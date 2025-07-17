@@ -12,7 +12,7 @@ A comprehensive Enterprise Resource Planning (ERP) and Point of Sale (POS) syste
 - **Reports** - Business analytics and reporting
 - **Customer Management** - Customer database and credit tracking
 
-### Advanced Search & Filter System
+### Advanced Search & Filter Systemm
 
 The application includes a comprehensive search and filter system implemented across all select components:
 
