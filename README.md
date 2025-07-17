@@ -1,394 +1,281 @@
-# Real-time Database System with Authentication
+# Wholesale Produce Market ERP POS System
 
-A comprehensive real-time database system built with Node.js, PostgreSQL, Redis, and WebSockets. Features secure authentication, real-time data synchronization, and collaborative document editing.
+A comprehensive Enterprise Resource Planning (ERP) and Point of Sale (POS) system designed specifically for wholesale produce markets. Built with React, TypeScript, Tailwind CSS, and Supabase.
 
-## 🚀 Features
+## Features
 
-### Core Functionality
-- **Real-time Data Synchronization** - Live updates across multiple clients using WebSockets
-- **Secure Authentication** - JWT-based auth with refresh tokens and session management
-- **Document Collaboration** - Real-time collaborative document editing
-- **ACID Compliance** - PostgreSQL with proper transaction handling
-- **Scalable Architecture** - Redis for caching and pub/sub messaging
+### Core Modules
+- **Dashboard** - Daily operations overview with key metrics
+- **Point of Sale (POS)** - Complete sales transaction processing
+- **Inventory Management** - Product receiving and stock tracking
+- **Accounting** - Financial management and bookkeeping
+- **Reports** - Business analytics and reporting
+- **Customer Management** - Customer database and credit tracking
 
-### Security Features
-- Password hashing with bcrypt
-- JWT access and refresh tokens
-- Rate limiting and request validation
-- SQL injection protection
-- CORS and security headers
-- Activity logging and monitoring
+### Advanced Search & Filter System
 
-### Real-time Features
-- Live document editing with conflict resolution
-- User presence indicators
-- Real-time notifications
-- Automatic reconnection handling
-- Room-based messaging
+The application includes a comprehensive search and filter system implemented across all select components:
 
-## 🏗️ Architecture
+#### SearchableSelect Component Features
 
+1. **Real-time Search**
+   - Fuzzy search with typo tolerance
+   - 300ms debounced input for performance
+   - Instant filtering as you type
+
+2. **Category Filtering**
+   - Filter options by category (e.g., Fruits, Vegetables)
+   - Visual filter chips showing active filters
+   - "All" option to clear category filters
+
+3. **Recent Selections**
+   - Automatically tracks recently selected items
+   - Quick access to frequently used options
+   - Persisted in localStorage
+
+4. **Keyboard Navigation**
+   - Arrow keys for option navigation
+   - Enter to select, Escape to close
+   - Full accessibility support
+
+5. **Multi-select Support**
+   - Select multiple options with visual chips
+   - "Select All" and "Clear All" buttons
+   - Individual item removal
+
+6. **Performance Optimized**
+   - Handles 1000+ items efficiently
+   - Virtualized scrolling for large datasets
+   - Debounced search input
+
+#### Usage Examples
+
+```tsx
+// Basic usage
+<SearchableSelect
+  options={customers.map(c => ({
+    id: c.id,
+    label: c.name,
+    value: c.id,
+    category: 'Customer'
+  }))}
+  value={selectedCustomer}
+  onChange={setSelectedCustomer}
+  placeholder="Select Customer"
+  searchPlaceholder="Search customers..."
+/>
+
+// Multi-select with categories
+<SearchableSelect
+  options={products.map(p => ({
+    id: p.id,
+    label: p.name,
+    value: p.id,
+    category: p.category
+  }))}
+  value={selectedProducts}
+  onChange={setSelectedProducts}
+  multiple={true}
+  categories={['Fruits', 'Vegetables']}
+  showSelectAll={true}
+  recentSelections={recentProducts}
+  onRecentUpdate={setRecentProducts}
+/>
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Client Apps   │    │   Load Balancer │    │   API Gateway   │
-│  (Web/Mobile)   │◄──►│    (Nginx)      │◄──►│   (Express)     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                                        │
-                       ┌─────────────────┐             │
-                       │   WebSocket     │◄────────────┤
-                       │   Server        │             │
-                       │  (Socket.IO)    │             │
-                       └─────────────────┘             │
-                                                        │
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   PostgreSQL    │◄──►│   Application   │◄──►│     Redis       │
-│   (Primary DB)  │    │     Server      │    │ (Cache/PubSub)  │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
 
-## 📋 Prerequisites
+#### Implementation Locations
 
-- Node.js 18+ 
-- PostgreSQL 13+
-- Redis 6+
-- npm or yarn
+The SearchableSelect component is implemented in:
+- **POS Module**: Customer selection
+- **Inventory Module**: Product and supplier selection
+- **Accounting Module**: Customer, supplier, and expense category selection
 
-## 🛠️ Installation
+#### Technical Specifications
 
-1. **Clone the repository**
+- **Debouncing**: 300ms delay for search input
+- **Accessibility**: Full ARIA support and screen reader compatibility
+- **Responsive**: Mobile-optimized interface
+- **Performance**: Optimized for large datasets (1000+ items)
+- **Persistence**: Recent selections stored in localStorage
+
+### Key Benefits
+
+1. **Reduced Cognitive Load**: Intuitive interface with smart defaults
+2. **Improved Task Completion**: Faster data selection with search and filters
+3. **Better User Experience**: Keyboard navigation and accessibility
+4. **Performance**: Efficient handling of large datasets
+5. **Consistency**: Unified component across all modules
+
+## Technology Stack
+
+- **Frontend**: React 18, TypeScript, Tailwind CSS
+- **Backend**: Supabase (PostgreSQL, Authentication, Real-time)
+- **Database**: PostgreSQL with Row Level Security
+- **Icons**: Lucide React
+- **Build Tool**: Vite
+- **State Management**: React Context API + Supabase
+- **Authentication**: Supabase Auth
+- **Real-time**: Supabase Realtime
+
+## Getting Started
+
+### Prerequisites
+
+1. **Supabase Project Setup**
+   - Create a new project at [supabase.com](https://supabase.com)
+   - Get your project URL and anon key from Settings > API
+   - Run the SQL migrations in the Supabase SQL editor
+
+2. **Environment Variables**
    ```bash
-   git clone <repository-url>
-   cd realtime-database-system
+   # Create .env.local file
+   VITE_SUPABASE_URL=your_supabase_project_url
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
    ```
 
-2. **Install dependencies**
+### Installation
+
+1. **Install Dependencies**
    ```bash
    npm install
    ```
 
-3. **Set up environment variables**
+2. **Start Development Server**
    ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-4. **Set up PostgreSQL database**
-   ```bash
-   # Create database
-   createdb realtime_db
-   
-   # Run migrations
-   npm run migrate
-   
-   # Seed with sample data
-   npm run seed
-   ```
-
-5. **Start Redis server**
-   ```bash
-   redis-server
-   ```
-
-6. **Start the application**
-   ```bash
-   # Development
    npm run dev
-   
-   # Production
-   npm start
    ```
 
-## 🗄️ Database Schema
+3. **Build for Production**
+   ```bash
+   npm run build
+   ```
 
-### Core Tables
+## Database Setup
 
-**users**
-- `id` (UUID, Primary Key)
-- `username` (VARCHAR, Unique)
-- `email` (VARCHAR, Unique) 
-- `password_hash` (VARCHAR)
-- `first_name`, `last_name` (VARCHAR)
-- `is_active` (BOOLEAN)
-- `created_at`, `updated_at` (TIMESTAMP)
+### 1. Run Migrations
 
-**documents**
-- `id` (UUID, Primary Key)
-- `title` (VARCHAR)
-- `content` (TEXT)
-- `owner_id` (UUID, Foreign Key → users.id)
-- `is_public` (BOOLEAN)
-- `version` (INTEGER)
-- `created_at`, `updated_at` (TIMESTAMP)
+Execute the SQL files in your Supabase SQL editor in order:
+1. `supabase/migrations/001_initial_schema.sql`
+2. `supabase/migrations/002_seed_data.sql`
 
-**document_collaborators**
-- `id` (UUID, Primary Key)
-- `document_id` (UUID, Foreign Key → documents.id)
-- `user_id` (UUID, Foreign Key → users.id)
-- `permission` (ENUM: 'read', 'write', 'admin')
+### 2. Create Demo User
 
-**refresh_tokens**
-- `id` (UUID, Primary Key)
-- `user_id` (UUID, Foreign Key → users.id)
-- `token_hash` (VARCHAR)
-- `expires_at` (TIMESTAMP)
-- `revoked_at` (TIMESTAMP)
+In Supabase Authentication, create a user:
+- Email: demo@market.com
+- Password: demo123
 
-## 🔐 API Endpoints
-
-### Authentication
-```
-POST   /api/auth/register     - Register new user
-POST   /api/auth/login        - User login
-POST   /api/auth/refresh-token - Refresh access token
-POST   /api/auth/logout       - User logout
-GET    /api/auth/profile      - Get user profile
+Then insert the user profile:
+```sql
+INSERT INTO users (id, email, name, role, store_id) VALUES 
+  ('user_id_from_auth', 'demo@market.com', 'Demo User', 'admin', '550e8400-e29b-41d4-a716-446655440000');
 ```
 
-### Documents
+## Authentication & Security
+
+### Row Level Security (RLS)
+
+All tables implement RLS policies ensuring:
+- Users can only access data from their assigned store
+- Multi-tenant architecture with store-based isolation
+- Secure API access with proper authentication
+
+### User Roles
+
+- **Admin**: Full system access
+- **Manager**: Store management and reporting
+- **Cashier**: POS and basic operations
+
+## Project Structure
+
 ```
-GET    /api/documents         - Get user's documents
-POST   /api/documents         - Create new document
-GET    /api/documents/:id     - Get specific document
-PUT    /api/documents/:id     - Update document
-DELETE /api/documents/:id     - Delete document
-POST   /api/documents/:id/collaborators - Add collaborator
-GET    /api/documents/:id/collaborators - Get collaborators
-```
-
-### Health Check
-```
-GET    /api/health           - System health status
-```
-
-## 🔌 WebSocket Events
-
-### Client → Server
-```javascript
-// Authentication and room management
-socket.emit('join_document', { documentId })
-socket.emit('leave_document', { documentId })
-
-// Real-time editing
-socket.emit('document_change', { documentId, changes, version })
-socket.emit('cursor_position', { documentId, position })
-```
-
-### Server → Client
-```javascript
-// User presence
-socket.on('user_joined', { userId, username })
-socket.on('user_left', { userId, username })
-socket.on('active_users', { users })
-
-// Document updates
-socket.on('document_created', { document, userId })
-socket.on('document_updated', { document, userId })
-socket.on('document_deleted', { documentId, userId })
-socket.on('document_changed', { changes, version, userId, username })
-
-// Collaboration
-socket.on('collaborator_added', { documentId, collaborator, userId })
-socket.on('cursor_updated', { userId, username, position })
-```
-
-## 🧪 Testing
-
-Run the test suite:
-```bash
-# Run all tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Run specific test file
-npm test -- auth.test.js
+src/
+├── lib/
+│   └── supabase.ts                # Supabase client configuration
+├── services/
+│   └── supabaseService.ts         # Database operations
+├── contexts/
+│   ├── SupabaseAuthContext.tsx    # Authentication state
+│   └── SupabaseDataContext.tsx    # Application data state
+├── types/
+│   └── database.ts                # TypeScript database types
+├── components/
+│   ├── common/
+│   │   └── SearchableSelect.tsx    # Advanced search/filter component
+│   ├── SupabaseLogin.tsx          # Authentication component
+│   ├── Dashboard.tsx               # Main dashboard
+│   ├── POS.tsx                    # Point of sale interface
+│   ├── Inventory.tsx              # Inventory management
+│   ├── Accounting.tsx             # Financial management
+│   ├── Reports.tsx                # Analytics and reporting
+│   └── Layout.tsx                 # Main layout wrapper
+├── hooks/
+│   ├── useLocalStorage.ts         # localStorage hook
+│   ├── useCurrency.ts             # Currency formatting
+│   └── useSupabase.ts             # Supabase auth hook
+├── supabase/
+│   └── migrations/                # Database migrations
+└── App.tsx                        # Main application component
 ```
 
-### Test Coverage
-- Authentication flow (register, login, logout, token refresh)
-- Document CRUD operations
-- Real-time synchronization
-- Error handling and edge cases
-- Security validations
+## Features in Detail
 
-## 🚀 Deployment
+### Daily Operations Focus
+- All metrics and data focused on current day operations
+- Real-time cash drawer management with Supabase
+- Today's sales, expenses, and transactions
+- Staff-friendly daily journal approach
 
-### Docker Deployment
-```bash
-# Build and run with Docker Compose
-docker-compose up -d
+### Real-time Updates
+- Live data synchronization across devices
+- Real-time inventory updates
+- Instant sales notifications
+- Multi-user collaboration
 
-# Scale the application
-docker-compose up -d --scale app=3
-```
+### Cloud-First Architecture
+- All data stored securely in Supabase
+- Works without internet connection
+- Automatic data persistence
+- Future sync capabilities ready
 
-### Production Considerations
-- Use environment-specific configurations
-- Set up SSL/TLS certificates
-- Configure reverse proxy (Nginx)
-- Set up monitoring and logging
-- Implement backup strategies
-- Use connection pooling
-- Set up health checks
+### Role-Based Access
+- Admin, Manager, and Cashier roles
+- Appropriate permissions per role
+- Secure authentication system
 
-## 📊 Monitoring
+### Comprehensive Accounting
+- Accounts receivable/payable tracking
+- Expense categorization and tracking
+- Multi-currency support (USD/LBP)
+- Financial reporting and analytics
 
-### Health Check Endpoint
-```bash
-curl http://localhost:3000/api/health
-```
+### Multi-Currency Support
+- Real exchange rates (1 USD = 89,500 LBP)
+- Currency-specific expense tracking
+- Automatic conversion for reporting
+- Flexible currency display preferences
 
-Response:
-```json
-{
-  "status": "healthy",
-  "timestamp": "2024-01-15T10:30:00.000Z",
-  "uptime": 3600,
-  "services": {
-    "database": { "status": "healthy" },
-    "redis": { "status": "healthy" }
-  }
-}
-```
+## Contributing
 
-### Logging
-- Application logs: `logs/combined.log`
-- Error logs: `logs/error.log`
-- Structured JSON logging with Winston
-- Request/response logging
-- Database query logging
+This is a production-ready ERP system designed for wholesale produce markets. Built with Supabase for scalability, security, and real-time capabilities. The search and filter functionality provides an enterprise-grade user experience that scales with business needs.
 
-## 🔧 Configuration
+## Deployment
 
-### Environment Variables
-```bash
-# Server
-PORT=3000
-NODE_ENV=production
+### Supabase Configuration
+1. Set up your production Supabase project
+2. Configure authentication providers
+3. Set up database backups
+4. Configure edge functions if needed
 
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=realtime_db
-DB_USER=postgres
-DB_PASSWORD=secure_password
+### Frontend Deployment
+1. Build the application: `npm run build`
+2. Deploy to your preferred hosting platform
+3. Set environment variables in production
+4. Configure domain and SSL
 
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=redis_password
+## Support
 
-# JWT
-JWT_SECRET=your-super-secret-jwt-key
-JWT_REFRESH_SECRET=your-refresh-secret-key
-JWT_EXPIRES_IN=15m
-JWT_REFRESH_EXPIRES_IN=7d
-
-# Rate Limiting
-RATE_LIMIT_WINDOW_MS=900000
-RATE_LIMIT_MAX_REQUESTS=100
-```
-
-## 🛡️ Security Best Practices
-
-### Implemented Security Measures
-- **Password Security**: bcrypt with salt rounds
-- **JWT Security**: Separate access/refresh tokens
-- **Rate Limiting**: Configurable request limits
-- **Input Validation**: Joi schema validation
-- **SQL Injection**: Parameterized queries
-- **CORS**: Configurable origin restrictions
-- **Headers**: Helmet.js security headers
-- **Session Management**: Redis-based sessions
-- **Activity Logging**: Comprehensive audit trail
-
-### Additional Recommendations
-- Use HTTPS in production
-- Implement API versioning
-- Set up Web Application Firewall (WAF)
-- Regular security audits
-- Dependency vulnerability scanning
-- Implement CSP headers
-- Use secure cookie settings
-
-## 📈 Performance Optimization
-
-### Database Optimization
-- Proper indexing on frequently queried columns
-- Connection pooling with configurable limits
-- Query optimization and monitoring
-- Database partitioning for large datasets
-
-### Caching Strategy
-- Redis for session storage
-- Query result caching
-- Real-time data caching
-- Cache invalidation strategies
-
-### WebSocket Optimization
-- Room-based messaging
-- Connection pooling
-- Message queuing
-- Graceful degradation
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Troubleshooting
-
-### Common Issues
-
-**Database Connection Issues**
-```bash
-# Check PostgreSQL status
-sudo systemctl status postgresql
-
-# Check connection
-psql -h localhost -U postgres -d realtime_db
-```
-
-**Redis Connection Issues**
-```bash
-# Check Redis status
-redis-cli ping
-
-# Check Redis logs
-tail -f /var/log/redis/redis-server.log
-```
-
-**WebSocket Connection Issues**
-- Check CORS configuration
-- Verify JWT token validity
-- Check firewall settings
-- Monitor network connectivity
-
-### Debug Mode
-```bash
-# Enable debug logging
-DEBUG=* npm run dev
-
-# Database query logging
-DB_LOGGING=true npm run dev
-```
-
-## 📞 Support
-
-For support and questions:
-- Create an issue in the repository
-- Check the documentation
-- Review the test files for usage examples
-
----
-
-Built with ❤️ using Node.js, PostgreSQL, Redis, and Socket.IO
+For issues and questions:
+1. Check the Supabase documentation
+2. Review the database schema
+3. Check RLS policies
+4. Verify environment variables
