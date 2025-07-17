@@ -7,19 +7,9 @@ export function useSupabase() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check if supabase client is properly initialized
-    if (!supabase || !supabase.auth) {
-      console.error('Supabase client is not properly initialized');
-      setLoading(false);
-      return;
-    }
-
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
-      setLoading(false);
-    }).catch((error) => {
-      console.error('Error getting session:', error);
       setLoading(false);
     });
 
@@ -33,18 +23,6 @@ export function useSupabase() {
 
     return () => subscription.unsubscribe();
   }, []);
-
-  // Return null methods if supabase is not initialized
-  if (!supabase || !supabase.auth) {
-    return {
-      user: null,
-      loading: false,
-      signUp: null,
-      signIn: null,
-      signOut: null,
-      resetPassword: null,
-    };
-  }
 
   return {
     user,
