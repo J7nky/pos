@@ -49,9 +49,9 @@ export function useSupabase() {
   return {
     user,
     loading,
-    signUp: supabase.auth.signUp.bind(supabase.auth),
-    signIn: supabase.auth.signInWithPassword.bind(supabase.auth),
-    signOut: supabase.auth.signOut.bind(supabase.auth),
-    resetPassword: supabase.auth.resetPasswordForEmail.bind(supabase.auth),
+    signUp: supabase.auth.signUp,
+    signIn: supabase.auth.signInWithPassword,
+    signOut: supabase.auth.signOut,
+    resetPassword: supabase.auth.resetPasswordForEmail,
   };
 }
