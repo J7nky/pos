@@ -137,7 +137,7 @@ export default function SupabaseLogin() {
                 <div>Password: demo123</div>
               </div>
               <p className="text-xs text-gray-500 mt-2">
-                Note: Follow the DEMO_USER_SETUP.md guide to create this user
+                Note: You'll need to create this user in your Supabase dashboard
               </p>
             </>
           ) : (
