@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { DataProvider } from './contexts/DataContext';
-import Login from './components/Login';
+import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthContext';
+import { SupabaseDataProvider } from './contexts/SupabaseDataContext';
+import SupabaseLogin from './components/SupabaseLogin';
 import Layout from './components/Layout';
 import Home from './components/Home';
 import Inventory from './components/Inventory';
@@ -12,10 +12,10 @@ import Accounting from './components/Accounting';
 import Settings from './components/Settings';
 
 function AppContent() {
-  const { user, isLoading } = useAuth();
+  const { userProfile, loading } = useSupabaseAuth();
   const [currentPage, setCurrentPage] = useState('home');
 
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="text-center">
@@ -26,8 +26,8 @@ function AppContent() {
     );
   }
 
-  if (!user) {
-    return <Login />;
+  if (!userProfile) {
+    return <SupabaseLogin />;
   }
 
   const renderPage = () => {
@@ -60,11 +60,11 @@ function AppContent() {
 
 function App() {
   return (
-    <AuthProvider>
-      <DataProvider>
+    <SupabaseAuthProvider>
+      <SupabaseDataProvider>
         <AppContent />
-      </DataProvider>
-    </AuthProvider>
+      </SupabaseDataProvider>
+    </SupabaseAuthProvider>
   );
 }
 
