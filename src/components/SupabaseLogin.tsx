@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { isSupabaseConfigured, getConfigurationErrors } from '../lib/supabase';
+import { isSupabaseConfigured } from '../lib/supabase';
 import { ShoppingCart, Eye, EyeOff } from 'lucide-react';
 
 export default function SupabaseLogin() {
@@ -11,7 +11,6 @@ export default function SupabaseLogin() {
   const [isLoading, setIsLoading] = useState(false);
   const { signIn } = useSupabaseAuth();
   const supabaseConfigured = isSupabaseConfigured();
-  const configErrors = getConfigurationErrors();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,8 +25,10 @@ export default function SupabaseLogin() {
     setIsLoading(true);
     
     try {
-      await signIn(email, password);
-      // If we get here, sign in was successful
+      const success = await signIn(email, password);
+      if (!success) {
+        setError('Sign in failed. Please check your credentials and try again.');
+      }
     } catch (error) {
       console.error('Login error:', error);
       if (error instanceof Error) {
@@ -107,15 +108,7 @@ export default function SupabaseLogin() {
           {!supabaseConfigured && (
             <div className="text-amber-600 text-sm text-center bg-amber-50 p-3 rounded-md border border-amber-200">
               <strong>⚠️ Setup Required:</strong> Database connection not configured. 
-             <br />
-             <div className="mt-2 text-xs">
-               {configErrors.map((error, index) => (
-                 <div key={index}>{error}</div>
-               ))}
-             </div>
-             <div className="mt-2 text-xs">
-               Check the browser console for detailed setup instructions.
-             </div>
+              <br />Check the browser console for setup instructions.
             </div>
           )}
 

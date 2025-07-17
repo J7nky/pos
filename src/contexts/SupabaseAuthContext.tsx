@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { User } from '@supabase/supabase-js';
 import { useSupabase } from '../hooks/useSupabase';
 import { SupabaseService } from '../services/supabaseService';
-import { isSupabaseConfigured, handleSupabaseError } from '../lib/supabase';
 
 interface UserProfile {
   id: string;
@@ -60,25 +59,19 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string): Promise<boolean> => {
     try {
-      // Check if Supabase is properly configured
-      if (!isSupabaseConfigured()) {
-        throw new Error('Supabase is not properly configured. Please check your environment variables.');
-      }
-      
       if (!supabaseSignIn) {
         console.error('Supabase signIn method is not available');
         return false;
       }
       const { error } = await supabaseSignIn({ email, password });
       if (error) {
-        handleSupabaseError(error);
+        console.error('Sign in error:', error);
         return false;
       }
       return true;
     } catch (error) {
       console.error('Sign in error:', error);
-      // Re-throw the error so it can be handled by the UI
-      throw error;
+      return false;
     }
   };
 

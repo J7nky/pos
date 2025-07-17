@@ -28,7 +28,7 @@ Follow these steps to create a demo/test user for development:
    - In your Supabase SQL editor, run:
    ```sql
    UPDATE users 
-   SET id = '64094e1d-67d2-4f47-8bd8-c06195ee2ece'
+   SET id = 'YOUR_ACTUAL_AUTH_USER_ID_HERE'
    WHERE id = 'demo-user-id-placeholder';
    ```
    - Replace `YOUR_ACTUAL_AUTH_USER_ID_HERE` with the User ID from Step 1
