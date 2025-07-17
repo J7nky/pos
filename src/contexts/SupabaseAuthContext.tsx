@@ -59,10 +59,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string): Promise<boolean> => {
     try {
-      if (!supabaseSignIn) {
-        console.error('Supabase signIn method is not available');
-        return false;
-      }
       const { error } = await supabaseSignIn({ email, password });
       if (error) {
         console.error('Sign in error:', error);
@@ -81,10 +77,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     profile: Omit<UserProfile, 'id' | 'email'>
   ): Promise<boolean> => {
     try {
-      if (!supabaseSignUp) {
-        console.error('Supabase signUp method is not available');
-        return false;
-      }
       const { data, error } = await supabaseSignUp({ email, password });
       if (error || !data.user) {
         console.error('Sign up error:', error);
@@ -107,10 +99,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async (): Promise<void> => {
     try {
-      if (!supabaseSignOut) {
-        console.error('Supabase signOut method is not available');
-        return;
-      }
       await supabaseSignOut();
       setUserProfile(null);
     } catch (error) {
@@ -120,10 +108,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
   const resetPassword = async (email: string): Promise<boolean> => {
     try {
-      if (!supabaseResetPassword) {
-        console.error('Supabase resetPassword method is not available');
-        return false;
-      }
       const { error } = await supabaseResetPassword(email);
       if (error) {
         console.error('Reset password error:', error);
