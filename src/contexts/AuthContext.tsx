@@ -13,14 +13,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const mockUsers: User[] = [
   {
     id: '1',
-    email: 'demo@market.com',
-    name: 'Demo User',
-    role: 'admin',
-    storeId: 'store1',
-    createdAt: '2024-01-01T00:00:00Z'
-  },
-  {
-    id: '2',
     email: 'admin@store1.com',
     name: 'John Admin',
     role: 'admin',
@@ -28,7 +20,7 @@ const mockUsers: User[] = [
     createdAt: '2024-01-01T00:00:00Z'
   },
   {
-    id: '3',
+    id: '2',
     email: 'manager@store1.com',
     name: 'Jane Manager',
     role: 'manager',
@@ -36,7 +28,7 @@ const mockUsers: User[] = [
     createdAt: '2024-01-01T00:00:00Z'
   },
   {
-    id: '4',
+    id: '3',
     email: 'cashier@store1.com',
     name: 'Bob Cashier',
     role: 'cashier',
@@ -65,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     const foundUser = mockUsers.find(u => u.email === email);
-    if (foundUser && (password === 'password' || password === 'demo123')) {
+    if (foundUser && password === 'password') {
       setUser(foundUser);
       localStorage.setItem('erp_user', JSON.stringify(foundUser));
       setIsLoading(false);
