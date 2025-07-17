@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { isSupabaseConfigured } from '../lib/supabase';
 import { ShoppingCart, Eye, EyeOff } from 'lucide-react';
 
 export default function SupabaseLogin() {
@@ -10,32 +9,19 @@ export default function SupabaseLogin() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { signIn } = useSupabaseAuth();
-  const supabaseConfigured = isSupabaseConfigured();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    
-    // Check if Supabase is properly configured
-    if (!supabaseConfigured) {
-      setError('Database connection not configured. Please check the console for setup instructions.');
-      return;
-    }
-    
     setIsLoading(true);
     
     try {
       const success = await signIn(email, password);
       if (!success) {
-        setError('Sign in failed. Please check your credentials and try again.');
+        setError('Invalid email or password');
       }
     } catch (error) {
-      console.error('Login error:', error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('Unable to connect to the authentication service. Please try again.');
-      }
+      setError('An error occurred during sign in');
     } finally {
       setIsLoading(false);
     }
@@ -105,16 +91,9 @@ export default function SupabaseLogin() {
             </div>
           )}
 
-          {!supabaseConfigured && (
-            <div className="text-amber-600 text-sm text-center bg-amber-50 p-3 rounded-md border border-amber-200">
-              <strong>⚠️ Setup Required:</strong> Database connection not configured. 
-              <br />Check the browser console for setup instructions.
-            </div>
-          )}
-
           <button
             type="submit"
-            disabled={isLoading || !supabaseConfigured}
+            disabled={isLoading}
             className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? (
@@ -129,31 +108,14 @@ export default function SupabaseLogin() {
         </form>
 
         <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-          {supabaseConfigured ? (
-            <>
-              <p className="text-sm text-gray-600 mb-2">Demo Account:</p>
-              <div className="text-xs space-y-1">
-                <div>Email: demo@market.com</div>
-                <div>Password: demo123</div>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">
-                Note: You'll need to create this user in your Supabase dashboard
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-red-600 mb-2">🔧 Setup Required:</p>
-              <div className="text-xs space-y-1 text-gray-600">
-                <div>1. Create a Supabase project</div>
-                <div>2. Get your project URL and anon key</div>
-                <div>3. Update your .env.local file</div>
-                <div>4. Restart the development server</div>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">
-                Check the browser console for detailed instructions
-              </p>
-            </>
-          )}
+          <p className="text-sm text-gray-600 mb-2">Demo Account:</p>
+          <div className="text-xs space-y-1">
+            <div>Email: demo@market.com</div>
+            <div>Password: demo123</div>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Note: You'll need to create this user in your Supabase dashboard
+          </p>
         </div>
       </div>
     </div>
