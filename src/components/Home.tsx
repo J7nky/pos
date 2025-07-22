@@ -1,7 +1,7 @@
 import React from 'react';
 import { useState } from 'react';
-import { useData } from '../contexts/DataContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { 
   DollarSign, 
@@ -23,10 +23,24 @@ import {
 } from 'lucide-react';
 
 export default function Home() {
-  const { products, suppliers, customers, sales, stockLevels, cashDrawer, openCashDrawer, transactions, lowStockAlertsEnabled, lowStockThreshold } = useData();
-  const { user } = useAuth();
+  const raw = useSupabaseData();
+  const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: p.is_active, createdAt: p.created_at})) : [];
+  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) : [];
+  const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) : [];
+  const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({...s, createdAt: s.created_at})) : [];
+  const stockLevels = Array.isArray(raw.stockLevels) ? raw.stockLevels : [];
+  const cashDrawer = raw.cashDrawer;
+  const openCashDrawer = raw.openCashDrawer;
+  const transactions = Array.isArray(raw.transactions) ? raw.transactions.map(t => ({...t, createdAt: t.created_at})) : [];
+  const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
+  const lowStockThreshold = raw.lowStockThreshold;
+  const { userProfile } = useSupabaseAuth();
   const { formatCurrency } = useCurrency();
   const [showFastActions, setShowFastActions] = useState(true);
+  const inventory = Array.isArray(raw.inventory) ? raw.inventory : [];
+  const recentReceivesCount = inventory
+    .sort((a, b) => new Date(b.received_at || b.receivedAt).getTime() - new Date(a.received_at || a.receivedAt).getTime())
+    .slice(0, 10).length;
 
   const today = new Date().toISOString().split('T')[0];
   const todaySales = sales.filter(sale => 
@@ -46,8 +60,8 @@ export default function Home() {
 
   const handleOpenDrawer = () => {
     const openingAmount = prompt('Enter opening cash amount:');
-    if (openingAmount && user) {
-      openCashDrawer(parseFloat(openingAmount), user.id);
+    if (openingAmount && userProfile) {
+      openCashDrawer(parseFloat(openingAmount), userProfile.id);
     }
   };
 
@@ -70,7 +84,7 @@ export default function Home() {
       color: 'bg-blue-500',
       hoverColor: 'hover:bg-blue-600',
       action: () => window.dispatchEvent(new CustomEvent('navigate', { detail: 'inventory' })),
-      stats: `${stockLevels.filter(s => s.currentStock > 0).length} in stock`
+      stats: `${recentReceivesCount} recent receives`
     },
     {
       id: 'add-customer',
@@ -110,7 +124,7 @@ export default function Home() {
       color: 'bg-teal-500',
       hoverColor: 'hover:bg-teal-600',
       action: () => window.dispatchEvent(new CustomEvent('navigate', { detail: 'inventory' })),
-      stats: lowStockAlertsEnabled ? `${lowStockItems.length} low stock` : 'Monitor stock'
+      stats: lowStockAlertsEnabled ? `${lowStockItems.length} low stock` : `${products.length} products`
     }
   ];
 
@@ -147,7 +161,7 @@ export default function Home() {
     <div className="p-6">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">
-          Welcome back, {user?.name}
+          Welcome back, {userProfile?.name}
         </h1>
         <p className="text-gray-600 mt-2">
           Here's what's happening at your store today.
@@ -244,43 +258,32 @@ export default function Home() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Low Stock Alert */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Low Stock Alert</h2>
-            <AlertTriangle className="w-5 h-5 text-amber-500" />
-          </div>
-          {!lowStockAlertsEnabled ? (
-            <div className="text-center py-8">
-              <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-              <p className="text-gray-500 mb-2">Low stock alerts are disabled</p>
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'settings' }))}
-                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-              >
-                Enable in Settings
-              </button>
+      <div className={`grid grid-cols-1 ${lowStockAlertsEnabled ? 'lg:grid-cols-2' : ''} gap-6`}>
+        {lowStockAlertsEnabled && (
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Low Stock Alert</h2>
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
             </div>
-          ) : lowStockItems.length > 0 ? (
-            <div className="space-y-3">
-              {lowStockItems.slice(0, 5).map(item => (
-                <div key={item.productId} className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
-                  <div>
-                    <p className="font-medium text-gray-900">{item.productName}</p>
-                    <p className="text-sm text-gray-600">{item.currentStock} {item.unit} remaining</p>
+            {lowStockItems.length > 0 ? (
+              <div className="space-y-3">
+                {lowStockItems.slice(0, 5).map(item => (
+                  <div key={item.productId} className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
+                    <div>
+                      <p className="font-medium text-gray-900">{item.productName}</p>
+                      <p className="text-sm text-gray-600">{item.currentStock} {item.unit} remaining</p>
+                    </div>
+                    <span className="px-2 py-1 bg-amber-200 text-amber-800 text-xs rounded-full">
+                      Low Stock
+                    </span>
                   </div>
-                  <span className="px-2 py-1 bg-amber-200 text-amber-800 text-xs rounded-full">
-                    Low Stock
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500 text-center py-4">All products are well stocked!</p>
-          )}
-        </div>
-
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-center py-4">All products are well stocked!</p>
+            )}
+          </div>
+        )}
         {/* Recent Sales */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">

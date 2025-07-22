@@ -1,10 +1,10 @@
-import { useData } from '../contexts/DataContext';
+import { useSupabaseData } from '../contexts/SupabaseDataContext';
 
 // Real conversion rate: 1 USD = 89,500 LBP
 const USD_TO_LBP_RATE = 89500;
 
 export function useCurrency() {
-  const { currency } = useData();
+  const { currency } = useSupabaseData();
 
   const formatCurrency = (amount: number): string => {
     if (currency === 'LBP') {

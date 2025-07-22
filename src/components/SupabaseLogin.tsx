@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { ShoppingCart, Eye, EyeOff } from 'lucide-react';
+import SearchableSelect from './common/SearchableSelect';
+import { SupabaseService } from '../services/supabaseService';
 
 export default function SupabaseLogin() {
   const [email, setEmail] = useState('');
@@ -8,20 +10,51 @@ export default function SupabaseLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn } = useSupabaseAuth();
+  const { signIn, signUp } = useSupabaseAuth();
+  const [showSignUp, setShowSignUp] = useState(false);
+  const [name, setName] = useState('');
+  const [role, setRole] = useState<'admin' | 'manager' | 'cashier'>('manager');
+  const [storeId, setStoreId] = useState('');
+  const [stores, setStores] = useState<any[]>([]);
+  const [storesLoading, setStoresLoading] = useState(false);
+
+  useEffect(() => {
+    if (showSignUp) {
+      setStoresLoading(true);
+      SupabaseService.getStores().then((data) => {
+        setStores(data || []);
+        setStoresLoading(false);
+        console.log('STORES:', data);
+      });
+    }
+  }, [showSignUp]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
-    
     try {
-      const success = await signIn(email, password);
-      if (!success) {
-        setError('Invalid email or password');
+      if (showSignUp) {
+        if (!name || !email || !password || !role || !storeId) {
+          setError('Please fill in all fields');
+          setIsLoading(false);
+          return;
+        }
+        const success = await signUp(email, password, { name, role, store_id: storeId });
+        if (!success) {
+          setError('Sign up failed. Please try again.');
+        } else {
+          setShowSignUp(false);
+        }
+      } else {
+        const success = await signIn(email, password);
+        if (!success) {
+          setError('Invalid email or password');
+        }
       }
     } catch (error) {
-      setError('An error occurred during sign in');
+      setError('An error occurred. Please try again.');
+      console.log(error);
     } finally {
       setIsLoading(false);
     }
@@ -39,6 +72,51 @@ export default function SupabaseLogin() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {showSignUp && (
+            <>
+              <div>
+                <label htmlFor="name" className="block text-sm font-medium text-gray-700">Full Name</label>
+                <input
+                  id="name"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter your name"
+                  required
+                  disabled={isLoading}
+                />
+              </div>
+              <div>
+                <label htmlFor="role" className="block text-sm font-medium text-gray-700">Role</label>
+                <select
+                  id="role"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as any)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  required
+                  disabled={isLoading}
+                >
+                  <option value="manager">Manager</option>
+                  <option value="cashier">Cashier</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="store" className="block text-sm font-medium text-gray-700">Store</label>
+                <SearchableSelect
+                  options={stores.map((s) => ({ id: s.id, label: s.name, value: s.id }))}
+                  value={storeId}
+                  onChange={(val) => {
+                    if (typeof val === 'string') setStoreId(val);
+                  }}
+                  placeholder="Select a store"
+                  loading={storesLoading}
+                  disabled={isLoading || storesLoading}
+                />
+              </div>
+            </>
+          )}
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-gray-700">
               Email Address
@@ -54,7 +132,6 @@ export default function SupabaseLogin() {
               disabled={isLoading}
             />
           </div>
-
           <div>
             <label htmlFor="password" className="block text-sm font-medium text-gray-700">
               Password
@@ -99,24 +176,48 @@ export default function SupabaseLogin() {
             {isLoading ? (
               <div className="flex items-center">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                Signing In...
+                {showSignUp ? 'Signing Up...' : 'Signing In...'}
               </div>
             ) : (
-              'Sign In'
+              showSignUp ? 'Sign Up' : 'Sign In'
             )}
           </button>
         </form>
 
-        <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-          <p className="text-sm text-gray-600 mb-2">Demo Account:</p>
-          <div className="text-xs space-y-1">
-            <div>Email: demo@market.com</div>
-            <div>Password: demo123</div>
-          </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Note: You'll need to create this user in your Supabase dashboard
-          </p>
+        <div className="mt-4 flex justify-center">
+          {showSignUp ? (
+            <button
+              type="button"
+              className="text-blue-600 hover:underline text-sm"
+              onClick={() => { setShowSignUp(false); setError(''); }}
+              disabled={isLoading}
+            >
+              Already have an account? Sign In
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="text-blue-600 hover:underline text-sm"
+              onClick={() => { setShowSignUp(true); setError(''); }}
+              disabled={isLoading}
+            >
+              Don&apos;t have an account? Sign Up
+            </button>
+          )}
         </div>
+
+        {!showSignUp && (
+          <div className="mt-8 p-4 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-600 mb-2">Demo Account:</p>
+            <div className="text-xs space-y-1">
+              <div>Email: demo@market.com</div>
+              <div>Password: demo123</div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Note: You&apos;ll need to create this user in your Supabase dashboard
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

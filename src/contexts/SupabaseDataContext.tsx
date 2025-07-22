@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { SupabaseService } from '../services/supabaseService';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { Database } from '../types/database';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 type Tables = Database['public']['Tables'];
 
@@ -14,7 +15,21 @@ interface SupabaseDataContextType {
   inventory: any[]; // Complex type with joins
   transactions: Tables['transactions']['Row'][];
   expenseCategories: Tables['expense_categories']['Row'][];
-  
+
+  // Computed/legacy compatibility
+  stockLevels: any[];
+  setStockLevels: (levels: any[]) => void;
+  lowStockAlertsEnabled: boolean;
+  lowStockThreshold: number;
+  defaultCommissionRate: number;
+  currency: 'USD' | 'LBP';
+  cashDrawer: any;
+  openCashDrawer: (amount: number, openedBy: string) => void;
+  accountsReceivable: any[];
+  accountsPayable: any[];
+  journalEntries: any[];
+  isOnline: boolean;
+
   // Loading states
   loading: {
     products: boolean;
@@ -39,6 +54,10 @@ interface SupabaseDataContextType {
   // Utility functions
   refreshData: () => Promise<void>;
   getStockLevels: () => any[];
+  toggleLowStockAlerts: (enabled: boolean) => void;
+  updateLowStockThreshold: (threshold: number) => void;
+  updateDefaultCommissionRate: (rate: number) => void;
+  updateCurrency: (currency: 'USD' | 'LBP') => void;
 }
 
 const SupabaseDataContext = createContext<SupabaseDataContextType | undefined>(undefined);
@@ -55,6 +74,21 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
   const [inventory, setInventory] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<Tables['transactions']['Row'][]>([]);
   const [expenseCategories, setExpenseCategories] = useState<Tables['expense_categories']['Row'][]>([]);
+
+  // Legacy/compatibility states
+  const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useLocalStorage<boolean>('lowStockAlertsEnabled', true);
+  const [lowStockThreshold, setLowStockThreshold] = useLocalStorage<number>('lowStockThreshold', 10);
+  const [defaultCommissionRate, setDefaultCommissionRate] = useLocalStorage<number>('defaultCommissionRate', 10);
+  const [currency, setCurrency] = useLocalStorage<'USD' | 'LBP'>('currency', 'USD');
+  // --- Persist cashDrawer in localStorage ---
+  const [cashDrawer, setCashDrawer] = useState<any>(() => {
+    const stored = localStorage.getItem('erp_cash_drawer');
+    return stored ? JSON.parse(stored) : null;
+  });
+  const [accountsReceivable] = useState<any[]>([]); // Stub
+  const [accountsPayable] = useState<any[]>([]); // Stub
+  const [journalEntries] = useState<any[]>([]); // Stub
+  const [isOnline] = useState(true); // Always online for now
 
   // Loading states
   const [loading, setLoading] = useState({
@@ -203,9 +237,14 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     
     setLoading(prev => ({ ...prev, sales: true }));
     try {
+      // Ensure each sale item has a sale_id before passing to createSale
+      const saleWithStore = { ...sale, store_id: storeId };
       const newSale = await SupabaseService.createSale(
-        { ...sale, store_id: storeId },
-        items
+        saleWithStore,
+        items.map(item => ({
+          ...item,
+          sale_id: saleWithStore.id as string, // Ensure sale_id is present; may need to adjust if id is generated after insert
+        }))
       );
       if (newSale) {
         // Refresh sales to get joined data
@@ -254,8 +293,25 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Add legacy/compatibility methods
+  const toggleLowStockAlerts = (enabled: boolean) => setLowStockAlertsEnabled(enabled);
+  const updateLowStockThreshold = (threshold: number) => setLowStockThreshold(threshold);
+  const updateDefaultCommissionRate = (rate: number) => setDefaultCommissionRate(rate);
+  const updateCurrency = (cur: 'USD' | 'LBP') => setCurrency(cur);
+  const openCashDrawer = (amount: number, openedBy: string) => {
+    const newDrawer = {
+      openingAmount: amount,
+      openedBy,
+      openedAt: new Date().toISOString(),
+      status: 'open',
+      currentAmount: amount
+    };
+    setCashDrawer(newDrawer);
+    // localStorage will be updated by useEffect
+  };
+
   // Calculate stock levels from inventory
-  const getStockLevels = () => {
+  const computeStockLevels = () => {
     return products.map(product => {
       const productInventory = inventory.filter(item => item.product_id === product.id);
       const totalStock = productInventory.reduce((sum, item) => sum + item.quantity, 0);
@@ -291,6 +347,19 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       };
     });
   };
+  // Add stockLevels as state so it can be set
+  const [stockLevels, setStockLevels] = useState<any[]>([]);
+  // Update stockLevels whenever products, suppliers, or inventory changes
+  useEffect(() => {
+    setStockLevels(computeStockLevels());
+  }, [products, suppliers, inventory]);
+
+  // Save cashDrawer to localStorage whenever it changes
+  useEffect(() => {
+    if (cashDrawer !== undefined) {
+      localStorage.setItem('erp_cash_drawer', JSON.stringify(cashDrawer));
+    }
+  }, [cashDrawer]);
 
   return (
     <SupabaseDataContext.Provider value={{
@@ -301,6 +370,18 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       inventory,
       transactions,
       expenseCategories,
+      stockLevels,
+      setStockLevels,
+      lowStockAlertsEnabled,
+      lowStockThreshold,
+      defaultCommissionRate,
+      currency,
+      cashDrawer,
+      openCashDrawer,
+      accountsReceivable,
+      accountsPayable,
+      journalEntries,
+      isOnline,
       loading,
       addProduct,
       addSupplier,
@@ -311,7 +392,11 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       addTransaction,
       addExpenseCategory,
       refreshData,
-      getStockLevels
+      getStockLevels: computeStockLevels, // Expose the computed function
+      toggleLowStockAlerts,
+      updateLowStockThreshold,
+      updateDefaultCommissionRate,
+      updateCurrency
     }}>
       {children}
     </SupabaseDataContext.Provider>

@@ -53,6 +53,21 @@ export class SupabaseService {
     }
   }
 
+  static async deleteProduct(id: string) {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
   // Suppliers
   static async getSuppliers(storeId: string) {
     try {
@@ -168,6 +183,36 @@ export class SupabaseService {
     }
   }
 
+  static async updateInventoryItem(id: string, updates: Tables['inventory_items']['Update']) {
+    try {
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .update({ ...updates })
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async deleteInventoryItem(id: string) {
+    try {
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .delete()
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
   // Sales
   static async getSales(storeId: string, limit?: number) {
     try {
@@ -216,6 +261,32 @@ export class SupabaseService {
         .insert(saleItemsWithSaleId);
 
       if (itemsError) throw itemsError;
+
+      // Deduct inventory (FIFO, as much as possible)
+      for (const item of items) {
+        let qtyToDeduct = item.quantity;
+        // Get inventory items for this product/supplier, oldest first
+        const { data: inventoryRows, error: inventoryError } = await supabase
+          .from('inventory_items')
+          .select('*')
+          .eq('product_id', item.product_id)
+          .eq('supplier_id', item.supplier_id)
+          .gt('quantity', 0)
+          .order('received_at', { ascending: true });
+        if (inventoryError) throw inventoryError;
+        if (!inventoryRows) continue;
+        for (const inv of inventoryRows) {
+          if (qtyToDeduct <= 0) break;
+          const deduct = Math.min(inv.quantity, qtyToDeduct);
+          const newQty = inv.quantity - deduct;
+          await supabase
+            .from('inventory_items')
+            .update({ quantity: newQty })
+            .eq('id', inv.id);
+          qtyToDeduct -= deduct;
+        }
+        // If qtyToDeduct > 0, we just deduct as much as possible (no error)
+      }
 
       return saleData;
     } catch (error) {
@@ -321,6 +392,20 @@ export class SupabaseService {
       
       if (error) throw error;
       return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  // Stores
+  static async getStores() {
+    try {
+      const { data, error } = await supabase
+        .from('stores')
+        .select('*')
+        .order('name');
+      if (error) throw error;
+      return data || [];
     } catch (error) {
       handleSupabaseError(error);
     }
