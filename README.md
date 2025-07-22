@@ -129,8 +129,8 @@ The SearchableSelect component is implemented in:
 2. **Environment Variables**
    ```bash
    # Create .env.local file
-   VITE_SUPABASE_URL=your_supabase_project_url
-   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   VITE_SUPABASE_URL=https://xyzcompany.supabase.co
+   VITE_SUPABASE_ANON_KEY=
    ```
 
 ### Installation
@@ -167,7 +167,7 @@ In Supabase Authentication, create a user:
 Then insert the user profile:
 ```sql
 INSERT INTO users (id, email, name, role, store_id) VALUES 
-  ('user_id_from_auth', 'demo@market.com', 'Demo User', 'admin', '550e8400-e29b-41d4-a716-446655440000');
+  ('10c75020-73e0-4351-8237-34a2637771e8', 'demo@market.com', 'Demo User', 'admin', '550e8400-e29b-41d4-a716-446655440000');
 ```
 
 ## Authentication & Security

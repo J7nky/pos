@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useData } from '../contexts/DataContext';
+import { useSupabaseData } from '../contexts/SupabaseDataContext';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -11,7 +11,15 @@ import {
 } from 'lucide-react';
 
 export default function Reports() {
-  const { sales, customers, products, stockLevels, suppliers, lowStockAlertsEnabled, lowStockThreshold } = useData();
+  const raw = useSupabaseData();
+  // Map all arrays to camelCase for compatibility
+  const products = raw.products.map(p => ({...p, isActive: p.is_active, createdAt: p.created_at})) as Array<{id: string, name: string, isActive: boolean, createdAt: string}>;
+  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Array<{id: string, name: string, isActive: boolean, createdAt: string, currentDebt: number, phone: string, email?: string, address?: string}>;
+  const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<{id: string, name: string, isActive: boolean, createdAt: string}>;
+  const sales = raw.sales.map(s => ({...s, createdAt: s.created_at})) as Array<any>;
+  const stockLevels = raw.stockLevels as Array<any>;
+  const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
+  const lowStockThreshold = raw.lowStockThreshold;
   const [dateRange, setDateRange] = useState({
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0]
@@ -49,7 +57,7 @@ export default function Reports() {
     }, {} as Record<string, { productName: string; quantity: number; revenue: number }>);
 
   const topProductsList = Object.values(topProducts)
-    .sort((a, b) => b.revenue - a.revenue)
+    .sort((a: any, b: any) => b.revenue - a.revenue)
     .slice(0, 5);
 
   const customerDebtSummary = customers.reduce((acc, customer) => {
@@ -174,7 +182,7 @@ export default function Reports() {
               {Object.entries(salesByPaymentMethod).map(([method, amount]) => (
                 <div key={method} className="flex items-center justify-between">
                   <span className="capitalize text-gray-700">{method}</span>
-                  <span className="font-medium text-gray-900">${amount.toFixed(2)}</span>
+                  <span className="font-medium text-gray-900">${(amount as number).toFixed(2)}</span>
                 </div>
               ))}
             </div>
@@ -193,7 +201,7 @@ export default function Reports() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {topProductsList.map((product, index) => (
+                  {topProductsList.map((product: any, index: number) => (
                     <tr key={index}>
                       <td className="px-4 py-4 text-gray-900">{product.productName}</td>
                       <td className="px-4 py-4 text-gray-900">{product.quantity}</td>

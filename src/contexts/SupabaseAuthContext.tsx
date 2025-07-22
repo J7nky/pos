@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { User } from '@supabase/supabase-js';
 import { useSupabase } from '../hooks/useSupabase';
 import { SupabaseService } from '../services/supabaseService';
+import { supabase } from '../lib/supabase';
 
 interface UserProfile {
   id: string;
@@ -59,7 +60,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string): Promise<boolean> => {
     try {
-      const { error } = await supabaseSignIn({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         console.error('Sign in error:', error);
         return false;

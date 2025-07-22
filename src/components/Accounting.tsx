@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useData } from '../contexts/DataContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from './common/SearchableSelect';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -23,23 +23,24 @@ import {
 } from 'lucide-react';
 
 export default function Accounting() {
-  const { 
-    accountsReceivable, 
-    accountsPayable, 
-    expenseCategories, 
-    journalEntries,
-    transactions,
-    customers,
-    suppliers,
-    addAccountsReceivable,
-    addAccountsPayable,
-    addExpenseCategory,
-    addJournalEntry,
-    addTransaction,
-    updateAccountsReceivable,
-    updateAccountsPayable
-  } = useData();
-  const { user } = useAuth();
+  const raw = useSupabaseData();
+  // Stubs for AR/AP/Journal
+  const accountsReceivable: any[] = [];
+  const accountsPayable: any[] = [];
+  const journalEntries: any[] = [];
+  const addAccountsReceivable = (..._args: any[]) => {};
+  const addAccountsPayable = (..._args: any[]) => {};
+  const addJournalEntry = (..._args: any[]) => {};
+  const updateAccountsReceivable = (..._args: any[]) => {};
+  const updateAccountsPayable = (..._args: any[]) => {};
+  const addExpenseCategory = raw.addExpenseCategory;
+  const addTransaction = raw.addTransaction;
+  const transactions = raw.transactions.map(t => ({...t, createdAt: t.created_at})) as Array<any>;
+  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Array<any>;
+  const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
+  const expenseCategories = raw.expenseCategories.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at})) as Array<any>;
+  
+  const { userProfile } = useSupabaseAuth();
   
   const { currency, formatCurrency, formatCurrencyWithSymbol, getConvertedAmount } = useCurrency();
   
@@ -182,7 +183,7 @@ export default function Accounting() {
       currency: expenseForm.currency as 'USD' | 'LBP',
       description: expenseForm.description,
       reference: expenseForm.reference,
-      createdBy: user?.id || ''
+      created_by: userProfile?.id || ''
     });
 
     setExpenseForm({
@@ -212,7 +213,7 @@ export default function Accounting() {
       entries: journalForm.entries,
       totalDebit,
       totalCredit,
-      createdBy: user?.id || ''
+      createdBy: userProfile?.id || ''
     });
 
     setJournalForm({

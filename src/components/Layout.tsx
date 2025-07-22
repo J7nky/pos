@@ -1,6 +1,6 @@
 import React, { ReactNode } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { useData } from '../contexts/DataContext';
+import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
+import { useSupabaseData } from '../contexts/SupabaseDataContext';
 import { 
   LayoutDashboard, 
   Package, 
@@ -21,8 +21,8 @@ interface LayoutProps {
 }
 
 export default function Layout({ children, currentPage, onPageChange }: LayoutProps) {
-  const { user, logout } = useAuth();
-  const { isOnline } = useData();
+  const { userProfile, signOut } = useSupabaseAuth();
+  const { isOnline, products, customers, inventory } = useSupabaseData();
 
   // Listen for navigation events from Fast Actions
   React.useEffect(() => {
@@ -77,11 +77,11 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
         <div className="absolute bottom-0 w-64 p-6 border-t">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-700">{user?.name}</p>
-              <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+              <p className="text-sm font-medium text-gray-700">{userProfile?.name}</p>
+              <p className="text-xs text-gray-500 capitalize">{userProfile?.role}</p>
             </div>
             <button
-              onClick={logout}
+              onClick={signOut}
               className="p-2 text-gray-400 hover:text-red-600 transition-colors"
             >
               <LogOut className="w-5 h-5" />

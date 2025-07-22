@@ -1,13 +1,34 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useData } from '../contexts/DataContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import SearchableSelect from './common/SearchableSelect';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { Plus, Search, Package, Truck, Eye, Camera, RotateCcw, X, Upload } from 'lucide-react';
+import { SupabaseService } from '../services/supabaseService';
+
+// Debounce hook
+function useDebounce(value: string, delay: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
 
 export default function Inventory() {
-  const { products, suppliers, inventory, stockLevels, addInventoryItem, addSupplier, addProduct, lowStockAlertsEnabled, lowStockThreshold, defaultCommissionRate } = useData();
-  const { user } = useAuth();
+  const raw = useSupabaseData();
+  const products = raw.products.map(p => ({...p, isActive: p.is_active, createdAt: p.created_at})) as Array<any>;
+  const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
+  const inventory = raw.inventory.map(i => ({...i, createdAt: i.created_at, product_id: i.product_id, supplier_id: i.supplier_id, received_at: i.received_at})) as Array<any>;
+  const stockLevels = raw.stockLevels as Array<any>;
+  const addInventoryItem = raw.addInventoryItem;
+  const addSupplier = raw.addSupplier;
+  const addProduct = raw.addProduct;
+  const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
+  const lowStockThreshold = raw.lowStockThreshold;
+  const defaultCommissionRate = raw.defaultCommissionRate;
+  const { userProfile } = useSupabaseAuth();
   const [recentProducts, setRecentProducts] = useLocalStorage<string[]>('inventory_recent_products', []);
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('inventory_recent_suppliers', []);
   const [activeTab, setActiveTab] = useState<'receive' | 'stock'>('receive');
@@ -30,6 +51,9 @@ export default function Inventory() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // Add spinner for image capture/upload
+  const [imageLoading, setImageLoading] = useState(false);
+
   // Cleanup camera stream when component unmounts or modal closes
   useEffect(() => {
     return () => {
@@ -40,6 +64,7 @@ export default function Inventory() {
   const startCamera = async () => {
     try {
       setCameraError('');
+      setImageLoading(true);
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           width: { ideal: 640 },
@@ -55,8 +80,9 @@ export default function Inventory() {
       }
     } catch (error) {
       console.error('Error accessing camera:', error);
-      setCameraError('Unable to access camera. Please check permissions.');
+      setCameraError('Unable to access camera. Please check permissions and ensure no other app is using the camera.');
     }
+    setImageLoading(false);
   };
 
   const stopCamera = () => {
@@ -107,15 +133,18 @@ export default function Inventory() {
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
+      setImageLoading(true);
       // Check file size (limit to 5MB)
       if (file.size > 5 * 1024 * 1024) {
         alert('File size too large. Please choose an image under 5MB.');
+        setImageLoading(false);
         return;
       }
 
       // Check file type
       if (!file.type.startsWith('image/')) {
         alert('Please select a valid image file.');
+        setImageLoading(false);
         return;
       }
 
@@ -127,6 +156,7 @@ export default function Inventory() {
           image: result,
           capturedPhoto: '' // Clear captured photo when loading file
         }));
+        setImageLoading(false);
       };
       reader.readAsDataURL(file);
     }
@@ -151,117 +181,1090 @@ export default function Inventory() {
   });
 
   const [receiveForm, setReceiveForm] = useState({
-    productId: '',
-    supplierId: '',
+    product_id: '',
+    supplier_id: '',
     type: 'commission' as 'commission' | 'cash',
     quantity: '',
     unit: 'kg' as 'kg' | 'piece' | 'box' | 'bag',
     weight: '',
     porterage: '',
-    transferFee: '',
+    transfer_fee: '',
     price: '',
-    commissionRate: '',
+    commission_rate: '',
     notes: ''
   });
 
   // Update commission rate when form opens or supplier changes
   React.useEffect(() => {
-    if (receiveForm.type === 'commission' && receiveForm.supplierId) {
+    if (receiveForm.type === 'commission' && receiveForm.supplier_id) {
       // Always use the global default commission rate
-      setReceiveForm(prev => ({ ...prev, commissionRate: defaultCommissionRate.toString() }));
+      setReceiveForm(prev => ({ ...prev, commission_rate: defaultCommissionRate.toString() }));
     } else if (receiveForm.type === 'cash') {
       // Clear commission rate for cash purchases
-      setReceiveForm(prev => ({ ...prev, commissionRate: '' }));
+      setReceiveForm(prev => ({ ...prev, commission_rate: '' }));
     }
-  }, [receiveForm.supplierId, receiveForm.type, defaultCommissionRate]);
+  }, [receiveForm.supplier_id, receiveForm.type, defaultCommissionRate]);
 
-  const handleReceiveSubmit = (e: React.FormEvent) => {
+  // Add loading and toast state
+  const [loading, setLoading] = useState<{ form?: boolean; product?: boolean; supplier?: boolean; initial?: boolean }>({ initial: false });
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const showToast = (type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // Add validation error state for forms
+  const [receiveErrors, setReceiveErrors] = useState<any>({});
+  const [productErrors, setProductErrors] = useState<any>({});
+  const [supplierErrors, setSupplierErrors] = useState<any>({});
+
+  const validateReceiveForm = () => {
+    const errors: any = {};
+    if (!receiveForm.product_id) errors.product_id = 'Product is required.';
+    if (!receiveForm.supplier_id) errors.supplier_id = 'Supplier is required.';
+    if (!receiveForm.quantity || isNaN(Number(receiveForm.quantity)) || Number(receiveForm.quantity) < 1) errors.quantity = 'Quantity must be at least 1.';
+    if (receiveForm.type === 'commission' && (receiveForm.commission_rate === '' || isNaN(Number(receiveForm.commission_rate)))) errors.commission_rate = 'Commission rate is required.';
+    if (receiveForm.type === 'cash' && (receiveForm.price === '' || isNaN(Number(receiveForm.price)))) errors.price = 'Purchase price is required.';
+    return errors;
+  };
+  const validateProductForm = () => {
+    const errors: any = {};
+    if (!productForm.name) errors.name = 'Product name is required.';
+    if (!productForm.category) errors.category = 'Category is required.';
+    return errors;
+  };
+  const validateSupplierForm = () => {
+    const errors: any = {};
+    if (!supplierForm.name) errors.name = 'Supplier name is required.';
+    if (!supplierForm.phone) errors.phone = 'Phone is required.';
+    return errors;
+  };
+
+  const handleReceiveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!receiveForm.productId || !receiveForm.supplierId || !receiveForm.quantity) return;
+    const errors = validateReceiveForm();
+    setReceiveErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setLoading(l => ({ ...l, form: true }));
+    try {
+      await addInventoryItem({
+        product_id: receiveForm.product_id,
+        supplier_id: receiveForm.supplier_id,
+        type: receiveForm.type,
+        quantity: parseInt(receiveForm.quantity),
+        unit: receiveForm.unit,
+        weight: receiveForm.weight ? parseFloat(receiveForm.weight) : undefined,
+        porterage: receiveForm.porterage ? parseFloat(receiveForm.porterage) : undefined,
+        transfer_fee: receiveForm.transfer_fee ? parseFloat(receiveForm.transfer_fee) : undefined,
+        price: receiveForm.price ? parseFloat(receiveForm.price) : undefined,
+        commission_rate: receiveForm.type === 'commission' && receiveForm.commission_rate ? parseFloat(receiveForm.commission_rate) : undefined,
+        notes: receiveForm.notes || undefined,
+        received_by: userProfile?.id || ''
+      });
+      setReceiveForm({
+        product_id: '',
+        supplier_id: '',
+        type: 'commission',
+        quantity: '',
+        unit: 'kg',
+        weight: '',
+        porterage: '',
+        transfer_fee: '',
+        price: '',
+        commission_rate: '',
+        notes: ''
+      });
+      setShowReceiveForm(false);
+      setReceiveErrors({});
+      showToast('success', 'Inventory received successfully!');
+    } catch (err) {
+      showToast('error', 'Failed to receive inventory.');
+    }
+    setLoading(l => ({ ...l, form: false }));
+  };
 
-    addInventoryItem({
-      productId: receiveForm.productId,
-      supplierId: receiveForm.supplierId,
-      type: receiveForm.type,
-      quantity: parseInt(receiveForm.quantity),
-      unit: receiveForm.unit,
-      weight: receiveForm.weight ? parseFloat(receiveForm.weight) : undefined,
-      porterage: receiveForm.porterage ? parseFloat(receiveForm.porterage) : undefined,
-      transferFee: receiveForm.transferFee ? parseFloat(receiveForm.transferFee) : undefined,
-      price: receiveForm.price ? parseFloat(receiveForm.price) : undefined,
-      commissionRate: receiveForm.type === 'commission' && receiveForm.commissionRate ? parseFloat(receiveForm.commissionRate) : undefined,
-      notes: receiveForm.notes || undefined,
-      receivedBy: user?.id || ''
+  const handleProductSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const errors = validateProductForm();
+    setProductErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setLoading(l => ({ ...l, product: true }));
+    try {
+      await addProduct({
+        name: productForm.name,
+        category: productForm.category,
+        image: productForm.capturedPhoto || productForm.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
+        is_active: true
+      });
+      stopCamera();
+      setProductForm({
+        name: '',
+        category: 'Fruits',
+        image: '',
+        capturedPhoto: ''
+      });
+      setShowAddProductForm(false);
+      setProductErrors({});
+      showToast('success', 'Product added successfully!');
+    } catch (err) {
+      showToast('error', 'Failed to add product.');
+    }
+    setLoading(l => ({ ...l, product: false }));
+  };
+
+  const handleSupplierSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const errors = validateSupplierForm();
+    setSupplierErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setLoading(l => ({ ...l, supplier: true }));
+    try {
+      await addSupplier({
+        name: supplierForm.name,
+        phone: supplierForm.phone,
+        email: supplierForm.email || '',
+        address: supplierForm.address,
+        type: supplierForm.type,
+        is_active: true
+      });
+      setSupplierForm({
+        name: '',
+        phone: '',
+        email: '',
+        address: '',
+        type: 'commission'
+      });
+      setShowAddSupplierForm(false);
+      setSupplierErrors({});
+      showToast('success', 'Supplier added successfully!');
+    } catch (err) {
+      showToast('error', 'Failed to add supplier.');
+    }
+    setLoading(l => ({ ...l, supplier: false }));
+  };
+
+  // Debounced search for stock levels
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
+  const filteredStockLevels = stockLevels.filter(item =>
+    item && typeof item.product_name === 'string' && item.product_name.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+  );
+
+  const recentReceives = inventory
+    .sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())
+    .slice(0, 10);
+
+  // Auto-focus first input in modals
+  const receiveFirstInputRef = useRef<HTMLInputElement>(null);
+  const productFirstInputRef = useRef<HTMLInputElement>(null);
+  const supplierFirstInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (showReceiveForm && receiveFirstInputRef.current) receiveFirstInputRef.current.focus();
+  }, [showReceiveForm]);
+  useEffect(() => {
+    if (showAddProductForm && productFirstInputRef.current) productFirstInputRef.current.focus();
+  }, [showAddProductForm]);
+  useEffect(() => {
+    if (showAddSupplierForm && supplierFirstInputRef.current) supplierFirstInputRef.current.focus();
+  }, [showAddSupplierForm]);
+  // Allow closing modals with Escape key
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showReceiveForm) setShowReceiveForm(false);
+        if (showAddProductForm) { stopCamera(); setShowAddProductForm(false); }
+        if (showAddSupplierForm) setShowAddSupplierForm(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [showReceiveForm, showAddProductForm, showAddSupplierForm]);
+
+  // Add edit/delete modal state
+  const [editItem, setEditItem] = useState<any>(null);
+  const [deleteItem, setDeleteItem] = useState<any>(null);
+
+  // Add updateInventoryItem and deleteInventoryItem as local stubs for now
+  const updateInventoryItem = async (item: any) => {
+    await SupabaseService.updateInventoryItem(item.id, {
+      quantity: Number(item.quantity),
+      price: item.price ? Number(item.price) : null,
+      notes: item.notes || null,
     });
+  };
+  const deleteInventoryItem = async (item: any) => {
+    await SupabaseService.deleteInventoryItem(item.id);
+  };
 
-    setReceiveForm({
-      productId: '',
-      supplierId: '',
+  // Add modal components for edit and delete
+  const EditInventoryModal = ({ item, onClose, onSave }: any) => {
+    const [form, setForm] = useState({ ...item });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto">
+          <div className="p-6 border-b">
+            <h2 className="text-xl font-semibold text-gray-900">Edit Inventory Item</h2>
+          </div>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setLoading(true);
+              setError('');
+              try {
+                await onSave(form);
+                onClose();
+              } catch (err: any) {
+                setError('Failed to update inventory item.');
+              }
+              setLoading(false);
+            }}
+            className="p-6 space-y-4"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Quantity</label>
+                <input
+                  type="number"
+                  value={form.quantity}
+                  onChange={e => setForm((f: any) => ({ ...f, quantity: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  min="0"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Unit</label>
+                <input
+                  type="text"
+                  value={form.unit}
+                  onChange={e => setForm((f: any) => ({ ...f, unit: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Price</label>
+                <input
+                  type="number"
+                  value={form.price || ''}
+                  onChange={e => setForm((f: any) => ({ ...f, price: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+                <input
+                  type="text"
+                  value={form.notes || ''}
+                  onChange={e => setForm((f: any) => ({ ...f, notes: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+              </div>
+            </div>
+            {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+            <div className="flex justify-end space-x-3 pt-4">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
+  const DeleteInventoryConfirm = ({ item, onClose, onDelete }: any) => {
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg max-w-md w-full">
+          <div className="p-6 border-b">
+            <h2 className="text-xl font-semibold text-gray-900">Delete Inventory Item</h2>
+          </div>
+          <div className="p-6">
+            <p>Are you sure you want to delete this inventory item?</p>
+            {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+            <div className="flex justify-end space-x-3 pt-4">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button
+                type="button"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                disabled={loading}
+                onClick={async () => {
+                  setLoading(true);
+                  setError('');
+                  try {
+                    await onDelete(item);
+                    onClose();
+                  } catch (err: any) {
+                    setError('Failed to delete inventory item.');
+                  }
+                  setLoading(false);
+                }}
+              >
+                {loading ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Subcomponents
+  const StockTable = ({ filteredStockLevels, products, lowStockAlertsEnabled, lowStockThreshold }: any) => {
+    // Pagination state
+    const [page, setPage] = useState(1);
+    const itemsPerPage = 10;
+    const totalPages = Math.ceil(filteredStockLevels.length / itemsPerPage);
+    const paginated = filteredStockLevels.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+    // Helper to get supplier info
+    const getSupplierInfo = (supplierId: string) => {
+      const supplier = products
+        .flatMap((p: any) => p.suppliers || [])
+        .find((s: any) => s.id === supplierId);
+      return supplier;
+    };
+    return (
+      <div className="bg-white rounded-lg shadow-sm">
+        <div className="p-6 border-b flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">Current Stock Levels</h2>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 rounded bg-gray-100 text-gray-700 disabled:opacity-50">Prev</button>
+            <span className="text-sm">Page {page} of {totalPages}</span>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-2 py-1 rounded bg-gray-100 text-gray-700 disabled:opacity-50">Next</button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Stock</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit Price</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total Value</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Suppliers</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Received</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {paginated.map((item: any) => {
+                const product = products.find((p: any) => p.id === item.product_id);
+                // For unit price, use the most recent inventory item's price for this product
+                const latestInventory = (product?.inventory || []).sort((a: any, b: any) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())[0];
+                const unitPrice = latestInventory?.price || 0;
+                const totalValue = unitPrice * item.current_stock;
+                return (
+                  <tr key={item.product_id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center">
+                        <img
+                          src={product?.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
+                          alt={product?.name}
+                          className="w-10 h-10 rounded-lg object-cover mr-3"
+                          onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
+                        />
+                        <div>
+                          <p className="font-medium text-gray-900">{item.product_name}</p>
+                          <p className="text-sm text-gray-500">{product?.category}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="font-medium text-gray-900">
+                        {item.current_stock} {item.unit}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-gray-900">{unitPrice ? `$${unitPrice.toFixed(2)}` : '-'}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-gray-900">{unitPrice ? `$${totalValue.toFixed(2)}` : '-'}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-wrap gap-1">
+                        {(item.suppliers || []).map((supplier: any) => (
+                          <span
+                            key={supplier.supplier_id}
+                            className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded relative group"
+                          >
+                            {supplier.supplier_name}: {supplier.quantity}
+                            {/* Tooltip for contact info */}
+                            <span className="hidden group-hover:block absolute left-0 top-full mt-1 z-10 bg-white border border-gray-300 rounded shadow-lg px-3 py-2 text-xs text-gray-700 min-w-[180px]">
+                              {(() => {
+                                const info = getSupplierInfo(supplier.supplier_id);
+                                return info ? (
+                                  <>
+                                    {info.phone && <div><b>Phone:</b> {info.phone}</div>}
+                                    {info.email && <div><b>Email:</b> {info.email}</div>}
+                                  </>
+                                ) : <span>No contact info</span>;
+                              })()}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-gray-500">
+                      {item.last_received ? new Date(item.last_received).toLocaleDateString() : 'Never'}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 text-xs rounded-full ${
+                        item.current_stock === 0 
+                          ? 'bg-red-100 text-red-800'
+                          : lowStockAlertsEnabled && item.current_stock < lowStockThreshold
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-green-100 text-green-800'
+                      }`}>
+                        {item.current_stock === 0 
+                          ? 'Out of Stock' 
+                          : lowStockAlertsEnabled && item.current_stock < lowStockThreshold
+                          ? 'Low Stock' 
+                          : 'In Stock'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+  const RecentReceivesTable = ({ recentReceives, products, suppliers, onEdit, onDelete }: any) => (
+    <div className="bg-white rounded-lg shadow-sm">
+      <div className="p-6 border-b">
+        <h2 className="text-lg font-semibold text-gray-900">Recent Product Receives</h2>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Received</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {recentReceives.map((item: any) => {
+              const product = products.find((p: any) => p.id === item.product_id);
+              const supplier = suppliers.find((s: any) => s.id === item.supplier_id);
+              return (
+                <tr key={item.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center">
+                      <img
+                        src={product?.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
+                        alt={product?.name}
+                        className="w-10 h-10 rounded-lg object-cover mr-3"
+                        onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
+                      />
+                      <div>
+                        <p className="font-medium text-gray-900">{product?.name}</p>
+                        <p className="text-sm text-gray-500">{product?.category}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-gray-900">{supplier?.name}</td>
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-1 text-xs rounded-full ${
+                      item.type === 'commission' 
+                        ? 'bg-green-100 text-green-800' 
+                        : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {item.type}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-gray-900">
+                    {item.quantity} {item.unit}
+                  </td>
+                  <td className="px-6 py-4 text-gray-500">
+                    {new Date(item.received_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-6 py-4">
+                    <button onClick={() => onEdit(item)} className="text-blue-600 hover:underline mr-2">Edit</button>
+                    <button onClick={() => onDelete(item)} className="text-red-600 hover:underline">Delete</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  // Add ProductTable subcomponent
+  const ProductTable = ({ products, onEdit, onDelete }: any) => (
+    <div className="bg-white rounded-lg shadow-sm">
+      <div className="p-6 border-b">
+        <h2 className="text-lg font-semibold text-gray-900">Stock Products</h2>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Image</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {products.map((product: any) => (
+              <tr key={product.id} className="hover:bg-gray-50">
+                <td className="px-6 py-4">
+                  <img
+                    src={product.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
+                    alt={product.name}
+                    className="w-10 h-10 rounded-lg object-cover"
+                    onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
+                  />
+                </td>
+                <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
+                <td className="px-6 py-4 text-gray-700">{product.category}</td>
+                <td className="px-6 py-4">
+                  <button onClick={() => onEdit(product)} className="text-blue-600 hover:underline mr-2">Edit</button>
+                  <button onClick={() => onDelete(product)} className="text-red-600 hover:underline">Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  // Add ReceiveFormModal subcomponent
+  const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userProfile, defaultCommissionRate, recentProducts, setRecentProducts, recentSuppliers, setRecentSuppliers }: any) => {
+    const [form, setForm] = useState({
+      product_id: '',
+      supplier_id: '',
       type: 'commission',
       quantity: '',
       unit: 'kg',
       weight: '',
       porterage: '',
-      transferFee: '',
+      transfer_fee: '',
       price: '',
-      commissionRate: '',
+      commission_rate: '',
       notes: ''
     });
-    setShowReceiveForm(false);
+    const [errors, setErrors] = useState<any>({});
+    const [loading, setLoading] = useState(false);
+    const firstInputRef = useRef<HTMLInputElement>(null);
+    useEffect(() => { if (open && firstInputRef.current) firstInputRef.current.focus(); }, [open]);
+    useEffect(() => {
+      const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape' && open) onClose(); };
+      window.addEventListener('keydown', handleEsc);
+      return () => window.removeEventListener('keydown', handleEsc);
+    }, [open, onClose]);
+    useEffect(() => {
+      if (form.type === 'commission' && form.supplier_id) {
+        setForm(prev => ({ ...prev, commission_rate: defaultCommissionRate.toString() }));
+      } else if (form.type === 'cash') {
+        setForm(prev => ({ ...prev, commission_rate: '' }));
+      }
+    }, [form.supplier_id, form.type, defaultCommissionRate]);
+    const validate = () => {
+      const errors: any = {};
+      if (!form.product_id) errors.product_id = 'Product is required.';
+      if (!form.supplier_id) errors.supplier_id = 'Supplier is required.';
+      if (!form.quantity || isNaN(Number(form.quantity)) || Number(form.quantity) < 1) errors.quantity = 'Quantity must be at least 1.';
+      if (form.type === 'commission' && (form.commission_rate === '' || isNaN(Number(form.commission_rate)))) errors.commission_rate = 'Commission rate is required.';
+      if (form.type === 'cash' && (form.price === '' || isNaN(Number(form.price)))) errors.price = 'Purchase price is required.';
+      return errors;
+    };
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      const errs = validate();
+      setErrors(errs);
+      if (Object.keys(errs).length > 0) return;
+      setLoading(true);
+      try {
+        await onSuccess({
+          product_id: form.product_id,
+          supplier_id: form.supplier_id,
+          type: form.type,
+          quantity: parseInt(form.quantity),
+          unit: form.unit,
+          weight: form.weight ? parseFloat(form.weight) : undefined,
+          porterage: form.porterage ? parseFloat(form.porterage) : undefined,
+          transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
+          price: form.price ? parseFloat(form.price) : undefined,
+          commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
+          notes: form.notes || undefined,
+          received_by: userProfile?.id || ''
+        });
+        setForm({
+          product_id: '',
+          supplier_id: '',
+          type: 'commission',
+          quantity: '',
+          unit: 'kg',
+          weight: '',
+          porterage: '',
+          transfer_fee: '',
+          price: '',
+          commission_rate: '',
+          notes: ''
+        });
+        setErrors({});
+        onClose();
+      } catch {
+        setErrors({ form: 'Failed to receive inventory.' });
+      }
+      setLoading(false);
+    };
+    if (!open) return null;
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="p-6 border-b">
+            <h2 className="text-xl font-semibold text-gray-900">Receive Products</h2>
+          </div>
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <input ref={firstInputRef} style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }} tabIndex={-1} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <SearchableSelect
+                  options={products.filter((p: any) => p.is_active).map((product: any) => ({
+                    id: product.id,
+                    label: product.name,
+                    value: product.id,
+                    category: product.category
+                  }))}
+                  value={form.product_id}
+                  onChange={(value: any) => setForm((prev: any) => ({ ...prev, product_id: value }))}
+                  placeholder="Select Product *"
+                  searchPlaceholder="Search products..."
+                  categories={['Fruits', 'Vegetables']}
+                  recentSelections={recentProducts}
+                  onRecentUpdate={setRecentProducts}
+                  showAddOption={true}
+                  addOptionText="Add New Product"
+                  className={`w-full ${errors.product_id ? 'border-red-500' : ''}`}
+                />
+                {errors.product_id && <p className="text-xs text-red-600 mt-1">{errors.product_id}</p>}
+              </div>
+              <div>
+                <SearchableSelect
+                  options={suppliers.filter((s: any) => s.is_active).map((supplier: any) => ({
+                    id: supplier.id,
+                    label: supplier.name,
+                    value: supplier.id,
+                    category: supplier.type === 'commission' ? 'Commission' : 'Cash'
+                  }))}
+                  value={form.supplier_id}
+                  onChange={(value: any) => setForm((prev: any) => ({ ...prev, supplier_id: value }))}
+                  placeholder="Select Supplier *"
+                  searchPlaceholder="Search suppliers..."
+                  categories={['Commission', 'Cash']}
+                  recentSelections={recentSuppliers}
+                  onRecentUpdate={setRecentSuppliers}
+                  showAddOption={true}
+                  addOptionText="Add New Supplier"
+                  className={`w-full ${errors.supplier_id ? 'border-red-500' : ''}`}
+                />
+                {errors.supplier_id && <p className="text-xs text-red-600 mt-1">{errors.supplier_id}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Supply Type *</label>
+                <select
+                  value={form.type}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, type: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                >
+                  <option value="commission">Commission</option>
+                  <option value="cash">Cash Purchase</option>
+                </select>
+              </div>
+              {form.type === 'commission' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Commission Rate (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={form.commission_rate}
+                    onChange={(e) => setForm((prev: any) => ({ ...prev, commission_rate: e.target.value }))}
+                    className={`w-full border ${errors.commission_rate ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2`}
+                    placeholder={`Default: ${defaultCommissionRate}%`}
+                  />
+                  {errors.commission_rate && <p className="text-xs text-red-600 mt-1">{errors.commission_rate}</p>}
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Unit *</label>
+                <select
+                  value={form.unit}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, unit: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                >
+                  <option value="kg">Kilogram (kg)</option>
+                  <option value="piece">Piece</option>
+                  <option value="box">Box</option>
+                  <option value="bag">Bag</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
+                <input
+                  type="number"
+                  value={form.quantity}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, quantity: e.target.value }))}
+                  className={`w-full border ${errors.quantity ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2`}
+                  required
+                  min="1"
+                  placeholder={`Enter quantity in ${form.unit}`}
+                />
+                {errors.quantity && <p className="text-xs text-red-600 mt-1">{errors.quantity}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Weight (optional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.weight}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, weight: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+              </div>
+              {form.type === 'cash' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Purchase Price *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={form.price}
+                    onChange={(e) => setForm((prev: any) => ({ ...prev, price: e.target.value }))}
+                    className={`w-full border ${errors.price ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2`}
+                    placeholder="Enter purchase price"
+                    required
+                  />
+                  {errors.price && <p className="text-xs text-red-600 mt-1">{errors.price}</p>}
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Porterage Fee (optional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.porterage}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, porterage: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Transfer Fee (optional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.transfer_fee}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, transfer_fee: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Notes (optional)</label>
+              <textarea
+                value={form.notes}
+                onChange={(e) => setForm((prev: any) => ({ ...prev, notes: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                rows={3}
+              />
+            </div>
+            {errors.form && <p className="text-xs text-red-600 mt-1">{errors.form}</p>}
+            <div className="flex justify-end space-x-3 pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                disabled={loading}
+              >
+                {loading ? 'Receiving...' : 'Receive Products'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
   };
 
-  const handleProductSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!productForm.name || !productForm.category) return;
-
-    addProduct({
-      name: productForm.name,
-      category: productForm.category,
-      image: productForm.capturedPhoto || productForm.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
-      isActive: true
-    });
-
-    stopCamera();
-    setProductForm({
+  // Add AddProductModal subcomponent
+  const AddProductModal = ({ open, onClose, onSuccess }: any) => {
+    const [form, setForm] = useState({
       name: '',
       category: 'Fruits',
       image: '',
       capturedPhoto: ''
     });
-    setShowAddProductForm(false);
+    const [errors, setErrors] = useState<any>({});
+    const [loading, setLoading] = useState(false);
+    const firstInputRef = useRef<HTMLInputElement>(null);
+    useEffect(() => { if (open && firstInputRef.current) firstInputRef.current.focus(); }, [open]);
+    useEffect(() => {
+      const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape' && open) onClose(); };
+      window.addEventListener('keydown', handleEsc);
+      return () => window.removeEventListener('keydown', handleEsc);
+    }, [open, onClose]);
+    const validate = () => {
+      const errors: any = {};
+      if (!form.name) errors.name = 'Product name is required.';
+      if (!form.category) errors.category = 'Category is required.';
+      return errors;
+    };
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      const errs = validate();
+      setErrors(errs);
+      if (Object.keys(errs).length > 0) return;
+      setLoading(true);
+      try {
+        await onSuccess({
+          name: form.name,
+          category: form.category,
+          image: form.capturedPhoto || form.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
+          is_active: true
+        });
+        setForm({ name: '', category: 'Fruits', image: '', capturedPhoto: '' });
+        setErrors({});
+        onClose();
+      } catch {
+        setErrors({ form: 'Failed to add product.' });
+      }
+      setLoading(false);
+    };
+    if (!open) return null;
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="p-6 border-b">
+            <h2 className="text-xl font-semibold text-gray-900">Add New Product</h2>
+          </div>
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <input ref={firstInputRef} style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }} tabIndex={-1} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product Name *</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, name: e.target.value }))}
+                  className={`w-full border ${errors.name ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2`}
+                  required
+                />
+                {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
+                <select
+                  value={form.category}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, category: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                >
+                  <option value="Fruits">Fruits</option>
+                  <option value="Vegetables">Vegetables</option>
+                </select>
+                {errors.category && <p className="text-xs text-red-600 mt-1">{errors.category}</p>}
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product Photo (optional)</label>
+                {/* For brevity, use a simple file input. You can add camera/capture logic as before if needed. */}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => setForm((prev: any) => ({ ...prev, image: ev.target?.result as string, capturedPhoto: '' }));
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+                {form.image && (
+                  <img src={form.image} alt="Preview" className="w-24 h-24 object-cover rounded mt-2" />
+                )}
+              </div>
+            </div>
+            {errors.form && <p className="text-xs text-red-600 mt-1">{errors.form}</p>}
+            <div className="flex justify-end space-x-3 pt-4">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700" disabled={loading}>{loading ? 'Adding...' : 'Add Product'}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
   };
 
-  const handleSupplierSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!supplierForm.name || !supplierForm.phone) return;
-
-    addSupplier({
-      name: supplierForm.name,
-      phone: supplierForm.phone,
-      email: supplierForm.email || undefined,
-      address: supplierForm.address,
-      type: supplierForm.type,
-      commissionRate: supplierForm.type === 'commission' ? parseFloat(supplierForm.commissionRate) || 0 : 0,
-      isActive: true
-    });
-
-    setSupplierForm({
-      name: '',
-      phone: '',
-      email: '',
-      address: '',
-      type: 'commission'
-    });
-    setShowAddSupplierForm(false);
+  // Add EditProductModal subcomponent
+  const EditProductModal = ({ open, onClose, onSuccess, product }: any) => {
+    const [form, setForm] = useState({ ...product });
+    const [errors, setErrors] = useState<any>({});
+    const [loading, setLoading] = useState(false);
+    const firstInputRef = useRef<HTMLInputElement>(null);
+    useEffect(() => { if (open && firstInputRef.current) firstInputRef.current.focus(); }, [open]);
+    useEffect(() => {
+      const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape' && open) onClose(); };
+      window.addEventListener('keydown', handleEsc);
+      return () => window.removeEventListener('keydown', handleEsc);
+    }, [open, onClose]);
+    const validate = () => {
+      const errors: any = {};
+      if (!form.name) errors.name = 'Product name is required.';
+      if (!form.category) errors.category = 'Category is required.';
+      return errors;
+    };
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      const errs = validate();
+      setErrors(errs);
+      if (Object.keys(errs).length > 0) return;
+      setLoading(true);
+      try {
+        await onSuccess({
+          id: form.id,
+          name: form.name,
+          category: form.category,
+          image: form.capturedPhoto || form.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
+        });
+        setErrors({});
+        onClose();
+      } catch {
+        setErrors({ form: 'Failed to update product.' });
+      }
+      setLoading(false);
+    };
+    if (!open) return null;
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="p-6 border-b">
+            <h2 className="text-xl font-semibold text-gray-900">Edit Product</h2>
+          </div>
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <input ref={firstInputRef} style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }} tabIndex={-1} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product Name *</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, name: e.target.value }))}
+                  className={`w-full border ${errors.name ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2`}
+                  required
+                />
+                {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
+                <select
+                  value={form.category}
+                  onChange={(e) => setForm((prev: any) => ({ ...prev, category: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                >
+                  <option value="Fruits">Fruits</option>
+                  <option value="Vegetables">Vegetables</option>
+                </select>
+                {errors.category && <p className="text-xs text-red-600 mt-1">{errors.category}</p>}
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product Photo (optional)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => setForm((prev: any) => ({ ...prev, image: ev.target?.result as string, capturedPhoto: '' }));
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+                {form.image && (
+                  <img src={form.image} alt="Preview" className="w-24 h-24 object-cover rounded mt-2" />
+                )}
+              </div>
+            </div>
+            {errors.form && <p className="text-xs text-red-600 mt-1">{errors.form}</p>}
+            <div className="flex justify-end space-x-3 pt-4">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
   };
 
-  const filteredStockLevels = stockLevels.filter(item =>
-    item.productName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Add showEditProductModal and editProductData state
+  const [showEditProductModal, setShowEditProductModal] = useState(false);
+  const [editProductData, setEditProductData] = useState<any>(null);
 
-  const recentReceives = inventory
-    .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
-    .slice(0, 10);
+  // Add showDeleteProductModal and deleteProductData state
+  const [showDeleteProductModal, setShowDeleteProductModal] = useState(false);
+  const [deleteProductData, setDeleteProductData] = useState<any>(null);
+
+  // Add DeleteProductConfirm subcomponent
+  const DeleteProductConfirm = ({ open, onClose, onDelete, product }: any) => {
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    if (!open) return null;
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg max-w-md w-full">
+          <div className="p-6 border-b">
+            <h2 className="text-xl font-semibold text-gray-900">Delete Product</h2>
+          </div>
+          <div className="p-6">
+            <p>Are you sure you want to delete <b>{product?.name}</b>?</p>
+            {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+            <div className="flex justify-end space-x-3 pt-4">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button
+                type="button"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                disabled={loading}
+                onClick={async () => {
+                  setLoading(true);
+                  setError('');
+                  try {
+                    await onDelete(product);
+                    onClose();
+                  } catch (err: any) {
+                    setError('Failed to delete product.');
+                  }
+                  setLoading(false);
+                }}
+              >
+                {loading ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="p-6">
@@ -305,70 +1308,14 @@ export default function Inventory() {
           }`}
         >
           <Package className="w-4 h-4 inline mr-2" />
-          Stock Levels
+          Stock Products
         </button>
       </div>
 
       {activeTab === 'receive' && (
         <div className="space-y-6">
           {/* Recent Receives */}
-          <div className="bg-white rounded-lg shadow-sm">
-            <div className="p-6 border-b">
-              <h2 className="text-lg font-semibold text-gray-900">Recent Product Receives</h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Received</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {recentReceives.map((item) => {
-                    const product = products.find(p => p.id === item.productId);
-                    const supplier = suppliers.find(s => s.id === item.supplierId);
-                    return (
-                      <tr key={item.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center">
-                            <img
-                              src={product?.image}
-                              alt={product?.name}
-                              className="w-10 h-10 rounded-lg object-cover mr-3"
-                            />
-                            <div>
-                              <p className="font-medium text-gray-900">{product?.name}</p>
-                              <p className="text-sm text-gray-500">{product?.category}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-gray-900">{supplier?.name}</td>
-                        <td className="px-6 py-4">
-                          <span className={`px-2 py-1 text-xs rounded-full ${
-                            item.type === 'commission' 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {item.type}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-gray-900">
-                          {item.quantity} {item.unit}
-                        </td>
-                        <td className="px-6 py-4 text-gray-500">
-                          {new Date(item.receivedAt).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <RecentReceivesTable recentReceives={recentReceives} products={products} suppliers={suppliers} onEdit={setEditItem} onDelete={setDeleteItem} />
         </div>
       )}
 
@@ -387,475 +1334,44 @@ export default function Inventory() {
               />
             </div>
           </div>
-
-          {/* Stock Levels */}
-          <div className="bg-white rounded-lg shadow-sm">
-            <div className="p-6 border-b">
-              <h2 className="text-lg font-semibold text-gray-900">Current Stock Levels</h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Stock</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Suppliers</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Received</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {filteredStockLevels.map((item) => {
-                    const product = products.find(p => p.id === item.productId);
-                    return (
-                      <tr key={item.productId} className="hover:bg-gray-50">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center">
-                            <img
-                              src={product?.image}
-                              alt={product?.name}
-                              className="w-10 h-10 rounded-lg object-cover mr-3"
-                            />
-                            <div>
-                              <p className="font-medium text-gray-900">{item.productName}</p>
-                              <p className="text-sm text-gray-500">{product?.category}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="font-medium text-gray-900">
-                            {item.currentStock} {item.unit}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-wrap gap-1">
-                            {(item.suppliers || []).map(supplier => (
-                              <span
-                                key={supplier.supplierId}
-                                className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
-                              >
-                                {supplier.supplierName}: {supplier.quantity}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-gray-500">
-                          {item.lastReceived ? new Date(item.lastReceived).toLocaleDateString() : 'Never'}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`px-2 py-1 text-xs rounded-full ${
-                            item.currentStock === 0 
-                              ? 'bg-red-100 text-red-800'
-                              : lowStockAlertsEnabled && item.currentStock < lowStockThreshold
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-green-100 text-green-800'
-                          }`}>
-                            {item.currentStock === 0 
-                              ? 'Out of Stock' 
-                              : lowStockAlertsEnabled && item.currentStock < lowStockThreshold
-                              ? 'Low Stock' 
-                              : 'In Stock'}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {/* Product Table */}
+          <ProductTable
+            products={products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))}
+            onEdit={(product: any) => { setEditProductData(product); setShowEditProductModal(true); }}
+            onDelete={(product: any) => { setDeleteProductData(product); setShowDeleteProductModal(true); }}
+          />
         </div>
       )}
 
       {/* Receive Form Modal */}
-      {showReceiveForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">Receive Products</h2>
-            </div>
-            <form onSubmit={handleReceiveSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <SearchableSelect
-                    options={products.filter(p => p.isActive).map(product => ({
-                      id: product.id,
-                      label: product.name,
-                      value: product.id,
-                      category: product.category
-                    }))}
-                    value={receiveForm.productId}
-                    onChange={(value) => setReceiveForm(prev => ({ ...prev, productId: value as string }))}
-                    placeholder="Select Product *"
-                    searchPlaceholder="Search products..."
-                    categories={['Fruits', 'Vegetables']}
-                    recentSelections={recentProducts}
-                    onRecentUpdate={setRecentProducts}
-                    showAddOption={true}
-                    addOptionText="Add New Product"
-                    onAddNew={() => setShowAddProductForm(true)}
-                    className="w-full"
-                  />
-                </div>
-
-                <div>
-                  <SearchableSelect
-                    options={suppliers.filter(s => s.isActive).map(supplier => ({
-                      id: supplier.id,
-                      label: supplier.name,
-                      value: supplier.id,
-                      category: supplier.type === 'commission' ? 'Commission' : 'Cash'
-                    }))}
-                    value={receiveForm.supplierId}
-                    onChange={(value) => setReceiveForm(prev => ({ ...prev, supplierId: value as string }))}
-                    placeholder="Select Supplier *"
-                    searchPlaceholder="Search suppliers..."
-                    categories={['Commission', 'Cash']}
-                    recentSelections={recentSuppliers}
-                    onRecentUpdate={setRecentSuppliers}
-                    showAddOption={true}
-                    addOptionText="Add New Supplier"
-                    onAddNew={() => setShowAddSupplierForm(true)}
-                    className="w-full"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Supply Type *
-                  </label>
-                  <select
-                    value={receiveForm.type}
-                    onChange={(e) => {
-                      const newType = e.target.value as 'commission' | 'cash';
-                      setReceiveForm(prev => ({ 
-                        ...prev, 
-                        type: newType,
-                        commissionRate: newType === 'commission' ? 
-                          (suppliers.find(s => s.id === prev.supplierId)?.commissionRate || defaultCommissionRate).toString() : 
-                          ''
-                      }));
-                    }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="commission">Commission</option>
-                    <option value="cash">Cash Purchase</option>
-                  </select>
-                </div>
-
-                {receiveForm.type === 'commission' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Commission Rate (%)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="100"
-                      value={receiveForm.commissionRate}
-                      onChange={(e) => setReceiveForm(prev => ({ ...prev, commissionRate: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder={`Default: ${defaultCommissionRate}%`}
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Default rate: {defaultCommissionRate}% (can be overridden or changed in Settings)
-                    </p>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Unit *
-                  </label>
-                  <select
-                    value={receiveForm.unit}
-                    onChange={(e) => setReceiveForm(prev => ({ ...prev, unit: e.target.value as 'kg' | 'piece' | 'box' | 'bag' }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="kg">Kilogram (kg)</option>
-                    <option value="piece">Piece</option>
-                    <option value="box">Box</option>
-                    <option value="bag">Bag</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Quantity *
-                  </label>
-                  <input
-                    type="number"
-                    value={receiveForm.quantity}
-                    onChange={(e) => setReceiveForm(prev => ({ ...prev, quantity: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    required
-                    min="1"
-                    placeholder={`Enter quantity in ${receiveForm.unit}`}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Weight (optional)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={receiveForm.weight}
-                    onChange={(e) => setReceiveForm(prev => ({ ...prev, weight: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                {receiveForm.type === 'cash' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Purchase Price *
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={receiveForm.price}
-                      onChange={(e) => setReceiveForm(prev => ({ ...prev, price: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="Enter purchase price"
-                      required
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Porterage Fee (optional)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={receiveForm.porterage}
-                    onChange={(e) => setReceiveForm(prev => ({ ...prev, porterage: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Transfer Fee (optional)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={receiveForm.transferFee}
-                    onChange={(e) => setReceiveForm(prev => ({ ...prev, transferFee: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Notes (optional)
-                </label>
-                <textarea
-                  value={receiveForm.notes}
-                  onChange={(e) => setReceiveForm(prev => ({ ...prev, notes: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  rows={3}
-                />
-              </div>
-
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowReceiveForm(false)}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  Receive Products
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <ReceiveFormModal
+        open={showReceiveForm}
+        onClose={() => setShowReceiveForm(false)}
+        onSuccess={async (data: any) => {
+          await addInventoryItem(data);
+          await raw.refreshData();
+          showToast('success', 'Inventory received successfully!');
+        }}
+        products={products}
+        suppliers={suppliers}
+        userProfile={userProfile}
+        defaultCommissionRate={defaultCommissionRate}
+        recentProducts={recentProducts}
+        setRecentProducts={setRecentProducts}
+        recentSuppliers={recentSuppliers}
+        setRecentSuppliers={setRecentSuppliers}
+      />
 
       {/* Add Product Form Modal */}
-      {showAddProductForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">Add New Product</h2>
-            </div>
-            <form onSubmit={handleProductSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Product Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={productForm.name}
-                    onChange={(e) => setProductForm(prev => ({ ...prev, name: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Category *
-                  </label>
-                  <select
-                    value={productForm.category}
-                    onChange={(e) => setProductForm(prev => ({ ...prev, category: e.target.value as 'Fruits' | 'Vegetables' }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="Fruits">Fruits</option>
-                    <option value="Vegetables">Vegetables</option>
-                  </select>
-                </div>
-
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Product Photo (optional)
-                  </label>
-                  
-                  {/* Camera Error */}
-                  {cameraError && (
-                    <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <p className="text-sm text-red-600">{cameraError}</p>
-                    </div>
-                  )}
-                  
-                  {/* Photo Capture Interface */}
-                  <div className="border border-gray-300 rounded-lg p-4">
-                    {!isCameraActive && !productForm.capturedPhoto && !productForm.image && (
-                      <div className="text-center">
-                        <Camera className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                        <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                          <button
-                            type="button"
-                            onClick={startCamera}
-                            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
-                          >
-                            <Camera className="w-4 h-4 mr-2" />
-                            Take Photo
-                          </button>
-                          <label className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center cursor-pointer">
-                            <Upload className="w-4 h-4 mr-2" />
-                            Load Photo
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleFileUpload}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {isCameraActive && (
-                      <div className="text-center">
-                        <video
-                          ref={videoRef}
-                          autoPlay
-                          playsInline
-                          className="w-full max-w-md mx-auto rounded-lg mb-3"
-                        />
-                        <div className="flex justify-center space-x-3">
-                          <button
-                            type="button"
-                            onClick={capturePhoto}
-                            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
-                          >
-                            <Camera className="w-4 h-4 mr-2" />
-                            Capture Photo
-                          </button>
-                          <button
-                            type="button"
-                            onClick={stopCamera}
-                            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center"
-                          >
-                            <X className="w-4 h-4 mr-2" />
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {(productForm.capturedPhoto || productForm.image) && (
-                      <div className="text-center">
-                        <img
-                          src={productForm.capturedPhoto || productForm.image}
-                          alt="Captured product"
-                          className="w-full max-w-md mx-auto rounded-lg mb-3"
-                        />
-                        <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                          <button
-                            type="button"
-                            onClick={retakePhoto}
-                            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
-                          >
-                            <Camera className="w-4 h-4 mr-2" />
-                            Take New Photo
-                          </button>
-                          <label className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center cursor-pointer">
-                            <Upload className="w-4 h-4 mr-2" />
-                            Load Different Photo
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleFileUpload}
-                              className="hidden"
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            onClick={clearPhoto}
-                            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center justify-center"
-                          >
-                            <X className="w-4 h-4 mr-2" />
-                            Remove Photo
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Hidden canvas for photo capture */}
-              <canvas ref={canvasRef} style={{ display: 'none' }} />
-
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    stopCamera();
-                    setShowAddProductForm(false);
-                  }}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                >
-                  Add Product
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <AddProductModal
+        open={showAddProductForm}
+        onClose={() => setShowAddProductForm(false)}
+        onSuccess={async (data: any) => {
+          await addProduct(data);
+          await raw.refreshData();
+          showToast('success', 'Product added successfully!');
+        }}
+      />
 
       {/* Add Supplier Form Modal */}
       {showAddSupplierForm && (
@@ -874,9 +1390,11 @@ export default function Inventory() {
                     type="text"
                     value={supplierForm.name}
                     onChange={(e) => setSupplierForm(prev => ({ ...prev, name: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                    className={`w-full border ${supplierErrors.name ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
                     required
+                    ref={supplierFirstInputRef}
                   />
+                  {supplierErrors.name && <p className="text-xs text-red-600 mt-1">{supplierErrors.name}</p>}
                 </div>
 
                 <div>
@@ -887,9 +1405,10 @@ export default function Inventory() {
                     type="tel"
                     value={supplierForm.phone}
                     onChange={(e) => setSupplierForm(prev => ({ ...prev, phone: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                    className={`w-full border ${supplierErrors.phone ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
                     required
                   />
+                  {supplierErrors.phone && <p className="text-xs text-red-600 mt-1">{supplierErrors.phone}</p>}
                 </div>
 
                 <div>
@@ -942,6 +1461,7 @@ export default function Inventory() {
                 <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={loading.supplier}
                 >
                   Add Supplier
                 </button>
@@ -950,6 +1470,76 @@ export default function Inventory() {
           </div>
         </div>
       )}
+
+      {/* Add spinner overlay for any loading */}
+      {(loading.form || loading.product || loading.supplier || loading.initial) && (
+        <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
+          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      )}
+
+      {/* Add toast display at top right */}
+      {toast && (
+        <div className={`fixed top-4 right-4 px-4 py-2 rounded shadow-lg z-50 text-white ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.message}</div>
+      )}
+
+      {/* Edit Inventory Modal */}
+      {editItem && (
+        <EditInventoryModal
+          item={editItem}
+          onClose={() => setEditItem(null)}
+          onSave={async (form: any) => {
+            try {
+              await updateInventoryItem(form);
+              await raw.refreshData();
+              showToast('success', 'Inventory item updated!');
+            } catch {
+              showToast('error', 'Failed to update inventory item.');
+            }
+            setEditItem(null);
+          }}
+        />
+      )}
+      {deleteItem && (
+        <DeleteInventoryConfirm
+          item={deleteItem}
+          onClose={() => setDeleteItem(null)}
+          onDelete={async (item: any) => {
+            try {
+              await deleteInventoryItem(item);
+              await raw.refreshData();
+              showToast('success', 'Inventory item deleted!');
+            } catch {
+              showToast('error', 'Failed to delete inventory item.');
+            }
+            setDeleteItem(null);
+          }}
+        />
+      )}
+
+      {/* Edit Product Modal */}
+      <EditProductModal
+        open={showEditProductModal}
+        onClose={() => setShowEditProductModal(false)}
+        product={editProductData}
+        onSuccess={async (data: any) => {
+          await SupabaseService.updateProduct(data.id, { name: data.name, category: data.category, image: data.image });
+          await raw.refreshData();
+          showToast('success', 'Product updated successfully!');
+        }}
+      />
+
+      {/* Delete Product Confirm Modal */}
+      <DeleteProductConfirm
+        open={showDeleteProductModal}
+        onClose={() => setShowDeleteProductModal(false)}
+        product={deleteProductData}
+        onDelete={async (product: any) => {
+          await SupabaseService.deleteProduct(product.id);
+          await raw.refreshData();
+          showToast('success', 'Product deleted successfully!');
+        }}
+      />
     </div>
   );
 }

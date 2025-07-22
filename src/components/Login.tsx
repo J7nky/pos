@@ -1,21 +1,21 @@
 import React, { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+// import { useAuth } from '../contexts/AuthContext';
 import { ShoppingCart } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login, isLoading } = useAuth();
+  // Deprecated: use SupabaseLogin instead
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
-    const success = await login(email, password);
-    if (!success) {
-      setError('Invalid email or password');
-    }
+    // const success = await login(email, password);
+    // if (!success) {
+    //   setError('Invalid email or password');
+    // }
   };
 
   return (
@@ -66,10 +66,11 @@ export default function Login() {
 
           <button
             type="submit"
-            disabled={isLoading}
+            // disabled={isLoading}
             className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading ? 'Signing In...' : 'Sign In'}
+            {/* {isLoading ? 'Signing In...' : 'Sign In'} */}
+            Sign In
           </button>
         </form>
 

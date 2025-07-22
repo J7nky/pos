@@ -29,7 +29,7 @@ export function useSupabase() {
     loading,
     signUp: supabase.auth.signUp,
     signIn: supabase.auth.signInWithPassword,
-    signOut: supabase.auth.signOut,
+    signOut: () => supabase.auth.signOut(),
     resetPassword: supabase.auth.resetPasswordForEmail,
   };
 }

@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { useData } from '../contexts/DataContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { Plus, Search, Edit, Trash2, CheckCircle, XCircle } from 'lucide-react';
 import { Customer } from '../types';
 
 export default function Customers() {
-  const { customers, addCustomer, updateCustomer } = useData();
-  const { user } = useAuth();
+  const raw = useSupabaseData();
+  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt, email: c.email || '', address: c.address || ''})) : [];
+  const addCustomer = raw.addCustomer;
+  const updateCustomer = raw.updateCustomer;
+  const { userProfile } = useSupabaseAuth();
 
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -18,6 +21,7 @@ export default function Customers() {
     address: '',
     isActive: true,
   });
+  const [customerFormError, setCustomerFormError] = useState<string | null>(null);
 
   const handleAddCustomerClick = () => {
     setEditingCustomer(null);
@@ -61,10 +65,16 @@ export default function Customers() {
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerForm.name || !customerForm.phone) {
-      alert('Name and Phone are required.');
+      setCustomerFormError('Name and Phone are required.');
       return;
     }
-
+    // Check for duplicate customer (case-insensitive, trimmed)
+    const exists = customers.some(c => c.name.trim().toLowerCase() === customerForm.name!.trim().toLowerCase() && c.phone.trim() === customerForm.phone!.trim());
+    if (exists) {
+      setCustomerFormError('This customer already exists.');
+      return;
+    }
+    setCustomerFormError(null);
     if (editingCustomer) {
       updateCustomer(editingCustomer.id, {
         ...customerForm,
@@ -72,9 +82,13 @@ export default function Customers() {
       } as Customer);
     } else {
       addCustomer({
-        ...customerForm,
-        currentDebt: 0, // New customers start with 0 debt
-      } as Omit<Customer, 'id' | 'createdAt'>);
+        name: customerForm.name!,
+        phone: customerForm.phone!,
+        email: customerForm.email || '',
+        address: customerForm.address || '',
+        is_active: customerForm.isActive ?? true,
+        current_debt: 0,
+      });
     }
     setShowCustomerForm(false);
   };
@@ -251,7 +265,7 @@ export default function Customers() {
                   <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">Is Active</label>
                 </div>
               </div>
-
+              {customerFormError && <div className="text-red-600 text-sm font-medium pt-2">{customerFormError}</div>}
               <div className="flex justify-end space-x-3 pt-4">
                 <button
                   type="button"

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useData } from '../contexts/DataContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { 
   Settings as SettingsIcon,
   Bell,
@@ -15,6 +15,7 @@ import {
   Calculator,
   DollarSign
 } from 'lucide-react';
+import useLocalStorage from '../hooks/useLocalStorage';
 
 export default function Settings() {
   const { 
@@ -26,8 +27,8 @@ export default function Settings() {
     updateLowStockThreshold,
     updateDefaultCommissionRate,
     updateCurrency
-  } = useData();
-  const { user } = useAuth();
+  } = useSupabaseData();
+  const { userProfile } = useSupabaseAuth();
 
   const [tempThreshold, setTempThreshold] = useState(lowStockThreshold.toString());
   const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate.toString());
@@ -88,7 +89,7 @@ export default function Settings() {
               <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
               <input
                 type="text"
-                value={user?.name || ''}
+                value={userProfile?.name || ''}
                 disabled
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-500"
               />
@@ -97,7 +98,7 @@ export default function Settings() {
               <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
               <input
                 type="email"
-                value={user?.email || ''}
+                value={userProfile?.email || ''}
                 disabled
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-500"
               />
@@ -106,7 +107,7 @@ export default function Settings() {
               <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
               <input
                 type="text"
-                value={user?.role || ''}
+                value={userProfile?.role || ''}
                 disabled
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-500 capitalize"
               />
