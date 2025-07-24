@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from './common/SearchableSelect';
@@ -30,7 +30,7 @@ interface BillTab {
 }
 
 export default function POS() {
-  const raw = useSupabaseData();
+  const raw = useOfflineData();
   const products = raw.products.map(p => ({...p, isActive: p.is_active, createdAt: p.created_at})) as Array<any>;
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Array<any>;
   const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
@@ -125,7 +125,7 @@ export default function POS() {
   // Helper to get available stock for a product-supplier
   const getSupplierStock = (productId: string, supplierId: string) => {
     const stock = stockLevels.find(s => s.productId === productId);
-    if (!stock) return 0;
+    if (!stock || !stock.suppliers) return 0;
     const supplier = stock.suppliers.find((sup: any) => sup.supplierId === supplierId);
     return supplier ? supplier.quantity : 0;
   };
@@ -144,7 +144,7 @@ export default function POS() {
 
   const getProductSuppliers = (productId: string) => {
     const stock = stockLevels.find(s => s.productId === productId);
-    return stock ? stock.suppliers : [];
+    return stock && stock.suppliers ? stock.suppliers : [];
   };
 
   // In addToCart, only allow up to available stock

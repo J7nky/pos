@@ -1,6 +1,7 @@
 import React, { ReactNode } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
+import SyncStatus from './SyncStatus';
 import { 
   LayoutDashboard, 
   Package, 
@@ -22,7 +23,8 @@ interface LayoutProps {
 
 export default function Layout({ children, currentPage, onPageChange }: LayoutProps) {
   const { userProfile, signOut } = useSupabaseAuth();
-  const { isOnline, products, customers, inventory } = useSupabaseData();
+  const { isOnline, products, customers, inventory, getSyncStatus } = useOfflineData();
+  const { unsyncedCount, isSyncing } = getSyncStatus();
 
   // Listen for navigation events from Fast Actions
   React.useEffect(() => {
@@ -41,6 +43,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
     { id: 'customers', label: 'Customers', icon: Users },
     { id: 'accounting', label: 'Accounting', icon: Calculator },
     { id: 'reports', label: 'Reports', icon: FileText },
+    { id: 'demo', label: '🚀 Offline Demo', icon: () => <span className="text-lg">🚀</span> },
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
 
@@ -55,6 +58,11 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
               <><Wifi className="w-4 h-4 mr-2 text-green-500" /> Online</>
             ) : (
               <><WifiOff className="w-4 h-4 mr-2 text-red-500" /> Offline</>
+            )}
+            {unsyncedCount > 0 && (
+              <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
+                {unsyncedCount} unsynced
+              </span>
             )}
           </div>
         </div>
@@ -73,6 +81,11 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
             </button>
           ))}
         </nav>
+
+        {/* Sync Status */}
+        <div className="mt-6 px-4">
+          <SyncStatus />
+        </div>
 
         <div className="absolute bottom-0 w-64 p-6 border-t">
           <div className="flex items-center justify-between">

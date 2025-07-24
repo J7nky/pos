@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 
 export default function Reports() {
-  const raw = useSupabaseData();
+  const raw = useOfflineData();
   // Map all arrays to camelCase for compatibility
   const products = raw.products.map(p => ({...p, isActive: p.is_active, createdAt: p.created_at})) as Array<{id: string, name: string, isActive: boolean, createdAt: string}>;
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Array<{id: string, name: string, isActive: boolean, createdAt: string, currentDebt: number, phone: string, email?: string, address?: string}>;

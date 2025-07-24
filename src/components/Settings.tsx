@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { 
   Settings as SettingsIcon,
@@ -15,7 +15,7 @@ import {
   Calculator,
   DollarSign
 } from 'lucide-react';
-import useLocalStorage from '../hooks/useLocalStorage';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 export default function Settings() {
   const { 
@@ -27,7 +27,7 @@ export default function Settings() {
     updateLowStockThreshold,
     updateDefaultCommissionRate,
     updateCurrency
-  } = useSupabaseData();
+  } = useOfflineData();
   const { userProfile } = useSupabaseAuth();
 
   const [tempThreshold, setTempThreshold] = useState(lowStockThreshold.toString());
