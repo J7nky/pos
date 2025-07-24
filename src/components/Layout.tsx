@@ -1,7 +1,6 @@
 import React, { ReactNode } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
-import SyncStatus from './SyncStatus';
 import { 
   LayoutDashboard, 
   Package, 
@@ -81,11 +80,6 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
             </button>
           ))}
         </nav>
-
-        {/* Sync Status */}
-        <div className="mt-6 px-4">
-          <SyncStatus />
-        </div>
 
         <div className="absolute bottom-0 w-64 p-6 border-t">
           <div className="flex items-center justify-between">
