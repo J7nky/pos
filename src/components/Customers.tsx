@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { Plus, Search, Edit, Trash2, CheckCircle, XCircle } from 'lucide-react';
 import { Customer } from '../types';
 
 export default function Customers() {
-  const raw = useSupabaseData();
+  const raw = useOfflineData();
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt, email: c.email || '', address: c.address || ''})) : [];
   const addCustomer = raw.addCustomer;
   const updateCustomer = raw.updateCustomer;

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import SearchableSelect from './common/SearchableSelect';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -17,7 +17,7 @@ function useDebounce(value: string, delay: number) {
 }
 
 export default function Inventory() {
-  const raw = useSupabaseData();
+  const raw = useOfflineData();
   const products = raw.products.map(p => ({...p, isActive: p.is_active, createdAt: p.created_at})) as Array<any>;
   const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
   const inventory = raw.inventory.map(i => ({...i, createdAt: i.created_at, product_id: i.product_id, supplier_id: i.supplier_id, received_at: i.received_at})) as Array<any>;

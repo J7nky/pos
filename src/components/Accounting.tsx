@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useSupabaseData } from '../contexts/SupabaseDataContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from './common/SearchableSelect';
@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export default function Accounting() {
-  const raw = useSupabaseData();
+  const raw = useOfflineData();
   // Stubs for AR/AP/Journal
   const accountsReceivable: any[] = [];
   const accountsPayable: any[] = [];

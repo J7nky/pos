@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthContext';
-import { SupabaseDataProvider } from './contexts/SupabaseDataContext';
+import { OfflineDataProvider } from './contexts/OfflineDataContext';
 import SupabaseLogin from './components/SupabaseLogin';
 import Layout from './components/Layout';
 import Home from './components/Home';
@@ -10,6 +10,7 @@ import Reports from './components/Reports';
 import Customers from './components/Customers';
 import Accounting from './components/Accounting';
 import Settings from './components/Settings';
+import OfflineDemo from './components/OfflineDemo';
 
 function AppContent() {
   const { userProfile, loading } = useSupabaseAuth();
@@ -46,6 +47,8 @@ function AppContent() {
         return <Customers />;
       case 'settings':
         return <Settings />;
+      case 'demo':
+        return <OfflineDemo />;
       default:
         return <Home />;
     }
@@ -61,9 +64,9 @@ function AppContent() {
 function App() {
   return (
     <SupabaseAuthProvider>
-      <SupabaseDataProvider>
+      <OfflineDataProvider>
         <AppContent />
-      </SupabaseDataProvider>
+      </OfflineDataProvider>
     </SupabaseAuthProvider>
   );
 }
