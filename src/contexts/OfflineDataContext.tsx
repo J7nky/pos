@@ -125,6 +125,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+  
+  // Debounced sync to prevent excessive sync calls during rapid changes
+  const [debouncedSyncTimeout, setDebouncedSyncTimeout] = useState<NodeJS.Timeout | null>(null);
 
   // Legacy compatibility states - exact match
   const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useLocalStorage<boolean>('lowStockAlertsEnabled', true);
@@ -167,19 +170,44 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   }, [justCameOnline, storeId, isSyncing]);
 
-  // Periodic auto-sync when online
+  // Enhanced periodic auto-sync when online
   useEffect(() => {
     if (isOnline && storeId && !isSyncing) {
-      // Auto-sync every 60 seconds when online (reduced frequency since we have immediate sync on reconnect)
+      // Auto-sync every 30 seconds when online and has unsynced data
       const interval = setInterval(() => {
         if (!syncService.isCurrentlyRunning() && unsyncedCount > 0) {
           console.log('⏰ Periodic auto-sync triggered');
           performSync(true); // Mark as automatic sync
         }
-      }, 60000);
+      }, 30000); // Reduced from 60s to 30s for better responsiveness
 
       return () => clearInterval(interval);
     }
+  }, [isOnline, storeId, isSyncing, unsyncedCount]);
+
+  // Auto-sync on window focus when online (for when user returns to tab)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (isOnline && storeId && !isSyncing && unsyncedCount > 0) {
+        console.log('👀 Window focused - auto-syncing...');
+        performSync(true);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isOnline && storeId && !isSyncing && unsyncedCount > 0) {
+        console.log('👁️ Page became visible - auto-syncing...');
+        performSync(true);
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [isOnline, storeId, isSyncing, unsyncedCount]);
 
   // Update stock levels when inventory, products, or suppliers change
@@ -334,6 +362,36 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Debounced sync to batch rapid changes and prevent excessive sync calls
+  const debouncedSync = () => {
+    if (!isOnline || isSyncing) return;
+    
+    // Clear existing timeout
+    if (debouncedSyncTimeout) {
+      clearTimeout(debouncedSyncTimeout);
+    }
+    
+    // Set new timeout for 2 seconds
+    const timeout = setTimeout(() => {
+      if (isOnline && !isSyncing && unsyncedCount > 0) {
+        console.log('🔄 Debounced auto-sync triggered');
+        performSync(true); // Mark as automatic sync
+      }
+      setDebouncedSyncTimeout(null);
+    }, 2000);
+    
+    setDebouncedSyncTimeout(timeout);
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (debouncedSyncTimeout) {
+        clearTimeout(debouncedSyncTimeout);
+      }
+    };
+  }, [debouncedSyncTimeout]);
+
   // CRUD Operations - matching exact function signatures
   const addProduct = async (productData: Omit<Tables['products']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
@@ -347,9 +405,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync after user action
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addSupplier = async (supplierData: Omit<Tables['suppliers']['Insert'], 'store_id'>): Promise<void> => {
@@ -364,9 +421,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync after user action
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addCustomer = async (customerData: Omit<Tables['customers']['Insert'], 'store_id'>): Promise<void> => {
@@ -383,9 +439,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const updateCustomer = async (id: string, updates: Tables['customers']['Update']): Promise<void> => {
@@ -393,9 +448,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
     
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addInventoryItem = async (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> => {
@@ -420,9 +474,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addSale = async (
@@ -490,9 +543,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addTransaction = async (transactionData: Omit<Tables['transactions']['Insert'], 'store_id'>): Promise<void> => {
@@ -511,9 +563,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addExpenseCategory = async (categoryData: Omit<Tables['expense_categories']['Insert'], 'store_id'>): Promise<void> => {
@@ -529,9 +580,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const fullResync = async (): Promise<SyncResult> => {

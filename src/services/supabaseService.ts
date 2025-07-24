@@ -55,14 +55,12 @@ export class SupabaseService {
 
   static async deleteProduct(id: string) {
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('products')
         .delete()
-        .eq('id', id)
-        .select()
-        .single();
+        .eq('id', id);
       if (error) throw error;
-      return data;
+      return true; // Return success indicator instead of deleted data
     } catch (error) {
       handleSupabaseError(error);
     }
@@ -200,14 +198,12 @@ export class SupabaseService {
 
   static async deleteInventoryItem(id: string) {
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('inventory_items')
         .delete()
-        .eq('id', id)
-        .select()
-        .single();
+        .eq('id', id);
       if (error) throw error;
-      return data;
+      return true; // Return success indicator instead of deleted data
     } catch (error) {
       handleSupabaseError(error);
     }
