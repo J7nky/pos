@@ -50,6 +50,7 @@ interface SupabaseDataContextType {
   addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: Omit<Tables['expense_categories']['Insert'], 'store_id'>) => Promise<void>;
+  addNonPricedItem: (item: any) => Promise<void>;
 
   // Utility functions
   refreshData: () => Promise<void>;
@@ -293,6 +294,13 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const addNonPricedItem = async (item: any): Promise<void> => {
+    const key = 'erp_non_priced_items';
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    const updated = [...existing, item];
+    localStorage.setItem(key, JSON.stringify(updated));
+  };
+
   // Add legacy/compatibility methods
   const toggleLowStockAlerts = (enabled: boolean) => setLowStockAlertsEnabled(enabled);
   const updateLowStockThreshold = (threshold: number) => setLowStockThreshold(threshold);
@@ -396,7 +404,8 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       toggleLowStockAlerts,
       updateLowStockThreshold,
       updateDefaultCommissionRate,
-      updateCurrency
+      updateCurrency,
+      addNonPricedItem
     }}>
       {children}
     </SupabaseDataContext.Provider>

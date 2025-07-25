@@ -17,6 +17,7 @@ import {
   PlusCircle
 } from 'lucide-react';
 import { SaleItem, Sale, Customer } from '../types';
+import { v4 as uuidv4 } from 'uuid';
 
 interface BillTab {
   id: string;
@@ -38,6 +39,7 @@ export default function POS() {
   const inventory = raw.inventory as Array<any>;
   const addSale = raw.addSale;
   const addCustomer = raw.addCustomer;
+  const addNonPricedItem = raw.addNonPricedItem || (async (item: any) => { /* fallback: store in localStorage or show error */ });
   const { userProfile } = useSupabaseAuth();
   const { formatCurrency } = useCurrency();
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
@@ -223,6 +225,48 @@ export default function POS() {
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
   const handleCheckout = async () => {
     if (activeTab.cart.length === 0) return;
+    // Check for non-priced items
+    const hasNonPriced = activeTab.cart.some(item => !item.unitPrice || item.unitPrice === 0);
+    if (hasNonPriced) {
+      if (!activeTab.selectedCustomer) {
+        setCustomerError('Customer is required for non-priced items.');
+        return;
+      }
+      setCustomerError(null);
+      setIsProcessing(true);
+      try {
+        // Store each non-priced item for later pricing
+        for (const item of activeTab.cart.filter(i => !i.unitPrice || i.unitPrice === 0)) {
+          await addNonPricedItem({
+            id: uuidv4(),
+            customerId: activeTab.selectedCustomer,
+            productId: item.productId,
+            productName: item.productName,
+            supplierId: item.supplierId,
+            supplierName: item.supplierName,
+            quantity: item.quantity,
+            weight: item.weight,
+            notes: item.notes,
+            createdAt: new Date().toISOString(),
+            status: 'non-priced',
+          });
+        }
+        // Remove non-priced items from cart and proceed with regular sale if any
+        const pricedCart = activeTab.cart.filter(i => i.unitPrice && i.unitPrice > 0);
+        if (pricedCart.length > 0) {
+          updateActiveTab({ cart: pricedCart });
+          showToast('success', 'Non-priced items stored. Please complete sale for priced items.');
+        } else {
+          // All items were non-priced, clear cart
+          updateActiveTab({ cart: [], selectedCustomer: '', amountReceived: '', notes: '', paymentMethod: 'cash' });
+          showToast('success', 'Non-priced items stored for later pricing.');
+        }
+      } catch (error) {
+        showToast('error', 'Failed to store non-priced items!');
+      }
+      setIsProcessing(false);
+      return;
+    }
     // Validation: if credit, require customer; if not credit and amountReceived < total, require customer
     if (
       (activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
@@ -763,7 +807,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, for
                     type="number"
                     min="1"
                     max={getSupplierStock(item.productId, item.supplierId)}
-                    value={item.quantity}
+                    value={item.quantity ?? ''}
                     onChange={(e) => updateCartItem(item.id, 'quantity', Math.max(1, Math.min(getSupplierStock(item.productId, item.supplierId), parseInt(e.target.value))))}
                     className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
                   />
@@ -773,7 +817,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, for
                   <input
                     type="number"
                     step="0.01"
-                    value={item.weight || ''}
+                    value={item.weight ?? ''}
                     onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
                     className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
                     placeholder="kg"
@@ -784,7 +828,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, for
                   <input
                     type="number"
                     step="0.01"
-                    value={item.unitPrice}
+                    value={item.unitPrice ?? ''}
                     onChange={(e) => updateCartItem(item.id, 'unitPrice', parseFloat(e.target.value))}
                     className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
                   />

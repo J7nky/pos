@@ -30,6 +30,9 @@ interface OfflineDataContextType {
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
   transactions: Tables['transactions']['Row'][];
   expenseCategories: Tables['expense_categories']['Row'][];
+  accountsReceivable: any[];
+  accountsPayable: any[];
+  journalEntries: any[];
 
   // Computed/legacy compatibility - exact match
   stockLevels: any[];
@@ -40,9 +43,6 @@ interface OfflineDataContextType {
   currency: 'USD' | 'LBP';
   cashDrawer: any;
   openCashDrawer: (amount: number, openedBy: string) => void;
-  accountsReceivable: any[];
-  accountsPayable: any[];
-  journalEntries: any[];
   isOnline: boolean;
 
   // Loading states - exact match
@@ -66,6 +66,16 @@ interface OfflineDataContextType {
   addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: Omit<Tables['expense_categories']['Insert'], 'store_id'>) => Promise<void>;
+  addAccountsReceivable: (ar: any) => Promise<void>;
+  updateAccountsReceivable: (id: string, updates: Partial<any>) => Promise<void>;
+  deleteAccountsReceivable: (id: string) => Promise<void>;
+  addAccountsPayable: (ap: any) => Promise<void>;
+  updateAccountsPayable: (id: string, updates: Partial<any>) => Promise<void>;
+  deleteAccountsPayable: (id: string) => Promise<void>;
+  addJournalEntry: (entry: any) => Promise<void>;
+  updateJournalEntry: (id: string, updates: Partial<any>) => Promise<void>;
+  deleteJournalEntry: (id: string) => Promise<void>;
+  addNonPricedItem: (item: any) => Promise<void>;
 
   // Utility functions - exact match
   refreshData: () => Promise<void>;
@@ -139,36 +149,133 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return stored ? JSON.parse(stored) : null;
   });
   const [stockLevels, setStockLevels] = useState<any[]>([]);
+  const [accountsReceivable, setAccountsReceivable] = useState<any[]>([]);
+  const [accountsPayable, setAccountsPayable] = useState<any[]>([]);
+  const [journalEntries, setJournalEntries] = useState<any[]>([]);
 
   // Initialize data when store is available
   useEffect(() => {
     if (storeId) {
-      // Clean up any invalid/orphaned data first
-      Promise.all([
-        db.cleanupInvalidInventoryItems(),
-        db.cleanupOrphanedRecords(storeId)
-      ]).then(([invalidCleaned, orphanedCleaned]) => {
-        if (invalidCleaned > 0 || orphanedCleaned > 0) {
-          console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
-        }
-        refreshData();
-        updateUnsyncedCount();
-      }).catch(error => {
-        console.error('❌ Cleanup failed:', error);
-        // Still proceed with normal initialization
-        refreshData();
-        updateUnsyncedCount();
-      });
+      initializeData();
     }
   }, [storeId]);
+
+  const initializeData = async () => {
+    if (!storeId) return;
+
+    try {
+      // Clean up any invalid/orphaned data first
+      const [invalidCleaned, orphanedCleaned] = await Promise.all([
+        db.cleanupInvalidInventoryItems(),
+        db.cleanupOrphanedRecords(storeId)
+      ]);
+
+      if (invalidCleaned > 0 || orphanedCleaned > 0) {
+        console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
+      }
+
+      // Load local data first
+      await refreshData();
+      await updateUnsyncedCount();
+
+      // Check if local database is empty (no essential data)
+      const [productCount, supplierCount, customerCount] = await Promise.all([
+        db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
+      ]);
+
+      const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
+
+      // If local database is empty and we're online, sync from cloud
+      if (isLocalDatabaseEmpty && isOnline) {
+        console.log('📥 Local database is empty, syncing from cloud...');
+        setLoading(prev => ({ ...prev, sync: true }));
+        
+        try {
+          const syncResult = await syncService.fullResync(storeId);
+          
+          if (syncResult.success) {
+            console.log(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
+            await refreshData();
+            await updateUnsyncedCount();
+          } else {
+            console.error('❌ Initial sync failed:', syncResult.errors);
+          }
+        } catch (error) {
+          console.error('❌ Initial sync error:', error);
+        } finally {
+          setLoading(prev => ({ ...prev, sync: false }));
+        }
+      } else if (isLocalDatabaseEmpty && !isOnline) {
+        console.log('📴 Local database is empty but offline - will sync when connection is restored');
+      } else if (!isLocalDatabaseEmpty) {
+        console.log(`📊 Local database loaded: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
+        
+        // If we have local data and we're online, perform a regular sync to get updates
+        if (isOnline && unsyncedCount === 0) {
+          console.log('🔄 Performing background sync to check for updates...');
+          performSync(true); // Auto sync without blocking UI
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ Data initialization failed:', error);
+      // Still try to load what we can from local storage
+      await refreshData();
+      await updateUnsyncedCount();
+    }
+  };
 
   // Auto-sync when connection is restored
   useEffect(() => {
     if (justCameOnline && storeId && !isSyncing) {
-      console.log('🌐 Connection restored - auto-syncing...');
-      performSync(true); // Mark as automatic sync
+      handleConnectionRestored();
     }
   }, [justCameOnline, storeId, isSyncing]);
+
+  const handleConnectionRestored = async () => {
+    if (!storeId) return;
+
+    console.log('🌐 Connection restored - checking what to sync...');
+    
+    try {
+      // Check if local database is empty
+      const [productCount, supplierCount, customerCount] = await Promise.all([
+        db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
+      ]);
+
+      const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
+
+      if (isLocalDatabaseEmpty) {
+        console.log('📥 Connection restored with empty database - performing full sync...');
+        setLoading(prev => ({ ...prev, sync: true }));
+        
+        try {
+          const syncResult = await syncService.fullResync(storeId);
+          
+          if (syncResult.success) {
+            console.log(`✅ Full sync after connection restore completed: downloaded ${syncResult.synced.downloaded} records`);
+            await refreshData();
+            await updateUnsyncedCount();
+          } else {
+            console.error('❌ Full sync after connection restore failed:', syncResult.errors);
+          }
+        } finally {
+          setLoading(prev => ({ ...prev, sync: false }));
+        }
+      } else {
+        console.log('🔄 Connection restored with local data - performing regular sync...');
+        performSync(true); // Regular sync for updates and uploads
+      }
+    } catch (error) {
+      console.error('❌ Connection restore sync error:', error);
+      // Fallback to regular sync
+      performSync(true);
+    }
+  };
 
   // Enhanced periodic auto-sync when online
   useEffect(() => {
@@ -228,7 +335,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         salesData,
         saleItemsData,
         transactionsData,
-        expenseCategoriesData
+        expenseCategoriesData,
+        accountsReceivableData,
+        accountsPayableData,
+        journalEntriesData
       ] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
@@ -237,7 +347,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         db.sales.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.sale_items.filter(item => !item._deleted).toArray(),
         db.transactions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.expense_categories.where('store_id').equals(storeId).filter(item => !item._deleted).toArray()
+        db.expense_categories.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.accounts_receivable?.where('store_id').equals(storeId).filter(item => !item._deleted).toArray() ?? [],
+        db.accounts_payable?.where('store_id').equals(storeId).filter(item => !item._deleted).toArray() ?? [],
+        db.journal_entries?.where('store_id').equals(storeId).filter(item => !item._deleted).toArray() ?? []
       ]);
 
       // Transform data to match SupabaseDataContext structure
@@ -246,6 +359,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setCustomers(customersData as Tables['customers']['Row'][]);
       setTransactions(transactionsData as Tables['transactions']['Row'][]);
       setExpenseCategories(expenseCategoriesData as Tables['expense_categories']['Row'][]);
+      setAccountsReceivable(accountsReceivableData);
+      setAccountsPayable(accountsPayableData);
+      setJournalEntries(journalEntriesData);
 
       // Store raw data
       setInventoryItems(inventoryData);
@@ -674,6 +790,62 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setCurrency(newCurrency);
   };
 
+  // Add AR/AP/Journal CRUD
+  const addAccountsReceivable = async (ar: any) => {
+    const newAR = { ...ar, id: createId(), createdAt: new Date().toISOString(), _deleted: false, store_id: storeId };
+    await db.accounts_receivable.add(newAR);
+    setAccountsReceivable(prev => [...prev, newAR]);
+  };
+
+  const updateAccountsReceivable = async (id: string, updates: Partial<any>) => {
+    await db.accounts_receivable.update(id, updates);
+    setAccountsReceivable(prev => prev.map(ar => ar.id === id ? { ...ar, ...updates } : ar));
+  };
+
+  const deleteAccountsReceivable = async (id: string) => {
+    await db.accounts_receivable.update(id, { _deleted: true });
+    setAccountsReceivable(prev => prev.filter(ar => ar.id !== id));
+  };
+
+  const addAccountsPayable = async (ap: any) => {
+    const newAP = { ...ap, id: createId(), createdAt: new Date().toISOString(), _deleted: false, store_id: storeId };
+    await db.accounts_payable.add(newAP);
+    setAccountsPayable(prev => [...prev, newAP]);
+  };
+
+  const updateAccountsPayable = async (id: string, updates: Partial<any>) => {
+    await db.accounts_payable.update(id, updates);
+    setAccountsPayable(prev => prev.map(ap => ap.id === id ? { ...ap, ...updates } : ap));
+  };
+
+  const deleteAccountsPayable = async (id: string) => {
+    await db.accounts_payable.update(id, { _deleted: true });
+    setAccountsPayable(prev => prev.filter(ap => ap.id !== id));
+  };
+
+  const addJournalEntry = async (entry: any) => {
+    const newEntry = { ...entry, id: createId(), createdAt: new Date().toISOString(), _deleted: false, store_id: storeId };
+    await db.journal_entries.add(newEntry);
+    setJournalEntries(prev => [...prev, newEntry]);
+  };
+
+  const updateJournalEntry = async (id: string, updates: Partial<any>) => {
+    await db.journal_entries.update(id, updates);
+    setJournalEntries(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+  };
+
+  const deleteJournalEntry = async (id: string) => {
+    await db.journal_entries.update(id, { _deleted: true });
+    setJournalEntries(prev => prev.filter(e => e.id !== id));
+  };
+
+  const addNonPricedItem = async (item: any): Promise<void> => {
+    const key = 'erp_non_priced_items';
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    const updated = [...existing, item];
+    localStorage.setItem(key, JSON.stringify(updated));
+  };
+
   return (
     <OfflineDataContext.Provider value={{
       // Data - exact match
@@ -684,6 +856,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       inventory,
       transactions,
       expenseCategories,
+      accountsReceivable,
+      accountsPayable,
+      journalEntries,
 
       // Computed/legacy compatibility - exact match
       stockLevels,
@@ -694,9 +869,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currency,
       cashDrawer,
       openCashDrawer,
-      accountsReceivable: [], // Stub
-      accountsPayable: [], // Stub
-      journalEntries: [], // Stub
       isOnline,
 
       // Loading states - exact match
@@ -711,6 +883,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addSale,
       addTransaction,
       addExpenseCategory,
+      addAccountsReceivable,
+      updateAccountsReceivable,
+      deleteAccountsReceivable,
+      addAccountsPayable,
+      updateAccountsPayable,
+      deleteAccountsPayable,
+      addJournalEntry,
+      updateJournalEntry,
+      deleteJournalEntry,
+      addNonPricedItem,
 
       // Utility functions - exact match
       refreshData,
