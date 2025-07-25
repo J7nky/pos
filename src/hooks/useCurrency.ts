@@ -7,6 +7,9 @@ export function useCurrency() {
   const { currency } = useOfflineData();
 
   const formatCurrency = (amount: number): string => {
+    if (amount == null || isNaN(amount)) {
+      return currency === 'LBP' ? `0 ل.ل` : `$0`;
+    }
     if (currency === 'LBP') {
       return `${amount.toLocaleString()} ل.ل`;
     }
@@ -14,6 +17,9 @@ export function useCurrency() {
   };
 
   const formatCurrencyWithSymbol = (amount: number, curr: 'USD' | 'LBP'): string => {
+    if (amount == null || isNaN(amount)) {
+      return curr === 'LBP' ? `0 ل.ل` : `$0`;
+    }
     if (curr === 'LBP') {
       return `${amount.toLocaleString()} ل.ل`;
     }

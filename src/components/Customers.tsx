@@ -3,6 +3,7 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { Plus, Search, Edit, Trash2, CheckCircle, XCircle } from 'lucide-react';
 import { Customer } from '../types';
+import Toast from './common/Toast';
 
 export default function Customers() {
   const raw = useOfflineData();
@@ -22,6 +23,16 @@ export default function Customers() {
     isActive: true,
   });
   const [customerFormError, setCustomerFormError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
+    message: '',
+    type: 'success',
+    visible: false,
+  });
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type, visible: true });
+  };
+  const hideToast = () => setToast(t => ({ ...t, visible: false }));
 
   const handleAddCustomerClick = () => {
     setEditingCustomer(null);
@@ -66,12 +77,14 @@ export default function Customers() {
     e.preventDefault();
     if (!customerForm.name || !customerForm.phone) {
       setCustomerFormError('Name and Phone are required.');
+      showToast('Name and Phone are required.', 'error');
       return;
     }
     // Check for duplicate customer (case-insensitive, trimmed)
-    const exists = customers.some(c => c.name.trim().toLowerCase() === customerForm.name!.trim().toLowerCase() && c.phone.trim() === customerForm.phone!.trim());
+    const exists = customers.some(c => c.name.trim().toLowerCase() === customerForm.name!.trim().toLowerCase() && c.phone.trim() === customerForm.phone!.trim() && (!editingCustomer || c.id !== editingCustomer.id));
     if (exists) {
       setCustomerFormError('This customer already exists.');
+      showToast('This customer already exists.', 'error');
       return;
     }
     setCustomerFormError(null);
@@ -80,6 +93,7 @@ export default function Customers() {
         ...customerForm,
         currentDebt: editingCustomer.currentDebt, // Preserve currentDebt
       } as Customer);
+      showToast('Customer updated successfully!', 'success');
     } else {
       addCustomer({
         name: customerForm.name!,
@@ -89,6 +103,7 @@ export default function Customers() {
         is_active: customerForm.isActive ?? true,
         current_debt: 0,
       });
+      showToast('Customer added successfully!', 'success');
     }
     setShowCustomerForm(false);
   };
@@ -101,6 +116,7 @@ export default function Customers() {
 
   return (
     <div className="p-6">
+      <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Customer Management</h1>
         <button
