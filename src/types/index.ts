@@ -43,6 +43,7 @@ export interface InventoryItem {
   supplierId: string;
   type: 'commission' | 'cash';
   quantity: number;
+  receivedQuantity: number;
   unit: 'kg' | 'piece' | 'box' | 'bag';
   weight?: number;
   porterage?: number;

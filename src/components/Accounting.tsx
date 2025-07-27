@@ -81,7 +81,7 @@ export default function Accounting() {
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('accounting_recent_suppliers', []);
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
   
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'customer-balances' | 'supplier-balances' | 'expenses' | 'journal' | 'nonpriced' | 'inventory-logs'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'customer-balances' | 'supplier-balances' | 'expenses' | 'journal' | 'nonpriced' | 'inventory-logs' | 'received-bills'>('dashboard');
   const [showForm, setShowForm] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
@@ -1317,21 +1317,32 @@ export default function Accounting() {
   const [selectedBills, setSelectedBills] = useState<Set<string>>(new Set());
   const [showPendingBillsBulkActions, setShowPendingBillsBulkActions] = useState(false);
 
+  // Received bills state
+  const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
+  const [receivedBillsSupplierFilter, setReceivedBillsSupplierFilter] = useState('');
+  const [receivedBillsProductFilter, setReceivedBillsProductFilter] = useState('');
+  const [receivedBillsPage, setReceivedBillsPage] = useState(1);
+  const [receivedBillsSort, setReceivedBillsSort] = useState<'date' | 'supplier' | 'product' | 'amount' | 'progress' | 'revenue' | 'status'>('date');
+  const [receivedBillsSortDir, setReceivedBillsSortDir] = useState<'asc' | 'desc'>('desc');
+  const [receivedBillsStatusFilter, setReceivedBillsStatusFilter] = useState<string>('all');
+  const [selectedReceivedBill, setSelectedReceivedBill] = useState<any>(null);
+  const [showReceivedBillDetails, setShowReceivedBillDetails] = useState(false);
+  const [showReceivedBillSalesLogs, setShowReceivedBillSalesLogs] = useState(false);
+
   // Pending bills functions
   const getPendingBills = useMemo(() => {
     const bills: any[] = [];
 
     try {
       // Group commission inventory items by supplier and product
-      const commissionItems = inventory.filter(item => 
-        item.type === 'commission' && 
+      const receivedItems = inventory.filter(item =>  
         item.product_id && 
         item.supplier_id
       );
       
-      console.log('Debug - Commission items found:', commissionItems.length);
+      console.log('Debug - Commission items found:', receivedItems.length);
       
-      commissionItems.forEach(item => {
+      receivedItems.forEach(item => {
         const product = products.find(p => p.id === item.product_id);
         const supplier = suppliers.find(s => s.id === item.supplier_id);
         
@@ -1713,6 +1724,368 @@ export default function Accounting() {
     );
   };
 
+  // Function to update existing inventory items with received_quantity
+  const updateInventoryItemsWithReceivedQuantity = async () => {
+    try {
+      console.log('Debug - Total inventory items:', inventory.length);
+      console.log('Debug - Inventory items with received_quantity issues:');
+      
+      inventory.forEach((item, index) => {
+        console.log(`Item ${index + 1}:`, {
+          id: item.id,
+          received_quantity: item.received_quantity,
+          received_quantity_type: typeof item.received_quantity,
+          quantity: item.quantity
+        });
+      });
+      
+      const itemsToUpdate = inventory.filter(item => 
+        item.received_quantity === null || item.received_quantity === undefined || item.received_quantity === 0
+      );
+      
+      console.log('Debug - Filtered items to update:', itemsToUpdate.length);
+      
+      if (itemsToUpdate.length > 0) {
+        console.log(`Found ${itemsToUpdate.length} inventory items without received_quantity`);
+        showToast(`Found ${itemsToUpdate.length} items that need received_quantity field. Please add new inventory items to see proper progress tracking.`, 'error');
+        
+        // Log the items that need updating
+        itemsToUpdate.forEach((item, index) => {
+          console.log(`Item ${index + 1} needs received_quantity update:`, {
+            id: item.id,
+            current_quantity: item.quantity,
+            received_quantity: item.received_quantity,
+            received_quantity_type: typeof item.received_quantity
+          });
+        });
+      } else {
+        showToast('All inventory items have received_quantity field set!', 'success');
+      }
+    } catch (error) {
+      console.error('Error checking inventory items:', error);
+      showToast('Error checking inventory items', 'error');
+    }
+  };
+
+  // Received bills functions
+  const getReceivedBills = useMemo(() => {
+    const bills: any[] = [];
+
+    try {
+      // Get all inventory items (both commission and cash)
+      const allInventoryItems = inventory.filter(item => 
+        item.product_id && 
+        item.supplier_id
+      );
+      
+      console.log('Debug - All inventory items found:', allInventoryItems.length);
+      
+      allInventoryItems.forEach(item => {
+        const product = products.find(p => p.id === item.product_id);
+        const supplier = suppliers.find(s => s.id === item.supplier_id);
+        
+        if (!product || !supplier) {
+          console.warn('Missing product or supplier for item:', item.id);
+          return;
+        }
+
+        // Calculate total sales for this specific inventory item (by received date)
+        const relatedSales = sales.filter(sale => 
+          sale.items && Array.isArray(sale.items) && 
+          sale.items.some((saleItem: any) => 
+            saleItem.productId === item.product_id && 
+            saleItem.supplierId === item.supplier_id &&
+            // Check if this sale happened after this inventory item was received
+            new Date(sale.created_at || sale.createdAt).getTime() >= new Date(item.received_at || item.created_at).getTime()
+          )
+        );
+
+        // Calculate total sold quantity and revenue for this specific inventory item
+        let totalSoldQuantity = 0;
+        let totalRevenue = 0;
+        let saleCount = 0;
+        
+        // Sort sales by date to process them chronologically
+        const sortedSales = relatedSales.sort((a, b) => 
+          new Date(a.created_at || a.createdAt).getTime() - new Date(b.created_at || b.createdAt).getTime()
+        );
+        
+        // Track how much we've sold from this specific inventory item
+        let totalSoldFromThisItem = 0;
+        
+        for (const sale of sortedSales) {
+          if (sale.items && Array.isArray(sale.items)) {
+            for (const saleItem of sale.items) {
+              if (saleItem.productId === item.product_id && 
+                  saleItem.supplierId === item.supplier_id &&
+                  typeof saleItem.quantity === 'number' &&
+                  typeof saleItem.totalPrice === 'number') {
+                
+                // Add to total sold from this inventory item
+                totalSoldFromThisItem += saleItem.quantity;
+                totalRevenue += saleItem.totalPrice;
+              }
+            }
+            saleCount++; // Count unique sales, not individual items
+          }
+        }
+
+        // Handle the case where received_quantity is null/undefined
+        // For existing items without received_quantity, we'll use quantity + sold items as the original quantity
+        let originalReceivedQuantity = 0;
+        
+        if (item.received_quantity !== null && item.received_quantity !== undefined && item.received_quantity > 0) {
+          // Use the received_quantity field if it exists and is valid
+          originalReceivedQuantity = item.received_quantity;
+        } else {
+          // For existing items without received_quantity, calculate it from current quantity + sold items
+          originalReceivedQuantity = item.quantity + totalSoldFromThisItem;
+          
+          // Debug: Log items that need received_quantity
+          console.log('Debug - Item needs received_quantity:', {
+            itemId: item.id,
+            productName: product.name,
+            received_quantity: item.received_quantity,
+            quantity: item.quantity,
+            totalSoldFromThisItem,
+            calculated_original: originalReceivedQuantity
+          });
+        }
+        const remainingQuantity = item.quantity; // Current remaining quantity
+        
+        // Calculate estimated total value when fully sold
+        const avgUnitPrice = totalSoldFromThisItem > 0 ? totalRevenue / totalSoldFromThisItem : (item.price || 0);
+        const estimatedTotalValue = originalReceivedQuantity * avgUnitPrice;
+        
+        // Calculate progress based on original received quantity
+        // Progress = (Total Sold / Original Received Quantity) × 100
+        const progress = originalReceivedQuantity > 0 ? Math.min((totalSoldFromThisItem / originalReceivedQuantity) * 100, 100) : 0;
+        
+        // Ensure we have valid values
+        const validOriginalQuantity = Math.max(originalReceivedQuantity, 0);
+        const validSoldQuantity = Math.max(totalSoldFromThisItem, 0);
+        const validRemainingQuantity = Math.max(remainingQuantity, 0);
+        const validProgress = isNaN(progress) || !isFinite(progress) ? 0 : Math.max(0, Math.min(100, progress));
+        
+        // Debug logging for problematic items
+        if (originalReceivedQuantity === 0 || isNaN(progress) || !isFinite(progress)) {
+          console.warn('Debug - Problematic item:', {
+            itemId: item.id,
+            productName: product.name,
+            receivedQuantity: item.received_quantity,
+            originalReceivedQuantity,
+            totalSoldFromThisItem,
+            progress,
+            remainingQuantity: item.quantity
+          });
+        }
+        
+        // Determine status based on progress
+        let status = 'pending';
+        if (progress >= 100) status = 'completed';
+        else if (progress >= 75) status = 'nearly-complete';
+        else if (progress >= 50) status = 'halfway';
+        else if (progress > 0) status = 'in-progress';
+
+        // Calculate cost and profit
+        const totalCost = item.type === 'commission' ? 
+          (item.porterage || 0) + (item.transfer_fee || 0) : 
+          (item.price || 0) * originalReceivedQuantity;
+        
+        const totalProfit = totalRevenue - totalCost;
+
+        bills.push({
+          id: item.id,
+          productId: item.product_id,
+          productName: product.name,
+          supplierId: item.supplier_id,
+          supplierName: supplier.name,
+          type: item.type,
+          originalQuantity: validOriginalQuantity,
+          remainingQuantity: validRemainingQuantity,
+          totalSoldQuantity: validSoldQuantity,
+          totalRevenue,
+          totalCost,
+          totalProfit,
+          avgUnitPrice,
+          estimatedTotalValue,
+          progress: validProgress,
+          status,
+          saleCount,
+          receivedAt: item.received_at || item.created_at,
+          receivedBy: item.received_by,
+          notes: item.notes,
+          unit: item.unit,
+          weight: item.weight,
+          porterage: item.porterage,
+          transferFee: item.transfer_fee,
+          price: item.price,
+          commissionRate: item.commission_rate,
+          relatedSales: sortedSales
+        });
+      });
+
+      console.log('Debug - Processed received bills:', bills.length);
+    } catch (error) {
+      console.error('Error processing received bills:', error);
+      showToast('Error processing received bills data', 'error');
+    }
+
+    return bills;
+  }, [inventory, products, suppliers, sales]);
+
+  const filteredReceivedBills = useMemo(() => {
+    try {
+      let filtered = getReceivedBills;
+
+      // Search filter
+      if (receivedBillsSearchTerm) {
+        const searchLower = receivedBillsSearchTerm.toLowerCase();
+        filtered = filtered.filter(bill => 
+          bill.productName.toLowerCase().includes(searchLower) ||
+          bill.supplierName.toLowerCase().includes(searchLower) ||
+          bill.type.toLowerCase().includes(searchLower)
+        );
+      }
+
+      // Supplier filter
+      if (receivedBillsSupplierFilter) {
+        filtered = filtered.filter(bill => bill.supplierId === receivedBillsSupplierFilter);
+      }
+
+      // Product filter
+      if (receivedBillsProductFilter) {
+        filtered = filtered.filter(bill => bill.productId === receivedBillsProductFilter);
+      }
+
+      // Status filter
+      if (receivedBillsStatusFilter !== 'all') {
+        filtered = filtered.filter(bill => bill.status === receivedBillsStatusFilter);
+      }
+
+      // Sort
+      filtered.sort((a, b) => {
+        let aValue: any, bValue: any;
+        
+        switch (receivedBillsSort) {
+          case 'date':
+            aValue = new Date(a.receivedAt).getTime();
+            bValue = new Date(b.receivedAt).getTime();
+            break;
+          case 'supplier':
+            aValue = a.supplierName.toLowerCase();
+            bValue = b.supplierName.toLowerCase();
+            break;
+          case 'product':
+            aValue = a.productName.toLowerCase();
+            bValue = b.productName.toLowerCase();
+            break;
+          case 'amount':
+            aValue = a.estimatedTotalValue;
+            bValue = b.estimatedTotalValue;
+            break;
+          case 'progress':
+            aValue = a.progress;
+            bValue = b.progress;
+            break;
+          case 'revenue':
+            aValue = a.totalRevenue;
+            bValue = b.totalRevenue;
+            break;
+          case 'status':
+            aValue = a.status;
+            bValue = b.status;
+            break;
+          default:
+            aValue = new Date(a.receivedAt).getTime();
+            bValue = new Date(b.receivedAt).getTime();
+        }
+
+        if (receivedBillsSortDir === 'asc') {
+          return aValue > bValue ? 1 : -1;
+        } else {
+          return aValue < bValue ? 1 : -1;
+        }
+      });
+
+      return filtered;
+    } catch (error) {
+      console.error('Error filtering received bills:', error);
+      return [];
+    }
+  }, [getReceivedBills, receivedBillsSearchTerm, receivedBillsSupplierFilter, receivedBillsProductFilter, receivedBillsStatusFilter, receivedBillsSort, receivedBillsSortDir]);
+
+  const paginatedReceivedBills = useMemo(() => {
+    const itemsPerPage = 10;
+    const startIndex = (receivedBillsPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredReceivedBills.slice(startIndex, endIndex);
+  }, [filteredReceivedBills, receivedBillsPage]);
+
+  const totalReceivedBillsPages = Math.ceil(filteredReceivedBills.length / 10);
+
+  const handleReceivedBillsSort = (sort: 'date' | 'supplier' | 'product' | 'amount' | 'progress' | 'revenue' | 'status') => {
+    if (receivedBillsSort === sort) {
+      setReceivedBillsSortDir(receivedBillsSortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setReceivedBillsSort(sort);
+      setReceivedBillsSortDir('desc');
+    }
+  };
+
+  const handleViewReceivedBillDetails = (bill: any) => {
+    setSelectedReceivedBill(bill);
+    setShowReceivedBillDetails(true);
+  };
+
+  const handleViewReceivedBillSalesLogs = (bill: any) => {
+    setSelectedReceivedBill(bill);
+    setShowReceivedBillSalesLogs(true);
+  };
+
+  const exportReceivedBills = () => {
+    try {
+      const headers = [
+        'Date', 'Product', 'Supplier', 'Type', 'Original Qty', 'Remaining Qty', 
+        'Sold Qty', 'Progress %', 'Revenue', 'Cost', 'Profit', 'Status', 'Unit Price'
+      ];
+
+      const csvContent = [
+        headers.join(','),
+        ...filteredReceivedBills.map(bill => [
+          new Date(bill.receivedAt).toLocaleDateString(),
+          `"${bill.productName}"`,
+          `"${bill.supplierName}"`,
+          bill.type,
+          bill.originalQuantity,
+          bill.remainingQuantity,
+          bill.totalSoldQuantity,
+          `${bill.progress.toFixed(1)}%`,
+          bill.totalRevenue.toFixed(2),
+          bill.totalCost.toFixed(2),
+          bill.totalProfit.toFixed(2),
+          bill.status,
+          bill.avgUnitPrice.toFixed(2)
+        ].join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `received-bills-${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      showToast('Received bills exported successfully', 'success');
+    } catch (error) {
+      console.error('Error exporting received bills:', error);
+      showToast('Error exporting received bills', 'error');
+    }
+  };
+
   return (
     <div className="p-6">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
@@ -1781,7 +2154,8 @@ export default function Accounting() {
           { id: 'supplier-balances', label: 'Supplier Balances', icon: Building2 },
           { id: 'expenses', label: 'Expenses', icon: Receipt },
           { id: 'nonpriced', label: 'Non Priced Items', icon: AlertCircle },
-          { id: 'inventory-logs', label: 'Inventory Logs', icon: Package }
+          { id: 'inventory-logs', label: 'Inventory Logs', icon: Package },
+          { id: 'received-bills', label: 'Received Bills', icon: FileText }
         ].map(tab => (
           <button
             key={tab.id}
@@ -2980,7 +3354,362 @@ export default function Accounting() {
         </div>
       )}
 
+      {activeTab === 'received-bills' && (
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Received Bills</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Track all received inventory items and their sales progress from point of sale
+              </p>
+              {(() => {
+                const problematicItems = inventory.filter(item => 
+                  item.received_quantity === null || item.received_quantity === undefined || item.received_quantity === 0
+                );
+                
+                // Debug: Log the count for the warning message
+                if (problematicItems.length > 0) {
+                  console.log('Debug - Warning message count:', problematicItems.length);
+                }
+                
+                return problematicItems.length > 0 ? (
+                  <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p className="text-xs text-yellow-800">
+                      ⚠️ {problematicItems.length} inventory item(s) don't have received_quantity set. Click "Fix Data" to check, or add new inventory items for proper progress tracking.
+                    </p>
+                  </div>
+                ) : null;
+              })()}
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={updateInventoryItemsWithReceivedQuantity}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Fix Data
+              </button>
+              <button
+                onClick={exportReceivedBills}
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
+              >
+                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                Export CSV
+              </button>
+            </div>
+          </div>
 
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white p-4 rounded-lg shadow-sm border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Total Bills</p>
+                  <p className="text-2xl font-bold text-gray-900">{filteredReceivedBills.length}</p>
+                </div>
+                <div className="p-2 bg-blue-100 rounded-full">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-lg shadow-sm border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">In Progress</p>
+                  <p className="text-2xl font-bold text-blue-600">
+                    {filteredReceivedBills.filter(bill => bill.status === 'in-progress').length}
+                  </p>
+                </div>
+                <div className="p-2 bg-blue-100 rounded-full">
+                  <Activity className="w-5 h-5 text-blue-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-lg shadow-sm border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Completed</p>
+                  <p className="text-2xl font-bold text-green-600">
+                    {filteredReceivedBills.filter(bill => bill.status === 'completed').length}
+                  </p>
+                </div>
+                <div className="p-2 bg-green-100 rounded-full">
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-lg shadow-sm border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Total Revenue</p>
+                  <p className="text-2xl font-bold text-green-600">
+                    {formatCurrency(filteredReceivedBills.reduce((sum, bill) => sum + bill.totalRevenue, 0))}
+                  </p>
+                </div>
+                <div className="p-2 bg-green-100 rounded-full">
+                  <DollarSign className="w-5 h-5 text-green-600" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="bg-white p-4 rounded-lg shadow-sm border">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* Search */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search products, suppliers..."
+                    value={receivedBillsSearchTerm}
+                    onChange={(e) => setReceivedBillsSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Product Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product</label>
+                <select
+                  value={receivedBillsProductFilter}
+                  onChange={(e) => setReceivedBillsProductFilter(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Products</option>
+                  {products.filter(p => p.is_active).map(product => (
+                    <option key={product.id} value={product.id}>{product.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Supplier Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Supplier</label>
+                <select
+                  value={receivedBillsSupplierFilter}
+                  onChange={(e) => setReceivedBillsSupplierFilter(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Suppliers</option>
+                  {suppliers.filter(s => s.is_active).map(supplier => (
+                    <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                <select
+                  value={receivedBillsStatusFilter}
+                  onChange={(e) => setReceivedBillsStatusFilter(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="all">All Status</option>
+                  <option value="pending">Pending</option>
+                  <option value="in-progress">In Progress</option>
+                  <option value="halfway">Halfway</option>
+                  <option value="nearly-complete">Nearly Complete</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </div>
+
+              {/* Type Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+                <select
+                  value={receivedBillsStatusFilter}
+                  onChange={(e) => setReceivedBillsStatusFilter(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="all">All Types</option>
+                  <option value="commission">Commission</option>
+                  <option value="cash">Cash</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <button
+                        onClick={() => handleReceivedBillsSort('date')}
+                        className="flex items-center space-x-1 hover:text-gray-700"
+                      >
+                        <span>Date</span>
+                        {receivedBillsSort === 'date' && (
+                          receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <button
+                        onClick={() => handleReceivedBillsSort('product')}
+                        className="flex items-center space-x-1 hover:text-gray-700"
+                      >
+                        <span>Product</span>
+                        {receivedBillsSort === 'product' && (
+                          receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <button
+                        onClick={() => handleReceivedBillsSort('supplier')}
+                        className="flex items-center space-x-1 hover:text-gray-700"
+                      >
+                        <span>Supplier</span>
+                        {receivedBillsSort === 'supplier' && (
+                          receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <button
+                        onClick={() => handleReceivedBillsSort('progress')}
+                        className="flex items-center space-x-1 hover:text-gray-700"
+                      >
+                        <span>Progress</span>
+                        {receivedBillsSort === 'progress' && (
+                          receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <button
+                        onClick={() => handleReceivedBillsSort('revenue')}
+                        className="flex items-center space-x-1 hover:text-gray-700"
+                      >
+                        <span>Revenue</span>
+                        {receivedBillsSort === 'revenue' && (
+                          receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {paginatedReceivedBills.map((bill) => (
+                    <tr key={bill.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {new Date(bill.receivedAt).toLocaleDateString()}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{bill.productName}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{bill.supplierName}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          bill.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
+                        }`}>
+                          {bill.type}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          <div>Original: {bill.originalQuantity} {bill.unit}</div>
+                          <div className="text-xs text-gray-500">Remaining: {bill.remainingQuantity} {bill.unit}</div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="w-16 bg-gray-200 rounded-full h-2 mr-2">
+                            <div
+                              className="bg-blue-600 h-2 rounded-full"
+                              style={{ width: `${bill.progress}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-sm text-gray-900">{bill.progress.toFixed(1)}%</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">
+                          {formatCurrency(bill.totalRevenue)}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Profit: {formatCurrency(bill.totalProfit)}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {getStatusBadge(bill.status)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleViewReceivedBillDetails(bill)}
+                            className="text-blue-600 hover:text-blue-900"
+                            title="View Details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleViewReceivedBillSalesLogs(bill)}
+                            className="text-green-600 hover:text-green-900"
+                            title="View Sales Logs"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {totalReceivedBillsPages > 1 && (
+              <div className="px-6 py-4 border-t border-gray-200">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-gray-700">
+                    Showing {((receivedBillsPage - 1) * 10) + 1} to {Math.min(receivedBillsPage * 10, filteredReceivedBills.length)} of {filteredReceivedBills.length} results
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => setReceivedBillsPage(Math.max(1, receivedBillsPage - 1))}
+                      disabled={receivedBillsPage === 1}
+                      className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm text-gray-700">
+                      Page {receivedBillsPage} of {totalReceivedBillsPages}
+                    </span>
+                    <button
+                      onClick={() => setReceivedBillsPage(Math.min(totalReceivedBillsPages, receivedBillsPage + 1))}
+                      disabled={receivedBillsPage === totalReceivedBillsPages}
+                      className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Inventory Item Details Modal */}
       {showInventoryItemDetails && selectedInventoryItem && (
@@ -3473,6 +4202,284 @@ export default function Accounting() {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Received Bill Details Modal */}
+      {showReceivedBillDetails && selectedReceivedBill && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900">Received Bill Details</h2>
+                <button
+                  onClick={() => setShowReceivedBillDetails(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Basic Information</h3>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Product</label>
+                      <p className="text-sm text-gray-900">{selectedReceivedBill.productName}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Supplier</label>
+                      <p className="text-sm text-gray-900">{selectedReceivedBill.supplierName}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Type</label>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        selectedReceivedBill.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
+                      }`}>
+                        {selectedReceivedBill.type}
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Received Date</label>
+                      <p className="text-sm text-gray-900">
+                        {new Date(selectedReceivedBill.receivedAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Received By</label>
+                      <p className="text-sm text-gray-900">{selectedReceivedBill.receivedBy}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Quantity & Progress</h3>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Original Quantity</label>
+                      <p className="text-sm text-gray-900">{selectedReceivedBill.originalQuantity} {selectedReceivedBill.unit}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Remaining Quantity</label>
+                      <p className="text-sm text-gray-900">{selectedReceivedBill.remainingQuantity} {selectedReceivedBill.unit}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Sold Quantity</label>
+                      <p className="text-sm text-gray-900">{selectedReceivedBill.totalSoldQuantity} {selectedReceivedBill.unit}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Progress</label>
+                      <div className="flex items-center mt-1">
+                        <div className="w-full bg-gray-200 rounded-full h-2 mr-2">
+                          <div
+                            className="bg-blue-600 h-2 rounded-full"
+                            style={{ width: `${selectedReceivedBill.progress}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-sm text-gray-900">{selectedReceivedBill.progress.toFixed(1)}%</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Status</label>
+                      <div className="mt-1">{getStatusBadge(selectedReceivedBill.status)}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Financial Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-green-50 p-4 rounded-lg">
+                    <label className="block text-sm font-medium text-green-700">Total Revenue</label>
+                    <p className="text-2xl font-bold text-green-900">{formatCurrency(selectedReceivedBill.totalRevenue)}</p>
+                  </div>
+                  <div className="bg-red-50 p-4 rounded-lg">
+                    <label className="block text-sm font-medium text-red-700">Total Cost</label>
+                    <p className="text-2xl font-bold text-red-900">{formatCurrency(selectedReceivedBill.totalCost)}</p>
+                  </div>
+                  <div className="bg-blue-50 p-4 rounded-lg">
+                    <label className="block text-sm font-medium text-blue-700">Total Profit</label>
+                    <p className="text-2xl font-bold text-blue-900">{formatCurrency(selectedReceivedBill.totalProfit)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {selectedReceivedBill.type === 'commission' && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Commission Details</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Porterage</label>
+                      <p className="text-sm text-gray-900">{formatCurrency(selectedReceivedBill.porterage || 0)}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Transfer Fee</label>
+                      <p className="text-sm text-gray-900">{formatCurrency(selectedReceivedBill.transferFee || 0)}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Commission Rate</label>
+                      <p className="text-sm text-gray-900">{selectedReceivedBill.commissionRate ? `${selectedReceivedBill.commissionRate}%` : 'N/A'}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Average Unit Price</label>
+                      <p className="text-sm text-gray-900">{formatCurrency(selectedReceivedBill.avgUnitPrice)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedReceivedBill.notes && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Notes</h3>
+                  <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg">{selectedReceivedBill.notes}</p>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+              <button
+                onClick={() => handleViewReceivedBillSalesLogs(selectedReceivedBill)}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                View Sales Logs
+              </button>
+              <button
+                onClick={() => setShowReceivedBillDetails(false)}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Received Bill Sales Logs Modal */}
+      {showReceivedBillSalesLogs && selectedReceivedBill && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">Sales Logs</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {selectedReceivedBill.productName} - {selectedReceivedBill.supplierName}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowReceivedBillSalesLogs(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="mb-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <p className="text-sm text-blue-700">Total Sales</p>
+                    <p className="text-lg font-bold text-blue-900">{selectedReceivedBill.saleCount}</p>
+                  </div>
+                  <div className="bg-green-50 p-3 rounded-lg">
+                    <p className="text-sm text-green-700">Total Revenue</p>
+                    <p className="text-lg font-bold text-green-900">{formatCurrency(selectedReceivedBill.totalRevenue)}</p>
+                  </div>
+                  <div className="bg-purple-50 p-3 rounded-lg">
+                    <p className="text-sm text-purple-700">Sold Quantity</p>
+                    <p className="text-lg font-bold text-purple-900">{selectedReceivedBill.totalSoldQuantity} {selectedReceivedBill.unit}</p>
+                  </div>
+                  <div className="bg-orange-50 p-3 rounded-lg">
+                    <p className="text-sm text-orange-700">Avg Price</p>
+                    <p className="text-lg font-bold text-orange-900">{formatCurrency(selectedReceivedBill.avgUnitPrice)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sale ID</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Price</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Method</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {selectedReceivedBill.relatedSales.map((sale: any) => {
+                      const saleItems = sale.items?.filter((item: any) => 
+                        item.productId === selectedReceivedBill.productId && 
+                        item.supplierId === selectedReceivedBill.supplierId
+                      ) || [];
+                      
+                      return saleItems.map((item: any, index: number) => (
+                        <tr key={`${sale.id}-${index}`} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">
+                              {new Date(sale.created_at || sale.createdAt).toLocaleDateString()}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">{sale.id}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">
+                              {customers.find(c => c.id === sale.customer_id)?.name || 'Walk-in Customer'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">
+                              {item.quantity} {selectedReceivedBill.unit}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">
+                              {formatCurrency(item.unitPrice)}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {formatCurrency(item.totalPrice)}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              sale.payment_method === 'cash' ? 'bg-green-100 text-green-800' :
+                              sale.payment_method === 'card' ? 'bg-blue-100 text-blue-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {sale.payment_method}
+                            </span>
+                          </td>
+                        </tr>
+                      ));
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {selectedReceivedBill.relatedSales.length === 0 && (
+                <div className="text-center py-8">
+                  <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No sales recorded for this item yet.</p>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => setShowReceivedBillSalesLogs(false)}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
