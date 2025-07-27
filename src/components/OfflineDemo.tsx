@@ -60,6 +60,7 @@ export default function OfflineDemo() {
           supplier_id: products[0].id, // Using product ID as placeholder
           type: 'cash',
           quantity: 100,
+          received_quantity: 100,
           unit: 'piece',
           weight: 50.5,
           price: 10.99,

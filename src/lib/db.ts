@@ -29,7 +29,7 @@ export interface Supplier extends BaseEntity {
   is_active: boolean;
 }
 
-export interface Customer extends BaseEntity {
+export interface  Customer extends BaseEntity {
   name: string;
   phone: string;
   email: string | null;
@@ -43,6 +43,7 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
   supplier_id: string;
   type: 'commission' | 'cash';
   quantity: number;
+  received_quantity: number;
   unit: 'kg' | 'piece' | 'box' | 'bag';
   weight: number | null;
   porterage: number | null;

@@ -166,6 +166,7 @@ export interface Database {
           supplier_id: string;
           type: 'commission' | 'cash';
           quantity: number;
+          received_quantity: number;
           unit: 'kg' | 'piece' | 'box' | 'bag';
           weight: number | null;
           porterage: number | null;
@@ -184,6 +185,7 @@ export interface Database {
           supplier_id: string;
           type: 'commission' | 'cash';
           quantity: number;
+          received_quantity: number;
           unit: 'kg' | 'piece' | 'box' | 'bag';
           weight?: number | null;
           porterage?: number | null;
@@ -199,6 +201,7 @@ export interface Database {
         Update: {
           id?: string;
           quantity?: number;
+          received_quantity?: number;
           weight?: number | null;
           porterage?: number | null;
           transfer_fee?: number | null;

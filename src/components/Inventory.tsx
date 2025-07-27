@@ -478,7 +478,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
               ) : (
                 <>
                   <Truck className="w-4 h-4 mr-2" />
-                  Receive Products
+                  Receive Product
                 </>
               )}
             </button>
@@ -1140,6 +1140,7 @@ export default function Inventory() {
         supplier_id: receiveForm.supplier_id,
         type: receiveForm.type,
         quantity: parseInt(receiveForm.quantity),
+        received_quantity: parseInt(receiveForm.quantity),
         unit: receiveForm.unit,
         weight: receiveForm.weight ? parseFloat(receiveForm.weight) : undefined,
         porterage: receiveForm.porterage ? parseFloat(receiveForm.porterage) : undefined,
