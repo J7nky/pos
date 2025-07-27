@@ -257,6 +257,7 @@ export interface Database {
           unit_price: number;
           total_price: number;
           notes: string | null;
+          store_id: string;
           created_at: string;
         };
         Insert: {
@@ -271,15 +272,22 @@ export interface Database {
           unit_price: number;
           total_price: number;
           notes?: string | null;
+          store_id: string;
           created_at?: string;
         };
         Update: {
           id?: string;
+          sale_id?: string;
+          product_id?: string;
+          product_name?: string;
+          supplier_id?: string;
+          supplier_name?: string;
           quantity?: number;
           weight?: number | null;
           unit_price?: number;
           total_price?: number;
           notes?: string | null;
+          store_id?: string;
         };
       };
       transactions: {

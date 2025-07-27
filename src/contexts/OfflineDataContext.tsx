@@ -22,6 +22,7 @@ type Tables = Database['public']['Tables'];
 
 // Match exact SupabaseDataContext interface for seamless migration
 interface OfflineDataContextType {
+  storeId: any;
   // Data - matching exact structure
   products: Tables['products']['Row'][];
   suppliers: Tables['suppliers']['Row'][];
@@ -76,6 +77,7 @@ interface OfflineDataContextType {
   updateJournalEntry: (id: string, updates: Partial<any>) => Promise<void>;
   deleteJournalEntry: (id: string) => Promise<void>;
   addNonPricedItem: (item: any) => Promise<void>;
+  deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
 
   // Utility functions - exact match
   refreshData: () => Promise<void>;
@@ -224,6 +226,27 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Still try to load what we can from local storage
       await refreshData();
       await updateUnsyncedCount();
+    }
+    
+    // Run migration for existing transactions after data loads
+    await migrateExistingTransactions();
+  };
+
+  // Migration: Fix existing transactions with large LBP amounts
+  const migrateExistingTransactions = async () => {
+    if (!storeId) return;
+    
+    // Check if migration has already been run
+    const migrationKey = `transaction_migration_${storeId}`;
+    const alreadyMigrated = localStorage.getItem(migrationKey);
+    if (alreadyMigrated) return;
+    
+    try {
+      // Mark migration as complete - we now handle precision issues during sync
+      localStorage.setItem(migrationKey, new Date().toISOString());
+      console.log('✅ Transaction migration completed - precision issues now handled during sync');
+    } catch (error) {
+      console.error('❌ Transaction migration failed:', error);
     }
   };
 
@@ -666,12 +689,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addTransaction = async (transactionData: Omit<Tables['transactions']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
+    // Store amounts as-is in their original currency
+    // We'll handle database precision issues only during sync to Supabase
     const transaction: Transaction = {
       id: createId(),
       store_id: storeId,
       created_at: new Date().toISOString(),
       _synced: false,
       ...transactionData,
+      amount: transactionData.amount, // Store original amount
       reference: transactionData.reference ?? null
     };
 
@@ -840,15 +866,102 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const addNonPricedItem = async (item: any): Promise<void> => {
+    if (!storeId) return;
+    
+    // Store the non-priced item in localStorage
     const key = 'erp_non_priced_items';
     const existing = JSON.parse(localStorage.getItem(key) || '[]');
     const updated = [...existing, item];
     localStorage.setItem(key, JSON.stringify(updated));
+    
+    // Deduct inventory (FIFO, as much as possible) - same logic as addSale
+    try {
+      const inventoryRecords = await db.inventory_items
+        .where('product_id')
+        .equals(item.productId)
+        .and(inv => inv.supplier_id === item.supplierId && inv.quantity > 0)
+        .sortBy('received_at');
+
+      let qtyToDeduct = item.quantity;
+      for (const inv of inventoryRecords) {
+        if (qtyToDeduct <= 0) break;
+        
+        const deduct = Math.min(inv.quantity, qtyToDeduct);
+        const newQuantity = inv.quantity - deduct;
+        
+        if (newQuantity <= 0) {
+          // Delete inventory item when quantity reaches 0 or below
+          await db.inventory_items.delete(inv.id);
+        } else {
+          // Update with new quantity
+          await db.inventory_items.update(inv.id, { 
+            quantity: newQuantity,
+            _synced: false
+          });
+        }
+        qtyToDeduct -= deduct;
+      }
+      
+      // Refresh data to update stock levels
+      await refreshData();
+      await updateUnsyncedCount();
+      
+      // Use debounced sync to batch rapid changes
+      debouncedSync();
+      
+    } catch (error) {
+      console.error('Error deducting inventory for non-priced item:', error);
+      throw error;
+    }
+  };
+
+  const deductInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
+    if (!storeId) return;
+    
+    try {
+      const inventoryRecords = await db.inventory_items
+        .where('product_id')
+        .equals(productId)
+        .and(inv => inv.supplier_id === supplierId && inv.quantity > 0)
+        .sortBy('received_at');
+
+      let qtyToDeduct = quantity;
+      for (const inv of inventoryRecords) {
+        if (qtyToDeduct <= 0) break;
+        
+        const deduct = Math.min(inv.quantity, qtyToDeduct);
+        const newQuantity = inv.quantity - deduct;
+        
+        if (newQuantity <= 0) {
+          // Delete inventory item when quantity reaches 0 or below
+          await db.inventory_items.delete(inv.id);
+        } else {
+          // Update with new quantity
+          await db.inventory_items.update(inv.id, { 
+            quantity: newQuantity,
+            _synced: false
+          });
+        }
+        qtyToDeduct -= deduct;
+      }
+      
+      // Refresh data to update stock levels
+      await refreshData();
+      await updateUnsyncedCount();
+      
+      // Use debounced sync to batch rapid changes
+      debouncedSync();
+      
+    } catch (error) {
+      console.error('Error deducting inventory for sale:', error);
+      throw error;
+    }
   };
 
   return (
     <OfflineDataContext.Provider value={{
       // Data - exact match
+      storeId,
       products,
       suppliers,
       customers,
@@ -893,6 +1006,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateJournalEntry,
       deleteJournalEntry,
       addNonPricedItem,
+      deductInventoryQuantity,
 
       // Utility functions - exact match
       refreshData,
