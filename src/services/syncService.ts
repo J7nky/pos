@@ -429,6 +429,24 @@ export class SyncService {
       delete cleanRecord.updated_at;
     }
     
+    // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow
+    // Supabase numeric field has precision 10, scale 2 (max: 99,999,999.99)
+    // Only convert LBP amounts that exceed the database precision limit
+    if (tableName === 'transactions' && cleanRecord.currency === 'LBP' && cleanRecord.amount) {
+      const USD_TO_LBP_RATE = 89500;
+      const originalAmount = cleanRecord.amount;
+      
+      // Only convert if amount exceeds database precision limit
+      if (originalAmount > 99999999) {
+        cleanRecord.amount = originalAmount / USD_TO_LBP_RATE;
+        // Change currency to USD for the converted amount
+        cleanRecord.currency = 'USD';
+        // Add a note in the description about the conversion
+        cleanRecord.description = `${cleanRecord.description} (Originally ${originalAmount.toLocaleString()} LBP)`;
+        console.log(`💱 Converting large LBP transaction for upload: ${originalAmount.toLocaleString()} LBP → $${cleanRecord.amount.toFixed(2)} USD`);
+      }
+    }
+    
     return cleanRecord;
   }
 

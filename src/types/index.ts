@@ -76,6 +76,7 @@ export interface SaleItem {
   unitPrice: number;
   totalPrice: number;
   notes?: string;
+  inventoryType?: 'commission' | 'cash'; // Track which type of inventory this item came from
 }
 
 export interface Sale {

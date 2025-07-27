@@ -3,6 +3,7 @@ import { SupabaseService } from '../services/supabaseService';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { Database } from '../types/database';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { supabase } from '../lib/supabase';
 
 type Tables = Database['public']['Tables'];
 
@@ -51,6 +52,7 @@ interface SupabaseDataContextType {
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: Omit<Tables['expense_categories']['Insert'], 'store_id'>) => Promise<void>;
   addNonPricedItem: (item: any) => Promise<void>;
+  deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
 
   // Utility functions
   refreshData: () => Promise<void>;
@@ -295,10 +297,86 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
   };
 
   const addNonPricedItem = async (item: any): Promise<void> => {
+    if (!storeId) return;
+    
+    // Store the non-priced item in localStorage
     const key = 'erp_non_priced_items';
     const existing = JSON.parse(localStorage.getItem(key) || '[]');
     const updated = [...existing, item];
     localStorage.setItem(key, JSON.stringify(updated));
+    
+    // Deduct inventory (FIFO, as much as possible) - same logic as createSale
+    try {
+      let qtyToDeduct = item.quantity;
+      // Get inventory items for this product/supplier, oldest first
+      const { data: inventoryRows, error: inventoryError } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('product_id', item.productId)
+        .eq('supplier_id', item.supplierId)
+        .gt('quantity', 0)
+        .order('received_at', { ascending: true });
+      
+      if (inventoryError) throw inventoryError;
+      if (!inventoryRows) return;
+      
+      for (const inv of inventoryRows) {
+        if (qtyToDeduct <= 0) break;
+        const deduct = Math.min(inv.quantity, qtyToDeduct);
+        const newQty = inv.quantity - deduct;
+        await supabase
+          .from('inventory_items')
+          .update({ quantity: newQty })
+          .eq('id', inv.id);
+        qtyToDeduct -= deduct;
+      }
+      
+      // Refresh inventory data to update stock levels
+      const inventoryData = await SupabaseService.getInventoryItems(storeId);
+      setInventory(inventoryData || []);
+      
+    } catch (error) {
+      console.error('Error deducting inventory for non-priced item:', error);
+      throw error;
+    }
+  };
+
+  const deductInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
+    if (!storeId) return;
+    
+    try {
+      let qtyToDeduct = quantity;
+      // Get inventory items for this product/supplier, oldest first (FIFO)
+      const { data: inventoryRows, error: inventoryError } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('product_id', productId)
+        .eq('supplier_id', supplierId)
+        .gt('quantity', 0)
+        .order('received_at', { ascending: true });
+      
+      if (inventoryError) throw inventoryError;
+      if (!inventoryRows) return;
+      
+      for (const inv of inventoryRows) {
+        if (qtyToDeduct <= 0) break;
+        const deduct = Math.min(inv.quantity, qtyToDeduct);
+        const newQty = inv.quantity - deduct;
+        await supabase
+          .from('inventory_items')
+          .update({ quantity: newQty })
+          .eq('id', inv.id);
+        qtyToDeduct -= deduct;
+      }
+      
+      // Refresh inventory data to update stock levels
+      const inventoryData = await SupabaseService.getInventoryItems(storeId);
+      setInventory(inventoryData || []);
+      
+    } catch (error) {
+      console.error('Error deducting inventory for sale:', error);
+      throw error;
+    }
   };
 
   // Add legacy/compatibility methods
