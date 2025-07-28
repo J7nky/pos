@@ -107,6 +107,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
         supplier_id: form.supplier_id,
         type: form.type,
         quantity: parseInt(form.quantity),
+        received_quantity: parseInt(form.quantity),
         unit: form.unit,
         weight: form.weight ? parseFloat(form.weight) : undefined,
         porterage: form.porterage ? parseFloat(form.porterage) : undefined,

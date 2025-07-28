@@ -344,10 +344,8 @@ export default function POS() {
         notes: activeTab.notes || undefined,
         createdBy: userProfile?.id || ''
       };
-      // Deduct inventory quantities before creating the sale
-      for (const item of activeTab.cart) {
-        await raw.deductInventoryQuantity(item.productId, item.supplierId, item.quantity);
-      }
+      // Note: Inventory deduction is handled automatically by the addSale function
+      // No need to manually deduct here as it would cause double deduction
 
       await addSale(
         {

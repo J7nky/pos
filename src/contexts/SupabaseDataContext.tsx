@@ -483,7 +483,8 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       updateLowStockThreshold,
       updateDefaultCommissionRate,
       updateCurrency,
-      addNonPricedItem
+      addNonPricedItem,
+      deductInventoryQuantity
     }}>
       {children}
     </SupabaseDataContext.Provider>
