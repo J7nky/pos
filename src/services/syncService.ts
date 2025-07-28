@@ -172,6 +172,7 @@ export class SyncService {
           if (error) {
             console.error(`❌ Upload failed for ${tableName}:`, error);
             console.error('📋 Failed batch data:', cleanedBatch);
+            console.error('🔍 First record fields:', Object.keys(cleanedBatch[0] || {}));
             result.errors.push(`Upload failed for ${tableName}: ${error.message}`);
             
             // For 409 conflicts, try individual uploads to identify problematic records
@@ -427,6 +428,11 @@ export class SyncService {
     
     if (tablesWithoutUpdatedAt.includes(tableName)) {
       delete cleanRecord.updated_at;
+    }
+    
+    // Remove created_by from sale_items as it doesn't exist in the database schema
+    if (tableName === 'sale_items') {
+      delete cleanRecord.created_by;
     }
     
     // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow

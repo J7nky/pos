@@ -641,7 +641,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _synced: false,
       ...item,
       weight: item.weight ?? null,
-      notes: item.notes ?? null
+      notes: item.notes ?? null,
+      received_quantity: item.quantity // Add the missing received_quantity property
     }));
 
     // Use transaction to ensure atomicity

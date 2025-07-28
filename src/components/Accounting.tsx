@@ -1859,7 +1859,7 @@ export default function Accounting() {
         
         // Calculate progress based on original received quantity
         // Progress = (Total Sold / Original Received Quantity) × 100
-        const progress = originalReceivedQuantity > 0 ? Math.min((totalSoldFromThisItem / originalReceivedQuantity) * 100, 100) : 0;
+        const progress = originalReceivedQuantity > 0 ? (originalReceivedQuantity-remainingQuantity) : 0;
         
         // Ensure we have valid values
         const validOriginalQuantity = Math.max(originalReceivedQuantity, 0);
@@ -4483,8 +4483,8 @@ export default function Accounting() {
           </div>
         </div>
       )}
-
-
     </div>
   );
 }
+
+
