@@ -64,7 +64,7 @@ interface OfflineDataContextType {
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
-  addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]) => Promise<void>;
+  addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'id'>[]) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: Omit<Tables['expense_categories']['Insert'], 'store_id'>) => Promise<void>;
   addAccountsReceivable: (ar: any) => Promise<void>;
@@ -380,7 +380,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setProducts(productsData as Tables['products']['Row'][]);
       setSuppliers(suppliersData as Tables['suppliers']['Row'][]);
       setCustomers(customersData as Tables['customers']['Row'][]);
-      setTransactions(transactionsData as Tables['transactions']['Row'][]);
+      setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
       setExpenseCategories(expenseCategoriesData as Tables['expense_categories']['Row'][]);
       setAccountsReceivable(accountsReceivableData);
       setAccountsPayable(accountsPayableData);
@@ -399,7 +399,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Transform sales with joined data
       const salesWithItems = await Promise.all(
         salesData.map(async (sale) => {
-          const items = saleItemsData.filter(item => item.sale_id === sale.id);
+          const items = saleItemsData.filter(item => item.id === sale.id);
           const customer = customersData.find(c => c.id === sale.customer_id);
           
           return {
@@ -619,7 +619,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const addSale = async (
     saleData: Omit<Tables['sales']['Insert'], 'store_id'>, 
-    items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]
+    items: Omit<Tables['sale_items']['Insert'], 'id'>[]
   ): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
@@ -636,13 +636,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const saleItemsWithIds = items.map(item => ({
       id: createId(),
-      sale_id: saleId,
       created_at: new Date().toISOString(),
       _synced: false,
       ...item,
       weight: item.weight ?? null,
-      notes: item.notes ?? null,
-      received_quantity: item.quantity // Add the missing received_quantity property
+      notes: item.notes ?? null
+      // NOTE: received_quantity field belongs to inventory_items table, NOT sale_items
     }));
 
     // Use transaction to ensure atomicity

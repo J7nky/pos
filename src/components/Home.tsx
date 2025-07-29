@@ -35,7 +35,7 @@ export default function Home() {
   const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
   const lowStockThreshold = raw.lowStockThreshold;
   const { userProfile } = useSupabaseAuth();
-  const { formatCurrency } = useCurrency();
+  const { formatCurrency, getConvertedAmount } = useCurrency();
   const [showFastActions, setShowFastActions] = useState(true);
   const inventory = Array.isArray(raw.inventory) ? raw.inventory : [];
   const recentReceivesCount = inventory
@@ -50,7 +50,7 @@ export default function Home() {
   const todayExpenses = transactions.filter(t => 
     t.type === 'expense' && t.createdAt.split('T')[0] === today
   ).reduce((sum, t) => {
-    const convertedAmount = useCurrency().getConvertedAmount(t.amount, t.currency || 'USD');
+    const convertedAmount = getConvertedAmount(t.amount, t.currency || 'USD');
     return sum + convertedAmount;
   }, 0);
 

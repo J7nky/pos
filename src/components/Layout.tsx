@@ -38,6 +38,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
   const menuItems = [
     { id: 'home', label: 'Home', icon: LayoutDashboard },
     { id: 'inventory', label: 'Inventory', icon: Package },
+
     { id: 'pos', label: 'Point of Sale', icon: ShoppingCart },
     { id: 'customers', label: 'Customers', icon: Users },
     { id: 'accounting', label: 'Accounting', icon: Calculator },

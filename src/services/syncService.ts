@@ -431,8 +431,12 @@ export class SyncService {
     }
     
     // Remove created_by from sale_items as it doesn't exist in the database schema
+    // Also handle store_id column issue - remove if it causes schema errors
     if (tableName === 'sale_items') {
       delete cleanRecord.created_by;
+      // Remove store_id if it's causing schema cache issues
+      // The store_id should be derived from the parent sale's store_id
+      delete cleanRecord.store_id;
     }
     
     // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow
@@ -462,7 +466,7 @@ export class SyncService {
   private getTableFromRecord(record: any): string {
     // Simple heuristic based on record properties
     if (record.product_id && record.supplier_id && record.received_at) return 'inventory_items';
-    if (record.sale_id && record.product_name) return 'sale_items';
+    if (record.product_name && record.supplier_name) return 'sale_items';
     if (record.customer_id !== undefined && record.subtotal !== undefined) return 'sales';
     if (record.type && record.amount && record.currency) return 'transactions';
     if (record.category && !record.amount) return 'products';
