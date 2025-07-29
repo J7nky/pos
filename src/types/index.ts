@@ -32,7 +32,6 @@ export interface Supplier {
   phone: string;
   email: string;
   address: string;
-  type: 'commission' | 'cash';
   isActive: boolean;
   createdAt: string;
 }
@@ -43,6 +42,7 @@ export interface InventoryItem {
   supplierId: string;
   type: 'commission' | 'cash';
   quantity: number;
+  receivedQuantity: number;
   unit: 'kg' | 'piece' | 'box' | 'bag';
   weight?: number;
   porterage?: number;
@@ -76,6 +76,7 @@ export interface SaleItem {
   unitPrice: number;
   totalPrice: number;
   notes?: string;
+  inventoryType?: 'commission' | 'cash'; // Track which type of inventory this item came from
 }
 
 export interface Sale {
@@ -204,4 +205,27 @@ export interface StockLevel {
     supplierName: string;
     quantity: number;
   }>;
+}
+
+export interface ChartOfAccount {
+  id: string;
+  code: string;
+  name: string;
+  type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+  subType: string;
+  balance: number;
+  description?: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface AuditTrail {
+  id: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  userId: string;
+  timestamp: string;
+  changes: Record<string, any>;
+  metadata: Record<string, any>;
 }

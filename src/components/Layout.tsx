@@ -1,7 +1,6 @@
 import React, { ReactNode } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
-import SyncStatus from './SyncStatus';
 import { 
   LayoutDashboard, 
   Package, 
@@ -39,6 +38,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
   const menuItems = [
     { id: 'home', label: 'Home', icon: LayoutDashboard },
     { id: 'inventory', label: 'Inventory', icon: Package },
+
     { id: 'pos', label: 'Point of Sale', icon: ShoppingCart },
     { id: 'customers', label: 'Customers', icon: Users },
     { id: 'accounting', label: 'Accounting', icon: Calculator },
@@ -81,11 +81,6 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
             </button>
           ))}
         </nav>
-
-        {/* Sync Status */}
-        <div className="mt-6 px-4">
-          <SyncStatus />
-        </div>
 
         <div className="absolute bottom-0 w-64 p-6 border-t">
           <div className="flex items-center justify-between">
