@@ -3,6 +3,7 @@ import { SupabaseService } from '../services/supabaseService';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { Database } from '../types/database';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { supabase } from '../lib/supabase';
 
 type Tables = Database['public']['Tables'];
 
@@ -47,9 +48,11 @@ interface SupabaseDataContextType {
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
-  addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]) => Promise<void>;
+  addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'id'>[]) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: Omit<Tables['expense_categories']['Insert'], 'store_id'>) => Promise<void>;
+  addNonPricedItem: (item: any) => Promise<void>;
+  deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
 
   // Utility functions
   refreshData: () => Promise<void>;
@@ -231,20 +234,16 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
 
   const addSale = async (
     sale: Omit<Tables['sales']['Insert'], 'store_id'>, 
-    items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]
+    items: Omit<Tables['sale_items']['Insert'], 'id'>[]
   ) => {
     if (!storeId) return;
     
     setLoading(prev => ({ ...prev, sales: true }));
     try {
-      // Ensure each sale item has a sale_id before passing to createSale
       const saleWithStore = { ...sale, store_id: storeId };
       const newSale = await SupabaseService.createSale(
         saleWithStore,
-        items.map(item => ({
-          ...item,
-          sale_id: saleWithStore.id as string, // Ensure sale_id is present; may need to adjust if id is generated after insert
-        }))
+        items
       );
       if (newSale) {
         // Refresh sales to get joined data
@@ -290,6 +289,89 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       throw error;
     } finally {
       setLoading(prev => ({ ...prev, expenseCategories: false }));
+    }
+  };
+
+  const addNonPricedItem = async (item: any): Promise<void> => {
+    if (!storeId) return;
+    
+    // Store the non-priced item in localStorage
+    const key = 'erp_non_priced_items';
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    const updated = [...existing, item];
+    localStorage.setItem(key, JSON.stringify(updated));
+    
+    // Deduct inventory (FIFO, as much as possible) - same logic as createSale
+    try {
+      let qtyToDeduct = item.quantity;
+      // Get inventory items for this product/supplier, oldest first
+      const { data: inventoryRows, error: inventoryError } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('product_id', item.productId)
+        .eq('supplier_id', item.supplierId)
+        .gt('quantity', 0)
+        .order('received_at', { ascending: true });
+      
+      if (inventoryError) throw inventoryError;
+      if (!inventoryRows) return;
+      
+      for (const inv of inventoryRows) {
+        if (qtyToDeduct <= 0) break;
+        const deduct = Math.min(inv.quantity, qtyToDeduct);
+        const newQty = inv.quantity - deduct;
+        await supabase
+          .from('inventory_items')
+          .update({ quantity: newQty })
+          .eq('id', inv.id);
+        qtyToDeduct -= deduct;
+      }
+      
+      // Refresh inventory data to update stock levels
+      const inventoryData = await SupabaseService.getInventoryItems(storeId);
+      setInventory(inventoryData || []);
+      
+    } catch (error) {
+      console.error('Error deducting inventory for non-priced item:', error);
+      throw error;
+    }
+  };
+
+  const deductInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
+    if (!storeId) return;
+    
+    try {
+      let qtyToDeduct = quantity;
+      // Get inventory items for this product/supplier, oldest first (FIFO)
+      const { data: inventoryRows, error: inventoryError } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('product_id', productId)
+        .eq('supplier_id', supplierId)
+        .gt('quantity', 0)
+        .order('received_at', { ascending: true });
+      
+      if (inventoryError) throw inventoryError;
+      if (!inventoryRows) return;
+      
+      for (const inv of inventoryRows) {
+        if (qtyToDeduct <= 0) break;
+        const deduct = Math.min(inv.quantity, qtyToDeduct);
+        const newQty = inv.quantity - deduct;
+        await supabase
+          .from('inventory_items')
+          .update({ quantity: newQty })
+          .eq('id', inv.id);
+        qtyToDeduct -= deduct;
+      }
+      
+      // Refresh inventory data to update stock levels
+      const inventoryData = await SupabaseService.getInventoryItems(storeId);
+      setInventory(inventoryData || []);
+      
+    } catch (error) {
+      console.error('Error deducting inventory for sale:', error);
+      throw error;
     }
   };
 
@@ -396,7 +478,9 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       toggleLowStockAlerts,
       updateLowStockThreshold,
       updateDefaultCommissionRate,
-      updateCurrency
+      updateCurrency,
+      addNonPricedItem,
+      deductInventoryQuantity
     }}>
       {children}
     </SupabaseDataContext.Provider>

@@ -55,14 +55,12 @@ export class SupabaseService {
 
   static async deleteProduct(id: string) {
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('products')
         .delete()
-        .eq('id', id)
-        .select()
-        .single();
+        .eq('id', id);
       if (error) throw error;
-      return data;
+      return true; // Return success indicator instead of deleted data
     } catch (error) {
       handleSupabaseError(error);
     }
@@ -200,14 +198,12 @@ export class SupabaseService {
 
   static async deleteInventoryItem(id: string) {
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('inventory_items')
         .delete()
-        .eq('id', id)
-        .select()
-        .single();
+        .eq('id', id);
       if (error) throw error;
-      return data;
+      return true; // Return success indicator instead of deleted data
     } catch (error) {
       handleSupabaseError(error);
     }
@@ -251,18 +247,13 @@ export class SupabaseService {
       if (saleError) throw saleError;
 
       // Insert sale items
-      const saleItemsWithSaleId = items.map(item => ({
-        ...item,
-        sale_id: saleData.id
-      }));
-
       const { error: itemsError } = await supabase
         .from('sale_items')
-        .insert(saleItemsWithSaleId);
+        .insert(items);
 
       if (itemsError) throw itemsError;
 
-      // Deduct inventory (FIFO, as much as possible)
+      // Deduct inventory and create inventory logs (FIFO, as much as possible)
       for (const item of items) {
         let qtyToDeduct = item.quantity;
         // Get inventory items for this product/supplier, oldest first
@@ -275,14 +266,39 @@ export class SupabaseService {
           .order('received_at', { ascending: true });
         if (inventoryError) throw inventoryError;
         if (!inventoryRows) continue;
+        
         for (const inv of inventoryRows) {
           if (qtyToDeduct <= 0) break;
           const deduct = Math.min(inv.quantity, qtyToDeduct);
           const newQty = inv.quantity - deduct;
+          
+          // Update inventory quantity
           await supabase
             .from('inventory_items')
             .update({ quantity: newQty })
             .eq('id', inv.id);
+
+          // Create inventory log for the sold quantity
+          await supabase
+            .from('inventory_logs')
+            .insert({
+              inventory_item_id: inv.id,
+              product_id: inv.product_id,
+              supplier_id: inv.supplier_id,
+              action: 'sold',
+              quantity_change: -deduct, // Negative for sold
+              quantity_before: inv.quantity,
+              quantity_after: newQty,
+              unit_price: item.unit_price,
+              total_value: deduct * item.unit_price,
+              currency: 'USD', // Default currency
+              reference_type: 'sale',
+              reference_id: saleData.id,
+              reference_description: `Sold ${deduct} units`,
+              created_by: sale.created_by,
+              store_id: sale.store_id
+            });
+
           qtyToDeduct -= deduct;
         }
         // If qtyToDeduct > 0, we just deduct as much as possible (no error)
@@ -326,6 +342,39 @@ export class SupabaseService {
       
       if (error) throw error;
       return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async createTransactionWithInventoryLog(
+    transaction: Tables['transactions']['Insert'],
+    inventoryLogId?: string
+  ) {
+    try {
+      // Create the transaction
+      const { data: transactionData, error: transactionError } = await supabase
+        .from('transactions')
+        .insert(transaction)
+        .select()
+        .single();
+      
+      if (transactionError) throw transactionError;
+
+      // If inventory log ID is provided, link it to the transaction
+      if (inventoryLogId && transactionData) {
+        const { error: linkError } = await supabase
+          .rpc('link_transaction_to_inventory_log', {
+            p_transaction_id: transactionData.id,
+            p_inventory_log_id: inventoryLogId
+          });
+
+        if (linkError) {
+          console.warn('Failed to link transaction to inventory log:', linkError);
+        }
+      }
+
+      return transactionData;
     } catch (error) {
       handleSupabaseError(error);
     }

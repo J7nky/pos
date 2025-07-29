@@ -5,6 +5,7 @@ import SupabaseLogin from './components/SupabaseLogin';
 import Layout from './components/Layout';
 import Home from './components/Home';
 import Inventory from './components/Inventory';
+
 import POS from './components/POS';
 import Reports from './components/Reports';
 import Customers from './components/Customers';
@@ -37,6 +38,7 @@ function AppContent() {
         return <Home />;
       case 'inventory':
         return <Inventory />;
+
       case 'pos':
         return <POS />;
       case 'reports':

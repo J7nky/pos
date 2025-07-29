@@ -17,6 +17,7 @@ import {
   PlusCircle
 } from 'lucide-react';
 import { SaleItem, Sale, Customer } from '../types';
+import { v4 as uuidv4 } from 'uuid';
 
 interface BillTab {
   id: string;
@@ -31,13 +32,14 @@ interface BillTab {
 
 export default function POS() {
   const raw = useOfflineData();
-  const products = raw.products.map(p => ({...p, isActive: p.is_active, createdAt: p.created_at})) as Array<any>;
-  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Array<any>;
-  const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
-  const stockLevels = raw.stockLevels as Array<any>;
-  const inventory = raw.inventory as Array<any>;
+  const products = (raw.products || []).map(p => ({...p, isActive: p.is_active, createdAt: p.created_at})) as Array<any>;
+  const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Array<any>;
+  const suppliers = (raw.suppliers || []).map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
+  const stockLevels = (raw.stockLevels || []) as Array<any>;
+  const inventory = (raw.inventory || []) as Array<any>;
   const addSale = raw.addSale;
   const addCustomer = raw.addCustomer;
+  const addNonPricedItem = raw.addNonPricedItem || (async (item: any) => { /* fallback: store in localStorage or show error */ });
   const { userProfile } = useSupabaseAuth();
   const { formatCurrency } = useCurrency();
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
@@ -117,20 +119,31 @@ export default function POS() {
   const activeTab = activeTabs.find(tab => tab.id === activeTabId);
   if (!activeTab) return null;
 
-  const getProductStock = (productId: string) => {
-    const stock = stockLevels.find(s => s.productId === productId);
-    return stock ? stock.currentStock : 0;
+  // Get all inventory items for a product-supplier combination
+  const getInventoryItems = (productId: string, supplierId: string) => {
+    return inventory.filter(item => 
+      item.product_id === productId && 
+      item.supplier_id === supplierId && 
+      item.quantity > 0
+    );
   };
 
-  // Helper to get available stock for a product-supplier
+  // Get total available stock for a product-supplier combination
   const getSupplierStock = (productId: string, supplierId: string) => {
-    const stock = stockLevels.find(s => s.productId === productId);
-    if (!stock || !stock.suppliers) return 0;
-    const supplier = stock.suppliers.find((sup: any) => sup.supplierId === supplierId);
-    return supplier ? supplier.quantity : 0;
+    const items = getInventoryItems(productId, supplierId);
+    return items.reduce((total, item) => total + item.quantity, 0);
   };
 
-  const filteredProducts = products.filter(product => 
+  // Get total stock for a product across all suppliers
+  const getProductStock = (productId: string) => {
+    const items = inventory.filter(item => 
+      item.product_id === productId && 
+      item.quantity > 0
+    );
+    return items.reduce((total, item) => total + item.quantity, 0);
+  };
+
+  const filteredProducts = (products || []).filter(product => 
     product.isActive && 
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
     getProductStock(product.id) > 0
@@ -143,8 +156,22 @@ export default function POS() {
   };
 
   const getProductSuppliers = (productId: string) => {
-    const stock = stockLevels.find(s => s.productId === productId);
-    return stock && stock.suppliers ? stock.suppliers : [];
+    // Get unique suppliers for this product from inventory
+    const supplierIds = [...new Set(
+      inventory
+        .filter(item => item.product_id === productId && item.quantity > 0)
+        .map(item => item.supplier_id)
+    )];
+    
+    return supplierIds.map(supplierId => {
+      const supplier = suppliers.find(s => s.id === supplierId);
+      const totalStock = getSupplierStock(productId, supplierId);
+      return {
+        supplierId,
+        supplierName: supplier?.name || 'Unknown Supplier',
+        quantity: totalStock
+      };
+    });
   };
 
   // In addToCart, only allow up to available stock
@@ -152,12 +179,15 @@ export default function POS() {
     const product = products.find(p => p.id === productId);
     const supplier = suppliers.find(s => s.id === supplierId);
     if (!product || !supplier) return;
+    
     const existingItem = activeTab.cart.find(item => 
       item.productId === productId && item.supplierId === supplierId
     );
     const availableStock = getSupplierStock(productId, supplierId);
     const currentQty = existingItem ? existingItem.quantity : 0;
+    
     if (currentQty >= availableStock) return; // Prevent adding more than available
+    
     if (existingItem) {
       const updatedCart = activeTab.cart.map(item =>
         item.productId === productId && item.supplierId === supplierId && item.quantity < availableStock
@@ -167,6 +197,11 @@ export default function POS() {
       updateActiveTab({ cart: updatedCart });
     } else {
       if (availableStock > 0) {
+        // Get the oldest inventory item for this product-supplier to determine type and price
+        const oldestInventoryItem = inventory
+          .filter(item => item.product_id === productId && item.supplier_id === supplierId && item.quantity > 0)
+          .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime())[0];
+        
         const newItem: SaleItem = {
           id: Date.now().toString(),
           productId,
@@ -175,9 +210,10 @@ export default function POS() {
           supplierName: supplier.name,
           quantity: 1,
           weight: undefined, // Weight will be entered manually during sale
-          unitPrice: 5.00, // Default price - would be configurable
-          totalPrice: 5.00,
-          notes: ''
+          unitPrice: oldestInventoryItem?.price || 0.00, // Use price from oldest inventory item
+          totalPrice: oldestInventoryItem?.price || 0.00,
+          notes: '',
+          inventoryType: oldestInventoryItem?.type || 'cash' // Track the inventory type
         };
         updateActiveTab({ cart: [...activeTab.cart, newItem] });
       }
@@ -190,11 +226,19 @@ export default function POS() {
       if (item.id === itemId) {
         let updatedItem = { ...item, [field]: value };
         if (field === 'quantity') {
-          const availableStock = getSupplierStock(item.productId, item.supplierId);
-          if (value > availableStock) {
-            updatedItem.quantity = availableStock;
-          } else if (value < 1) {
+          // Ensure quantity is a valid number
+          const numValue = typeof value === 'number' ? value : parseInt(value);
+          if (isNaN(numValue) || numValue < 1) {
             updatedItem.quantity = 1;
+          } else {
+            // For non-priced items, we might want to be more lenient with stock limits
+            // but still enforce basic constraints
+            const availableStock = getSupplierStock(item.productId, item.supplierId);
+            if (availableStock > 0 && numValue > availableStock) {
+              updatedItem.quantity = availableStock;
+            } else {
+              updatedItem.quantity = numValue;
+            }
           }
         }
         if (field === 'quantity' || field === 'unitPrice' || field === 'weight') {
@@ -223,6 +267,48 @@ export default function POS() {
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
   const handleCheckout = async () => {
     if (activeTab.cart.length === 0) return;
+    // Check for non-priced items
+    const hasNonPriced = activeTab.cart.some(item => !item.unitPrice || item.unitPrice === 0);
+    if (hasNonPriced) {
+      if (!activeTab.selectedCustomer) {
+        setCustomerError('Customer is required for non-priced items.');
+        return;
+      }
+      setCustomerError(null);
+      setIsProcessing(true);
+      try {
+        // Store each non-priced item for later pricing
+        for (const item of activeTab.cart.filter(i => !i.unitPrice || i.unitPrice === 0)) {
+          await addNonPricedItem({
+            id: uuidv4(),
+            customerId: activeTab.selectedCustomer,
+            productId: item.productId,
+            productName: item.productName,
+            supplierId: item.supplierId,
+            supplierName: item.supplierName,
+            quantity: item.quantity,
+            weight: item.weight,
+            notes: item.notes,
+            createdAt: new Date().toISOString(),
+            status: 'non-priced',
+          });
+        }
+        // Remove non-priced items from cart and proceed with regular sale if any
+        const pricedCart = activeTab.cart.filter(i => i.unitPrice && i.unitPrice > 0);
+        if (pricedCart.length > 0) {
+          updateActiveTab({ cart: pricedCart });
+          showToast('success', 'Non-priced items stored. Please complete sale for priced items.');
+        } else {
+          // All items were non-priced, clear cart
+          updateActiveTab({ cart: [], selectedCustomer: '', amountReceived: '', notes: '', paymentMethod: 'cash' });
+          showToast('success', 'Non-priced items stored for later pricing.');
+        }
+      } catch (error) {
+        showToast('error', 'Failed to store non-priced items!');
+      }
+      setIsProcessing(false);
+      return;
+    }
     // Validation: if credit, require customer; if not credit and amountReceived < total, require customer
     if (
       (activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
@@ -258,6 +344,9 @@ export default function POS() {
         notes: activeTab.notes || undefined,
         createdBy: userProfile?.id || ''
       };
+      // Note: Inventory deduction is handled automatically by the addSale function
+      // No need to manually deduct here as it would cause double deduction
+
       await addSale(
         {
           customer_id: sale.customerId,
@@ -279,7 +368,10 @@ export default function POS() {
           weight: item.weight,
           unit_price: item.unitPrice,
           total_price: item.totalPrice,
-          notes: item.notes
+          notes: item.notes,
+          store_id: raw.storeId,
+          created_at: new Date().toISOString(),
+          created_by: userProfile?.id || '',
         }))
       );
       await raw.refreshData(); // Ensure UI is in sync with backend
@@ -703,9 +795,9 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductSuppliers, a
   <div className="bg-white rounded-lg shadow-sm p-6">
     <h2 className="text-lg font-semibold text-gray-900 mb-4">Products</h2>
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-      {filteredProducts.map((product: any) => {
+      {(filteredProducts || []).map((product: any) => {
         const stock = getProductStock(product.id);
-        const productSuppliers = getProductSuppliers(product.id);
+        const productSuppliers = getProductSuppliers(product.id) || [];
         return (
           <div key={product.id} className="border border-gray-200 rounded-lg p-3">
             <img src={product.image} alt={product.name} className="w-full h-24 object-cover rounded-lg mb-2" />
@@ -740,12 +832,12 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, for
   <div className="bg-white rounded-lg shadow-sm">
     <div className="p-4 border-b flex items-center">
       <ShoppingCart className="w-5 h-5 mr-2 text-gray-600" />
-      <h2 className="text-lg font-semibold text-gray-900">Cart ({activeTab.cart.length})</h2>
+      <h2 className="text-lg font-semibold text-gray-900">Cart ({(activeTab?.cart || []).length})</h2>
     </div>
     <div className="max-h-64 overflow-y-auto">
-      {activeTab.cart.length > 0 ? (
+      {(activeTab?.cart || []).length > 0 ? (
         <div className="divide-y divide-gray-200">
-          {activeTab.cart.map((item: any) => (
+          {(activeTab?.cart || []).map((item: any) => (
             <div key={item.id} className="p-4">
               <div className="flex items-start justify-between mb-2">
                 <div className="flex-1">
@@ -763,8 +855,20 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, for
                     type="number"
                     min="1"
                     max={getSupplierStock(item.productId, item.supplierId)}
-                    value={item.quantity}
-                    onChange={(e) => updateCartItem(item.id, 'quantity', Math.max(1, Math.min(getSupplierStock(item.productId, item.supplierId), parseInt(e.target.value))))}
+                    value={item.quantity ?? ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '') {
+                        updateCartItem(item.id, 'quantity', 1);
+                      } else {
+                        const numValue = parseInt(value);
+                        if (!isNaN(numValue)) {
+                          const availableStock = getSupplierStock(item.productId, item.supplierId);
+                          const clampedValue = Math.max(1, Math.min(availableStock, numValue));
+                          updateCartItem(item.id, 'quantity', clampedValue);
+                        }
+                      }
+                    }}
                     className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
                   />
                 </div>
@@ -773,7 +877,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, for
                   <input
                     type="number"
                     step="0.01"
-                    value={item.weight || ''}
+                    value={item.weight ?? ''}
                     onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
                     className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
                     placeholder="kg"
@@ -784,7 +888,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, for
                   <input
                     type="number"
                     step="0.01"
-                    value={item.unitPrice}
+                    value={item.unitPrice ?? ''}
                     onChange={(e) => updateCartItem(item.id, 'unitPrice', parseFloat(e.target.value))}
                     className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
                   />

@@ -29,7 +29,7 @@ export interface Supplier extends BaseEntity {
   is_active: boolean;
 }
 
-export interface Customer extends BaseEntity {
+export interface  Customer extends BaseEntity {
   name: string;
   phone: string;
   email: string | null;
@@ -43,6 +43,7 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
   supplier_id: string;
   type: 'commission' | 'cash';
   quantity: number;
+  received_quantity: number;
   unit: 'kg' | 'piece' | 'box' | 'bag';
   weight: number | null;
   porterage: number | null;
@@ -67,7 +68,6 @@ export interface Sale extends Omit<BaseEntity, 'updated_at'> {
 }
 
 export interface SaleItem extends Omit<BaseEntity, 'updated_at' | 'store_id'> {
-  sale_id: string;
   product_id: string;
   product_name: string;
   supplier_id: string;
@@ -116,6 +116,44 @@ export interface PendingSync {
   last_error?: string;
 }
 
+export interface AccountsReceivable extends BaseEntity {
+  customer_id: string;
+  customer_name: string;
+  invoice_number: string;
+  amount: number;
+  amount_paid: number;
+  amount_due: number;
+  due_date: string;
+  status: 'pending' | 'paid' | 'overdue' | 'partial';
+  description?: string;
+}
+
+export interface AccountsPayable extends BaseEntity {
+  supplier_id: string;
+  supplier_name: string;
+  invoice_number: string;
+  amount: number;
+  amount_paid: number;
+  amount_due: number;
+  due_date: string;
+  status: 'pending' | 'paid' | 'overdue' | 'partial';
+  description?: string;
+}
+
+export interface JournalEntry extends BaseEntity {
+  date: string;
+  reference: string;
+  description: string;
+  entries: Array<{
+    account: string;
+    debit: number;
+    credit: number;
+  }>;
+  total_debit: number;
+  total_credit: number;
+  created_by: string;
+}
+
 class POSDatabase extends Dexie {
   // Core tables
   products!: Table<Product, string>;
@@ -126,6 +164,9 @@ class POSDatabase extends Dexie {
   sale_items!: Table<SaleItem, string>;
   transactions!: Table<Transaction, string>;
   expense_categories!: Table<ExpenseCategory, string>;
+  accounts_receivable!: Table<AccountsReceivable, string>;
+  accounts_payable!: Table<AccountsPayable, string>;
+  journal_entries!: Table<JournalEntry, string>;
   
   // Sync management tables
   sync_metadata!: Table<SyncMetadata, string>;
@@ -145,8 +186,11 @@ class POSDatabase extends Dexie {
       // Tables WITHOUT updated_at: inventory_items, sales, sale_items, transactions
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at',
       sales: 'id, store_id, customer_id, created_at, status, created_by',
-      sale_items: 'id, sale_id, product_id, supplier_id, created_at',
+      sale_items: 'id, product_id, supplier_id, created_at',
       transactions: 'id, store_id, type, category, created_at, created_by',
+      accounts_receivable: 'id, store_id, customer_id, invoice_number, due_date, status',
+      accounts_payable: 'id, store_id, supplier_id, invoice_number, due_date, status',
+      journal_entries: 'id, store_id, date, reference, created_by',
       
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
@@ -159,6 +203,9 @@ class POSDatabase extends Dexie {
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.expense_categories.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.accounts_receivable.hook('creating', this.addCreateFields);
+    this.accounts_payable.hook('creating', this.addCreateFields);
+    this.journal_entries.hook('creating', this.addCreateFields);
     
     // Tables WITHOUT updated_at: inventory_items, sales, sale_items, transactions
     this.inventory_items.hook('creating', this.addCreateFields);
@@ -300,7 +347,7 @@ class POSDatabase extends Dexie {
     );
     
     const orphanedSaleItems = saleItems.filter(item => 
-      !saleIds.has(item.sale_id) || !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
     );
     
     const orphanedTransactions = transactions.filter(transaction => 

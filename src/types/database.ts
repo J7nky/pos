@@ -94,7 +94,6 @@ export interface Database {
           phone: string;
           email: string | null;
           address: string;
-          type: 'commission' | 'cash';
           is_active: boolean;
           store_id: string;
           created_at: string;
@@ -106,7 +105,6 @@ export interface Database {
           phone: string;
           email?: string | null;
           address: string;
-          type: 'commission' | 'cash';
           is_active?: boolean;
           store_id: string;
           created_at?: string;
@@ -118,7 +116,6 @@ export interface Database {
           phone?: string;
           email?: string | null;
           address?: string;
-          type?: 'commission' | 'cash';
           is_active?: boolean;
           updated_at?: string;
         };
@@ -166,6 +163,7 @@ export interface Database {
           supplier_id: string;
           type: 'commission' | 'cash';
           quantity: number;
+          received_quantity: number;
           unit: 'kg' | 'piece' | 'box' | 'bag';
           weight: number | null;
           porterage: number | null;
@@ -184,6 +182,7 @@ export interface Database {
           supplier_id: string;
           type: 'commission' | 'cash';
           quantity: number;
+          received_quantity: number;
           unit: 'kg' | 'piece' | 'box' | 'bag';
           weight?: number | null;
           porterage?: number | null;
@@ -199,6 +198,7 @@ export interface Database {
         Update: {
           id?: string;
           quantity?: number;
+          received_quantity?: number;
           weight?: number | null;
           porterage?: number | null;
           transfer_fee?: number | null;
@@ -247,7 +247,6 @@ export interface Database {
       sale_items: {
         Row: {
           id: string;
-          sale_id: string;
           product_id: string;
           product_name: string;
           supplier_id: string;
@@ -257,11 +256,11 @@ export interface Database {
           unit_price: number;
           total_price: number;
           notes: string | null;
+          store_id: string;
           created_at: string;
         };
         Insert: {
           id?: string;
-          sale_id: string;
           product_id: string;
           product_name: string;
           supplier_id: string;
@@ -271,14 +270,74 @@ export interface Database {
           unit_price: number;
           total_price: number;
           notes?: string | null;
+          store_id: string;
           created_at?: string;
         };
         Update: {
           id?: string;
+          product_id?: string;
+          product_name?: string;
+          supplier_id?: string;
+          supplier_name?: string;
           quantity?: number;
           weight?: number | null;
           unit_price?: number;
           total_price?: number;
+          notes?: string | null;
+          store_id?: string;
+        };
+      };
+      inventory_logs: {
+        Row: {
+          id: string;
+          inventory_item_id: string;
+          product_id: string;
+          supplier_id: string;
+          action: 'received' | 'sold' | 'adjusted' | 'transferred' | 'damaged' | 'expired';
+          quantity_change: number;
+          quantity_before: number;
+          quantity_after: number;
+          unit_price: number | null;
+          total_value: number | null;
+          currency: 'USD' | 'LBP';
+          reference_type: string | null;
+          reference_id: string | null;
+          reference_description: string | null;
+          notes: string | null;
+          created_by: string;
+          store_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          inventory_item_id: string;
+          product_id: string;
+          supplier_id: string;
+          action: 'received' | 'sold' | 'adjusted' | 'transferred' | 'damaged' | 'expired';
+          quantity_change: number;
+          quantity_before: number;
+          quantity_after: number;
+          unit_price?: number | null;
+          total_value?: number | null;
+          currency: 'USD' | 'LBP';
+          reference_type?: string | null;
+          reference_id?: string | null;
+          reference_description?: string | null;
+          notes?: string | null;
+          created_by: string;
+          store_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          quantity_change?: number;
+          quantity_before?: number;
+          quantity_after?: number;
+          unit_price?: number | null;
+          total_value?: number | null;
+          reference_type?: string | null;
+          reference_id?: string | null;
+          reference_description?: string | null;
           notes?: string | null;
         };
       };
@@ -291,6 +350,7 @@ export interface Database {
           currency: 'USD' | 'LBP';
           description: string;
           reference: string | null;
+          inventory_log_id: string | null;
           store_id: string;
           created_by: string;
           created_at: string;
@@ -303,6 +363,7 @@ export interface Database {
           currency: 'USD' | 'LBP';
           description: string;
           reference?: string | null;
+          inventory_log_id?: string | null;
           store_id: string;
           created_by: string;
           created_at?: string;
@@ -312,6 +373,7 @@ export interface Database {
           amount?: number;
           description?: string;
           reference?: string | null;
+          inventory_log_id?: string | null;
         };
       };
       expense_categories: {

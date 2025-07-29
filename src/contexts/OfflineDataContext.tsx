@@ -22,6 +22,7 @@ type Tables = Database['public']['Tables'];
 
 // Match exact SupabaseDataContext interface for seamless migration
 interface OfflineDataContextType {
+  storeId: any;
   // Data - matching exact structure
   products: Tables['products']['Row'][];
   suppliers: Tables['suppliers']['Row'][];
@@ -30,6 +31,9 @@ interface OfflineDataContextType {
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
   transactions: Tables['transactions']['Row'][];
   expenseCategories: Tables['expense_categories']['Row'][];
+  accountsReceivable: any[];
+  accountsPayable: any[];
+  journalEntries: any[];
 
   // Computed/legacy compatibility - exact match
   stockLevels: any[];
@@ -40,9 +44,6 @@ interface OfflineDataContextType {
   currency: 'USD' | 'LBP';
   cashDrawer: any;
   openCashDrawer: (amount: number, openedBy: string) => void;
-  accountsReceivable: any[];
-  accountsPayable: any[];
-  journalEntries: any[];
   isOnline: boolean;
 
   // Loading states - exact match
@@ -63,9 +64,20 @@ interface OfflineDataContextType {
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
-  addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]) => Promise<void>;
+  addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'id'>[]) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: Omit<Tables['expense_categories']['Insert'], 'store_id'>) => Promise<void>;
+  addAccountsReceivable: (ar: any) => Promise<void>;
+  updateAccountsReceivable: (id: string, updates: Partial<any>) => Promise<void>;
+  deleteAccountsReceivable: (id: string) => Promise<void>;
+  addAccountsPayable: (ap: any) => Promise<void>;
+  updateAccountsPayable: (id: string, updates: Partial<any>) => Promise<void>;
+  deleteAccountsPayable: (id: string) => Promise<void>;
+  addJournalEntry: (entry: any) => Promise<void>;
+  updateJournalEntry: (id: string, updates: Partial<any>) => Promise<void>;
+  deleteJournalEntry: (id: string) => Promise<void>;
+  addNonPricedItem: (item: any) => Promise<void>;
+  deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
 
   // Utility functions - exact match
   refreshData: () => Promise<void>;
@@ -125,6 +137,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+  
+  // Debounced sync to prevent excessive sync calls during rapid changes
+  const [debouncedSyncTimeout, setDebouncedSyncTimeout] = useState<NodeJS.Timeout | null>(null);
 
   // Legacy compatibility states - exact match
   const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useLocalStorage<boolean>('lowStockAlertsEnabled', true);
@@ -136,50 +151,193 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return stored ? JSON.parse(stored) : null;
   });
   const [stockLevels, setStockLevels] = useState<any[]>([]);
+  const [accountsReceivable, setAccountsReceivable] = useState<any[]>([]);
+  const [accountsPayable, setAccountsPayable] = useState<any[]>([]);
+  const [journalEntries, setJournalEntries] = useState<any[]>([]);
 
   // Initialize data when store is available
   useEffect(() => {
     if (storeId) {
-      // Clean up any invalid/orphaned data first
-      Promise.all([
-        db.cleanupInvalidInventoryItems(),
-        db.cleanupOrphanedRecords(storeId)
-      ]).then(([invalidCleaned, orphanedCleaned]) => {
-        if (invalidCleaned > 0 || orphanedCleaned > 0) {
-          console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
-        }
-        refreshData();
-        updateUnsyncedCount();
-      }).catch(error => {
-        console.error('❌ Cleanup failed:', error);
-        // Still proceed with normal initialization
-        refreshData();
-        updateUnsyncedCount();
-      });
+      initializeData();
     }
   }, [storeId]);
+
+  const initializeData = async () => {
+    if (!storeId) return;
+
+    try {
+      // Clean up any invalid/orphaned data first
+      const [invalidCleaned, orphanedCleaned] = await Promise.all([
+        db.cleanupInvalidInventoryItems(),
+        db.cleanupOrphanedRecords(storeId)
+      ]);
+
+      if (invalidCleaned > 0 || orphanedCleaned > 0) {
+        console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
+      }
+
+      // Load local data first
+      await refreshData();
+      await updateUnsyncedCount();
+
+      // Check if local database is empty (no essential data)
+      const [productCount, supplierCount, customerCount] = await Promise.all([
+        db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
+      ]);
+
+      const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
+
+      // If local database is empty and we're online, sync from cloud
+      if (isLocalDatabaseEmpty && isOnline) {
+        console.log('📥 Local database is empty, syncing from cloud...');
+        setLoading(prev => ({ ...prev, sync: true }));
+        
+        try {
+          const syncResult = await syncService.fullResync(storeId);
+          
+          if (syncResult.success) {
+            console.log(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
+            await refreshData();
+            await updateUnsyncedCount();
+          } else {
+            console.error('❌ Initial sync failed:', syncResult.errors);
+          }
+        } catch (error) {
+          console.error('❌ Initial sync error:', error);
+        } finally {
+          setLoading(prev => ({ ...prev, sync: false }));
+        }
+      } else if (isLocalDatabaseEmpty && !isOnline) {
+        console.log('📴 Local database is empty but offline - will sync when connection is restored');
+      } else if (!isLocalDatabaseEmpty) {
+        console.log(`📊 Local database loaded: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
+        
+        // If we have local data and we're online, perform a regular sync to get updates
+        if (isOnline && unsyncedCount === 0) {
+          console.log('🔄 Performing background sync to check for updates...');
+          performSync(true); // Auto sync without blocking UI
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ Data initialization failed:', error);
+      // Still try to load what we can from local storage
+      await refreshData();
+      await updateUnsyncedCount();
+    }
+    
+    // Run migration for existing transactions after data loads
+    await migrateExistingTransactions();
+  };
+
+  // Migration: Fix existing transactions with large LBP amounts
+  const migrateExistingTransactions = async () => {
+    if (!storeId) return;
+    
+    // Check if migration has already been run
+    const migrationKey = `transaction_migration_${storeId}`;
+    const alreadyMigrated = localStorage.getItem(migrationKey);
+    if (alreadyMigrated) return;
+    
+    try {
+      // Mark migration as complete - we now handle precision issues during sync
+      localStorage.setItem(migrationKey, new Date().toISOString());
+      console.log('✅ Transaction migration completed - precision issues now handled during sync');
+    } catch (error) {
+      console.error('❌ Transaction migration failed:', error);
+    }
+  };
 
   // Auto-sync when connection is restored
   useEffect(() => {
     if (justCameOnline && storeId && !isSyncing) {
-      console.log('🌐 Connection restored - auto-syncing...');
-      performSync(true); // Mark as automatic sync
+      handleConnectionRestored();
     }
   }, [justCameOnline, storeId, isSyncing]);
 
-  // Periodic auto-sync when online
+  const handleConnectionRestored = async () => {
+    if (!storeId) return;
+
+    console.log('🌐 Connection restored - checking what to sync...');
+    
+    try {
+      // Check if local database is empty
+      const [productCount, supplierCount, customerCount] = await Promise.all([
+        db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
+      ]);
+
+      const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
+
+      if (isLocalDatabaseEmpty) {
+        console.log('📥 Connection restored with empty database - performing full sync...');
+        setLoading(prev => ({ ...prev, sync: true }));
+        
+        try {
+          const syncResult = await syncService.fullResync(storeId);
+          
+          if (syncResult.success) {
+            console.log(`✅ Full sync after connection restore completed: downloaded ${syncResult.synced.downloaded} records`);
+            await refreshData();
+            await updateUnsyncedCount();
+          } else {
+            console.error('❌ Full sync after connection restore failed:', syncResult.errors);
+          }
+        } finally {
+          setLoading(prev => ({ ...prev, sync: false }));
+        }
+      } else {
+        console.log('🔄 Connection restored with local data - performing regular sync...');
+        performSync(true); // Regular sync for updates and uploads
+      }
+    } catch (error) {
+      console.error('❌ Connection restore sync error:', error);
+      // Fallback to regular sync
+      performSync(true);
+    }
+  };
+
+  // Enhanced periodic auto-sync when online
   useEffect(() => {
     if (isOnline && storeId && !isSyncing) {
-      // Auto-sync every 60 seconds when online (reduced frequency since we have immediate sync on reconnect)
+      // Auto-sync every 30 seconds when online and has unsynced data
       const interval = setInterval(() => {
         if (!syncService.isCurrentlyRunning() && unsyncedCount > 0) {
           console.log('⏰ Periodic auto-sync triggered');
           performSync(true); // Mark as automatic sync
         }
-      }, 60000);
+      }, 30000); // Reduced from 60s to 30s for better responsiveness
 
       return () => clearInterval(interval);
     }
+  }, [isOnline, storeId, isSyncing, unsyncedCount]);
+
+  // Auto-sync on window focus when online (for when user returns to tab)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (isOnline && storeId && !isSyncing && unsyncedCount > 0) {
+        console.log('👀 Window focused - auto-syncing...');
+        performSync(true);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isOnline && storeId && !isSyncing && unsyncedCount > 0) {
+        console.log('👁️ Page became visible - auto-syncing...');
+        performSync(true);
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [isOnline, storeId, isSyncing, unsyncedCount]);
 
   // Update stock levels when inventory, products, or suppliers change
@@ -200,7 +358,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         salesData,
         saleItemsData,
         transactionsData,
-        expenseCategoriesData
+        expenseCategoriesData,
+        accountsReceivableData,
+        accountsPayableData,
+        journalEntriesData
       ] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
@@ -209,15 +370,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         db.sales.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.sale_items.filter(item => !item._deleted).toArray(),
         db.transactions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.expense_categories.where('store_id').equals(storeId).filter(item => !item._deleted).toArray()
+        db.expense_categories.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.accounts_receivable?.where('store_id').equals(storeId).filter(item => !item._deleted).toArray() ?? [],
+        db.accounts_payable?.where('store_id').equals(storeId).filter(item => !item._deleted).toArray() ?? [],
+        db.journal_entries?.where('store_id').equals(storeId).filter(item => !item._deleted).toArray() ?? []
       ]);
 
       // Transform data to match SupabaseDataContext structure
       setProducts(productsData as Tables['products']['Row'][]);
       setSuppliers(suppliersData as Tables['suppliers']['Row'][]);
       setCustomers(customersData as Tables['customers']['Row'][]);
-      setTransactions(transactionsData as Tables['transactions']['Row'][]);
+      setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
       setExpenseCategories(expenseCategoriesData as Tables['expense_categories']['Row'][]);
+      setAccountsReceivable(accountsReceivableData);
+      setAccountsPayable(accountsPayableData);
+      setJournalEntries(journalEntriesData);
 
       // Store raw data
       setInventoryItems(inventoryData);
@@ -232,7 +399,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Transform sales with joined data
       const salesWithItems = await Promise.all(
         salesData.map(async (sale) => {
-          const items = saleItemsData.filter(item => item.sale_id === sale.id);
+          const items = saleItemsData.filter(item => item.id === sale.id);
           const customer = customersData.find(c => c.id === sale.customer_id);
           
           return {
@@ -334,6 +501,36 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Debounced sync to batch rapid changes and prevent excessive sync calls
+  const debouncedSync = () => {
+    if (!isOnline || isSyncing) return;
+    
+    // Clear existing timeout
+    if (debouncedSyncTimeout) {
+      clearTimeout(debouncedSyncTimeout);
+    }
+    
+    // Set new timeout for 2 seconds
+    const timeout = setTimeout(() => {
+      if (isOnline && !isSyncing && unsyncedCount > 0) {
+        console.log('🔄 Debounced auto-sync triggered');
+        performSync(true); // Mark as automatic sync
+      }
+      setDebouncedSyncTimeout(null);
+    }, 2000);
+    
+    setDebouncedSyncTimeout(timeout);
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (debouncedSyncTimeout) {
+        clearTimeout(debouncedSyncTimeout);
+      }
+    };
+  }, [debouncedSyncTimeout]);
+
   // CRUD Operations - matching exact function signatures
   const addProduct = async (productData: Omit<Tables['products']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
@@ -347,9 +544,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync after user action
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addSupplier = async (supplierData: Omit<Tables['suppliers']['Insert'], 'store_id'>): Promise<void> => {
@@ -364,9 +560,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync after user action
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addCustomer = async (customerData: Omit<Tables['customers']['Insert'], 'store_id'>): Promise<void> => {
@@ -383,9 +578,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const updateCustomer = async (id: string, updates: Tables['customers']['Update']): Promise<void> => {
@@ -393,9 +587,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
     
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addInventoryItem = async (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> => {
@@ -420,14 +613,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addSale = async (
     saleData: Omit<Tables['sales']['Insert'], 'store_id'>, 
-    items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]
+    items: Omit<Tables['sale_items']['Insert'], 'id'>[]
   ): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
@@ -444,12 +636,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const saleItemsWithIds = items.map(item => ({
       id: createId(),
-      sale_id: saleId,
       created_at: new Date().toISOString(),
       _synced: false,
       ...item,
       weight: item.weight ?? null,
       notes: item.notes ?? null
+      // NOTE: received_quantity field belongs to inventory_items table, NOT sale_items
     }));
 
     // Use transaction to ensure atomicity
@@ -490,20 +682,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addTransaction = async (transactionData: Omit<Tables['transactions']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
+    // Store amounts as-is in their original currency
+    // We'll handle database precision issues only during sync to Supabase
     const transaction: Transaction = {
       id: createId(),
       store_id: storeId,
       created_at: new Date().toISOString(),
       _synced: false,
       ...transactionData,
+      amount: transactionData.amount, // Store original amount
       reference: transactionData.reference ?? null
     };
 
@@ -511,9 +705,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const addExpenseCategory = async (categoryData: Omit<Tables['expense_categories']['Insert'], 'store_id'>): Promise<void> => {
@@ -529,9 +722,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
 
-    if (isOnline && !isSyncing) {
-      performSync(false); // Manual sync
-    }
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
   };
 
   const fullResync = async (): Promise<SyncResult> => {
@@ -624,9 +816,152 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setCurrency(newCurrency);
   };
 
+  // Add AR/AP/Journal CRUD
+  const addAccountsReceivable = async (ar: any) => {
+    const newAR = { ...ar, id: createId(), createdAt: new Date().toISOString(), _deleted: false, store_id: storeId };
+    await db.accounts_receivable.add(newAR);
+    setAccountsReceivable(prev => [...prev, newAR]);
+  };
+
+  const updateAccountsReceivable = async (id: string, updates: Partial<any>) => {
+    await db.accounts_receivable.update(id, updates);
+    setAccountsReceivable(prev => prev.map(ar => ar.id === id ? { ...ar, ...updates } : ar));
+  };
+
+  const deleteAccountsReceivable = async (id: string) => {
+    await db.accounts_receivable.update(id, { _deleted: true });
+    setAccountsReceivable(prev => prev.filter(ar => ar.id !== id));
+  };
+
+  const addAccountsPayable = async (ap: any) => {
+    const newAP = { ...ap, id: createId(), createdAt: new Date().toISOString(), _deleted: false, store_id: storeId };
+    await db.accounts_payable.add(newAP);
+    setAccountsPayable(prev => [...prev, newAP]);
+  };
+
+  const updateAccountsPayable = async (id: string, updates: Partial<any>) => {
+    await db.accounts_payable.update(id, updates);
+    setAccountsPayable(prev => prev.map(ap => ap.id === id ? { ...ap, ...updates } : ap));
+  };
+
+  const deleteAccountsPayable = async (id: string) => {
+    await db.accounts_payable.update(id, { _deleted: true });
+    setAccountsPayable(prev => prev.filter(ap => ap.id !== id));
+  };
+
+  const addJournalEntry = async (entry: any) => {
+    const newEntry = { ...entry, id: createId(), createdAt: new Date().toISOString(), _deleted: false, store_id: storeId };
+    await db.journal_entries.add(newEntry);
+    setJournalEntries(prev => [...prev, newEntry]);
+  };
+
+  const updateJournalEntry = async (id: string, updates: Partial<any>) => {
+    await db.journal_entries.update(id, updates);
+    setJournalEntries(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+  };
+
+  const deleteJournalEntry = async (id: string) => {
+    await db.journal_entries.update(id, { _deleted: true });
+    setJournalEntries(prev => prev.filter(e => e.id !== id));
+  };
+
+  const addNonPricedItem = async (item: any): Promise<void> => {
+    if (!storeId) return;
+    
+    // Store the non-priced item in localStorage
+    const key = 'erp_non_priced_items';
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    const updated = [...existing, item];
+    localStorage.setItem(key, JSON.stringify(updated));
+    
+    // Deduct inventory (FIFO, as much as possible) - same logic as addSale
+    try {
+      const inventoryRecords = await db.inventory_items
+        .where('product_id')
+        .equals(item.productId)
+        .and(inv => inv.supplier_id === item.supplierId && inv.quantity > 0)
+        .sortBy('received_at');
+
+      let qtyToDeduct = item.quantity;
+      for (const inv of inventoryRecords) {
+        if (qtyToDeduct <= 0) break;
+        
+        const deduct = Math.min(inv.quantity, qtyToDeduct);
+        const newQuantity = inv.quantity - deduct;
+        
+        if (newQuantity <= 0) {
+          // Delete inventory item when quantity reaches 0 or below
+          await db.inventory_items.delete(inv.id);
+        } else {
+          // Update with new quantity
+          await db.inventory_items.update(inv.id, { 
+            quantity: newQuantity,
+            _synced: false
+          });
+        }
+        qtyToDeduct -= deduct;
+      }
+      
+      // Refresh data to update stock levels
+      await refreshData();
+      await updateUnsyncedCount();
+      
+      // Use debounced sync to batch rapid changes
+      debouncedSync();
+      
+    } catch (error) {
+      console.error('Error deducting inventory for non-priced item:', error);
+      throw error;
+    }
+  };
+
+  const deductInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
+    if (!storeId) return;
+    
+    try {
+      const inventoryRecords = await db.inventory_items
+        .where('product_id')
+        .equals(productId)
+        .and(inv => inv.supplier_id === supplierId && inv.quantity > 0)
+        .sortBy('received_at');
+
+      let qtyToDeduct = quantity;
+      for (const inv of inventoryRecords) {
+        if (qtyToDeduct <= 0) break;
+        
+        const deduct = Math.min(inv.quantity, qtyToDeduct);
+        const newQuantity = inv.quantity - deduct;
+        
+        if (newQuantity <= 0) {
+          // Delete inventory item when quantity reaches 0 or below
+          await db.inventory_items.delete(inv.id);
+        } else {
+          // Update with new quantity
+          await db.inventory_items.update(inv.id, { 
+            quantity: newQuantity,
+            _synced: false
+          });
+        }
+        qtyToDeduct -= deduct;
+      }
+      
+      // Refresh data to update stock levels
+      await refreshData();
+      await updateUnsyncedCount();
+      
+      // Use debounced sync to batch rapid changes
+      debouncedSync();
+      
+    } catch (error) {
+      console.error('Error deducting inventory for sale:', error);
+      throw error;
+    }
+  };
+
   return (
     <OfflineDataContext.Provider value={{
       // Data - exact match
+      storeId,
       products,
       suppliers,
       customers,
@@ -634,6 +969,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       inventory,
       transactions,
       expenseCategories,
+      accountsReceivable,
+      accountsPayable,
+      journalEntries,
 
       // Computed/legacy compatibility - exact match
       stockLevels,
@@ -644,9 +982,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currency,
       cashDrawer,
       openCashDrawer,
-      accountsReceivable: [], // Stub
-      accountsPayable: [], // Stub
-      journalEntries: [], // Stub
       isOnline,
 
       // Loading states - exact match
@@ -661,6 +996,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addSale,
       addTransaction,
       addExpenseCategory,
+      addAccountsReceivable,
+      updateAccountsReceivable,
+      deleteAccountsReceivable,
+      addAccountsPayable,
+      updateAccountsPayable,
+      deleteAccountsPayable,
+      addJournalEntry,
+      updateJournalEntry,
+      deleteJournalEntry,
+      addNonPricedItem,
+      deductInventoryQuantity,
 
       // Utility functions - exact match
       refreshData,

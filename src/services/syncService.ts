@@ -172,6 +172,7 @@ export class SyncService {
           if (error) {
             console.error(`❌ Upload failed for ${tableName}:`, error);
             console.error('📋 Failed batch data:', cleanedBatch);
+            console.error('🔍 First record fields:', Object.keys(cleanedBatch[0] || {}));
             result.errors.push(`Upload failed for ${tableName}: ${error.message}`);
             
             // For 409 conflicts, try individual uploads to identify problematic records
@@ -429,6 +430,33 @@ export class SyncService {
       delete cleanRecord.updated_at;
     }
     
+    // Remove created_by from sale_items as it doesn't exist in the database schema
+    // Also handle store_id column issue - remove if it causes schema errors
+    if (tableName === 'sale_items') {
+      delete cleanRecord.created_by;
+      // Remove store_id if it's causing schema cache issues
+      // The store_id should be derived from the parent sale's store_id
+      delete cleanRecord.store_id;
+    }
+    
+    // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow
+    // Supabase numeric field has precision 10, scale 2 (max: 99,999,999.99)
+    // Only convert LBP amounts that exceed the database precision limit
+    if (tableName === 'transactions' && cleanRecord.currency === 'LBP' && cleanRecord.amount) {
+      const USD_TO_LBP_RATE = 89500;
+      const originalAmount = cleanRecord.amount;
+      
+      // Only convert if amount exceeds database precision limit
+      if (originalAmount > 99999999) {
+        cleanRecord.amount = originalAmount / USD_TO_LBP_RATE;
+        // Change currency to USD for the converted amount
+        cleanRecord.currency = 'USD';
+        // Add a note in the description about the conversion
+        cleanRecord.description = `${cleanRecord.description} (Originally ${originalAmount.toLocaleString()} LBP)`;
+        console.log(`💱 Converting large LBP transaction for upload: ${originalAmount.toLocaleString()} LBP → $${cleanRecord.amount.toFixed(2)} USD`);
+      }
+    }
+    
     return cleanRecord;
   }
 
@@ -438,7 +466,7 @@ export class SyncService {
   private getTableFromRecord(record: any): string {
     // Simple heuristic based on record properties
     if (record.product_id && record.supplier_id && record.received_at) return 'inventory_items';
-    if (record.sale_id && record.product_name) return 'sale_items';
+    if (record.product_name && record.supplier_name) return 'sale_items';
     if (record.customer_id !== undefined && record.subtotal !== undefined) return 'sales';
     if (record.type && record.amount && record.currency) return 'transactions';
     if (record.category && !record.amount) return 'products';

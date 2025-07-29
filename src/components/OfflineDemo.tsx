@@ -8,8 +8,7 @@ export default function OfflineDemo() {
     addProduct, 
     addCustomer, 
     addInventoryItem, 
-    getSyncStatus, 
-    sync,
+    getSyncStatus,
     products,
     customers,
     inventory 
@@ -61,6 +60,7 @@ export default function OfflineDemo() {
           supplier_id: products[0].id, // Using product ID as placeholder
           type: 'cash',
           quantity: 100,
+          received_quantity: 100,
           unit: 'piece',
           weight: 50.5,
           price: 10.99,
@@ -73,15 +73,12 @@ export default function OfflineDemo() {
       addLogEntry(`📊 Current unsynced items: ${unsyncedCount}`);
       
       if (isOnline && unsyncedCount > 0) {
-        addLogEntry('⬆️ Triggering sync to cloud...');
-        const result = await sync();
-        if (result.success) {
-          addLogEntry(`✅ Sync completed! Uploaded: ${result.synced.uploaded}, Downloaded: ${result.synced.downloaded}`);
-        } else {
-          addLogEntry(`❌ Sync failed: ${result.errors.join(', ')}`);
-        }
+        addLogEntry('⬆️ Auto-sync will handle these changes automatically...');
+        addLogEntry('🔄 In real usage, no manual sync needed - everything syncs in background!');
       } else if (!isOnline) {
-        addLogEntry('📱 Working offline - data will sync when connection returns!');
+        addLogEntry('📱 Working offline - data will auto-sync when connection returns!');
+      } else {
+        addLogEntry('✅ All data synced! Auto-sync keeps everything up to date.');
       }
       
     } catch (error) {
