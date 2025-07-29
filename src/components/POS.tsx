@@ -82,7 +82,7 @@ export default function POS() {
 
   const createNewTab = () => {
     const newTab: BillTab = {
-      id: Date.now().toString(),
+      id: uuidv4(),
       name: `Bill ${activeTabs.length + 1}`,
       cart: [],
       selectedCustomer: '',
@@ -203,7 +203,7 @@ export default function POS() {
           .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime())[0];
         
         const newItem: SaleItem = {
-          id: Date.now().toString(),
+          id: uuidv4(),
           productId,
           productName: product.name,
           supplierId,
@@ -211,7 +211,7 @@ export default function POS() {
           quantity: 1,
           weight: undefined, // Weight will be entered manually during sale
           unitPrice: oldestInventoryItem?.price || 0.00, // Use price from oldest inventory item
-          totalPrice: oldestInventoryItem?.price || 0.00,
+          totalPrice: Math.round((oldestInventoryItem?.price || 0.00) * 100) / 100,
           notes: '',
           inventoryType: oldestInventoryItem?.type || 'cash' // Track the inventory type
         };
@@ -243,9 +243,9 @@ export default function POS() {
         }
         if (field === 'quantity' || field === 'unitPrice' || field === 'weight') {
           if (updatedItem.weight && updatedItem.weight > 0) {
-            updatedItem.totalPrice = updatedItem.weight * updatedItem.unitPrice;
+            updatedItem.totalPrice = Math.round(updatedItem.weight * updatedItem.unitPrice * 100) / 100;
           } else {
-            updatedItem.totalPrice = updatedItem.quantity * updatedItem.unitPrice;
+            updatedItem.totalPrice = Math.round(updatedItem.quantity * updatedItem.unitPrice * 100) / 100;
           }
         }
         return updatedItem;
@@ -261,8 +261,8 @@ export default function POS() {
   };
 
   const subtotal = activeTab.cart.reduce((sum, item) => sum + item.totalPrice, 0);
-  const total = subtotal;
-  const change = activeTab.amountReceived ? parseFloat(activeTab.amountReceived) - total : 0;
+  const total = Math.round(subtotal * 100) / 100; // Fix floating point precision
+  const change = activeTab.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
   const handleCheckout = async () => {
