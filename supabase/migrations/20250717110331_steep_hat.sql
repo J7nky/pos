@@ -123,7 +123,6 @@ CREATE TABLE IF NOT EXISTS sales (
 -- Create sale_items table
 CREATE TABLE IF NOT EXISTS sale_items (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-  sale_id uuid NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
   product_id uuid NOT NULL REFERENCES products(id),
   product_name text NOT NULL,
   supplier_id uuid NOT NULL REFERENCES suppliers(id),
@@ -133,6 +132,7 @@ CREATE TABLE IF NOT EXISTS sale_items (
   unit_price decimal(10,2) NOT NULL,
   total_price decimal(10,2) NOT NULL,
   notes text,
+  store_id uuid NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
   created_at timestamptz DEFAULT now()
 );
 
@@ -206,7 +206,7 @@ CREATE POLICY "Users can access own store sales" ON sales
 
 CREATE POLICY "Users can access own store sale items" ON sale_items
   FOR ALL TO authenticated
-  USING (sale_id IN (SELECT id FROM sales WHERE store_id IN (SELECT store_id FROM users WHERE id = auth.uid())));
+  USING (store_id IN (SELECT store_id FROM users WHERE id = auth.uid()));
 
 CREATE POLICY "Users can access own store expense categories" ON expense_categories
   FOR ALL TO authenticated
@@ -225,7 +225,7 @@ CREATE INDEX IF NOT EXISTS idx_inventory_items_store_id ON inventory_items(store
 CREATE INDEX IF NOT EXISTS idx_inventory_items_product_id ON inventory_items(product_id);
 CREATE INDEX IF NOT EXISTS idx_sales_store_id ON sales(store_id);
 CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
-CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);
+CREATE INDEX IF NOT EXISTS idx_sale_items_store_id ON sale_items(store_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_store_id ON transactions(store_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
 

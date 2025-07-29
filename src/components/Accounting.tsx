@@ -3,6 +3,8 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from './common/SearchableSelect';
+import { debugSalesData, validateSalesDataStructure, generateSalesDataReport } from '../utils/salesDataDebugger';
+import { cleanupAndValidateSaleItems } from '../utils/cleanupSaleItemsData';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { 
   Calculator,
@@ -2086,6 +2088,79 @@ export default function Accounting() {
     }
   };
 
+  const debugSalesDataIssues = () => {
+    try {
+      console.log('🔍 Starting comprehensive sales data debug...');
+      
+      // Generate comprehensive report
+      const report = generateSalesDataReport(inventory, sales, products, suppliers);
+      
+      // Validate sales data structure
+      const validation = validateSalesDataStructure(sales);
+      
+      // Show debug summary
+      showToast(`Debug complete: ${report.itemsWithSales}/${report.totalInventoryItems} items have sales. Check console for details.`, 'success');
+      
+      console.log('📋 Sales Data Debug Summary:');
+      console.log(`- Total Inventory Items: ${report.totalInventoryItems}`);
+      console.log(`- Items With Sales: ${report.itemsWithSales}`);
+      console.log(`- Items Without Sales: ${report.itemsWithoutSales}`);
+      console.log(`- Total Sales: ${report.totalSales}`);
+      console.log(`- Valid Sales: ${report.validSales}`);
+      console.log(`- Invalid Sales: ${validation.invalid}`);
+      
+      if (validation.issues.length > 0) {
+        console.log('⚠️ Data Issues Found:');
+        validation.issues.forEach(issue => console.log(`  - ${issue}`));
+      }
+
+      if (report.topProductsBySales.length > 0) {
+        console.log('🏆 Top Products by Sales:');
+        report.topProductsBySales.forEach((product, index) => 
+          console.log(`  ${index + 1}. ${product.productName}: ${product.salesCount} sales`)
+        );
+      }
+
+    } catch (error) {
+      console.error('Error during sales data debug:', error);
+      showToast('Error during debug analysis. Check console for details.', 'error');
+    }
+  };
+
+  const cleanupSaleItemsData = async () => {
+    try {
+      console.log('🧹 Starting sale_items data cleanup...');
+      showToast('Cleaning up sale_items data...', 'success');
+      
+      const result = await cleanupAndValidateSaleItems();
+      
+      const { cleanup, validation } = result;
+      
+      console.log('🔍 Cleanup Results:');
+      console.log(`- Records Found: ${cleanup.recordsFound}`);
+      console.log(`- Records Cleaned: ${cleanup.recordsCleaned}`);
+      console.log(`- Cleanup Errors: ${cleanup.errors.length}`);
+      
+      console.log('🔍 Validation Results:');
+      console.log(`- Total Records: ${validation.totalRecords}`);
+      console.log(`- Valid Records: ${validation.validRecords}`);
+      console.log(`- Invalid Records: ${validation.invalidRecords}`);
+      console.log(`- Issues Found: ${validation.issues.length}`);
+      
+      if (cleanup.recordsCleaned > 0) {
+        showToast(`Cleanup complete: ${cleanup.recordsCleaned} records fixed. Check console for details.`, 'success');
+      } else if (validation.issues.length > 0) {
+        showToast(`Validation found ${validation.issues.length} issues. Check console for details.`, 'error');
+      } else {
+        showToast('All sale_items data is clean and valid!', 'success');
+      }
+
+    } catch (error) {
+      console.error('Error during sale_items cleanup:', error);
+      showToast('Error during cleanup. Check console for details.', 'error');
+    }
+  };
+
   return (
     <div className="p-6">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
@@ -3384,6 +3459,22 @@ export default function Accounting() {
             </div>
             <div className="flex items-center space-x-2">
               <button
+                onClick={cleanupSaleItemsData}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center"
+                title="Clean up sale_items data structure issues - fixes sync errors"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Fix Sync
+              </button>
+              <button
+                onClick={debugSalesDataIssues}
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center"
+                title="Debug sales data issues - check console for detailed analysis"
+              >
+                <AlertCircle className="w-4 h-4 mr-2" />
+                Debug Sales
+              </button>
+              <button
                 onClick={updateInventoryItemsWithReceivedQuantity}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
               >
@@ -4359,132 +4450,262 @@ export default function Accounting() {
 
       {/* Received Bill Sales Logs Modal */}
       {showReceivedBillSalesLogs && selectedReceivedBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900">Sales Logs</h2>
-                  <p className="text-sm text-gray-600 mt-1">
-                    {selectedReceivedBill.productName} - {selectedReceivedBill.supplierName}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowReceivedBillSalesLogs(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-            </div>
-            <div className="p-6">
-              <div className="mb-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="bg-blue-50 p-3 rounded-lg">
-                    <p className="text-sm text-blue-700">Total Sales</p>
-                    <p className="text-lg font-bold text-blue-900">{selectedReceivedBill.saleCount}</p>
-                  </div>
-                  <div className="bg-green-50 p-3 rounded-lg">
-                    <p className="text-sm text-green-700">Total Revenue</p>
-                    <p className="text-lg font-bold text-green-900">{formatCurrency(selectedReceivedBill.totalRevenue)}</p>
-                  </div>
-                  <div className="bg-purple-50 p-3 rounded-lg">
-                    <p className="text-sm text-purple-700">Sold Quantity</p>
-                    <p className="text-lg font-bold text-purple-900">{selectedReceivedBill.totalSoldQuantity} {selectedReceivedBill.unit}</p>
-                  </div>
-                  <div className="bg-orange-50 p-3 rounded-lg">
-                    <p className="text-sm text-orange-700">Avg Price</p>
-                    <p className="text-lg font-bold text-orange-900">{formatCurrency(selectedReceivedBill.avgUnitPrice)}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sale ID</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Price</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Method</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {selectedReceivedBill.relatedSales.map((sale: any) => {
-                      const saleItems = sale.items?.filter((item: any) => 
-                        item.productId === selectedReceivedBill.productId && 
-                        item.supplierId === selectedReceivedBill.supplierId
-                      ) || [];
-                      
-                      return saleItems.map((item: any, index: number) => (
-                        <tr key={`${sale.id}-${index}`} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">
-                              {new Date(sale.created_at || sale.createdAt).toLocaleDateString()}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900">{sale.id}</div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">
-                              {customers.find(c => c.id === sale.customer_id)?.name || 'Walk-in Customer'}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">
-                              {item.quantity} {selectedReceivedBill.unit}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">
-                              {formatCurrency(item.unitPrice)}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900">
-                              {formatCurrency(item.totalPrice)}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              sale.payment_method === 'cash' ? 'bg-green-100 text-green-800' :
-                              sale.payment_method === 'card' ? 'bg-blue-100 text-blue-800' :
-                              'bg-yellow-100 text-yellow-800'
-                            }`}>
-                              {sale.payment_method}
-                            </span>
-                          </td>
-                        </tr>
-                      ));
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {selectedReceivedBill.relatedSales.length === 0 && (
-                <div className="text-center py-8">
-                  <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No sales recorded for this item yet.</p>
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-              <button
-                onClick={() => setShowReceivedBillSalesLogs(false)}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <ReceivedBillSalesLogsModal 
+          selectedReceivedBill={selectedReceivedBill}
+          setShowReceivedBillSalesLogs={setShowReceivedBillSalesLogs}
+          sales={sales}
+          customers={customers}
+          formatCurrency={formatCurrency}
+        />
       )}
     </div>
   );
+
+  // Received Bill Sales Logs Modal Component
+  function ReceivedBillSalesLogsModal({ 
+    selectedReceivedBill, 
+    setShowReceivedBillSalesLogs, 
+    sales, 
+    customers, 
+    formatCurrency 
+  }: {
+    selectedReceivedBill: any;
+    setShowReceivedBillSalesLogs: (show: boolean) => void;
+    sales: any[];
+    customers: any[];
+    formatCurrency: (amount: number) => string;
+  }) {
+    // Process sales data to get detailed sale items for this specific inventory item
+    const processedSalesData = useMemo(() => {
+          if (!selectedReceivedBill.relatedSales || !Array.isArray(selectedReceivedBill.relatedSales)) {
+            return [];
+          }
+
+          const salesDetails: any[] = [];
+          
+          selectedReceivedBill.relatedSales.forEach((sale: any) => {
+            // Handle both nested items structure and direct sale items
+            let saleItems: any[] = [];
+            
+            if (sale.items && Array.isArray(sale.items)) {
+              // New structure with nested items
+              saleItems = sale.items;
+            } else {
+              // Check if this sale has items stored separately (old structure compatibility)
+              // For now, we'll try to find sale items from the raw sales data
+              const fullSale = sales.find(s => s.id === sale.id);
+              if (fullSale && fullSale.items) {
+                saleItems = fullSale.items;
+              }
+            }
+
+            // Filter items that match this specific product and supplier
+            const matchingItems = saleItems.filter((item: any) => {
+              const productMatch = item.productId === selectedReceivedBill.productId || 
+                                  item.product_id === selectedReceivedBill.productId;
+              const supplierMatch = item.supplierId === selectedReceivedBill.supplierId || 
+                                   item.supplier_id === selectedReceivedBill.supplierId;
+              return productMatch && supplierMatch;
+            });
+
+            matchingItems.forEach((item: any) => {
+              salesDetails.push({
+                saleId: sale.id,
+                saleDate: sale.created_at || sale.createdAt,
+                customerId: sale.customer_id,
+                customerName: customers.find(c => c.id === sale.customer_id)?.name || 'Walk-in Customer',
+                quantity: item.quantity,
+                weight: item.weight,
+                unitPrice: item.unitPrice || item.unit_price,
+                totalPrice: item.totalPrice || item.total_price,
+                paymentMethod: sale.payment_method || sale.paymentMethod || 'cash',
+                notes: item.notes,
+                productName: item.productName || item.product_name || selectedReceivedBill.productName,
+                supplierName: item.supplierName || item.supplier_name || selectedReceivedBill.supplierName
+              });
+            });
+          });
+
+          return salesDetails.sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
+        }, [selectedReceivedBill, sales]);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900">Sales Logs</h2>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {selectedReceivedBill.productName} - {selectedReceivedBill.supplierName}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Inventory Item ID: {selectedReceivedBill.id}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowReceivedBillSalesLogs(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+              <div className="p-6">
+                <div className="mb-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="bg-blue-50 p-3 rounded-lg">
+                      <p className="text-sm text-blue-700">Total Sales</p>
+                      <p className="text-lg font-bold text-blue-900">{processedSalesData.length}</p>
+                    </div>
+                    <div className="bg-green-50 p-3 rounded-lg">
+                      <p className="text-sm text-green-700">Total Revenue</p>
+                      <p className="text-lg font-bold text-green-900">
+                        {formatCurrency(processedSalesData.reduce((sum, item) => sum + (item.totalPrice || 0), 0))}
+                      </p>
+                    </div>
+                    <div className="bg-purple-50 p-3 rounded-lg">
+                      <p className="text-sm text-purple-700">Sold Quantity</p>
+                      <p className="text-lg font-bold text-purple-900">
+                        {processedSalesData.reduce((sum, item) => sum + (item.quantity || 0), 0)} {selectedReceivedBill.unit}
+                      </p>
+                    </div>
+                    <div className="bg-orange-50 p-3 rounded-lg">
+                      <p className="text-sm text-orange-700">Avg Price</p>
+                      <p className="text-lg font-bold text-orange-900">
+                        {formatCurrency(processedSalesData.length > 0 ? 
+                          processedSalesData.reduce((sum, item) => sum + (item.unitPrice || 0), 0) / processedSalesData.length : 0
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {processedSalesData.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sale ID</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weight</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Price</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Method</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {processedSalesData.map((item, index) => (
+                          <tr key={`${item.saleId}-${index}`} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {new Date(item.saleDate).toLocaleDateString()}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {new Date(item.saleDate).toLocaleTimeString()}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm font-medium text-gray-900 font-mono">
+                                {item.saleId.slice(-8).toUpperCase()}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">{item.customerName}</div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {item.quantity} {selectedReceivedBill.unit}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {item.weight ? `${item.weight} kg` : '-'}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {formatCurrency(item.unitPrice || 0)}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm font-medium text-gray-900">
+                                {formatCurrency(item.totalPrice || 0)}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                item.paymentMethod === 'cash' ? 'bg-green-100 text-green-800' :
+                                item.paymentMethod === 'card' ? 'bg-blue-100 text-blue-800' :
+                                item.paymentMethod === 'credit' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {item.paymentMethod}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Sales Recorded</h3>
+                    <p className="text-gray-500 mb-4">
+                      No sales have been recorded for this inventory item yet.
+                    </p>
+                    <div className="text-sm text-gray-400 bg-gray-50 p-4 rounded-lg">
+                      <p><strong>Debug Info:</strong></p>
+                      <p>Product ID: {selectedReceivedBill.productId}</p>
+                      <p>Supplier ID: {selectedReceivedBill.supplierId}</p>
+                      <p>Related Sales Count: {selectedReceivedBill.relatedSales?.length || 0}</p>
+                      <p>Total Sales in System: {sales.length}</p>
+                      <p>Inventory Received: {new Date(selectedReceivedBill.receivedAt).toLocaleDateString()}</p>
+                      {(() => {
+                        const debugInfo = debugSalesData(
+                          { 
+                            id: selectedReceivedBill.id, 
+                            received_at: selectedReceivedBill.receivedAt,
+                            created_at: selectedReceivedBill.receivedAt,
+                            product_id: selectedReceivedBill.productId,
+                            supplier_id: selectedReceivedBill.supplierId
+                          },
+                          sales,
+                          selectedReceivedBill.productId,
+                          selectedReceivedBill.supplierId
+                        );
+                        return (
+                          <div className="mt-2 pt-2 border-t border-gray-300">
+                            <p><strong>Detailed Analysis:</strong></p>
+                            <p>Sales after received date: {debugInfo.relatedSalesCount}</p>
+                            <p>Sales with valid items: {debugInfo.relatedSalesWithItems}</p>
+                            <p>Matching items found: {debugInfo.matchingItemsCount}</p>
+                            <p>Product matches: {debugInfo.debugDetails.matchingCriteria.productMatches}</p>
+                            <p>Supplier matches: {debugInfo.debugDetails.matchingCriteria.supplierMatches}</p>
+                            <p>Both match: {debugInfo.debugDetails.matchingCriteria.bothMatch}</p>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-between">
+                <div className="text-sm text-gray-500">
+                  Showing {processedSalesData.length} sale record{processedSalesData.length !== 1 ? 's' : ''}
+                </div>
+                <button
+                  onClick={() => setShowReceivedBillSalesLogs(false)}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+    );
+  }
 }
-
-

@@ -32,7 +32,6 @@ export interface Supplier {
   phone: string;
   email: string;
   address: string;
-  type: 'commission' | 'cash';
   isActive: boolean;
   createdAt: string;
 }
@@ -206,4 +205,27 @@ export interface StockLevel {
     supplierName: string;
     quantity: number;
   }>;
+}
+
+export interface ChartOfAccount {
+  id: string;
+  code: string;
+  name: string;
+  type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+  subType: string;
+  balance: number;
+  description?: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface AuditTrail {
+  id: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  userId: string;
+  timestamp: string;
+  changes: Record<string, any>;
+  metadata: Record<string, any>;
 }

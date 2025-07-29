@@ -8,7 +8,7 @@ ADD COLUMN IF NOT EXISTS store_id uuid REFERENCES stores(id) ON DELETE CASCADE;
 UPDATE sale_items 
 SET store_id = sales.store_id 
 FROM sales 
-WHERE sale_items.sale_id = sales.id;
+WHERE sale_items.id = sales.id;
 
 -- Make store_id NOT NULL after populating existing records
 ALTER TABLE sale_items 

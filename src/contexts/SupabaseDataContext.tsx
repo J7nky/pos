@@ -48,7 +48,7 @@ interface SupabaseDataContextType {
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
-  addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]) => Promise<void>;
+  addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'id'>[]) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: Omit<Tables['expense_categories']['Insert'], 'store_id'>) => Promise<void>;
   addNonPricedItem: (item: any) => Promise<void>;
@@ -234,20 +234,16 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
 
   const addSale = async (
     sale: Omit<Tables['sales']['Insert'], 'store_id'>, 
-    items: Omit<Tables['sale_items']['Insert'], 'sale_id'>[]
+    items: Omit<Tables['sale_items']['Insert'], 'id'>[]
   ) => {
     if (!storeId) return;
     
     setLoading(prev => ({ ...prev, sales: true }));
     try {
-      // Ensure each sale item has a sale_id before passing to createSale
       const saleWithStore = { ...sale, store_id: storeId };
       const newSale = await SupabaseService.createSale(
         saleWithStore,
-        items.map(item => ({
-          ...item,
-          sale_id: saleWithStore.id as string, // Ensure sale_id is present; may need to adjust if id is generated after insert
-        }))
+        items
       );
       if (newSale) {
         // Refresh sales to get joined data
