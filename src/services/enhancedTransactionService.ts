@@ -74,7 +74,7 @@ export class EnhancedTransactionService {
 
       const balanceBefore = customer.currentDebt;
       const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
-      const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
+      const balanceAfter = balanceBefore - amountInUSD; // Allow negative debt (customer credit)
 
       // Create correlation ID for this transaction group
       const correlationId = context.correlationId || this.generateCorrelationId();
