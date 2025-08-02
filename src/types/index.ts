@@ -22,7 +22,6 @@ export interface Product {
   name: string;
   category: string;
   image: string;
-  isActive: boolean;
   createdAt: string;
 }
 
@@ -30,9 +29,10 @@ export interface Supplier {
   id: string;
   name: string;
   phone: string;
-  email: string;
+  email: string | null; // Updated to match database schema
   address: string;
   isActive: boolean;
+  balance: number | null; // Updated to match database schema
   createdAt: string;
 }
 
@@ -58,41 +58,27 @@ export interface Customer {
   id: string;
   name: string;
   phone: string;
-  email?: string;
-  address?: string;
-  currentDebt: number;
+  email: string | null; // Updated to match database schema
+  address: string | null; // Updated to match database schema
+  balance: number; // Changed from currentDebt to balance to match Supabase schema
   isActive: boolean;
   createdAt: string;
 }
 
 export interface SaleItem {
   id: string;
+  inventoryItemId: string; // Added to match Supabase schema
   productId: string;
-  productName: string;
   supplierId: string;
-  supplierName: string;
-  quantity: number;
+  customerId?: string; // Made optional to match Supabase schema
   weight?: number;
   unitPrice: number;
-  totalPrice: number;
+  receivedValue: number; // Matches received_value in database
   notes?: string;
-  inventoryType?: 'commission' | 'cash'; // Track which type of inventory this item came from
+  createdBy?: string; // Added to match Supabase schema
 }
 
-export interface Sale {
-  id: string;
-  customerId?: string;
-  items: SaleItem[];
-  subtotal: number;
-  total: number;
-  paymentMethod: 'cash' | 'card' | 'credit';
-  amountPaid: number;
-  amountDue: number;
-  status: 'completed' | 'pending' | 'cancelled';
-  notes?: string;
-  createdAt: string;
-  createdBy: string;
-}
+
 
 export interface Payment {
   id: string;
@@ -116,59 +102,6 @@ export interface Transaction {
   reference?: string;
   createdAt: string;
   createdBy: string;
-}
-
-export interface AccountsReceivable {
-  id: string;
-  customerId: string;
-  customerName: string;
-  invoiceNumber: string;
-  amount: number;
-  amountPaid: number;
-  amountDue: number;
-  dueDate: string;
-  status: 'pending' | 'overdue' | 'paid' | 'partial';
-  createdAt: string;
-  lastPaymentDate?: string;
-}
-
-export interface AccountsPayable {
-  id: string;
-  supplierId: string;
-  supplierName: string;
-  invoiceNumber: string;
-  amount: number;
-  amountPaid: number;
-  amountDue: number;
-  dueDate: string;
-  status: 'pending' | 'overdue' | 'paid' | 'partial';
-  description: string;
-  createdAt: string;
-  lastPaymentDate?: string;
-}
-
-export interface ExpenseCategory {
-  id: string;
-  name: string;
-  description?: string;
-  isActive: boolean;
-  createdAt: string;
-}
-
-export interface JournalEntry {
-  id: string;
-  date: string;
-  reference: string;
-  description: string;
-  entries: Array<{
-    account: string;
-    debit: number;
-    credit: number;
-  }>;
-  totalDebit: number;
-  totalCredit: number;
-  createdBy: string;
-  createdAt: string;
 }
 
 export interface CashDrawer {
@@ -205,27 +138,4 @@ export interface StockLevel {
     supplierName: string;
     quantity: number;
   }>;
-}
-
-export interface ChartOfAccount {
-  id: string;
-  code: string;
-  name: string;
-  type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
-  subType: string;
-  balance: number;
-  description?: string;
-  isActive: boolean;
-  createdAt: string;
-}
-
-export interface AuditTrail {
-  id: string;
-  entityType: string;
-  entityId: string;
-  action: string;
-  userId: string;
-  timestamp: string;
-  changes: Record<string, any>;
-  metadata: Record<string, any>;
 }

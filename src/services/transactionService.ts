@@ -72,14 +72,14 @@ export class TransactionService {
         };
       }
 
-      const balanceBefore = customer.currentDebt;
+      const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
       const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
 
       // Update customer balance if requested
       if (options.updateCustomerBalance !== false) {
         const updatedCustomers = customers.map((c: Customer) => 
           c.id === customerId 
-            ? { ...c, currentDebt: balanceAfter }
+            ? { ...c, balance: balanceAfter } // Updated to use balance field
             : c
         );
         localStorage.setItem('erp_customers', JSON.stringify(updatedCustomers));

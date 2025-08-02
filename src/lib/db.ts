@@ -17,7 +17,6 @@ export interface Product extends BaseEntity {
   name: string;
   category: string;
   image: string;
-  is_active: boolean;
 }
 
 export interface Supplier extends BaseEntity {
@@ -27,6 +26,7 @@ export interface Supplier extends BaseEntity {
   address: string;
   type: 'commission' | 'cash';
   is_active: boolean;
+  balance: number | null; // Added balance field to match Supabase schema
 }
 
 export interface  Customer extends BaseEntity {
@@ -34,7 +34,7 @@ export interface  Customer extends BaseEntity {
   phone: string;
   email: string | null;
   address: string | null;
-  current_debt: number;
+  balance: number; // Changed from current_debt to balance to match Supabase schema
   is_active: boolean;
 }
 
@@ -67,17 +67,16 @@ export interface Sale extends Omit<BaseEntity, 'updated_at'> {
   created_by: string;
 }
 
-export interface SaleItem extends Omit<BaseEntity, 'updated_at' | 'store_id'> {
+export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
+  inventory_item_id: string; // Added to match Supabase schema
   product_id: string;
-  product_name: string;
   supplier_id: string;
-  supplier_name: string;
-  quantity: number;
   weight: number | null;
   unit_price: number;
-  total_price: number;
+  received_value: number; // Added to match Supabase schema
   notes: string | null;
-  sale_id: string; // Add this field to link sale items to their parent sale
+  customer_id: string | null; // Added to match Supabase schema
+  created_by: string; // Added to match Supabase schema
 }
 
 export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
@@ -164,7 +163,7 @@ class POSDatabase extends Dexie {
   sales!: Table<Sale, string>;
   sale_items!: Table<SaleItem, string>;
   transactions!: Table<Transaction, string>;
-  expense_categories!: Table<ExpenseCategory, string>;
+
   accounts_receivable!: Table<AccountsReceivable, string>;
   accounts_payable!: Table<AccountsPayable, string>;
   journal_entries!: Table<JournalEntry, string>;
@@ -176,18 +175,18 @@ class POSDatabase extends Dexie {
   constructor() {
     super('POSDatabase');
     
-    this.version(3).stores({
+    this.version(4).stores({
       // Core tables with basic indexing (avoiding boolean field indexing for now)
-      // Tables WITH updated_at: products, suppliers, customers, expense_categories
-      products: 'id, store_id, name, category, is_active, updated_at',
+      // Tables WITH updated_at: products, suppliers, customers
+      products: 'id, store_id, name, category, updated_at',
       suppliers: 'id, store_id, name, type, is_active, updated_at',
       customers: 'id, store_id, name, phone, is_active, updated_at',
-      expense_categories: 'id, store_id, name, is_active, updated_at',
+
       
       // Tables WITHOUT updated_at: inventory_items, sales, sale_items, transactions
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at',
       sales: 'id, store_id, customer_id, created_at, status, created_by',
-      sale_items: 'id, product_id, supplier_id, created_at, sale_id', // Add sale_id index
+      sale_items: 'id, inventory_item_id, product_id, supplier_id, created_at', // Updated to match Supabase schema
       transactions: 'id, store_id, type, category, created_at, created_by',
       accounts_receivable: 'id, store_id, customer_id, invoice_number, due_date, status',
       accounts_payable: 'id, store_id, supplier_id, invoice_number, due_date, status',
@@ -199,11 +198,11 @@ class POSDatabase extends Dexie {
     });
 
     // Add hooks for automatic timestamping and ID generation
-    // Tables WITH updated_at: products, suppliers, customers, expense_categories
+    // Tables WITH updated_at: products, suppliers, customers
     this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.expense_categories.hook('creating', this.addCreateFieldsWithUpdatedAt);
+
     this.accounts_receivable.hook('creating', this.addCreateFields);
     this.accounts_payable.hook('creating', this.addCreateFields);
     this.journal_entries.hook('creating', this.addCreateFields);
@@ -218,7 +217,7 @@ class POSDatabase extends Dexie {
     this.products.hook('updating', this.addUpdateFields);
     this.suppliers.hook('updating', this.addUpdateFields);
     this.customers.hook('updating', this.addUpdateFields);
-    this.expense_categories.hook('updating', this.addUpdateFields);
+
   }
 
   private addCreateFields = (primKey: any, obj: any, trans: any) => {
@@ -348,7 +347,7 @@ class POSDatabase extends Dexie {
     );
     
     const orphanedSaleItems = saleItems.filter(item => 
-      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id) || (item.sale_id && !saleIds.has(item.sale_id))
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id) || (item.id && !saleIds.has(item.id))
     );
     
     const orphanedTransactions = transactions.filter(transaction => 

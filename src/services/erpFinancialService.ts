@@ -107,7 +107,7 @@ export class ERPFinancialService {
         entityId: customer.id,
         entityName: customer.name,
         entityType: 'customer',
-        currentBalance: customer.currentDebt,
+        currentBalance: customer.balance || 0, // Updated to use balance field with null safety
         currency: 'USD',
         lastTransactionDate: customer.createdAt,
         totalTransactions: 0,
@@ -203,16 +203,16 @@ export class ERPFinancialService {
       throw new Error('Customer not found');
     }
 
-    const balanceBefore = customer.currentDebt;
+    const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
     const balanceAfter = balanceBefore + sale.amountDue;
 
     // Update customer balance
     this.updateAccountBalance(customer.id, sale.amountDue, true);
     
-    // Update customer debt in customers array
+    // Update customer balance in customers array
     const customerIndex = this.customers.findIndex(c => c.id === customer.id);
     if (customerIndex !== -1) {
-      this.customers[customerIndex].currentDebt = balanceAfter;
+      this.customers[customerIndex].balance = balanceAfter; // Updated to use balance field
     }
 
     // Create accounts receivable entry
@@ -275,16 +275,16 @@ export class ERPFinancialService {
     }
 
     const amountInUSD = this.convertCurrency(amount, currency, 'USD');
-    const balanceBefore = customer.currentDebt;
+    const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
     const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
 
     // Update customer balance
     this.updateAccountBalance(customer.id, amountInUSD, false);
     
-    // Update customer debt
+    // Update customer balance
     const customerIndex = this.customers.findIndex(c => c.id === customer.id);
     if (customerIndex !== -1) {
-      this.customers[customerIndex].currentDebt = balanceAfter;
+      this.customers[customerIndex].balance = balanceAfter; // Updated to use balance field
     }
 
     // Update cash drawer if cash payment

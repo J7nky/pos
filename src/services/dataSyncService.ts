@@ -46,7 +46,7 @@ export class DataSyncService {
     const tables = [
       'customers', 'suppliers', 'transactions', 'accounts_receivable', 
       'accounts_payable', 'inventory_items', 'sales', 'sale_items', 
-      'expense_categories'
+    
     ];
 
     tables.forEach(table => {
@@ -72,7 +72,7 @@ export class DataSyncService {
           phone: c.phone,
           email: c.email,
           address: c.address,
-          currentDebt: c.current_debt,
+          balance: c.balance,
           isActive: c.is_active,
           createdAt: c.created_at
         }));
@@ -197,7 +197,7 @@ export class DataSyncService {
               quantity: item.quantity,
               weight: item.weight,
               unitPrice: item.unit_price,
-              totalPrice: item.total_price,
+              receivedValue: item.received_value,
               notes: item.notes,
               createdAt: item.created_at
             })),
@@ -216,19 +216,7 @@ export class DataSyncService {
         return mappedSales.length;
       });
 
-      // Sync expense categories
-      await this.syncTable('expense_categories', storeId, async () => {
-        const categories = await db.expense_categories.where('store_id').equals(storeId).toArray();
-        const mappedCategories = categories.map(c => ({
-          id: c.id,
-          name: c.name,
-          description: c.description,
-          isActive: c.is_active,
-          createdAt: c.created_at
-        }));
-        localStorage.setItem('erp_expense_categories', JSON.stringify(mappedCategories));
-        return mappedCategories.length;
-      });
+
 
       console.log('✅ Data synchronization completed successfully');
 

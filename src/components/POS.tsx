@@ -32,8 +32,8 @@ interface BillTab {
 
 export default function POS() {
   const raw = useOfflineData();
-  const products = (raw.products || []).map(p => ({...p, isActive: p.is_active, createdAt: p.created_at})) as Array<any>;
-  const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Array<any>;
+  const products = (raw.products || []).map(p => ({...p, isActive: true, createdAt: p.created_at})) as Array<any>;
+  const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
   const stockLevels = (raw.stockLevels || []) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
@@ -360,16 +360,15 @@ export default function POS() {
           created_by: sale.createdBy,
         },
         activeTab.cart.map(item => ({
+          inventory_item_id: item.inventoryItemId || '', // Added to match Supabase schema
           product_id: item.productId,
-          product_name: item.productName,
           supplier_id: item.supplierId,
-          supplier_name: item.supplierName,
-          quantity: item.quantity,
           weight: item.weight,
           unit_price: item.unitPrice,
-          total_price: item.totalPrice,
+          received_value: item.totalPrice, // Changed from total_price to received_value
           notes: item.notes,
           store_id: raw.storeId,
+          customer_id: activeTab.selectedCustomer || null, // Added to match Supabase schema
           created_at: new Date().toISOString(),
           created_by: userProfile?.id || '',
         }))
@@ -428,7 +427,7 @@ export default function POS() {
         email: customerForm.email || '',
         address: customerForm.address || '',
         is_active: customerForm.isActive ?? true,
-        current_debt: 0,
+        balance: 0,
       });
       await raw.refreshData();
       // Find the new customer by name and phone (best effort)

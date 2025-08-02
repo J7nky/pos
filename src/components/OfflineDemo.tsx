@@ -47,7 +47,7 @@ export default function OfflineDemo() {
         phone: '+1234567890',
         email: 'demo@example.com',
         address: '123 Demo Street',
-        current_debt: 0,
+        balance: 0,
         is_active: true
       });
       addLogEntry('✅ Customer added to local database instantly!');

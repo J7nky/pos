@@ -37,7 +37,7 @@ export default function FinancialProcessor() {
   const { userProfile } = useSupabaseAuth();
   const { currency, formatCurrency, formatCurrencyWithSymbol, getConvertedAmount } = useCurrency();
   
-  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Array<any>;
+  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<any>;
   const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
   const sales = raw.sales;
   const inventory = raw.inventory;
@@ -154,7 +154,7 @@ export default function FinancialProcessor() {
         return customers.filter(c => c.isActive).map(c => ({
           id: c.id,
           name: c.name,
-          balance: c.currentDebt
+          balance: c.balance || 0 // Updated to use balance field with null safety
         }));
       case 'supplier_payment':
         return suppliers.filter(s => s.isActive).map(s => ({

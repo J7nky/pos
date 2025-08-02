@@ -59,8 +59,8 @@ const initialSuppliers: Supplier[] = [
 ];
 
 const initialCustomers: Customer[] = [
-  { id: '1', name: 'Restaurant ABC', phone: '+1234567893', email: 'orders@restaurantabc.com', address: '321 Main Street', currentDebt: 1200, isActive: true, createdAt: '2024-01-01T00:00:00Z' },
-  { id: '2', name: 'Corner Store', phone: '+1234567894', address: '654 Corner Ave', currentDebt: 0, isActive: true, createdAt: '2024-01-01T00:00:00Z' }
+  { id: '1', name: 'Restaurant ABC', phone: '+1234567893', email: 'orders@restaurantabc.com', address: '321 Main Street', balance: 1200, isActive: true, createdAt: '2024-01-01T00:00:00Z' }, // Updated to use balance field
+  { id: '2', name: 'Corner Store', phone: '+1234567894', address: '654 Corner Ave', balance: 0, isActive: true, createdAt: '2024-01-01T00:00:00Z' } // Updated to use balance field
 ];
 
 const initialExpenseCategories: ExpenseCategory[] = [
@@ -102,7 +102,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     const storedAccountsReceivable = localStorage.getItem('erp_accounts_receivable');
     const storedAccountsPayable = localStorage.getItem('erp_accounts_payable');
-    const storedExpenseCategories = localStorage.getItem('erp_expense_categories');
+
     const storedJournalEntries = localStorage.getItem('erp_journal_entries');
     const storedLowStockSettings = localStorage.getItem('erp_low_stock_settings');
     const storedCommissionSettings = localStorage.getItem('erp_commission_settings');
@@ -279,7 +279,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
     const updatedCategories = [...expenseCategories, newCategory];
     setExpenseCategories(updatedCategories);
-    localStorage.setItem('erp_expense_categories', JSON.stringify(updatedCategories));
+    
   };
 
   const addJournalEntry = (entry: Omit<JournalEntry, 'id' | 'createdAt'>) => {

@@ -101,7 +101,7 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
   
   // Processed data
   const customers = useMemo(() => 
-    raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Customer[], 
+            raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Customer[], 
     [raw.customers]
   );
   
@@ -223,8 +223,8 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
   const kpiData = useMemo(() => {
     const totalCustomers = customers.filter(c => c.isActive).length;
     const totalSuppliers = suppliers.filter(s => s.isActive).length;
-    const customersWithDebt = customers.filter(c => c.currentDebt > 0).length;
-    const totalCustomerDebt = customers.reduce((sum, c) => sum + c.currentDebt, 0);
+    const customersWithDebt = customers.filter(c => (c.balance || 0) > 0).length; // Updated to use balance field with null safety
+    const totalCustomerDebt = customers.reduce((sum, c) => sum + (c.balance || 0), 0); // Updated to use balance field with null safety
     const avgDebtPerCustomer = customersWithDebt > 0 ? totalCustomerDebt / customersWithDebt : 0;
     
     const recentTransactions = transactions
