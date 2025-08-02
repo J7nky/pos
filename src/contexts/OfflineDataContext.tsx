@@ -78,17 +78,17 @@ interface OfflineDataContextType {
   deleteJournalEntry: (id: string) => Promise<void>;
   addNonPricedItem: (item: any) => Promise<void>;
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
-
+  
   // Utility functions - exact match
   refreshData: () => Promise<void>;
   getStockLevels: () => any[];
   toggleLowStockAlerts: (enabled: boolean) => void;
   updateLowStockThreshold: (threshold: number) => void;
   updateDefaultCommissionRate: (rate: number) => void;
-  updateCurrency: (currency: 'USD' | 'LBP') => void;
-
+  updateCurrency: (newCurrency: 'USD' | 'LBP') => void;
+  
   // Additional offline-specific features
-  sync: () => Promise<SyncResult>;
+  sync: (isAutomatic?: boolean) => Promise<SyncResult>;
   fullResync: () => Promise<SyncResult>;
   getSyncStatus: () => {
     isOnline: boolean;
@@ -399,7 +399,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Transform sales with joined data
       const salesWithItems = await Promise.all(
         salesData.map(async (sale) => {
-          const items = saleItemsData.filter(item => item.id === sale.id);
+          const items = saleItemsData.filter(item => item.sale_id === sale.id);
           const customer = customersData.find(c => c.id === sale.customer_id);
           
           return {
@@ -640,7 +640,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _synced: false,
       ...item,
       weight: item.weight ?? null,
-      notes: item.notes ?? null
+      notes: item.notes ?? null,
+      sale_id: saleId // Link sale items to their parent sale
       // NOTE: received_quantity field belongs to inventory_items table, NOT sale_items
     }));
 
@@ -1033,4 +1034,4 @@ export function useOfflineData() {
     throw new Error('useOfflineData must be used within an OfflineDataProvider');
   }
   return context;
-} 
+}
