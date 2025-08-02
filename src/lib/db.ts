@@ -77,6 +77,7 @@ export interface SaleItem extends Omit<BaseEntity, 'updated_at' | 'store_id'> {
   unit_price: number;
   total_price: number;
   notes: string | null;
+  sale_id: string; // Add this field to link sale items to their parent sale
 }
 
 export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
@@ -186,7 +187,7 @@ class POSDatabase extends Dexie {
       // Tables WITHOUT updated_at: inventory_items, sales, sale_items, transactions
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at',
       sales: 'id, store_id, customer_id, created_at, status, created_by',
-      sale_items: 'id, product_id, supplier_id, created_at',
+      sale_items: 'id, product_id, supplier_id, created_at, sale_id', // Add sale_id index
       transactions: 'id, store_id, type, category, created_at, created_by',
       accounts_receivable: 'id, store_id, customer_id, invoice_number, due_date, status',
       accounts_payable: 'id, store_id, supplier_id, invoice_number, due_date, status',
@@ -347,7 +348,7 @@ class POSDatabase extends Dexie {
     );
     
     const orphanedSaleItems = saleItems.filter(item => 
-      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id) || (item.sale_id && !saleIds.has(item.sale_id))
     );
     
     const orphanedTransactions = transactions.filter(transaction => 
@@ -414,4 +415,4 @@ export const createBaseEntity = (storeId: string, data: Partial<BaseEntity> = {}
     _synced: false,
     ...data
   };
-}; 
+};
