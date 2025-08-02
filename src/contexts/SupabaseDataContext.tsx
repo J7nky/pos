@@ -15,7 +15,7 @@ interface SupabaseDataContextType {
   sales: any[]; // Complex type with joins
   inventory: any[]; // Complex type with joins
   transactions: Tables['transactions']['Row'][];
-  expenseCategories: Tables['expense_categories']['Row'][];
+
 
   // Computed/legacy compatibility
   stockLevels: any[];
@@ -39,7 +39,7 @@ interface SupabaseDataContextType {
     sales: boolean;
     inventory: boolean;
     transactions: boolean;
-    expenseCategories: boolean;
+
   };
 
   // CRUD operations
@@ -48,9 +48,9 @@ interface SupabaseDataContextType {
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
-  addSale: (sale: Omit<Tables['sales']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'id'>[]) => Promise<void>;
+  addSale: (sale: Omit<Tables['sale_items']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'id'>[]) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
-  addExpenseCategory: (category: Omit<Tables['expense_categories']['Insert'], 'store_id'>) => Promise<void>;
+
   addNonPricedItem: (item: any) => Promise<void>;
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
 
@@ -76,7 +76,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
   const [sales, setSales] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<Tables['transactions']['Row'][]>([]);
-  const [expenseCategories, setExpenseCategories] = useState<Tables['expense_categories']['Row'][]>([]);
+
 
   // Legacy/compatibility states
   const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useLocalStorage<boolean>('lowStockAlertsEnabled', true);
@@ -123,15 +123,14 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
         salesData,
         inventoryData,
         transactionsData,
-        expenseCategoriesData
+        transactionsData
       ] = await Promise.all([
         SupabaseService.getProducts(storeId),
         SupabaseService.getSuppliers(storeId),
         SupabaseService.getCustomers(storeId),
-        SupabaseService.getSales(storeId),
+        SupabaseService.getSaleItems(storeId),
         SupabaseService.getInventoryItems(storeId),
-        SupabaseService.getTransactions(storeId),
-        SupabaseService.getExpenseCategories(storeId)
+        SupabaseService.getTransactions(storeId)
       ]);
 
       setProducts(productsData || []);
@@ -140,7 +139,6 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       setSales(salesData || []);
       setInventory(inventoryData || []);
       setTransactions(transactionsData || []);
-      setExpenseCategories(expenseCategoriesData || []);
     } catch (error) {
       console.error('Error loading data:', error);
     }
@@ -233,21 +231,22 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
   };
 
   const addSale = async (
-    sale: Omit<Tables['sales']['Insert'], 'store_id'>, 
+    sale: Omit<Tables['sale_items']['Insert'], 'store_id'>, 
     items: Omit<Tables['sale_items']['Insert'], 'id'>[]
   ) => {
     if (!storeId) return;
     
     setLoading(prev => ({ ...prev, sales: true }));
     try {
-      const saleWithStore = { ...sale, store_id: storeId };
-      const newSale = await SupabaseService.createSale(
-        saleWithStore,
-        items
+      // Create sale items directly since there's no sales table
+      const saleItemsWithStore = items.map(item => ({ ...item, store_id: storeId }));
+      const newSaleItems = await Promise.all(
+        saleItemsWithStore.map(item => SupabaseService.createSaleItem(item))
       );
-      if (newSale) {
+      
+      if (newSaleItems.length > 0) {
         // Refresh sales to get joined data
-        const salesData = await SupabaseService.getSales(storeId);
+        const salesData = await SupabaseService.getSaleItems(storeId);
         setSales(salesData || []);
       }
     } catch (error) {
@@ -275,22 +274,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addExpenseCategory = async (category: Omit<Tables['expense_categories']['Insert'], 'store_id'>) => {
-    if (!storeId) return;
-    
-    setLoading(prev => ({ ...prev, expenseCategories: true }));
-    try {
-      const newCategory = await SupabaseService.createExpenseCategory({ ...category, store_id: storeId });
-      if (newCategory) {
-        setExpenseCategories(prev => [...prev, newCategory]);
-      }
-    } catch (error) {
-      console.error('Error adding expense category:', error);
-      throw error;
-    } finally {
-      setLoading(prev => ({ ...prev, expenseCategories: false }));
-    }
-  };
+
 
   const addNonPricedItem = async (item: any): Promise<void> => {
     if (!storeId) return;
@@ -451,7 +435,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       sales,
       inventory,
       transactions,
-      expenseCategories,
+      
       stockLevels,
       setStockLevels,
       lowStockAlertsEnabled,
@@ -472,7 +456,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       addInventoryItem,
       addSale,
       addTransaction,
-      addExpenseCategory,
+      
       refreshData,
       getStockLevels: computeStockLevels, // Expose the computed function
       toggleLowStockAlerts,

@@ -21,7 +21,7 @@ const SYNC_TABLES = [
   'sales',
   'sale_items',
   'transactions',
-  'expense_categories'
+
 ] as const;
 
 type SyncTable = typeof SYNC_TABLES[number];
@@ -253,8 +253,8 @@ export class SyncService {
         }
 
         // Determine the timestamp field for each table
-        // Only these tables have updated_at: products, suppliers, customers, expense_categories
-        const hasUpdatedAt = ['products', 'suppliers', 'customers', 'expense_categories'].includes(tableName);
+            // Only these tables have updated_at: products, suppliers, customers
+    const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
         const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
 
         // Get remote changes since last sync
@@ -331,8 +331,8 @@ export class SyncService {
     }
 
     // Determine the timestamp field for this table
-    // Only these tables have updated_at: products, suppliers, customers, expense_categories
-    const hasUpdatedAt = ['products', 'suppliers', 'customers', 'expense_categories'].includes(tableName);
+    // Only these tables have updated_at: products, suppliers, customers
+    const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
     const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
 
     // If local record is modified, apply conflict resolution strategy
@@ -343,6 +343,7 @@ export class SyncService {
     if (remoteModifiedAt >= localModifiedAt) {
       // Keep remote version, mark local changes as pending sync
       await db.addPendingSync(tableName, localRecord.id, 'update', localRecord);
+      
       await (db as any)[tableName].put({
         ...remoteRecord,
         _synced: true,
@@ -422,7 +423,7 @@ export class SyncService {
     const { _synced, _lastSyncedAt, _deleted, ...cleanRecord } = record;
     
     // Remove updated_at for tables that don't have it in Supabase
-    // Only these tables have updated_at: products, suppliers, customers, expense_categories
+    // Only these tables have updated_at: products, suppliers, customers
     const tableName = this.getTableFromRecord(record);
     const tablesWithoutUpdatedAt = ['inventory_items', 'sales', 'sale_items', 'transactions'];
     
@@ -430,8 +431,7 @@ export class SyncService {
       delete cleanRecord.updated_at;
     }
     
-    // Remove created_by from sale_items as it doesn't exist in the database schema
-    // Also handle store_id column issue - remove if it causes schema errors
+    // Handle sale_items specific field removals
     if (tableName === 'sale_items') {
       delete cleanRecord.created_by;
       // Remove store_id if it's causing schema cache issues
@@ -466,13 +466,13 @@ export class SyncService {
   private getTableFromRecord(record: any): string {
     // Simple heuristic based on record properties
     if (record.product_id && record.supplier_id && record.received_at) return 'inventory_items';
-    if (record.product_name && record.supplier_name) return 'sale_items';
+    if (record.inventory_item_id && record.product_id && record.supplier_id) return 'sale_items';
     if (record.customer_id !== undefined && record.subtotal !== undefined) return 'sales';
     if (record.type && record.amount && record.currency) return 'transactions';
     if (record.category && !record.amount) return 'products';
     if (record.phone && record.type) return 'suppliers';
-    if (record.phone && record.current_debt !== undefined) return 'customers';
-    if (record.description !== undefined) return 'expense_categories';
+    if (record.phone && record.balance !== undefined) return 'customers';
+
     return 'unknown';
   }
 
@@ -528,16 +528,16 @@ export class SyncService {
 
       if (error) {
         result.errors.push(`Download failed: ${error.message}`);
-             } else if (remoteRecords) {
-         for (const record of remoteRecords as any[]) {
-           await (db as any)[tableName].put({
-             ...record,
-             _synced: true,
-             _lastSyncedAt: new Date().toISOString()
-           });
-         }
-         result.synced.downloaded = remoteRecords.length;
-       }
+      } else if (remoteRecords) {
+        for (const record of remoteRecords as any[]) {
+          await (db as any)[tableName].put({
+            ...record,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        }
+        result.synced.downloaded = remoteRecords.length;
+      }
 
       result.success = result.errors.length === 0;
 

@@ -21,7 +21,7 @@ export interface POSSaleItem {
   quantity: number;
   weight?: number | null;
   unit_price: number;
-  total_price: number;
+  received_value: number;
   notes?: string | null;
   store_id: string;
   created_at: string;
@@ -76,7 +76,7 @@ export class POSAccountingIntegration {
           quantity: item.quantity,
           weight: item.weight || undefined,
           unitPrice: item.unit_price,
-          totalPrice: item.total_price,
+          receivedValue: item.received_value,
           notes: item.notes || ''
         })),
         subtotal: saleData.subtotal,
@@ -213,7 +213,7 @@ export class POSAccountingIntegration {
     creditStatus: {
       available: number;
       limit: number;
-      currentDebt: number;
+      balance: number; // Updated to use balance field instead of currentDebt
       isOverLimit: boolean;
       agingDays: number;
     };
@@ -239,8 +239,8 @@ export class POSAccountingIntegration {
         creditStatus: {
           available: enhancedCustomer.availableCredit,
           limit: enhancedCustomer.creditLimit,
-          currentDebt: enhancedCustomer.currentDebt || 0,
-          isOverLimit: (enhancedCustomer.currentDebt || 0) > enhancedCustomer.creditLimit,
+          balance: enhancedCustomer.balance || 0, // Updated to use balance field with null safety
+          isOverLimit: (enhancedCustomer.balance || 0) > enhancedCustomer.creditLimit, // Updated to use balance field
           agingDays: enhancedCustomer.daysSinceLastPayment
         },
         recentTransactions
@@ -337,11 +337,11 @@ export class POSAccountingIntegration {
     todaysTransactionCount: number;
     cashDrawerAmount: number;
     pendingReceivables: number;
-    topCustomers: Array<{
-      name: string;
-      totalSales: number;
-      currentDebt: number;
-    }>;
+          topCustomers: Array<{
+        name: string;
+        totalSales: number;
+        balance: number; // Updated to use balance field instead of currentDebt
+      }>;
   } {
     try {
       const balanceSheet = erpFinancialService.generateBalanceSheet();
@@ -364,7 +364,7 @@ export class POSAccountingIntegration {
           return {
             name: customer.name,
             totalSales: enhancedData?.totalSales || 0,
-            currentDebt: customer.currentDebt || 0
+            balance: customer.balance || 0 // Updated to use balance field with null safety
           };
         })
         .sort((a: { totalSales: number }, b: { totalSales: number }) => b.totalSales - a.totalSales)
@@ -418,7 +418,7 @@ export class POSAccountingIntegration {
     if (saleData.customer_id && saleData.amount_due > 0) {
       const customerInfo = this.getEnhancedCustomerInfo(saleData.customer_id);
       if (customerInfo) {
-        const newDebt = customerInfo.creditStatus.currentDebt + saleData.amount_due;
+        const newDebt = customerInfo.creditStatus.balance + saleData.amount_due; // Updated to use balance field
         if (newDebt > customerInfo.creditStatus.limit) {
           warnings.push(`Sale will exceed customer credit limit ($${customerInfo.creditStatus.limit})`);
         }

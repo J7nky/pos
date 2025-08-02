@@ -7,7 +7,7 @@ import Toast from './common/Toast';
 
 export default function Customers() {
   const raw = useOfflineData();
-  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt, email: c.email || '', address: c.address || ''})) : [];
+  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance || 0, email: c.email || '', address: c.address || ''})) : [];
   const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at, email: s.email || '', address: s.address || ''})) : [];
   const addCustomer = raw.addCustomer;
   const updateCustomer = raw.updateCustomer;
@@ -104,7 +104,7 @@ export default function Customers() {
     if (editingCustomer) {
       updateCustomer(editingCustomer.id, {
         ...customerForm,
-        currentDebt: editingCustomer.currentDebt,
+        balance: editingCustomer.balance || 0,
       } as Customer);
       showToast('Customer updated successfully!', 'success');
     } else {
@@ -114,7 +114,7 @@ export default function Customers() {
         email: customerForm.email || '',
         address: customerForm.address || '',
         is_active: customerForm.isActive ?? true,
-        current_debt: 0,
+        balance: 0,
       });
       showToast('Customer added successfully!', 'success');
     }
@@ -298,8 +298,8 @@ export default function Customers() {
                         <div className="text-sm text-gray-500">{customer.email}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className={`font-medium ${customer.currentDebt > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          ${customer.currentDebt.toLocaleString()}
+                        <span className={`font-medium ${(customer.balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          ${(customer.balance || 0).toLocaleString()}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">

@@ -12,7 +12,6 @@ export class SupabaseService {
         .from('products')
         .select('*')
         .eq('store_id', storeId)
-        .eq('is_active', true)
         .order('name');
       
       if (error) throw error;
@@ -209,15 +208,16 @@ export class SupabaseService {
     }
   }
 
-  // Sales
-  static async getSales(storeId: string, limit?: number) {
+  // Sale Items (since there's no sales table, we work directly with sale_items)
+  static async getSaleItems(storeId: string, limit?: number) {
     try {
       let query = supabase
-        .from('sales')
+        .from('sale_items')
         .select(`
           *,
           customers(name),
-          sale_items(*)
+          products(name, category),
+          suppliers(name)
         `)
         .eq('store_id', storeId)
         .order('created_at', { ascending: false });
@@ -235,76 +235,16 @@ export class SupabaseService {
     }
   }
 
-  static async createSale(sale: Tables['sales']['Insert'], items: Tables['sale_items']['Insert'][]) {
+  static async createSaleItem(item: Tables['sale_items']['Insert']) {
     try {
-      // Start a transaction
-      const { data: saleData, error: saleError } = await supabase
-        .from('sales')
-        .insert(sale)
+      const { data, error } = await supabase
+        .from('sale_items')
+        .insert(item)
         .select()
         .single();
-
-      if (saleError) throw saleError;
-
-      // Insert sale items
-      const { error: itemsError } = await supabase
-        .from('sale_items')
-        .insert(items);
-
-      if (itemsError) throw itemsError;
-
-      // Deduct inventory and create inventory logs (FIFO, as much as possible)
-      for (const item of items) {
-        let qtyToDeduct = item.quantity;
-        // Get inventory items for this product/supplier, oldest first
-        const { data: inventoryRows, error: inventoryError } = await supabase
-          .from('inventory_items')
-          .select('*')
-          .eq('product_id', item.product_id)
-          .eq('supplier_id', item.supplier_id)
-          .gt('quantity', 0)
-          .order('received_at', { ascending: true });
-        if (inventoryError) throw inventoryError;
-        if (!inventoryRows) continue;
-        
-        for (const inv of inventoryRows) {
-          if (qtyToDeduct <= 0) break;
-          const deduct = Math.min(inv.quantity, qtyToDeduct);
-          const newQty = inv.quantity - deduct;
-          
-          // Update inventory quantity
-          await supabase
-            .from('inventory_items')
-            .update({ quantity: newQty })
-            .eq('id', inv.id);
-
-          // Create inventory log for the sold quantity
-          await supabase
-            .from('inventory_logs')
-            .insert({
-              inventory_item_id: inv.id,
-              product_id: inv.product_id,
-              supplier_id: inv.supplier_id,
-              action: 'sold',
-              quantity_change: -deduct, // Negative for sold
-              quantity_before: inv.quantity,
-              quantity_after: newQty,
-              unit_price: item.unit_price,
-              total_value: deduct * item.unit_price,
-              currency: 'USD', // Default currency
-              reference_type: 'sale',
-              reference_id: saleData.id,
-              reference_description: `Sold ${deduct} units`,
-              created_by: sale.created_by,
-              store_id: sale.store_id
-            });
-
-          qtyToDeduct -= deduct;
-        }
-        // If qtyToDeduct > 0, we just deduct as much as possible (no error)
-      }
-
-      return saleData;
+      
+      if (error) throw error;
+      return data;
     } catch (error) {
       handleSupabaseError(error);
     }
@@ -380,37 +320,7 @@ export class SupabaseService {
     }
   }
 
-  // Expense Categories
-  static async getExpenseCategories(storeId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('expense_categories')
-        .select('*')
-        .eq('store_id', storeId)
-        .eq('is_active', true)
-        .order('name');
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
 
-  static async createExpenseCategory(category: Tables['expense_categories']['Insert']) {
-    try {
-      const { data, error } = await supabase
-        .from('expense_categories')
-        .insert(category)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
 
   // User Profile
   static async getUserProfile(userId: string) {

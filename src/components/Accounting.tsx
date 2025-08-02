@@ -68,7 +68,7 @@ export default function Accounting() {
   const addExpenseCategory = raw.addExpenseCategory;
   const addTransaction = raw.addTransaction;
   const transactions = raw.transactions.map(t => ({...t, createdAt: t.created_at})) as Array<any>;
-  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, currentDebt: c.current_debt})) as Array<any>;
+  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<any>;
   const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
   const expenseCategories = raw.expenseCategories.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at})) as Array<any>;
   const inventory = raw.inventory || [];
@@ -278,8 +278,8 @@ export default function Accounting() {
   const kpiData = useMemo(() => {
     const totalCustomers = customers.filter(c => c.isActive).length;
     const totalSuppliers = suppliers.filter(s => s.isActive).length;
-    const customersWithDebt = customers.filter(c => c.currentDebt > 0).length;
-    const totalCustomerDebt = customers.reduce((sum, c) => sum + c.currentDebt, 0);
+    const customersWithDebt = customers.filter(c => (c.balance || 0) > 0).length; // Updated to use balance field with null safety
+    const totalCustomerDebt = customers.reduce((sum, c) => sum + (c.balance || 0), 0); // Updated to use balance field with null safety
     const avgDebtPerCustomer = customersWithDebt > 0 ? totalCustomerDebt / customersWithDebt : 0;
     
     const recentTransactions = transactions
@@ -424,13 +424,13 @@ export default function Accounting() {
       // Store amounts as-is in their original currency, convert only for display
       const paymentAmount = parseFloat(receiveForm.amount);
       const customerDebtInPaymentCurrency = receiveForm.currency === 'LBP' ? 
-        customer.currentDebt * 89500 : customer.currentDebt;
+        (customer.balance || 0) * 89500 : (customer.balance || 0); // Updated to use balance field with null safety
       const newDebtInPaymentCurrency = Math.max(0, customerDebtInPaymentCurrency - paymentAmount);
       const newDebtInUSD = receiveForm.currency === 'LBP' ? 
         newDebtInPaymentCurrency / 89500 : newDebtInPaymentCurrency;
       
       await raw.updateCustomer(receiveForm.customerId, { 
-        current_debt: newDebtInUSD 
+        balance: newDebtInUSD 
       });
       
       // Also add to legacy transaction system for compatibility
@@ -1123,16 +1123,17 @@ export default function Accounting() {
         transactionType: 'inventory'
       });
     });
-
     // Add sales transaction logs
+    
     sales.forEach(sale => {
       sale.items?.forEach((saleItem: any) => {
         const product = products.find(p => p.id === saleItem.productId);
         const supplier = suppliers.find(s => s.id === saleItem.supplierId);
         const customer = customers.find(c => c.id === sale.customer_id);
+        console.log('sale',sale)
         
         logs.push({
-          id: `sale-${sale.id}-${saleItem.id}`,
+          id: `sale-${sale.id}`,
           type: 'sale',
           date: sale.created_at,
           productId: saleItem.productId,
@@ -1156,7 +1157,6 @@ export default function Accounting() {
         });
       });
     });
-
     // Add financial transaction logs
     transactions.forEach(transaction => {
       logs.push({
@@ -1248,6 +1248,7 @@ export default function Accounting() {
     });
 
     return filtered;
+
   }, [getInventoryTransactionLogs, inventoryLogsSearchTerm, inventoryLogsProductFilter, inventoryLogsSupplierFilter, inventoryLogsDateFilter, inventoryLogsSort, inventoryLogsSortDir]);
 
   const inventoryLogsPerPage = 20;
@@ -2304,10 +2305,10 @@ export default function Accounting() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600 font-medium">Total Customer Debt</p>
-                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(customers.filter(c => c.currentDebt > 0).reduce((sum, c) => sum + c.currentDebt, 0))}</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(customers.filter(c => (c.balance || 0) > 0).reduce((sum, c) => sum + (c.balance || 0), 0))}</p>
                   <div className="flex items-center mt-2">
                     <Users className="w-4 h-4 text-blue-500 mr-1" />
-                    <span className="text-sm font-medium text-blue-600">{customers.filter(c => c.currentDebt > 0).length}</span>
+                    <span className="text-sm font-medium text-blue-600">{customers.filter(c => (c.balance || 0) > 0).length}</span>
                     <span className="text-xs text-gray-500 ml-1">customers with debt</span>
                   </div>
                 </div>
@@ -2440,7 +2441,7 @@ export default function Accounting() {
                   {customers
                     .filter(customer => customer.name.toLowerCase().includes(searchTerm.toLowerCase()))
                     .filter(customer => customer.isActive)
-                    .sort((a, b) => b.currentDebt - a.currentDebt)
+                    .sort((a, b) => (b.balance || 0) - (a.balance || 0)) // Updated to use balance field with null safety
                     .map(customer => (
                     <tr key={customer.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4">
@@ -2459,23 +2460,23 @@ export default function Accounting() {
                         <div className="text-sm text-gray-500">{customer.email || 'No email'}</div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className={`text-lg font-semibold ${customer.currentDebt > 0 ? 'text-red-600' : customer.currentDebt < 0 ? 'text-green-600' : 'text-gray-900'}`}>
-                          {formatCurrency(Math.abs(customer.currentDebt))}
+                        <div className={`text-lg font-semibold ${(customer.balance || 0) > 0 ? 'text-red-600' : (customer.balance || 0) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                          {formatCurrency(Math.abs(customer.balance || 0))}
                         </div>
                         <div className="text-xs text-gray-500">
-                          {customer.currentDebt > 0 ? 'Owes money' : customer.currentDebt < 0 ? 'Credit balance' : 'Balanced'}
+                          {(customer.balance || 0) > 0 ? 'Owes money' : (customer.balance || 0) < 0 ? 'Credit balance' : 'Balanced'}
                         </div>
                       </td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 text-xs rounded-full ${
-                          (currency === 'LBP' ? customer.currentDebt * 89500 : customer.currentDebt) > 1000 ? 'bg-red-100 text-red-800' :
-                          customer.currentDebt > 0 ? 'bg-yellow-100 text-yellow-800' :
-                          customer.currentDebt < 0 ? 'bg-green-100 text-green-800' :
+                          (currency === 'LBP' ? (customer.balance || 0) * 89500 : (customer.balance || 0)) > 1000 ? 'bg-red-100 text-red-800' :
+                          (customer.balance || 0) > 0 ? 'bg-yellow-100 text-yellow-800' :
+                          (customer.balance || 0) < 0 ? 'bg-green-100 text-green-800' :
                           'bg-gray-100 text-gray-800'
                         }`}>
-                          {(currency === 'LBP' ? customer.currentDebt * 89500 : customer.currentDebt) > 1000 ? 'High Debt' :
-                           customer.currentDebt > 0 ? 'Has Debt' :
-                           customer.currentDebt < 0 ? 'Credit' :
+                          {(currency === 'LBP' ? (customer.balance || 0) * 89500 : (customer.balance || 0)) > 1000 ? 'High Debt' :
+                           (customer.balance || 0) > 0 ? 'Has Debt' :
+                           (customer.balance || 0) < 0 ? 'Credit' :
                            'Balanced'}
                         </span>
                       </td>
@@ -2513,7 +2514,7 @@ export default function Accounting() {
                 <div>
                   <p className="text-sm text-gray-600">Total Customer Debt</p>
                   <p className="text-2xl font-bold text-red-600">
-                    {formatCurrency(customers.filter(c => c.currentDebt > 0).reduce((sum, c) => sum + c.currentDebt, 0))}
+                    {formatCurrency(customers.filter(c => (c.balance || 0) > 0).reduce((sum, c) => sum + (c.balance || 0), 0))}
                   </p>
                 </div>
                 <AlertTriangle className="w-8 h-8 text-red-500" />
@@ -2525,7 +2526,7 @@ export default function Accounting() {
                 <div>
                   <p className="text-sm text-gray-600">Customers with Debt</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {customers.filter(c => c.currentDebt > 0).length}
+                    {customers.filter(c => (c.balance || 0) > 0).length}
                   </p>
                 </div>
                 <Users className="w-8 h-8 text-blue-500" />
@@ -2537,9 +2538,9 @@ export default function Accounting() {
                 <div>
                   <p className="text-sm text-gray-600">Average Debt per Customer</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {formatCurrency(customers.filter(c => c.currentDebt > 0).length > 0 ? 
-                      customers.filter(c => c.currentDebt > 0).reduce((sum, c) => sum + c.currentDebt, 0) / 
-                      customers.filter(c => c.currentDebt > 0).length : 0)}
+                    {formatCurrency(customers.filter(c => (c.balance || 0) > 0).length > 0 ? 
+                      customers.filter(c => (c.balance || 0) > 0).reduce((sum, c) => sum + (c.balance || 0), 0) / 
+                      customers.filter(c => (c.balance || 0) > 0).length : 0)}
                   </p>
                 </div>
                 <Target className="w-8 h-8 text-purple-500" />
@@ -3181,7 +3182,7 @@ export default function Accounting() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Products</option>
-                  {products.filter(p => p.is_active).map(product => (
+                  {products.filter(p => p.isActive).map(product => (
                     <option key={product.id} value={product.id}>{product.name}</option>
                   ))}
                 </select>
@@ -3275,7 +3276,6 @@ export default function Accounting() {
               </div>
             </div>
           </div>
-
           {/* Transaction Logs Table */}
           <div className="bg-white rounded-lg shadow-sm border">
             <div className="p-6 border-b">
@@ -3325,7 +3325,8 @@ export default function Accounting() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {pagedInventoryLogs.map(log => (
+                  
+                  {(pagedInventoryLogs).map(log => (
                     <tr key={log.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">
@@ -3575,7 +3576,7 @@ export default function Accounting() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Products</option>
-                  {products.filter(p => p.is_active).map(product => (
+                  {products.filter(p => p.isActive).map(product => (
                     <option key={product.id} value={product.id}>{product.name}</option>
                   ))}
                 </select>
@@ -4517,7 +4518,7 @@ export default function Accounting() {
                 quantity: item.quantity,
                 weight: item.weight,
                 unitPrice: item.unitPrice || item.unit_price,
-                totalPrice: item.totalPrice || item.total_price,
+                receivedValue: item.receivedValue || item.received_value,
                 paymentMethod: sale.payment_method || sale.paymentMethod || 'cash',
                 notes: item.notes,
                 productName: item.productName || item.product_name || selectedReceivedBill.productName,

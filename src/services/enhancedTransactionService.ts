@@ -72,7 +72,7 @@ export class EnhancedTransactionService {
         throw new Error('Customer not found');
       }
 
-      const balanceBefore = customer.currentDebt;
+      const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
       const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
       const balanceAfter = balanceBefore - amountInUSD; // Allow negative debt (customer credit)
 
@@ -123,7 +123,7 @@ export class EnhancedTransactionService {
           userName: context.userName,
           previousData: { balance: balanceBefore },
           newData: { balance: balanceAfter },
-          changedFields: ['currentDebt'],
+          changedFields: ['balance'], // Updated to use balance field
           balanceChange: {
             entityType: 'customer',
             balanceBefore,
@@ -332,13 +332,13 @@ export class EnhancedTransactionService {
         customer = customers.find((c: Customer) => c.id === sale.customerId);
         
         if (customer) {
-          const balanceBefore = customer.currentDebt;
+          const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
           const balanceAfter = balanceBefore + sale.amountDue;
           
           // Update customer balance
           const updatedCustomers = customers.map((c: Customer) => 
             c.id === sale.customerId 
-              ? { ...c, currentDebt: balanceAfter }
+              ? { ...c, balance: balanceAfter } // Updated to use balance field
               : c
           );
           localStorage.setItem('erp_customers', JSON.stringify(updatedCustomers));

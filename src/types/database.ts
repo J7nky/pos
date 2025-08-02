@@ -12,7 +12,7 @@ export interface Database {
           updated_at: string;
         };
         Insert: {
-          id?: string;
+          id: string;
           email: string;
           name: string;
           role: 'admin' | 'manager' | 'cashier';
@@ -63,7 +63,6 @@ export interface Database {
           name: string;
           category: string;
           image: string;
-          is_active: boolean;
           store_id: string;
           created_at: string;
           updated_at: string;
@@ -73,7 +72,6 @@ export interface Database {
           name: string;
           category: string;
           image: string;
-          is_active?: boolean;
           store_id: string;
           created_at?: string;
           updated_at?: string;
@@ -83,7 +81,6 @@ export interface Database {
           name?: string;
           category?: string;
           image?: string;
-          is_active?: boolean;
           updated_at?: string;
         };
       };
@@ -94,10 +91,10 @@ export interface Database {
           phone: string;
           email: string | null;
           address: string;
-          is_active: boolean;
           store_id: string;
           created_at: string;
           updated_at: string;
+          balance: number | null;
         };
         Insert: {
           id?: string;
@@ -105,10 +102,10 @@ export interface Database {
           phone: string;
           email?: string | null;
           address: string;
-          is_active?: boolean;
           store_id: string;
           created_at?: string;
           updated_at?: string;
+          balance?: number | null;
         };
         Update: {
           id?: string;
@@ -116,7 +113,7 @@ export interface Database {
           phone?: string;
           email?: string | null;
           address?: string;
-          is_active?: boolean;
+          balance?: number | null;
           updated_at?: string;
         };
       };
@@ -127,7 +124,7 @@ export interface Database {
           phone: string;
           email: string | null;
           address: string | null;
-          current_debt: number;
+          balance: number;
           is_active: boolean;
           store_id: string;
           created_at: string;
@@ -139,7 +136,7 @@ export interface Database {
           phone: string;
           email?: string | null;
           address?: string | null;
-          current_debt?: number;
+          balance?: number;
           is_active?: boolean;
           store_id: string;
           created_at?: string;
@@ -151,7 +148,7 @@ export interface Database {
           phone?: string;
           email?: string | null;
           address?: string | null;
-          current_debt?: number;
+          balance?: number;
           is_active?: boolean;
           updated_at?: string;
         };
@@ -163,7 +160,6 @@ export interface Database {
           supplier_id: string;
           type: 'commission' | 'cash';
           quantity: number;
-          received_quantity: number;
           unit: 'kg' | 'piece' | 'box' | 'bag';
           weight: number | null;
           porterage: number | null;
@@ -175,6 +171,7 @@ export interface Database {
           received_by: string;
           store_id: string;
           created_at: string;
+          received_quantity: number;
         };
         Insert: {
           id?: string;
@@ -182,7 +179,6 @@ export interface Database {
           supplier_id: string;
           type: 'commission' | 'cash';
           quantity: number;
-          received_quantity: number;
           unit: 'kg' | 'piece' | 'box' | 'bag';
           weight?: number | null;
           porterage?: number | null;
@@ -194,151 +190,59 @@ export interface Database {
           received_by: string;
           store_id: string;
           created_at?: string;
+          received_quantity: number;
         };
         Update: {
           id?: string;
           quantity?: number;
-          received_quantity?: number;
           weight?: number | null;
           porterage?: number | null;
           transfer_fee?: number | null;
           price?: number | null;
           commission_rate?: number | null;
           notes?: string | null;
-        };
-      };
-      sales: {
-        Row: {
-          id: string;
-          customer_id: string | null;
-          subtotal: number;
-          total: number;
-          payment_method: 'cash' | 'card' | 'credit';
-          amount_paid: number;
-          amount_due: number;
-          status: 'completed' | 'pending' | 'cancelled';
-          notes: string | null;
-          store_id: string;
-          created_by: string;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          customer_id?: string | null;
-          subtotal: number;
-          total: number;
-          payment_method: 'cash' | 'card' | 'credit';
-          amount_paid: number;
-          amount_due: number;
-          status: 'completed' | 'pending' | 'cancelled';
-          notes?: string | null;
-          store_id: string;
-          created_by: string;
-          created_at?: string;
-        };
-        Update: {
-          id?: string;
-          status?: 'completed' | 'pending' | 'cancelled';
-          amount_paid?: number;
-          amount_due?: number;
-          notes?: string | null;
+          received_quantity?: number;
         };
       };
       sale_items: {
         Row: {
           id: string;
+          inventory_item_id: string;
           product_id: string;
-          product_name: string;
           supplier_id: string;
-          supplier_name: string;
-          quantity: number;
           weight: number | null;
           unit_price: number;
-          total_price: number;
+          received_value: number;
           notes: string | null;
-          store_id: string;
           created_at: string;
+          store_id: string;
+          customer_id: string | null;
+          created_by: string;
         };
         Insert: {
           id?: string;
+          inventory_item_id: string;
           product_id: string;
-          product_name: string;
           supplier_id: string;
-          supplier_name: string;
-          quantity: number;
           weight?: number | null;
           unit_price: number;
-          total_price: number;
+          received_value: number;
           notes?: string | null;
-          store_id: string;
           created_at?: string;
+          store_id: string;
+          customer_id?: string | null;
+          created_by: string;
         };
         Update: {
           id?: string;
+          inventory_item_id: string;
           product_id?: string;
-          product_name?: string;
           supplier_id?: string;
-          supplier_name?: string;
-          quantity?: number;
           weight?: number | null;
           unit_price?: number;
-          total_price?: number;
+          received_value?: number;
           notes?: string | null;
-          store_id?: string;
-        };
-      };
-      inventory_logs: {
-        Row: {
-          id: string;
-          inventory_item_id: string;
-          product_id: string;
-          supplier_id: string;
-          action: 'received' | 'sold' | 'adjusted' | 'transferred' | 'damaged' | 'expired';
-          quantity_change: number;
-          quantity_before: number;
-          quantity_after: number;
-          unit_price: number | null;
-          total_value: number | null;
-          currency: 'USD' | 'LBP';
-          reference_type: string | null;
-          reference_id: string | null;
-          reference_description: string | null;
-          notes: string | null;
-          created_by: string;
-          store_id: string;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          inventory_item_id: string;
-          product_id: string;
-          supplier_id: string;
-          action: 'received' | 'sold' | 'adjusted' | 'transferred' | 'damaged' | 'expired';
-          quantity_change: number;
-          quantity_before: number;
-          quantity_after: number;
-          unit_price?: number | null;
-          total_value?: number | null;
-          currency: 'USD' | 'LBP';
-          reference_type?: string | null;
-          reference_id?: string | null;
-          reference_description?: string | null;
-          notes?: string | null;
-          created_by: string;
-          store_id: string;
-          created_at?: string;
-        };
-        Update: {
-          id?: string;
-          quantity_change?: number;
-          quantity_before?: number;
-          quantity_after?: number;
-          unit_price?: number | null;
-          total_value?: number | null;
-          reference_type?: string | null;
-          reference_id?: string | null;
-          reference_description?: string | null;
-          notes?: string | null;
+          customer_id?: string | null;
         };
       };
       transactions: {
@@ -350,7 +254,6 @@ export interface Database {
           currency: 'USD' | 'LBP';
           description: string;
           reference: string | null;
-          inventory_log_id: string | null;
           store_id: string;
           created_by: string;
           created_at: string;
@@ -363,7 +266,6 @@ export interface Database {
           currency: 'USD' | 'LBP';
           description: string;
           reference?: string | null;
-          inventory_log_id?: string | null;
           store_id: string;
           created_by: string;
           created_at?: string;
@@ -373,34 +275,6 @@ export interface Database {
           amount?: number;
           description?: string;
           reference?: string | null;
-          inventory_log_id?: string | null;
-        };
-      };
-      expense_categories: {
-        Row: {
-          id: string;
-          name: string;
-          description: string | null;
-          is_active: boolean;
-          store_id: string;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          name: string;
-          description?: string | null;
-          is_active?: boolean;
-          store_id: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          name?: string;
-          description?: string | null;
-          is_active?: boolean;
-          updated_at?: string;
         };
       };
     };
