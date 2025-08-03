@@ -116,30 +116,6 @@ export interface PendingSync {
   last_error?: string;
 }
 
-export interface AccountsReceivable extends BaseEntity {
-  customer_id: string;
-  customer_name: string;
-  invoice_number: string;
-  amount: number;
-  amount_paid: number;
-  amount_due: number;
-  due_date: string;
-  status: 'pending' | 'paid' | 'overdue' | 'partial';
-  description?: string;
-}
-
-export interface AccountsPayable extends BaseEntity {
-  supplier_id: string;
-  supplier_name: string;
-  invoice_number: string;
-  amount: number;
-  amount_paid: number;
-  amount_due: number;
-  due_date: string;
-  status: 'pending' | 'paid' | 'overdue' | 'partial';
-  description?: string;
-}
-
 export interface JournalEntry extends BaseEntity {
   date: string;
   reference: string;
@@ -164,10 +140,6 @@ class POSDatabase extends Dexie {
   sale_items!: Table<SaleItem, string>;
   transactions!: Table<Transaction, string>;
 
-  accounts_receivable!: Table<AccountsReceivable, string>;
-  accounts_payable!: Table<AccountsPayable, string>;
-  journal_entries!: Table<JournalEntry, string>;
-  
   // Sync management tables
   sync_metadata!: Table<SyncMetadata, string>;
   pending_syncs!: Table<PendingSync, string>;
@@ -182,16 +154,12 @@ class POSDatabase extends Dexie {
       suppliers: 'id, store_id, name, type, is_active, updated_at',
       customers: 'id, store_id, name, phone, is_active, updated_at',
 
-      
       // Tables WITHOUT updated_at: inventory_items, sales, sale_items, transactions
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at',
       sales: 'id, store_id, customer_id, created_at, status, created_by',
       sale_items: 'id, inventory_item_id, product_id, supplier_id, created_at', // Updated to match Supabase schema
       transactions: 'id, store_id, type, category, created_at, created_by',
-      accounts_receivable: 'id, store_id, customer_id, invoice_number, due_date, status',
-      accounts_payable: 'id, store_id, supplier_id, invoice_number, due_date, status',
-      journal_entries: 'id, store_id, date, reference, created_by',
-      
+  
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
       pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count'
@@ -203,10 +171,6 @@ class POSDatabase extends Dexie {
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
 
-    this.accounts_receivable.hook('creating', this.addCreateFields);
-    this.accounts_payable.hook('creating', this.addCreateFields);
-    this.journal_entries.hook('creating', this.addCreateFields);
-    
     // Tables WITHOUT updated_at: inventory_items, sales, sale_items, transactions
     this.inventory_items.hook('creating', this.addCreateFields);
     this.sales.hook('creating', this.addCreateFields);
@@ -217,7 +181,6 @@ class POSDatabase extends Dexie {
     this.products.hook('updating', this.addUpdateFields);
     this.suppliers.hook('updating', this.addUpdateFields);
     this.customers.hook('updating', this.addUpdateFields);
-
   }
 
   private addCreateFields = (primKey: any, obj: any, trans: any) => {

@@ -78,7 +78,56 @@ export interface SaleItem {
   createdBy?: string; // Added to match Supabase schema
 }
 
+// Added missing interfaces to match database schema
+export interface Sale {
+  id: string;
+  customerId: string | null;
+  subtotal: number;
+  total: number;
+  paymentMethod: 'cash' | 'card' | 'credit';
+  amountPaid: number;
+  amountDue: number;
+  status: 'completed' | 'pending' | 'cancelled';
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+}
 
+export interface AccountsReceivable {
+  id: string;
+  customerId: string;
+  customerName: string;
+  invoiceNumber: string;
+  amount: number;
+  amountPaid: number;
+  amountDue: number;
+  dueDate: string;
+  status: 'pending' | 'paid' | 'overdue' | 'partial';
+  description?: string;
+  createdAt: string;
+}
+
+export interface AccountsPayable {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  invoiceNumber: string;
+  amount: number;
+  amountPaid: number;
+  amountDue: number;
+  dueDate: string;
+  status: 'pending' | 'paid' | 'overdue' | 'partial';
+  description?: string;
+  createdAt: string;
+}
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  createdAt: string;
+}
 
 export interface Payment {
   id: string;

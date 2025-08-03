@@ -3,12 +3,9 @@ import {
   Customer, 
   Supplier, 
   Transaction, 
-  AccountsReceivable, 
-  AccountsPayable,
   InventoryItem,
   Sale,
-  SaleItem,
-  ExpenseCategory
+  SaleItem
 } from '../types';
 
 export interface SyncStatus {
@@ -44,9 +41,8 @@ export class DataSyncService {
 
   private initializeSyncStatus() {
     const tables = [
-      'customers', 'suppliers', 'transactions', 'accounts_receivable', 
-      'accounts_payable', 'inventory_items', 'sales', 'sale_items', 
-    
+      'customers', 'suppliers', 'transactions', 
+      'inventory_items', 'sales', 'sale_items'
     ];
 
     tables.forEach(table => {
@@ -89,7 +85,9 @@ export class DataSyncService {
           phone: s.phone,
           email: s.email,
           address: s.address,
+          type: s.type,
           isActive: s.is_active,
+          balance: s.balance,
           createdAt: s.created_at
         }));
         localStorage.setItem('erp_suppliers', JSON.stringify(mappedSuppliers));
@@ -112,45 +110,6 @@ export class DataSyncService {
         }));
         localStorage.setItem('erp_transactions', JSON.stringify(mappedTransactions));
         return mappedTransactions.length;
-      });
-
-      // Sync accounts receivable
-      await this.syncTable('accounts_receivable', storeId, async () => {
-        const receivables = await db.accounts_receivable.where('store_id').equals(storeId).toArray();
-        const mappedReceivables = receivables.map(ar => ({
-          id: ar.id,
-          customerId: ar.customer_id,
-          customerName: ar.customer_name,
-          invoiceNumber: ar.invoice_number,
-          amount: ar.amount,
-          amountPaid: ar.amount_paid,
-          amountDue: ar.amount_due,
-          dueDate: ar.due_date,
-          status: ar.status,
-          createdAt: ar.created_at
-        }));
-        localStorage.setItem('erp_accounts_receivable', JSON.stringify(mappedReceivables));
-        return mappedReceivables.length;
-      });
-
-      // Sync accounts payable
-      await this.syncTable('accounts_payable', storeId, async () => {
-        const payables = await db.accounts_payable.where('store_id').equals(storeId).toArray();
-        const mappedPayables = payables.map(ap => ({
-          id: ap.id,
-          supplierId: ap.supplier_id,
-          supplierName: ap.supplier_name,
-          invoiceNumber: ap.invoice_number,
-          amount: ap.amount,
-          amountPaid: ap.amount_paid,
-          amountDue: ap.amount_due,
-          dueDate: ap.due_date,
-          status: ap.status,
-          description: ap.description,
-          createdAt: ap.created_at
-        }));
-        localStorage.setItem('erp_accounts_payable', JSON.stringify(mappedPayables));
-        return mappedPayables.length;
       });
 
       // Sync inventory items
@@ -190,16 +149,16 @@ export class DataSyncService {
             customerId: sale.customer_id,
             items: items.map(item => ({
               id: item.id,
+              inventoryItemId: item.inventory_item_id,
               productId: item.product_id,
-              productName: item.product_name,
               supplierId: item.supplier_id,
-              supplierName: item.supplier_name,
-              quantity: item.quantity,
               weight: item.weight,
               unitPrice: item.unit_price,
               receivedValue: item.received_value,
               notes: item.notes,
-              createdAt: item.created_at
+              customerId: item.customer_id,
+              createdAt: item.created_at,
+              createdBy: item.created_by
             })),
             subtotal: sale.subtotal,
             total: sale.total,
@@ -215,8 +174,6 @@ export class DataSyncService {
         localStorage.setItem('erp_sales', JSON.stringify(mappedSales));
         return mappedSales.length;
       });
-
-
 
       console.log('✅ Data synchronization completed successfully');
 
