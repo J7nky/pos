@@ -69,7 +69,7 @@ export default function Accounting() {
   const addTransaction = raw.addTransaction;
   const transactions = raw.transactions.map(t => ({...t, createdAt: t.created_at})) as Array<any>;
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<any>;
-  const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
+  const suppliers = raw.suppliers.map(s => ({...s, created_at: s.created_at,balance: s.balance,})) as Array<any>;
   const expenseCategories = raw.expenseCategories.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at})) as Array<any>;
   const inventory = raw.inventory || [];
   const sales = raw.sales || [];
@@ -3182,7 +3182,7 @@ export default function Accounting() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Products</option>
-                  {products.filter(p => p.isActive).map(product => (
+                  {products.filter(p => p).map(product => (
                     <option key={product.id} value={product.id}>{product.name}</option>
                   ))}
                 </select>
@@ -3576,7 +3576,7 @@ export default function Accounting() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Products</option>
-                  {products.filter(p => p.isActive).map(product => (
+                  {products.filter(p => p).map(product => (
                     <option key={product.id} value={product.id}>{product.name}</option>
                   ))}
                 </select>

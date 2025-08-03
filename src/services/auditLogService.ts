@@ -2,9 +2,7 @@ import {
   Customer, 
   Supplier, 
   Transaction, 
-  AccountsReceivable, 
-  AccountsPayable,
-  Sale,
+
   SaleItem,
   InventoryItem
 } from '../types';
@@ -65,7 +63,7 @@ export type AuditAction =
 
 export type EntityType = 
   | 'customer' | 'supplier' | 'transaction' | 'sale' | 'inventory_item'
-  | 'accounts_receivable' | 'accounts_payable' | 'cash_drawer' | 'user' | 'system';
+   | 'cash_drawer' | 'user' | 'system';
 
 export interface AuditQuery {
   startDate?: string;
@@ -316,7 +314,7 @@ export class AuditLogService {
   }
 
   public logSaleTransaction(params: {
-    sale: Sale;
+    sale: any; // Add sale parameter
     items: SaleItem[];
     customerId?: string;
     customerName?: string;
@@ -325,7 +323,7 @@ export class AuditLogService {
     balanceChange?: AuditLogEntry['balanceChange'];
   }): string {
     const itemsDescription = params.items.map(item => 
-      `${item.productName} (${item.quantity}${item.weight ? ` x ${item.weight}kg` : ''})`
+      `${item.productId} (${item.unitPrice}${item.weight ? ` x ${item.weight}kg` : ''})`
     ).join(', ');
 
     return this.log({
@@ -382,7 +380,7 @@ export class AuditLogService {
     ];
     
     const mediumActions: AuditAction[] = [
-      'customer_payment_received', 'supplier_payment_sent', 'receivable_paid', 'payable_paid'
+      'customer_payment_received', 'supplier_payment_sent'
     ];
 
     if (criticalActions.includes(action)) return 'critical';

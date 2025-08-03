@@ -1,11 +1,5 @@
 import { currencyService } from './currencyService';
-import { 
-  Transaction, 
-  AccountsReceivable, 
-  AccountsPayable, 
-  Customer, 
-  Supplier 
-} from '../types';
+import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable } from '../types';
 
 export interface TransactionResult {
   success: boolean;
@@ -58,7 +52,7 @@ export class TransactionService {
 
       const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
       
-      // Get customer data (this would come from your data context)
+      // Get customer data from localStorage
       const customers = JSON.parse(localStorage.getItem('erp_customers') || '[]');
       const customer = customers.find((c: Customer) => c.id === customerId);
       
@@ -72,10 +66,10 @@ export class TransactionService {
         };
       }
 
-      const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
-      const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
+      const balanceBefore = customer.balance || 0;
+      const balanceAfter = balanceBefore - amountInUSD; // Payment reduces debt
 
-      // Update customer balance if requested
+      // Update customer balance in localStorage
       if (options.updateCustomerBalance !== false) {
         const updatedCustomers = customers.map((c: Customer) => 
           c.id === customerId 
@@ -85,7 +79,7 @@ export class TransactionService {
         localStorage.setItem('erp_customers', JSON.stringify(updatedCustomers));
       }
 
-      // Update accounts receivable
+      // Update accounts receivable in localStorage
       if (options.createReceivable !== false) {
         const receivables = JSON.parse(localStorage.getItem('erp_accounts_receivable') || '[]');
         const pendingReceivables = receivables.filter((ar: AccountsReceivable) => 
@@ -105,7 +99,6 @@ export class TransactionService {
           
           if (receivable.amountDue === 0) {
             receivable.status = 'paid';
-            receivable.lastPaymentDate = new Date().toISOString();
           } else {
             receivable.status = 'partial';
           }
@@ -172,7 +165,7 @@ export class TransactionService {
 
       const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
       
-      // Get supplier data
+      // Get supplier data from localStorage
       const suppliers = JSON.parse(localStorage.getItem('erp_suppliers') || '[]');
       const supplier = suppliers.find((s: Supplier) => s.id === supplierId);
       
@@ -186,60 +179,46 @@ export class TransactionService {
         };
       }
 
-      // Calculate current balance owed to supplier
-      const payables = JSON.parse(localStorage.getItem('erp_accounts_payable') || '[]');
-      const supplierPayables = payables.filter((ap: AccountsPayable) => 
-        ap.supplierId === supplierId && ap.status !== 'paid'
-      );
-      
-      const balanceBefore = supplierPayables.reduce((sum: number, ap: AccountsPayable) => 
-        sum + ap.amountDue, 0
-      );
+      const balanceBefore = supplier.balance || 0;
+      const balanceAfter = balanceBefore - amountInUSD; // Payment reduces debt
 
-      // Update accounts payable
+      // Update supplier balance in localStorage
+      if (options.updateSupplierBalance !== false) {
+        const updatedSuppliers = suppliers.map((s: Supplier) => 
+          s.id === supplierId 
+            ? { ...s, balance: balanceAfter }
+            : s
+        );
+        localStorage.setItem('erp_suppliers', JSON.stringify(updatedSuppliers));
+      }
+
+      // Update accounts payable in localStorage
       if (options.createPayable !== false) {
-        let remainingPayment = amountInUSD;
+        const payables = JSON.parse(localStorage.getItem('erp_accounts_payable') || '[]');
+        const pendingPayables = payables.filter((ap: AccountsPayable) => 
+          ap.supplierId === supplierId && ap.status !== 'paid'
+        );
+
+        let remainingAmount = amountInUSD;
         const updatedPayables = [...payables];
 
-        // Pay down existing payables first
-        for (const payable of supplierPayables) {
-          if (remainingPayment <= 0) break;
+        for (const payable of pendingPayables) {
+          if (remainingAmount <= 0) break;
           
-          const paymentAmount = Math.min(remainingPayment, payable.amountDue);
+          const paymentAmount = Math.min(remainingAmount, payable.amountDue);
           payable.amountPaid += paymentAmount;
           payable.amountDue -= paymentAmount;
-          remainingPayment -= paymentAmount;
+          remainingAmount -= paymentAmount;
           
           if (payable.amountDue === 0) {
             payable.status = 'paid';
-            payable.lastPaymentDate = new Date().toISOString();
           } else {
             payable.status = 'partial';
           }
         }
 
-        // If there's remaining payment, create a credit entry
-        if (remainingPayment > 0) {
-          const creditPayable: AccountsPayable = {
-            id: Date.now().toString(),
-            supplierId,
-            supplierName: supplier.name,
-            invoiceNumber: `CREDIT-${Date.now()}`,
-            amount: remainingPayment,
-            amountPaid: remainingPayment,
-            amountDue: -remainingPayment, // Negative indicates credit
-            dueDate: new Date().toISOString().split('T')[0],
-            status: 'paid',
-            description: `Payment credit to ${supplier.name}`,
-            createdAt: new Date().toISOString()
-          };
-          updatedPayables.push(creditPayable);
-        }
-
         localStorage.setItem('erp_accounts_payable', JSON.stringify(updatedPayables));
       }
-
-      const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
 
       // Create transaction record
       const transaction: Transaction = {
@@ -249,7 +228,7 @@ export class TransactionService {
         amount: amountInUSD,
         currency: 'USD',
         description: `${description} (Originally ${currency} ${amount})`,
-        reference: `SUP-PAY-${Date.now()}`,
+        reference: `PAY-${Date.now()}`,
         createdAt: new Date().toISOString(),
         createdBy
       };
@@ -339,32 +318,37 @@ export class TransactionService {
     startDate?: string,
     endDate?: string
   ): Transaction[] {
-    const transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
-    
-    let filtered = transactions;
+    try {
+      const transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
+      
+      let filteredTransactions = transactions;
 
-    if (entityId) {
-      // Filter by entity if needed
-      filtered = filtered.filter((t: Transaction) => 
-        t.description.includes(entityId)
+      // Filter by entity if provided
+      if (entityId) {
+        // For now, we'll return all transactions since we don't have entity linking
+        // This can be enhanced later to filter by customer/supplier transactions
+        filteredTransactions = transactions;
+      }
+
+      // Filter by date range if provided
+      if (startDate || endDate) {
+        filteredTransactions = filteredTransactions.filter((t: Transaction) => {
+          const transactionDate = new Date(t.createdAt);
+          const start = startDate ? new Date(startDate) : new Date(0);
+          const end = endDate ? new Date(endDate) : new Date();
+          
+          return transactionDate >= start && transactionDate <= end;
+        });
+      }
+
+      return filteredTransactions.sort((a: Transaction, b: Transaction) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
-    }
 
-    if (startDate) {
-      filtered = filtered.filter((t: Transaction) => 
-        new Date(t.createdAt) >= new Date(startDate)
-      );
+    } catch (error) {
+      console.error('Error getting transaction history:', error);
+      return [];
     }
-
-    if (endDate) {
-      filtered = filtered.filter((t: Transaction) => 
-        new Date(t.createdAt) <= new Date(endDate)
-      );
-    }
-
-    return filtered.sort((a: Transaction, b: Transaction) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
   }
 }
 
