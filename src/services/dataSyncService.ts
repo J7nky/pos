@@ -137,42 +137,26 @@ export class DataSyncService {
         return mappedInventory.length;
       });
 
-      // Sync sales
-      await this.syncTable('sales', storeId, async () => {
-        const sales = await db.sales.where('store_id').equals(storeId).toArray();
+      // Sync sale_items
+      await this.syncTable('sale_items', storeId, async () => {
         const saleItems = await db.sale_items.toArray();
         
-        const mappedSales = sales.map(sale => {
-          const items = saleItems.filter(si => si.id === sale.id);
-          return {
-            id: sale.id,
-            customerId: sale.customer_id,
-            items: items.map(item => ({
-              id: item.id,
-              inventoryItemId: item.inventory_item_id,
-              productId: item.product_id,
-              supplierId: item.supplier_id,
-              weight: item.weight,
-              unitPrice: item.unit_price,
-              receivedValue: item.received_value,
-              notes: item.notes,
-              customerId: item.customer_id,
-              createdAt: item.created_at,
-              createdBy: item.created_by
-            })),
-            subtotal: sale.subtotal,
-            total: sale.total,
-            paymentMethod: sale.payment_method,
-            amountPaid: sale.amount_paid,
-            amountDue: sale.amount_due,
-            status: sale.status,
-            notes: sale.notes,
-            createdAt: sale.created_at,
-            createdBy: sale.created_by
-          };
-        });
-        localStorage.setItem('erp_sales', JSON.stringify(mappedSales));
-        return mappedSales.length;
+        const mappedSaleItems = saleItems.map(item => ({
+          id: item.id,
+          inventoryItemId: item.inventory_item_id,
+          productId: item.product_id,
+          supplierId: item.supplier_id,
+          weight: item.weight,
+          unitPrice: item.unit_price,
+          receivedValue: item.received_value,
+          paymentMethod: item.payment_method,
+          notes: item.notes,
+          customerId: item.customer_id,
+          createdAt: item.created_at,
+          createdBy: item.created_by
+        }));
+        localStorage.setItem('erp_sale_items', JSON.stringify(mappedSaleItems));
+        return mappedSaleItems.length;
       });
 
       console.log('✅ Data synchronization completed successfully');
@@ -276,13 +260,11 @@ export class DataSyncService {
       const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
       const customers = await db.customers.where('store_id').equals(storeId).toArray();
       const inventory = await db.inventory_items.where('store_id').equals(storeId).toArray();
-      const sales = await db.sales.where('store_id').equals(storeId).toArray();
       const saleItems = await db.sale_items.toArray();
 
       const productIds = new Set(products.map(p => p.id));
       const supplierIds = new Set(suppliers.map(s => s.id));
       const customerIds = new Set(customers.map(c => c.id));
-      const saleIds = new Set(sales.map(s => s.id));
 
       // Check orphaned inventory items
       const orphanedInventory = inventory.filter(item => 
@@ -324,13 +306,11 @@ export class DataSyncService {
       // Get all related data
       const products = await db.products.where('store_id').equals(storeId).toArray();
       const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
-      const sales = await db.sales.where('store_id').equals(storeId).toArray();
       const inventory = await db.inventory_items.where('store_id').equals(storeId).toArray();
       const saleItems = await db.sale_items.toArray();
 
       const productIds = new Set(products.map(p => p.id));
       const supplierIds = new Set(suppliers.map(s => s.id));
-      const saleIds = new Set(sales.map(s => s.id));
 
       // Clean up orphaned inventory items
       const orphanedInventory = inventory.filter(item => 

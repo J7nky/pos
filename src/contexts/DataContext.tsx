@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Product, Supplier, Customer, Sale, InventoryItem, StockLevel, CashDrawer, Transaction, AccountsReceivable, AccountsPayable, ExpenseCategory, JournalEntry } from '../types';
+import { Product, Supplier, Customer, InventoryItem, StockLevel, CashDrawer, Transaction, AccountsReceivable, AccountsPayable, ExpenseCategory, JournalEntry } from '../types';
 
 interface DataContextType {
   products: Product[];

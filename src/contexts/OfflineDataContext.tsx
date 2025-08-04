@@ -9,7 +9,6 @@ import {
   Supplier, 
   Customer, 
   InventoryItem, 
-  Sale, 
   SaleItem, 
   Transaction, 
   ExpenseCategory,
@@ -30,7 +29,8 @@ interface OfflineDataContextType {
   sales: any[]; // Complex type with joins
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
   transactions: Tables['transactions']['Row'][];
-  expenseCategories: any[];
+  expenseCategories: any[]; // Not in current schema
+ 
 
   // Computed/legacy compatibility - exact match
   stockLevels: any[];
@@ -64,7 +64,7 @@ interface OfflineDataContextType {
   addSale: (sale: any, items: any[]) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: any) => Promise<void>;
- 
+  
   addNonPricedItem: (item: any) => Promise<void>;
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
   
@@ -344,7 +344,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         salesData,
         saleItemsData,
         transactionsData,
-        
       ] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
@@ -358,10 +357,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Transform data to match SupabaseDataContext structure
       setProducts(productsData as Tables['products']['Row'][]);
-      setSuppliers(suppliersData.map(s => ({ ...s, balance: s.balance || null })) as Tables['suppliers']['Row'][]);
+      setSuppliers(suppliersData.map(s => ({ ...s, balance: null })) as Tables['suppliers']['Row'][]);
       setCustomers(customersData.map(c => ({ ...c, balance: c.balance || 0 })) as Tables['customers']['Row'][]);
       setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
- 
 
       // Store raw data
       setInventoryItems(inventoryData);
@@ -593,23 +591,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   ): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
-    const saleId = createId();
-    const sale: Sale = {
-      id: saleId,
-      store_id: storeId,
-      created_at: new Date().toISOString(),
-      _synced: false,
-      customer_id: saleData.customer_id ?? null,
-      subtotal: saleData.subtotal || 0,
-      total: saleData.total || 0,
-      payment_method: saleData.payment_method || 'cash',
-      amount_paid: saleData.amount_paid ?? 0,
-      amount_due: saleData.amount_due ?? 0,
-      status: saleData.status || 'completed',
-      notes: saleData.notes ?? null,
-      created_by: saleData.created_by || 'system'
-    };
-
     const saleItemsWithIds = items.map(item => ({
       id: createId(),
       created_at: new Date().toISOString(),
@@ -620,10 +601,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       weight: item.weight ?? null,
       unit_price: item.unit_price,
       received_value: item.received_value || item.unit_price,
+      payment_method: item.payment_method || 'cash', // Add payment method field
       notes: item.notes ?? null,
       store_id: storeId,
-      customer_id: saleData.customer_id ?? null,
-      created_by: saleData.created_by || 'system'
+      customer_id: item.customer_id ?? null,
+      created_by: item.created_by || 'system'
     }));
 
     // Use transaction to ensure atomicity
@@ -788,10 +770,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setCurrency(newCurrency);
   };
 
-
-
-
-
   const addNonPricedItem = async (item: any): Promise<void> => {
     if (!storeId) return;
     
@@ -891,12 +869,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       storeId,
       products,
       suppliers,
+      expenseCategories,
       customers,
       sales,
       inventory,
       transactions,
-      expenseCategories,
-      
+  
 
       // Computed/legacy compatibility - exact match
       stockLevels,
@@ -921,7 +899,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addSale,
       addTransaction,
       addExpenseCategory,
-     
       addNonPricedItem,
       deductInventoryQuantity,
 

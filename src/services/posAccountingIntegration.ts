@@ -1,5 +1,5 @@
 import { erpFinancialService } from './erpFinancialService';
-import { Sale, SaleItem, Customer, Supplier } from '../types';
+import { SaleItem, Customer, Supplier } from '../types';
 
 export interface POSSaleData {
   customer_id?: string;

@@ -55,17 +55,7 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
   received_by: string;
 }
 
-export interface Sale extends Omit<BaseEntity, 'updated_at'> {
-  customer_id: string | null;
-  subtotal: number;
-  total: number;
-  payment_method: 'cash' | 'card' | 'credit';
-  amount_paid: number;
-  amount_due: number;
-  status: 'completed' | 'pending' | 'cancelled';
-  notes: string | null;
-  created_by: string;
-}
+
 
 export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
   inventory_item_id: string; // Added to match Supabase schema
@@ -74,6 +64,7 @@ export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
   weight: number | null;
   unit_price: number;
   received_value: number; // Added to match Supabase schema
+  payment_method: 'cash' | 'card' | 'credit'; // Added payment method field
   notes: string | null;
   customer_id: string | null; // Added to match Supabase schema
   created_by: string; // Added to match Supabase schema
@@ -136,7 +127,6 @@ class POSDatabase extends Dexie {
   suppliers!: Table<Supplier, string>;
   customers!: Table<Customer, string>;
   inventory_items!: Table<InventoryItem, string>;
-  sales!: Table<Sale, string>;
   sale_items!: Table<SaleItem, string>;
   transactions!: Table<Transaction, string>;
 
@@ -147,17 +137,16 @@ class POSDatabase extends Dexie {
   constructor() {
     super('POSDatabase');
     
-    this.version(5).stores({
+    this.version(7).stores({
       // Core tables with enhanced indexing to match database schema
       // Tables WITH updated_at: products, suppliers, customers
       products: 'id, store_id, name, category, updated_at',
       suppliers: 'id, store_id, name, type, is_active, updated_at, balance', // Added balance index
       customers: 'id, store_id, name, phone, is_active, updated_at, balance', // Added balance index
 
-      // Tables WITHOUT updated_at: inventory_items, sales, sale_items, transactions
+      // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity', // Added received_quantity index
-      sales: 'id, store_id, customer_id, created_at, status, created_by',
-      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, created_at, created_by', // Added customer_id and created_by indexes
+      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id and created_by indexes
       transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
   
       // Sync management
@@ -198,6 +187,9 @@ class POSDatabase extends Dexie {
         if (!saleItem.created_by) {
           saleItem.created_by = ''; // Default empty string for created_by
         }
+        if (!saleItem.payment_method) {
+          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
+        }
       });
 
       // Update inventory_items to ensure received_quantity exists
@@ -208,15 +200,31 @@ class POSDatabase extends Dexie {
       });
     });
 
+    // Migration for version 6 - add payment_method to sale_items
+    this.version(6).upgrade(trans => {
+      // Update sale_items to ensure payment_method field exists
+      trans.table('sale_items').toCollection().modify(saleItem => {
+        if (!saleItem.payment_method) {
+          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
+        }
+      });
+    });
+
+    // Migration for version 7 - remove sales table (no longer needed)
+    this.version(7).upgrade(trans => {
+      // The sales table will be automatically removed from the schema
+      // Any existing sales data will be lost, but this matches the backend schema
+      console.log('Removing sales table to match backend schema');
+    });
+
     // Add hooks for automatic timestamping and ID generation
     // Tables WITH updated_at: products, suppliers, customers
     this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
 
-    // Tables WITHOUT updated_at: inventory_items, sales, sale_items, transactions
+    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
     this.inventory_items.hook('creating', this.addCreateFields);
-    this.sales.hook('creating', this.addCreateFields);
     this.sale_items.hook('creating', this.addCreateFields);
     this.transactions.hook('creating', this.addCreateFields);
 
@@ -323,7 +331,6 @@ class POSDatabase extends Dexie {
 
   async validateDataIntegrity(storeId: string): Promise<{
     orphanedInventory: any[];
-    orphanedSales: any[];
     orphanedSaleItems: any[];
     orphanedTransactions: any[];
   }> {
@@ -334,26 +341,20 @@ class POSDatabase extends Dexie {
     const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
     const customers = await this.customers.where('store_id').equals(storeId).toArray();
     const inventory = await this.inventory_items.where('store_id').equals(storeId).toArray();
-    const sales = await this.sales.where('store_id').equals(storeId).toArray();
     const saleItems = await this.sale_items.toArray();
     const transactions = await this.transactions.where('store_id').equals(storeId).toArray();
     
     const productIds = new Set(products.map(p => p.id));
     const supplierIds = new Set(suppliers.map(s => s.id));
     const customerIds = new Set(customers.map(c => c.id));
-    const saleIds = new Set(sales.map(s => s.id));
     
     // Find orphaned records
     const orphanedInventory = inventory.filter(item => 
       !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
     );
     
-    const orphanedSales = sales.filter(sale => 
-      sale.customer_id && !customerIds.has(sale.customer_id)
-    );
-    
     const orphanedSaleItems = saleItems.filter(item => 
-      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id) || (item.id && !saleIds.has(item.id))
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
     );
     
     const orphanedTransactions = transactions.filter(transaction => 
@@ -363,14 +364,12 @@ class POSDatabase extends Dexie {
     
     console.log('📊 Data integrity report:', {
       orphanedInventory: orphanedInventory.length,
-      orphanedSales: orphanedSales.length,
       orphanedSaleItems: orphanedSaleItems.length,
       orphanedTransactions: orphanedTransactions.length
     });
     
     return {
       orphanedInventory,
-      orphanedSales,
       orphanedSaleItems,
       orphanedTransactions
     };
@@ -392,13 +391,6 @@ class POSDatabase extends Dexie {
       await this.sale_items.bulkDelete(integrity.orphanedSaleItems.map(item => item.id));
       cleaned += integrity.orphanedSaleItems.length;
       console.log(`🗑️ Removed ${integrity.orphanedSaleItems.length} orphaned sale items`);
-    }
-    
-    // Clean up orphaned sales
-    if (integrity.orphanedSales.length > 0) {
-      await this.sales.bulkDelete(integrity.orphanedSales.map(sale => sale.id));
-      cleaned += integrity.orphanedSales.length;
-      console.log(`🗑️ Removed ${integrity.orphanedSales.length} orphaned sales`);
     }
     
     return cleaned;
