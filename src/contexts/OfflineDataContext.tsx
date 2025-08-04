@@ -30,10 +30,7 @@ interface OfflineDataContextType {
   sales: any[]; // Complex type with joins
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
   transactions: Tables['transactions']['Row'][];
-  expenseCategories: any[]; // Not in current schema
-  accountsReceivable: any[];
-  accountsPayable: any[];
-  journalEntries: any[];
+  expenseCategories: any[];
 
   // Computed/legacy compatibility - exact match
   stockLevels: any[];
@@ -67,15 +64,7 @@ interface OfflineDataContextType {
   addSale: (sale: any, items: any[]) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: any) => Promise<void>;
-  addAccountsReceivable: (ar: any) => Promise<void>;
-  updateAccountsReceivable: (id: string, updates: Partial<any>) => Promise<void>;
-  deleteAccountsReceivable: (id: string) => Promise<void>;
-  addAccountsPayable: (ap: any) => Promise<void>;
-  updateAccountsPayable: (id: string, updates: Partial<any>) => Promise<void>;
-  deleteAccountsPayable: (id: string) => Promise<void>;
-  addJournalEntry: (entry: any) => Promise<void>;
-  updateJournalEntry: (id: string, updates: Partial<any>) => Promise<void>;
-  deleteJournalEntry: (id: string) => Promise<void>;
+ 
   addNonPricedItem: (item: any) => Promise<void>;
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
   
@@ -151,9 +140,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return stored ? JSON.parse(stored) : null;
   });
   const [stockLevels, setStockLevels] = useState<any[]>([]);
-  const [accountsReceivable, setAccountsReceivable] = useState<any[]>([]);
-  const [accountsPayable, setAccountsPayable] = useState<any[]>([]);
-  const [journalEntries, setJournalEntries] = useState<any[]>([]);
 
   // Initialize data when store is available
   useEffect(() => {
@@ -358,9 +344,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         salesData,
         saleItemsData,
         transactionsData,
-        expenseCategoriesData,
-        accountsReceivableData,
-        accountsPayableData,
+        
       ] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
@@ -370,19 +354,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         db.sale_items.filter(item => !item._deleted).toArray(),
         db.transactions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
 
-        db.accounts_receivable?.where('store_id').equals(storeId).filter(item => !item._deleted).toArray() ?? [],
-        db.accounts_payable?.where('store_id').equals(storeId).filter(item => !item._deleted).toArray() ?? [],
-        db.journal_entries?.where('store_id').equals(storeId).filter(item => !item._deleted).toArray() ?? []
       ]);
 
       // Transform data to match SupabaseDataContext structure
       setProducts(productsData as Tables['products']['Row'][]);
-      setSuppliers(suppliersData.map(s => ({ ...s, balance: null })) as Tables['suppliers']['Row'][]);
+      setSuppliers(suppliersData.map(s => ({ ...s, balance: s.balance || null })) as Tables['suppliers']['Row'][]);
       setCustomers(customersData.map(c => ({ ...c, balance: c.balance || 0 })) as Tables['customers']['Row'][]);
       setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
-      setExpenseCategories(expenseCategoriesData);
-      setAccountsReceivable(accountsReceivableData);
-      setAccountsPayable(accountsPayableData);
+ 
 
       // Store raw data
       setInventoryItems(inventoryData);
@@ -809,54 +788,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setCurrency(newCurrency);
   };
 
-  // Add AR/AP/Journal CRUD
-  const addAccountsReceivable = async (ar: any) => {
-    const newAR = { ...ar, id: createId(), createdAt: new Date().toISOString(), _deleted: false, store_id: storeId };
-    await db.accounts_receivable.add(newAR);
-    setAccountsReceivable(prev => [...prev, newAR]);
-  };
 
-  const updateAccountsReceivable = async (id: string, updates: Partial<any>) => {
-    await db.accounts_receivable.update(id, updates);
-    setAccountsReceivable(prev => prev.map(ar => ar.id === id ? { ...ar, ...updates } : ar));
-  };
 
-  const deleteAccountsReceivable = async (id: string) => {
-    await db.accounts_receivable.update(id, { _deleted: true });
-    setAccountsReceivable(prev => prev.filter(ar => ar.id !== id));
-  };
 
-  const addAccountsPayable = async (ap: any) => {
-    const newAP = { ...ap, id: createId(), createdAt: new Date().toISOString(), _deleted: false, store_id: storeId };
-    await db.accounts_payable.add(newAP);
-    setAccountsPayable(prev => [...prev, newAP]);
-  };
-
-  const updateAccountsPayable = async (id: string, updates: Partial<any>) => {
-    await db.accounts_payable.update(id, updates);
-    setAccountsPayable(prev => prev.map(ap => ap.id === id ? { ...ap, ...updates } : ap));
-  };
-
-  const deleteAccountsPayable = async (id: string) => {
-    await db.accounts_payable.update(id, { _deleted: true });
-    setAccountsPayable(prev => prev.filter(ap => ap.id !== id));
-  };
-
-  const addJournalEntry = async (entry: any) => {
-    const newEntry = { ...entry, id: createId(), createdAt: new Date().toISOString(), _deleted: false, store_id: storeId };
-    await db.journal_entries.add(newEntry);
-    setJournalEntries(prev => [...prev, newEntry]);
-  };
-
-  const updateJournalEntry = async (id: string, updates: Partial<any>) => {
-    await db.journal_entries.update(id, updates);
-    setJournalEntries(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
-  };
-
-  const deleteJournalEntry = async (id: string) => {
-    await db.journal_entries.update(id, { _deleted: true });
-    setJournalEntries(prev => prev.filter(e => e.id !== id));
-  };
 
   const addNonPricedItem = async (item: any): Promise<void> => {
     if (!storeId) return;
@@ -962,9 +896,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       inventory,
       transactions,
       expenseCategories,
-      accountsReceivable,
-      accountsPayable,
-      journalEntries,
+      
 
       // Computed/legacy compatibility - exact match
       stockLevels,
@@ -989,15 +921,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addSale,
       addTransaction,
       addExpenseCategory,
-      addAccountsReceivable,
-      updateAccountsReceivable,
-      deleteAccountsReceivable,
-      addAccountsPayable,
-      updateAccountsPayable,
-      deleteAccountsPayable,
-      addJournalEntry,
-      updateJournalEntry,
-      deleteJournalEntry,
+     
       addNonPricedItem,
       deductInventoryQuantity,
 

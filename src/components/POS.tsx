@@ -32,9 +32,9 @@ interface BillTab {
 
 export default function POS() {
   const raw = useOfflineData();
-  const products = (raw.products || []).map(p => ({...p, isActive: true, createdAt: p.created_at})) as Array<any>;
+  const products = (raw.products || []).map(p => ({...p, createdAt: p.created_at})) as Array<any>;
   const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<any>;
-  const suppliers = (raw.suppliers || []).map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
+  const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at, type: s.type || 'commission'})) as Array<any>;
   const stockLevels = (raw.stockLevels || []) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
   const addSale = raw.addSale;
@@ -144,7 +144,7 @@ export default function POS() {
   };
 
   const filteredProducts = (products || []).filter(product => 
-    product.isActive && 
+  
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
     getProductStock(product.id) > 0
   );
@@ -213,7 +213,8 @@ export default function POS() {
           unitPrice: oldestInventoryItem?.price || 0.00, // Use price from oldest inventory item
           totalPrice: Math.round((oldestInventoryItem?.price || 0.00) * 100) / 100,
           notes: '',
-          inventoryType: oldestInventoryItem?.type || 'cash' // Track the inventory type
+          inventoryType: oldestInventoryItem?.type || 'cash', // Track the inventory type
+          inventoryItemId: oldestInventoryItem?.id || '' // Added to match database schema
         };
         updateActiveTab({ cart: [...activeTab.cart, newItem] });
       }
@@ -363,10 +364,10 @@ export default function POS() {
           inventory_item_id: item.inventoryItemId || '', // Added to match Supabase schema
           product_id: item.productId,
           supplier_id: item.supplierId,
-          weight: item.weight,
+          weight: item.weight || null,
           unit_price: item.unitPrice,
-          received_value: item.totalPrice, // Changed from total_price to received_value
-          notes: item.notes,
+          received_value: item.totalPrice || 0, // Changed from total_price to received_value
+          notes: item.notes || null,
           store_id: raw.storeId,
           customer_id: activeTab.selectedCustomer || null, // Added to match Supabase schema
           created_at: new Date().toISOString(),
@@ -548,7 +549,7 @@ export default function POS() {
                     type="text"
                     id="address"
                     name="address"
-                    value={customerForm.address}
+                    value={customerForm.address || ''}
                     onChange={handleCustomerFormChange}
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   />
