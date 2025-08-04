@@ -16,7 +16,7 @@ import {
   X,
   PlusCircle
 } from 'lucide-react';
-import { SaleItem, Sale, Customer } from '../types';
+import { SaleItem, Customer } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface BillTab {
@@ -34,7 +34,7 @@ export default function POS() {
   const raw = useOfflineData();
   const products = (raw.products || []).map(p => ({...p, createdAt: p.created_at})) as Array<any>;
   const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<any>;
-  const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at, type: s.type || 'commission'})) as Array<any>;
+  const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
   const stockLevels = (raw.stockLevels || []) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
   const addSale = raw.addSale;
@@ -110,9 +110,20 @@ export default function POS() {
   };
 
   const updateActiveTab = (updates: Partial<BillTab>) => {
-    const updatedTabs = activeTabs.map(tab =>
-      tab.id === activeTabId ? { ...tab, ...updates } : tab
-    );
+    const updatedTabs = activeTabs.map(tab => {
+      if (tab.id === activeTabId) {
+        let updatedTab = { ...tab, ...updates };
+        // If payment method is being updated, also update all cart items
+        if (updates.paymentMethod && updatedTab.cart) {
+          updatedTab.cart = updatedTab.cart.map(item => ({
+            ...item,
+            paymentMethod: updates.paymentMethod
+          }));
+        }
+        return updatedTab;
+      }
+      return tab;
+    });
     setActiveTabs(updatedTabs);
   };
 
@@ -212,6 +223,7 @@ export default function POS() {
           weight: undefined, // Weight will be entered manually during sale
           unitPrice: oldestInventoryItem?.price || 0.00, // Use price from oldest inventory item
           totalPrice: Math.round((oldestInventoryItem?.price || 0.00) * 100) / 100,
+          paymentMethod: activeTab.paymentMethod, // Set payment method from current tab
           notes: '',
           inventoryType: oldestInventoryItem?.type || 'cash', // Track the inventory type
           inventoryItemId: oldestInventoryItem?.id || '' // Added to match database schema
@@ -261,7 +273,7 @@ export default function POS() {
     updateActiveTab({ cart: updatedCart });
   };
 
-  const subtotal = activeTab.cart.reduce((sum, item) => sum + item.totalPrice, 0);
+  const subtotal = activeTab.cart.reduce((sum, item) => sum + (item.totalPrice ?? 0), 0);
   const total = Math.round(subtotal * 100) / 100; // Fix floating point precision
   const change = activeTab.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
@@ -331,35 +343,11 @@ export default function POS() {
           await raw.openCashDrawer(openingAmount, userProfile.id);
         }
       }
-      const customer = customers.find(c => c.id === activeTab.selectedCustomer);
-      const amountPaid = activeTab.paymentMethod === 'credit' ? 0 : parseFloat(activeTab.amountReceived) || total;
-      const sale: Omit<Sale, 'id' | 'createdAt'> = {
-        customerId: activeTab.selectedCustomer || undefined,
-        items: activeTab.cart,
-        subtotal,
-        total,
-        paymentMethod: activeTab.paymentMethod,
-        amountPaid,
-        amountDue: total - amountPaid,
-        status: activeTab.paymentMethod === 'credit' ? 'pending' : 'completed',
-        notes: activeTab.notes || undefined,
-        createdBy: userProfile?.id || ''
-      };
       // Note: Inventory deduction is handled automatically by the addSale function
       // No need to manually deduct here as it would cause double deduction
 
       await addSale(
-        {
-          customer_id: sale.customerId,
-          subtotal: sale.subtotal,
-          total: sale.total,
-          payment_method: sale.paymentMethod,
-          amount_paid: sale.amountPaid,
-          amount_due: sale.amountDue,
-          status: sale.status,
-          notes: sale.notes,
-          created_by: sale.createdBy,
-        },
+        {}, // Empty sale object since we only create sale_items
         activeTab.cart.map(item => ({
           inventory_item_id: item.inventoryItemId || '', // Added to match Supabase schema
           product_id: item.productId,
@@ -367,6 +355,7 @@ export default function POS() {
           weight: item.weight || null,
           unit_price: item.unitPrice,
           received_value: item.totalPrice || 0, // Changed from total_price to received_value
+          payment_method: item.paymentMethod || activeTab.paymentMethod, // Add payment method
           notes: item.notes || null,
           store_id: raw.storeId,
           customer_id: activeTab.selectedCustomer || null, // Added to match Supabase schema
@@ -538,7 +527,7 @@ export default function POS() {
                     type="email"
                     id="email"
                     name="email"
-                    value={customerForm.email}
+                    value={customerForm.email  ||''}
                     onChange={handleCustomerFormChange}
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   />

@@ -77,25 +77,13 @@ export interface SaleItem {
   unitPrice: number;
   totalPrice?: number; // Added for cart calculations
   receivedValue?: number; // Matches received_value in database, optional for cart items
+  paymentMethod?: 'cash' | 'card' | 'credit'; // Added payment method field
   notes?: string;
   createdBy?: string; // Added to match Supabase schema
   inventoryType?: 'commission' | 'cash'; // Added for inventory tracking
 }
 
 // Added missing interfaces to match database schema
-export interface Sale {
-  id: string;
-  customerId: string | null;
-  subtotal: number;
-  total: number;
-  paymentMethod: 'cash' | 'card' | 'credit';
-  amountPaid: number;
-  amountDue: number;
-  status: 'completed' | 'pending' | 'cancelled';
-  notes?: string;
-  createdAt: string;
-  createdBy: string;
-}
 
 export interface AccountsReceivable {
   id: string;

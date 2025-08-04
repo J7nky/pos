@@ -213,6 +213,7 @@ export interface Database {
           weight: number | null;
           unit_price: number;
           received_value: number;
+          payment_method: 'cash' | 'card' | 'credit';
           notes: string | null;
           created_at: string;
           store_id: string;
@@ -227,6 +228,7 @@ export interface Database {
           weight?: number | null;
           unit_price: number;
           received_value: number;
+          payment_method: 'cash' | 'card' | 'credit';
           notes?: string | null;
           created_at?: string;
           store_id: string;
@@ -241,6 +243,7 @@ export interface Database {
           weight?: number | null;
           unit_price?: number;
           received_value?: number;
+          payment_method?: 'cash' | 'card' | 'credit';
           notes?: string | null;
           customer_id?: string | null;
         };

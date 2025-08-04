@@ -100,7 +100,7 @@ export async function validateSaleItemsStructure(): Promise<{
     const requiredFields = [
       'id', 'product_id', 'product_name', 
       'supplier_id', 'supplier_name', 'quantity', 
-      'unit_price', 'total_price', 'created_at'
+      'unit_price', 'total_price', 'payment_method', 'created_at'
     ];
 
     const optionalFields = ['weight', 'notes', 'store_id', '_synced', '_lastSyncedAt'];

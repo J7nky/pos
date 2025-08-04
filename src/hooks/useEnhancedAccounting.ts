@@ -5,7 +5,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { enhancedTransactionService, EnhancedTransactionResult, TransactionContext } from '../services/enhancedTransactionService';
 import { auditLogService, AuditLogEntry, AuditQuery } from '../services/auditLogService';
 import { currencyService } from '../services/currencyService';
-import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable, Sale, SaleItem } from '../types';
+import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable, SaleItem } from '../types';
 
 export interface EnhancedAccountingState {
   // Dashboard data
@@ -67,8 +67,7 @@ export interface EnhancedAccountingActions {
   }) => Promise<EnhancedTransactionResult>;
   
   processSale: (params: {
-    sale: Omit<Sale, 'id' | 'createdAt'>;
-    items: Omit<SaleItem, 'id'>[];
+    saleItems: Omit<SaleItem, 'id'>[];
   }) => Promise<EnhancedTransactionResult>;
   
   // Data querying with audit trails
@@ -375,15 +374,13 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
   }, [createTransactionContext]);
 
   const processSale = useCallback(async (params: {
-    sale: Omit<Sale, 'id' | 'createdAt'>;
-    items: Omit<SaleItem, 'id'>[];
+    saleItems: Omit<SaleItem, 'id'>[];
   }): Promise<EnhancedTransactionResult> => {
     setIsProcessing(true);
     try {
       const context = createTransactionContext();
       const result = await enhancedTransactionService.processSale(
-        params.sale,
-        params.items,
+        params.saleItems,
         context
       );
       
