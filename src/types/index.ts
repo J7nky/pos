@@ -31,7 +31,6 @@ export interface Supplier {
   phone: string;
   email: string | null; // Updated to match database schema
   address: string;
-  isActive: boolean;
   balance: number | null; // Updated to match database schema
   createdAt: string;
 }
@@ -67,15 +66,20 @@ export interface Customer {
 
 export interface SaleItem {
   id: string;
-  inventoryItemId: string; // Added to match Supabase schema
+  inventoryItemId?: string; // Added to match Supabase schema
   productId: string;
+  productName?: string; // Added for UI display
   supplierId: string;
+  supplierName?: string; // Added for UI display
   customerId?: string; // Made optional to match Supabase schema
+  quantity: number; // Added quantity field for cart items
   weight?: number;
   unitPrice: number;
-  receivedValue: number; // Matches received_value in database
+  totalPrice?: number; // Added for cart calculations
+  receivedValue?: number; // Matches received_value in database, optional for cart items
   notes?: string;
   createdBy?: string; // Added to match Supabase schema
+  inventoryType?: 'commission' | 'cash'; // Added for inventory tracking
 }
 
 // Added missing interfaces to match database schema

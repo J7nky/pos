@@ -18,7 +18,6 @@ const SYNC_TABLES = [
   'suppliers', 
   'customers',
   'inventory_items',
-  'sales',
   'sale_items',
   'transactions',
 
@@ -171,7 +170,7 @@ export class SyncService {
 
           if (error) {
             console.error(`❌ Upload failed for ${tableName}:`, error);
-            console.error('📋 Failed batch data:', cleanedBatch);
+            console.error('📋 Failed batch data:', cleanedBatch); 
             console.error('🔍 First record fields:', Object.keys(cleanedBatch[0] || {}));
             result.errors.push(`Upload failed for ${tableName}: ${error.message}`);
             
@@ -431,12 +430,19 @@ export class SyncService {
       delete cleanRecord.updated_at;
     }
     
-    // Handle sale_items specific field removals
+    // Handle sale_items specific field cleanup (now keeping created_by and store_id as they're in database schema)
     if (tableName === 'sale_items') {
-      delete cleanRecord.created_by;
-      // Remove store_id if it's causing schema cache issues
-      // The store_id should be derived from the parent sale's store_id
-      delete cleanRecord.store_id;
+      // Ensure required fields are present and valid
+      if (!cleanRecord.inventory_item_id) {
+        cleanRecord.inventory_item_id = '';
+      }
+      if (!cleanRecord.created_by) {
+        cleanRecord.created_by = '';
+      }
+      if (!cleanRecord.customer_id) {
+        cleanRecord.customer_id = null;
+      }
+      // Keep store_id as it's now part of the database schema
     }
     
     // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow
@@ -470,8 +476,9 @@ export class SyncService {
     if (record.customer_id !== undefined && record.subtotal !== undefined) return 'sales';
     if (record.type && record.amount && record.currency) return 'transactions';
     if (record.category && !record.amount) return 'products';
-    if (record.phone && record.type) return 'suppliers';
-    if (record.phone && record.balance !== undefined) return 'customers';
+    // Updated supplier detection to handle new type field and distinguish from transactions
+    if (record.phone && record.type && (record.type === 'commission' || record.type === 'cash') && !record.amount) return 'suppliers';
+    if (record.phone && record.balance !== undefined && !record.type) return 'customers';
 
     return 'unknown';
   }

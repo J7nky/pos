@@ -51,26 +51,15 @@ import {
   X
 } from 'lucide-react';
 import Toast from './common/Toast';
-import { AccountsReceivable, AccountsPayable } from '../lib/db';
 
 export default function Accounting() {
   const raw = useOfflineData();
-  const {
-    accountsReceivable,
-    accountsPayable,
-    addAccountsReceivable,
-    updateAccountsReceivable,
-    deleteAccountsReceivable,
-    addAccountsPayable,
-    updateAccountsPayable,
-    deleteAccountsPayable,
-  } = raw;
   const addExpenseCategory = raw.addExpenseCategory;
   const addTransaction = raw.addTransaction;
-  const transactions = raw.transactions.map(t => ({...t, createdAt: t.created_at})) as Array<any>;
-  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<any>;
-  const suppliers = raw.suppliers.map(s => ({...s, created_at: s.created_at,balance: s.balance,})) as Array<any>;
-  const expenseCategories = raw.expenseCategories.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at})) as Array<any>;
+  const transactions = raw.transactions.map(t => ({...t, createdAt: t.created_at}));
+  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance}));
+  const suppliers = raw.suppliers.map(s => ({...s, createdAt: s.created_at, balance: s.balance, type: s.type || 'cash'}));
+  const expenseCategories = raw.expenseCategories || [];
   const inventory = raw.inventory || [];
   const sales = raw.sales || [];
   const products = raw.products || [];
@@ -232,16 +221,6 @@ export default function Accounting() {
     };
   }, [transactions, dashboardPeriod, getConvertedAmount]);
 
-  // Calculate totals
-  const totalReceivables = accountsReceivable.reduce((sum, ar) => sum + ar.amountDue, 0);
-  const overdueReceivables = accountsReceivable.filter(ar => 
-    new Date(ar.dueDate) < new Date() && ar.status !== 'paid'
-  );
-  const totalPayables = accountsPayable.reduce((sum, ap) => sum + ap.amountDue, 0);
-  const overduePayables = accountsPayable.filter(ap => 
-    new Date(ap.dueDate) < new Date() && ap.status !== 'paid'
-  );
-
   const today = new Date().toISOString().split('T')[0];
 
   // Calculate today's expenses with currency conversion
@@ -276,8 +255,8 @@ export default function Accounting() {
 
   // Enhanced KPI calculations
   const kpiData = useMemo(() => {
-    const totalCustomers = customers.filter(c => c.isActive).length;
-    const totalSuppliers = suppliers.filter(s => s.isActive).length;
+    const totalCustomers = customers.filter(c => c.is_active).length;
+    const totalSuppliers = suppliers.length;
     const customersWithDebt = customers.filter(c => (c.balance || 0) > 0).length; // Updated to use balance field with null safety
     const totalCustomerDebt = customers.reduce((sum, c) => sum + (c.balance || 0), 0); // Updated to use balance field with null safety
     const avgDebtPerCustomer = customersWithDebt > 0 ? totalCustomerDebt / customersWithDebt : 0;
@@ -330,58 +309,7 @@ export default function Accounting() {
   };
   const hideToast = () => setToast(t => ({ ...t, visible: false }));
 
-  // Filtering, sorting, and pagination state for AR/AP
-  const [arStatusFilter, setArStatusFilter] = useState('');
-  const [arSort, setArSort] = useState<'dueDate' | 'amount' | 'status'>('dueDate');
-  const [arSortDir, setArSortDir] = useState<'asc' | 'desc'>('asc');
-  const [arPage, setArPage] = useState(1);
-  const AR_PAGE_SIZE = 10;
 
-  const [apStatusFilter, setApStatusFilter] = useState('');
-  const [apSort, setApSort] = useState<'dueDate' | 'amount' | 'status'>('dueDate');
-  const [apSortDir, setApSortDir] = useState<'asc' | 'desc'>('asc');
-  const [apPage, setApPage] = useState(1);
-  const AP_PAGE_SIZE = 10;
-
-  // Filtering, sorting, and pagination logic for AR
-  const filteredAR = accountsReceivable
-    .filter(ar => ((ar.customerName || ar.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase())))
-    .filter(ar => !arStatusFilter || ar.status === arStatusFilter)
-  ;
-  const sortedAR = [...filteredAR].sort((a, b) => {
-    if (arSort === 'dueDate') {
-      const aDate = new Date(a.dueDate).getTime();
-      const bDate = new Date(b.dueDate).getTime();
-      return arSortDir === 'asc' ? aDate - bDate : bDate - aDate;
-    } else if (arSort === 'amount') {
-      return arSortDir === 'asc' ? a.amountDue - b.amountDue : b.amountDue - a.amountDue;
-    } else if (arSort === 'status') {
-      return arSortDir === 'asc' ? a.status.localeCompare(b.status) : b.status.localeCompare(a.status);
-    }
-    return 0;
-  });
-  const arTotalPages = Math.ceil(sortedAR.length / AR_PAGE_SIZE);
-  const pagedAR = sortedAR.slice((arPage - 1) * AR_PAGE_SIZE, arPage * AR_PAGE_SIZE);
-
-  // Filtering, sorting, and pagination logic for AP
-  const filteredAP = accountsPayable
-    .filter(ap => ((ap.supplierName || ap.supplier_name || '').toLowerCase().includes(searchTerm.toLowerCase())))
-    .filter(ap => !apStatusFilter || ap.status === apStatusFilter)
-  ;
-  const sortedAP = [...filteredAP].sort((a, b) => {
-    if (apSort === 'dueDate') {
-      const aDate = new Date(a.dueDate).getTime();
-      const bDate = new Date(b.dueDate).getTime();
-      return apSortDir === 'asc' ? aDate - bDate : bDate - aDate;
-    } else if (apSort === 'amount') {
-      return apSortDir === 'asc' ? a.amountDue - b.amountDue : b.amountDue - a.amountDue;
-    } else if (apSort === 'status') {
-      return apSortDir === 'asc' ? a.status.localeCompare(b.status) : b.status.localeCompare(a.status);
-    }
-    return 0;
-  });
-  const apTotalPages = Math.ceil(sortedAP.length / AP_PAGE_SIZE);
-  const pagedAP = sortedAP.slice((apPage - 1) * AP_PAGE_SIZE, apPage * AP_PAGE_SIZE);
 
   // Form handlers
   const handleReceiveSubmit = async (e: React.FormEvent) => {
@@ -497,62 +425,6 @@ export default function Accounting() {
         `Payment to ${supplier.name}${payForm.description ? ': ' + payForm.description : ''}`,
         userProfile?.id || ''
       );
-      
-      // Update supplier balance by paying down existing accounts payable
-      // Store amounts as-is in their original currency, convert only for display
-      const paymentAmount = parseFloat(payForm.amount);
-      const supplierPayables = accountsPayable.filter(ap => ap.supplier_id === payForm.supplierId && ap.status !== 'paid');
-      
-      let remainingPayment = paymentAmount;
-      
-      // Pay down existing payables first
-      for (const payable of supplierPayables) {
-        if (remainingPayment <= 0) break;
-        
-        // Convert payable amounts to payment currency for comparison
-        const payableAmountInPaymentCurrency = payForm.currency === 'LBP' ? 
-          payable.amountDue * 89500 : payable.amountDue;
-        const payablePaidInPaymentCurrency = payForm.currency === 'LBP' ? 
-          payable.amountPaid * 89500 : payable.amountPaid;
-        
-        const paymentAmount = Math.min(remainingPayment, payableAmountInPaymentCurrency);
-        const newAmountPaidInPaymentCurrency = payablePaidInPaymentCurrency + paymentAmount;
-        const newAmountDueInPaymentCurrency = payableAmountInPaymentCurrency - paymentAmount;
-        const newStatus = newAmountDueInPaymentCurrency === 0 ? 'paid' : 'partial';
-        
-        // Convert back to USD for storage
-        const newAmountPaidInUSD = payForm.currency === 'LBP' ? 
-          newAmountPaidInPaymentCurrency / 89500 : newAmountPaidInPaymentCurrency;
-        const newAmountDueInUSD = payForm.currency === 'LBP' ? 
-          newAmountDueInPaymentCurrency / 89500 : newAmountDueInPaymentCurrency;
-        
-        await updateAccountsPayable(payable.id, {
-          amount_paid: newAmountPaidInUSD,
-          amount_due: newAmountDueInUSD,
-          status: newStatus
-        });
-        
-        remainingPayment -= paymentAmount;
-      }
-      
-      // If there's remaining payment amount (overpayment or payment without prior payables),
-      // create a credit entry
-      if (remainingPayment > 0) {
-        const creditAmountInUSD = payForm.currency === 'LBP' ? 
-          remainingPayment / 89500 : remainingPayment;
-        
-        await addAccountsPayable({
-          supplier_id: payForm.supplierId,
-          supplier_name: supplier.name,
-          invoice_number: `CREDIT-${Date.now()}`,
-          amount: creditAmountInUSD,
-          amount_paid: creditAmountInUSD,
-          amount_due: -creditAmountInUSD, // Negative amount due indicates credit
-          due_date: new Date().toISOString().split('T')[0],
-          status: 'paid',
-          description: `Payment credit to ${supplier.name}${payForm.description ? ': ' + payForm.description : ''}`
-        });
-      }
       
       // Also add to legacy transaction system for compatibility
       addTransaction({
@@ -672,246 +544,9 @@ export default function Accounting() {
     }
   };
 
-  // Add edit/delete handlers for AR/AP
-  const handleEditReceivable = async (ar: AccountsReceivable) => {
-    // For now, just prompt for new amount (future: modal form)
-    const newAmount = prompt('Edit amount:', String(ar.amount_due));
-    if (newAmount !== null) {
-      try {
-        await updateAccountsReceivable(ar.id, { amount_due: parseFloat(newAmount) });
-        showToast('Receivable updated!', 'success');
-      } catch {
-        showToast('Failed to update receivable.', 'error');
-      }
-    }
-  };
-  const handleDeleteReceivable = async (ar: AccountsReceivable) => {
-    if (window.confirm('Delete this receivable?')) {
-      try {
-        await deleteAccountsReceivable(ar.id);
-        showToast('Receivable deleted!', 'success');
-      } catch {
-        showToast('Failed to delete receivable.', 'error');
-      }
-    }
-  };
-  const handleEditPayable = async (ap: AccountsPayable) => {
-    const newAmount = prompt('Edit amount:', String(ap.amount_due));
-    if (newAmount !== null) {
-      try {
-        await updateAccountsPayable(ap.id, { amount_due: parseFloat(newAmount) });
-        showToast('Payable updated!', 'success');
-      } catch {
-        showToast('Failed to update payable.', 'error');
-      }
-    }
-  };
-  const handleDeletePayable = async (ap: AccountsPayable) => {
-    if (window.confirm('Delete this payable?')) {
-      try {
-        await deleteAccountsPayable(ap.id);
-        showToast('Payable deleted!', 'success');
-      } catch {
-        showToast('Failed to delete payable.', 'error');
-      }
-    }
-  };
 
-  // --- ReceivablesTable component ---
-  function ReceivablesTable({
-    data, page, totalPages, onPageChange, onEdit, onDelete, statusFilter, onStatusFilter, sort, sortDir, onSort, searchTerm
-  }: {
-    data: AccountsReceivable[];
-    page: number;
-    totalPages: number;
-    onPageChange: (page: number) => void;
-    onEdit: (ar: AccountsReceivable) => void;
-    onDelete: (ar: AccountsReceivable) => void;
-    statusFilter: string;
-    onStatusFilter: (status: string) => void;
-    sort: 'dueDate' | 'amount' | 'status';
-    sortDir: 'asc' | 'desc';
-    onSort: (sort: 'dueDate' | 'amount' | 'status') => void;
-    searchTerm: string;
-  }) {
-    return (
-      <div className="bg-white rounded-lg shadow-sm">
-        <div className="p-6 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Accounts Receivable</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <div className="flex flex-wrap gap-2 mb-2">
-            <select value={statusFilter} onChange={e => { onStatusFilter(e.target.value); onPageChange(1); }} className="border rounded px-2 py-1">
-              <option value="">All Statuses</option>
-              <option value="pending">Pending</option>
-              <option value="paid">Paid</option>
-              <option value="overdue">Overdue</option>
-              <option value="partial">Partial</option>
-            </select>
-            <button onClick={() => onSort('dueDate')} className={`border rounded px-2 py-1 ${sort === 'dueDate' ? 'font-bold' : ''}`}>Due Date {sort === 'dueDate' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button>
-            <button onClick={() => onSort('amount')} className={`border rounded px-2 py-1 ${sort === 'amount' ? 'font-bold' : ''}`}>Amount {sort === 'amount' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button>
-            <button onClick={() => onSort('status')} className={`border rounded px-2 py-1 ${sort === 'status' ? 'font-bold' : ''}`}>Status {sort === 'status' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button>
-          </div>
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {data.length === 0 ? (
-                <tr><td colSpan={6} className="text-center text-gray-500 py-8">
-                  <div className="flex flex-col items-center">
-                    <AlertCircle className="w-8 h-8 text-gray-400 mb-2" aria-label="No receivables" />
-                    <span className="font-semibold">No receivables found</span>
-                    <span className="text-sm text-gray-400">Try adjusting your filters or add a new receivable.</span>
-                  </div>
-                </td></tr>
-              ) : data.map(ar => (
-                <tr key={ar.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-gray-900">{ar.customer_name}</td>
-                  <td className="px-6 py-4 text-gray-900">{ar.invoice_number}</td>
-                  <td className="px-6 py-4 text-gray-900">${ar.amount_due.toFixed(2)}</td>
-                  <td className="px-6 py-4 text-gray-900">
-                    {new Date(ar.due_date).toLocaleDateString()}
-                    {ar.status === 'overdue' && (
-                      <span className="ml-2 text-xs text-red-700 font-semibold" aria-label="Days overdue">
-                        ({Math.max(0, Math.floor((Date.now() - new Date(ar.due_date).getTime()) / (1000 * 60 * 60 * 24)))} days overdue)
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full flex items-center w-fit ${getStatusColor(ar.status)}`} aria-label={`Status: ${ar.status}`}>
-                      {getStatusIcon(ar.status)}
-                      <span className="ml-1 capitalize">{ar.status}</span>
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex space-x-2">
-                      <button className="text-blue-600 hover:text-blue-800" onClick={() => onEdit(ar)}>
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button className="text-red-600 hover:text-red-800" onClick={() => onDelete(ar)}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="flex justify-end gap-2 mt-2">
-            <button disabled={page === 1} onClick={() => onPageChange(Math.max(1, page - 1))} className="px-2 py-1 border rounded disabled:opacity-50">Prev</button>
-            <span>Page {page} of {totalPages || 1}</span>
-            <button disabled={page === totalPages || totalPages === 0} onClick={() => onPageChange(Math.min(totalPages, page + 1))} className="px-2 py-1 border rounded disabled:opacity-50">Next</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
-  // --- PayablesTable component ---
-  function PayablesTable({
-    data, page, totalPages, onPageChange, onEdit, onDelete, statusFilter, onStatusFilter, sort, sortDir, onSort, searchTerm
-  }: {
-    data: AccountsPayable[];
-    page: number;
-    totalPages: number;
-    onPageChange: (page: number) => void;
-    onEdit: (ap: AccountsPayable) => void;
-    onDelete: (ap: AccountsPayable) => void;
-    statusFilter: string;
-    onStatusFilter: (status: string) => void;
-    sort: 'dueDate' | 'amount' | 'status';
-    sortDir: 'asc' | 'desc';
-    onSort: (sort: 'dueDate' | 'amount' | 'status') => void;
-    searchTerm: string;
-  }) {
-    return (
-      <div className="bg-white rounded-lg shadow-sm">
-        <div className="p-6 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Accounts Payable</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <div className="flex flex-wrap gap-2 mb-2">
-            <select value={statusFilter} onChange={e => { onStatusFilter(e.target.value); onPageChange(1); }} className="border rounded px-2 py-1">
-              <option value="">All Statuses</option>
-              <option value="pending">Pending</option>
-              <option value="paid">Paid</option>
-              <option value="overdue">Overdue</option>
-              <option value="partial">Partial</option>
-            </select>
-            <button onClick={() => onSort('dueDate')} className={`border rounded px-2 py-1 ${sort === 'dueDate' ? 'font-bold' : ''}`}>Due Date {sort === 'dueDate' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button>
-            <button onClick={() => onSort('amount')} className={`border rounded px-2 py-1 ${sort === 'amount' ? 'font-bold' : ''}`}>Amount {sort === 'amount' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button>
-            <button onClick={() => onSort('status')} className={`border rounded px-2 py-1 ${sort === 'status' ? 'font-bold' : ''}`}>Status {sort === 'status' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button>
-          </div>
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {data.length === 0 ? (
-                <tr><td colSpan={6} className="text-center text-gray-500 py-8">
-                  <div className="flex flex-col items-center">
-                    <AlertCircle className="w-8 h-8 text-gray-400 mb-2" aria-label="No payables" />
-                    <span className="font-semibold">No payables found</span>
-                    <span className="text-sm text-gray-400">Try adjusting your filters or add a new payable.</span>
-                  </div>
-                </td></tr>
-              ) : data.map(ap => (
-                <tr key={ap.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-gray-900">{ap.supplier_name}</td>
-                  <td className="px-6 py-4 text-gray-900">{ap.invoice_number}</td>
-                  <td className="px-6 py-4 text-gray-900">${ap.amount_due.toFixed(2)}</td>
-                  <td className="px-6 py-4 text-gray-900">
-                    {new Date(ap.due_date).toLocaleDateString()}
-                    {ap.status === 'overdue' && (
-                      <span className="ml-2 text-xs text-red-700 font-semibold" aria-label="Days overdue">
-                        ({Math.max(0, Math.floor((Date.now() - new Date(ap.due_date).getTime()) / (1000 * 60 * 60 * 24)))} days overdue)
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full flex items-center w-fit ${getStatusColor(ap.status)}`} aria-label={`Status: ${ap.status}`}>
-                      {getStatusIcon(ap.status)}
-                      <span className="ml-1 capitalize">{ap.status}</span>
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex space-x-2">
-                      <button className="text-blue-600 hover:text-blue-800" onClick={() => onEdit(ap)}>
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button className="text-red-600 hover:text-red-800" onClick={() => onDelete(ap)}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="flex justify-end gap-2 mt-2">
-            <button disabled={page === 1} onClick={() => onPageChange(Math.max(1, page - 1))} className="px-2 py-1 border rounded disabled:opacity-50">Prev</button>
-            <span>Page {page} of {totalPages || 1}</span>
-            <button disabled={page === totalPages || totalPages === 0} onClick={() => onPageChange(Math.min(totalPages, page + 1))} className="px-2 py-1 border rounded disabled:opacity-50">Next</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+
 
   // Add to Accounting component state:
   const [nonPricedItems, setNonPricedItems] = useState<any[]>([]);
@@ -967,29 +602,7 @@ export default function Accounting() {
     localStorage.setItem(key, JSON.stringify(newItems));
     setNonPricedItems(newItems);
     
-    // Add to receivables
-    const totalAmount = item.unitPrice * (item.weight || item.quantity);
-    try {
-      const customer = customers.find(c => c.id === item.customerId);
-      if (customer) {
-        await addAccountsReceivable({
-          customer_id: item.customerId,
-          customer_name: customer.name,
-          invoice_number: 'NP-' + item.id.slice(-6).toUpperCase(),
-          amount: totalAmount,
-          amount_paid: 0,
-          amount_due: totalAmount,
-          due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days from now
-          status: 'pending',
-          description: `${item.productName} (${item.weight || item.quantity} ${item.weight ? 'kg' : 'units'})`,
-        });
-        showToast('Moved to receivables successfully!', 'success');
-      } else {
-        showToast('Customer not found', 'error');
-      }
-    } catch (error) {
-      showToast('Failed to move to receivables', 'error');
-    }
+    showToast('Item marked as priced successfully!', 'success');
   };
 
   const handleBulkMarkPriced = async () => {
@@ -1554,20 +1167,7 @@ export default function Accounting() {
       const commissionAmount = (closingBill.totalRevenue * closingBill.commissionRate) / 100;
       const supplierPayment = closingBill.totalRevenue - commissionAmount;
 
-      // Create accounts payable for supplier
-      const payableData = {
-        supplier_id: closingBill.supplierId,
-        supplier_name: closingBill.supplierName,
-        invoice_number: `BILL-${closingBill.inventoryItemId.slice(-8)}`,
-        amount: supplierPayment,
-        amount_paid: 0,
-        amount_due: supplierPayment,
-        due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days from now
-        status: 'pending' as const,
-        description: `Commission bill for ${closingBill.productName} - ${closingBill.soldQuantity} units sold`
-      };
-
-      await addAccountsPayable(payableData);
+      // Bill closing processed without creating accounts payable
 
       // Add commission transaction
       await addTransaction({
@@ -1639,19 +1239,7 @@ export default function Accounting() {
         const commissionAmount = (bill.totalRevenue * bill.commissionRate) / 100;
         const supplierPayment = bill.totalRevenue - commissionAmount;
 
-        const payableData = {
-          supplier_id: bill.supplierId,
-          supplier_name: bill.supplierName,
-          invoice_number: `BILL-${bill.inventoryItemId.slice(-8)}`,
-          amount: supplierPayment,
-          amount_paid: 0,
-          amount_due: supplierPayment,
-          due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          status: 'pending' as const,
-          description: `Commission bill for ${bill.productName} - ${bill.soldQuantity} units sold`
-        };
-
-        await addAccountsPayable(payableData);
+        // Bill closed without creating accounts payable
         closedCount++;
       }
 
@@ -2318,22 +1906,7 @@ export default function Accounting() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-purple-500">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 font-medium">Active Suppliers</p>
-                  <p className="text-2xl font-bold text-gray-900">{suppliers.filter(s => s.isActive).length}</p>
-                  <div className="flex items-center mt-2">
-                    <Award className="w-4 h-4 text-purple-500 mr-1" />
-                    <span className="text-sm font-medium text-purple-600">{suppliers.filter(s => s.isActive && s.type === 'commission').length}</span>
-                    <span className="text-xs text-gray-500 ml-1">commission based</span>
-                  </div>
-                </div>
-                <div className="p-3 bg-purple-100 rounded-full">
-                  <Building2 className="w-6 h-6 text-purple-600" />
-                </div>
-              </div>
-            </div>
+         
           </div>
 
 
@@ -2359,7 +1932,7 @@ export default function Accounting() {
                       {transaction.type === 'income' ? (
                         <ArrowDownRight className={`w-4 h-4 ${transaction.type === 'income' ? 'text-green-600' : 'text-red-600'}`} />
                       ) : (
-                        <ArrowUpRight className={`w-4 h-4 ${transaction.type === 'income' ? 'text-green-600' : 'text-red-600'}`} />
+                        <ArrowUpRight className={`w-4 h-4 ${transaction.type === 'expense' ? 'text-red-600' : 'text-green-600'}`} />
                       )}
                     </div>
                     <div>
@@ -2440,7 +2013,7 @@ export default function Accounting() {
                 <tbody className="divide-y divide-gray-200">
                   {customers
                     .filter(customer => customer.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                    .filter(customer => customer.isActive)
+                    .filter(customer => customer.is_active)
                     .sort((a, b) => (b.balance || 0) - (a.balance || 0)) // Updated to use balance field with null safety
                     .map(customer => (
                     <tr key={customer.id} className="hover:bg-gray-50">
@@ -2597,7 +2170,6 @@ export default function Accounting() {
                 <tbody className="divide-y divide-gray-200">
                   {suppliers
                     .filter(supplier => supplier.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                    .filter(supplier => supplier.isActive)
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(supplier => (
                     <tr key={supplier.id} className="hover:bg-gray-50">
@@ -2619,61 +2191,29 @@ export default function Accounting() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        {(() => {
-                          // Calculate current balance owed to this supplier (including credits)
-                          // amounts are stored in USD, formatCurrency will convert to display currency
-                          const supplierPayables = accountsPayable.filter(ap => ap.supplier_id === supplier.id);
-                          const totalOwed = supplierPayables.reduce((sum, ap) => sum + ap.amountDue, 0);
-                          
-                          return (
-                            <div>
-                              <div className={`text-lg font-semibold ${
-                                totalOwed > 0 ? 'text-red-600' : 
-                                totalOwed < 0 ? 'text-green-600' : 
-                                'text-gray-900'
-                              }`}>
-                                {formatCurrency(Math.abs(totalOwed))}
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                {totalOwed > 0 ? 'Amount owed' : 
-                                 totalOwed < 0 ? 'Credit balance' : 
-                                 'No outstanding balance'}
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        <div>
+                          <div className="text-lg font-semibold text-gray-900">
+                            {formatCurrency(Math.abs(supplier.balance || 0))}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {(supplier.balance || 0) > 0 ? 'Credit balance' : 
+                             (supplier.balance || 0) < 0 ? 'Amount owed' : 
+                             'No outstanding balance'}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm text-gray-900">{supplier.phone || 'N/A'}</div>
                         <div className="text-sm text-gray-500">{supplier.email || 'No email'}</div>
                       </td>
                       <td className="px-6 py-4">
-                        {(() => {
-                          // amounts are stored in USD, convert to display currency for status logic
-                          const supplierPayables = accountsPayable.filter(ap => ap.supplier_id === supplier.id);
-                          const totalOwedInUSD = supplierPayables.reduce((sum, ap) => sum + ap.amountDue, 0);
-                          const totalOwedInDisplayCurrency = currency === 'LBP' ? 
-                            totalOwedInUSD * 89500 : totalOwedInUSD;
-                          
-                          return (
-                            <div>
-                              <span className={`px-2 py-1 text-xs rounded-full ${
-                                totalOwedInDisplayCurrency > 5000 ? 'bg-red-100 text-red-800' :
-                                totalOwedInDisplayCurrency > 0 ? 'bg-yellow-100 text-yellow-800' :
-                                totalOwedInDisplayCurrency < 0 ? 'bg-green-100 text-green-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {totalOwedInDisplayCurrency > 5000 ? 'High Balance' :
-                                 totalOwedInDisplayCurrency > 0 ? 'Has Balance' :
-                                 totalOwedInDisplayCurrency < 0 ? 'Credit' :
-                                 'Balanced'}
-                              </span>
-                              <div className="text-xs text-gray-500 mt-1">
-                                {supplier.type === 'commission' ? 'Commission' : 'Cash'} • {supplier.isActive ? 'Active' : 'Inactive'}
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        <div>
+                          <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
+                            {supplier.type === 'commission' ? 'Commission' : 'Cash'}
+                          </span>
+                          <div className="text-xs text-gray-500 mt-1">
+                          </div>
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-500">
                         {supplier.createdAt ? new Date(supplier.createdAt).toLocaleDateString() : 'N/A'}
@@ -2707,48 +2247,23 @@ export default function Accounting() {
             <div className="bg-white rounded-lg shadow-sm p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600">Total Amount Owed</p>
-                  <p className="text-2xl font-bold text-red-600">
-                    {formatCurrency(Math.max(0, accountsPayable.reduce((sum, ap) => sum + ap.amountDue, 0)))}
+                  <p className="text-sm text-gray-600">Total Supplier Credit Balance</p>
+                  <p className="text-2xl font-bold text-green-600">
+                    {formatCurrency(Math.max(0, suppliers.reduce((sum, s) => sum + Math.max(0, s.balance || 0), 0)))}
                   </p>
                 </div>
-                <AlertTriangle className="w-8 h-8 text-red-500" />
+                <AlertTriangle className="w-8 h-8 text-green-500" />
               </div>
             </div>
+
+          
 
             <div className="bg-white rounded-lg shadow-sm p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600">Suppliers with Non-Zero Balance</p>
+                  <p className="text-sm text-gray-600">Commission Suppliers</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {(() => {
-                      const suppliersWithBalance = suppliers.filter(s => {
-                        const supplierPayables = accountsPayable.filter(ap => ap.supplier_id === s.id);
-                        const totalOwed = supplierPayables.reduce((sum, ap) => sum + ap.amountDue, 0);
-                        return totalOwed !== 0; // Include both debt and credit balances
-                      });
-                      return suppliersWithBalance.length;
-                    })()}
-                  </p>
-                </div>
-                <Building2 className="w-8 h-8 text-blue-500" />
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Average Debt per Supplier</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {(() => {
-                      const suppliersWithDebt = suppliers.filter(s => {
-                        const supplierPayables = accountsPayable.filter(ap => ap.supplier_id === s.id);
-                        const totalOwed = supplierPayables.reduce((sum, ap) => sum + ap.amountDue, 0);
-                        return totalOwed > 0; // Only positive balances for average debt calculation
-                      });
-                      const totalOwed = Math.max(0, accountsPayable.reduce((sum, ap) => sum + ap.amountDue, 0));
-                      return formatCurrency(suppliersWithDebt.length > 0 ? totalOwed / suppliersWithDebt.length : 0);
-                    })()}
+                    {suppliers.filter(s => s.type === 'commission' ).length}
                   </p>
                 </div>
                 <Target className="w-8 h-8 text-purple-500" />
@@ -2775,7 +2290,7 @@ export default function Accounting() {
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Expense Categories</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {expenseCategories.filter(c => c.isActive).map(category => {
+                                  {expenseCategories.filter(c => c.is_active).map(category => {
                 const todayCategoryExpenses = transactions.filter(t => 
                   t.type === 'expense' && t.category === category.name && t.createdAt.split('T')[0] === today
                 );
@@ -3197,7 +2712,7 @@ export default function Accounting() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Suppliers</option>
-                  {suppliers.filter(s => s.is_active).map(supplier => (
+                  {suppliers.map(supplier => (
                     <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
                   ))}
                 </select>
@@ -3591,7 +3106,7 @@ export default function Accounting() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Suppliers</option>
-                  {suppliers.filter(s => s.is_active).map(supplier => (
+                  {suppliers.map(supplier => (
                     <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
                   ))}
                 </select>
@@ -4022,7 +3537,7 @@ export default function Accounting() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="md:col-span-2">
                     <SearchableSelect
-                      options={customers.filter(c => c.isActive).map(customer => ({
+                      options={customers.filter(c => c.is_active).map(customer => ({
                         id: customer.id,
                         label: customer.name,
                         value: customer.id,
@@ -4123,7 +3638,7 @@ export default function Accounting() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="md:col-span-2">
                     <SearchableSelect
-                      options={suppliers.filter(s => s.isActive).map(supplier => ({
+                      options={suppliers.map(supplier => ({
                         id: supplier.id,
                         label: supplier.name,
                         value: supplier.id,
@@ -4217,7 +3732,7 @@ export default function Accounting() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <SearchableSelect
-                      options={expenseCategories.filter(c => c.isActive).map(category => ({
+                      options={expenseCategories.filter(c => c.is_active).map(category => ({
                         id: category.id,
                         label: category.name,
                         value: category.id,

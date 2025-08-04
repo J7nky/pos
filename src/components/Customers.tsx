@@ -8,7 +8,7 @@ import Toast from './common/Toast';
 export default function Customers() {
   const raw = useOfflineData();
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance || 0, email: c.email || '', address: c.address || ''})) : [];
-  const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at, email: s.email || '', address: s.address || ''})) : [];
+  const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at || 'commission', email: s.email || '', address: s.address || ''})) : [];
   const addCustomer = raw.addCustomer;
   const updateCustomer = raw.updateCustomer;
   const addSupplier = raw.addSupplier;
@@ -32,7 +32,7 @@ export default function Customers() {
     phone: '',
     email: '',
     address: '',
-    isActive: true,
+    
   });
   const [customerFormError, setCustomerFormError] = useState<string | null>(null);
   const [supplierFormError, setSupplierFormError] = useState<string | null>(null);
@@ -129,7 +129,6 @@ export default function Customers() {
       phone: '',
       email: '',
       address: '',
-      isActive: true,
     });
     setShowSupplierForm(true);
   };
@@ -141,7 +140,6 @@ export default function Customers() {
       phone: supplier.phone,
       email: supplier.email || '',
       address: supplier.address || '',
-      isActive: supplier.isActive,
     });
     setShowSupplierForm(true);
   };
@@ -157,7 +155,6 @@ export default function Customers() {
   const handleSupplierCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSupplierForm(prev => ({
       ...prev,
-      isActive: e.target.checked,
     }));
   };
 
@@ -184,8 +181,6 @@ export default function Customers() {
         phone: supplierForm.phone!,
         email: supplierForm.email || '',
         address: supplierForm.address || '',
-        type: 'commission', // Default value since type should be determined at inventory level
-        is_active: supplierForm.isActive ?? true,
       });
       showToast('Supplier added successfully!', 'success');
     }
@@ -339,17 +334,16 @@ export default function Customers() {
                  <tr>
                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                  </tr>
                </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                                 {filteredSuppliers.length === 0 ? (
-                   <tr>
-                     <td colSpan={4} className="px-6 py-4 text-center text-gray-500">
-                       No suppliers found.
-                     </td>
-                   </tr>
+                                                 {filteredSuppliers.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
+                      No suppliers found.
+                    </td>
+                  </tr>
                  ) : (
                                      filteredSuppliers.map(supplier => (
                      <tr key={supplier.id}>
@@ -357,17 +351,12 @@ export default function Customers() {
                          <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
                          <div className="text-sm text-gray-500">{supplier.address}</div>
                        </td>
-                       <td className="px-6 py-4 whitespace-nowrap">
-                         <div className="text-sm text-gray-900">{supplier.phone}</div>
-                         <div className="text-sm text-gray-500">{supplier.email}</div>
-                       </td>
-                       <td className="px-6 py-4 whitespace-nowrap">
-                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                           supplier.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                         }`}>
-                           {supplier.isActive ? 'Active' : 'Inactive'}
-                         </span>
-                       </td>
+                                             <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{supplier.phone}</div>
+                        <div className="text-sm text-gray-500">{supplier.email}</div>
+                      </td>
+                     
+                    
                        <td className="px-6 py-4 whitespace-nowrap text-left text-sm font-medium">
                          <button
                            onClick={() => handleEditSupplierClick(supplier)}
@@ -427,7 +416,7 @@ export default function Customers() {
                     type="email"
                     id="email"
                     name="email"
-                    value={customerForm.email}
+                    value={customerForm.email || ''}
                     onChange={handleCustomerFormChange}
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   />
@@ -438,7 +427,7 @@ export default function Customers() {
                     type="text"
                     id="address"
                     name="address"
-                    value={customerForm.address}
+                    value={customerForm.address || ''}
                     onChange={handleCustomerFormChange}
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   />
@@ -517,7 +506,7 @@ export default function Customers() {
                     type="email"
                     id="supplier-email"
                     name="email"
-                    value={supplierForm.email}
+                    value={supplierForm.email || ''}
                     onChange={handleSupplierFormChange}
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   />
@@ -533,18 +522,8 @@ export default function Customers() {
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
-                
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="supplier-isActive"
-                    name="isActive"
-                    checked={supplierForm.isActive}
-                    onChange={handleSupplierCheckboxChange}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="supplier-isActive" className="ml-2 block text-sm text-gray-900">Is Active</label>
-                </div>
+               
+         
               </div>
               {supplierFormError && <div className="text-red-600 text-sm font-medium pt-2">{supplierFormError}</div>}
               <div className="flex justify-end space-x-3 pt-4">

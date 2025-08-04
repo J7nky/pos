@@ -220,7 +220,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Product *</label>
                     <SearchableSelect
-                      options={products.filter((p: any) => p.isActive).map((product: any) => ({
+                      options={products.map((product: any) => ({
                         id: product.id,
                         label: product.name,
                         value: product.id,
@@ -243,7 +243,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Supplier *</label>
                     <SearchableSelect
-                      options={suppliers.filter((s: any) => s.isActive).map((supplier: any) => ({
+                      options={suppliers.map((supplier: any) => ({
                         id: supplier.id,
                         label: supplier.name,
                         value: supplier.id,
@@ -543,7 +543,6 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
         name: form.name.trim(),
         category: form.category,
         image: form.capturedPhoto || form.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
-        is_active: true
       });
       setForm({ name: '', category: 'Fruits', image: '', capturedPhoto: '' });
       setErrors({});
@@ -902,8 +901,8 @@ const DeleteProductConfirm = ({ open, onClose, onDelete, product }: any) => {
 
 export default function Inventory() {
   const raw = useOfflineData();
-  const products = raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) as Array<any>;
-  const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Array<any>;
+  const products = raw.products.map(p => ({...p, createdAt: p.created_at})) as Array<any>;
+  const suppliers = raw.suppliers.map(s => ({...s,  createdAt: s.created_at})) as Array<any>;
   const inventory = raw.inventory.map(i => ({...i, createdAt: i.created_at, product_id: i.product_id, supplier_id: i.supplier_id, received_at: i.received_at})) as Array<any>;
   const stockLevels = raw.stockLevels as Array<any>;
   const addInventoryItem = raw.addInventoryItem;
@@ -1184,7 +1183,6 @@ export default function Inventory() {
         name: productForm.name,
         category: productForm.category,
         image: productForm.capturedPhoto || productForm.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
-        is_active: true
       });
       stopCamera();
       setProductForm({
@@ -1214,8 +1212,6 @@ export default function Inventory() {
         phone: supplierForm.phone,
         email: supplierForm.email || '',
         address: supplierForm.address,
-        type: supplierForm.type,
-        is_active: true
       });
       setSupplierForm({
         name: '',
@@ -2062,9 +2058,20 @@ export default function Inventory() {
         onClose={() => setShowDeleteProductModal(false)}
         product={deleteProductData}
         onDelete={async (product: any) => {
-          await SupabaseService.deleteProduct(product.id);
-          await raw.refreshData();
-          showToast('success', 'Product deleted successfully!');
+          try {
+            // Delete from cloud database
+            await SupabaseService.deleteProduct(product.id);
+            
+            // Delete from local IndexedDB
+            await db.products.delete(product.id);
+            
+            // Refresh data to update UI
+            await raw.refreshData();
+            showToast('success', 'Product deleted successfully!');
+          } catch (error) {
+            console.error('Error deleting product:', error);
+            showToast('error', 'Failed to delete product.');
+          }
         }}
       />
     </div>

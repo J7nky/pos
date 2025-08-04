@@ -24,7 +24,7 @@ export interface Supplier extends BaseEntity {
   phone: string;
   email: string | null;
   address: string;
-  type: 'commission' | 'cash';
+  type: 'commission' | 'cash'; // Added to match database schema
   is_active: boolean;
   balance: number | null; // Added balance field to match Supabase schema
 }
@@ -147,22 +147,65 @@ class POSDatabase extends Dexie {
   constructor() {
     super('POSDatabase');
     
-    this.version(4).stores({
-      // Core tables with basic indexing (avoiding boolean field indexing for now)
+    this.version(5).stores({
+      // Core tables with enhanced indexing to match database schema
       // Tables WITH updated_at: products, suppliers, customers
       products: 'id, store_id, name, category, updated_at',
-      suppliers: 'id, store_id, name, type, is_active, updated_at',
-      customers: 'id, store_id, name, phone, is_active, updated_at',
+      suppliers: 'id, store_id, name, type, is_active, updated_at, balance', // Added balance index
+      customers: 'id, store_id, name, phone, is_active, updated_at, balance', // Added balance index
 
       // Tables WITHOUT updated_at: inventory_items, sales, sale_items, transactions
-      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at',
+      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity', // Added received_quantity index
       sales: 'id, store_id, customer_id, created_at, status, created_by',
-      sale_items: 'id, inventory_item_id, product_id, supplier_id, created_at', // Updated to match Supabase schema
-      transactions: 'id, store_id, type, category, created_at, created_by',
+      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, created_at, created_by', // Added customer_id and created_by indexes
+      transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
   
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
       pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count'
+    });
+
+    // Migration for version 5 - update existing records to match new schema
+    this.version(5).upgrade(trans => {
+      // Update suppliers to ensure type field exists
+      trans.table('suppliers').toCollection().modify(supplier => {
+        if (!supplier.type) {
+          supplier.type = 'commission'; // Default to commission for existing suppliers
+        }
+        if (supplier.balance === undefined || supplier.balance === null) {
+          supplier.balance = 0; // Default balance for existing suppliers
+        }
+      });
+
+      // Update customers to ensure balance field exists  
+      trans.table('customers').toCollection().modify(customer => {
+        if (customer.balance === undefined || customer.balance === null) {
+          customer.balance = 0; // Default balance for existing customers
+        }
+      });
+
+      // Update sale_items to ensure all required fields exist
+      trans.table('sale_items').toCollection().modify(saleItem => {
+        if (!saleItem.inventory_item_id) {
+          saleItem.inventory_item_id = ''; // Default empty string for missing inventory_item_id
+        }
+        if (saleItem.received_value === undefined || saleItem.received_value === null) {
+          saleItem.received_value = saleItem.total_price || 0; // Migrate from total_price to received_value
+        }
+        if (!saleItem.customer_id) {
+          saleItem.customer_id = null; // Default null for customer_id
+        }
+        if (!saleItem.created_by) {
+          saleItem.created_by = ''; // Default empty string for created_by
+        }
+      });
+
+      // Update inventory_items to ensure received_quantity exists
+      trans.table('inventory_items').toCollection().modify(inventoryItem => {
+        if (inventoryItem.received_quantity === undefined || inventoryItem.received_quantity === null) {
+          inventoryItem.received_quantity = inventoryItem.quantity || 0; // Default to quantity value
+        }
+      });
     });
 
     // Add hooks for automatic timestamping and ID generation
