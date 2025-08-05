@@ -38,13 +38,8 @@ export function debugSalesData(
       return false;
     }
 
-    // Check if sale has matching items
-    const hasMatchingItems = sale.items && Array.isArray(sale.items) && 
-      sale.items.some((item: any) => {
-        const productMatch = item.productId === productId || item.product_id === productId;
-        const supplierMatch = item.supplierId === supplierId || item.supplier_id === supplierId;
-        return productMatch && supplierMatch;
-      });
+    // Check if sale matches the product and supplier
+    const hasMatchingItems = sale.product_id === productId && sale.supplier_id === supplierId;
 
     if (hasMatchingItems) {
       console.log(`✅ Sale ${sale.id} has matching items`);
@@ -57,36 +52,21 @@ export function debugSalesData(
 
   console.log(`📊 Found ${relatedSales.length} related sales out of ${allSales.length} total sales`);
 
-  // Analyze sales structure
-  const relatedSalesWithItems = relatedSales.filter(sale => sale.items && Array.isArray(sale.items));
-  const salesWithoutItems = relatedSales.filter(sale => !sale.items || !Array.isArray(sale.items));
-
-  // Count matching items
-  let totalMatchingItems = 0;
+  // Count matching sales
+  let totalMatchingSales = 0;
   let productMatches = 0;
   let supplierMatches = 0;
   let bothMatch = 0;
 
-  const itemsPerSale: Record<string, number> = {};
-
   relatedSales.forEach(sale => {
-    if (sale.items && Array.isArray(sale.items)) {
-      let saleMatchingItems = 0;
-      
-      sale.items.forEach((item: any) => {
-        const productMatch = item.productId === productId || item.product_id === productId;
-        const supplierMatch = item.supplierId === supplierId || item.supplier_id === supplierId;
-        
-        if (productMatch) productMatches++;
-        if (supplierMatch) supplierMatches++;
-        if (productMatch && supplierMatch) {
-          bothMatch++;
-          saleMatchingItems++;
-          totalMatchingItems++;
-        }
-      });
-      
-      itemsPerSale[sale.id] = saleMatchingItems;
+    const productMatch = sale.product_id === productId;
+    const supplierMatch = sale.supplier_id === supplierId;
+    
+    if (productMatch) productMatches++;
+    if (supplierMatch) supplierMatches++;
+    if (productMatch && supplierMatch) {
+      bothMatch++;
+      totalMatchingSales++;
     }
   });
 
@@ -96,12 +76,12 @@ export function debugSalesData(
     supplierId,
     totalSalesInSystem: allSales.length,
     relatedSalesCount: relatedSales.length,
-    relatedSalesWithItems: relatedSalesWithItems.length,
-    matchingItemsCount: totalMatchingItems,
+    relatedSalesWithItems: relatedSales.length, // All sales now have direct structure
+    matchingItemsCount: totalMatchingSales,
     debugDetails: {
       relatedSaleIds: relatedSales.map(s => s.id),
-      salesWithoutItems: salesWithoutItems.map(s => s.id),
-      itemsPerSale,
+      salesWithoutItems: [], // No sales without items in new structure
+      itemsPerSale: {}, // Not applicable in new structure
       matchingCriteria: {
         productMatches,
         supplierMatches,
@@ -131,34 +111,29 @@ export function validateSalesDataStructure(sales: any[]): {
       return;
     }
 
-    if (!sale.items) {
-      issues.push(`Sale ${sale.id} missing items array`);
+    if (!sale.product_id) {
+      issues.push(`Sale ${sale.id} missing product_id`);
       invalid++;
       return;
     }
 
-    if (!Array.isArray(sale.items)) {
-      issues.push(`Sale ${sale.id} items is not an array`);
+    if (!sale.supplier_id) {
+      issues.push(`Sale ${sale.id} missing supplier_id`);
       invalid++;
       return;
     }
 
-    if (sale.items.length === 0) {
-      issues.push(`Sale ${sale.id} has empty items array`);
+    if (typeof sale.unit_price !== 'number') {
+      issues.push(`Sale ${sale.id} missing or invalid unit_price`);
+      invalid++;
+      return;
     }
 
-    // Validate item structure
-    sale.items.forEach((item: any, itemIndex: number) => {
-      if (!item.productId && !item.product_id) {
-        issues.push(`Sale ${sale.id} item ${itemIndex} missing product ID`);
-      }
-      if (!item.supplierId && !item.supplier_id) {
-        issues.push(`Sale ${sale.id} item ${itemIndex} missing supplier ID`);
-      }
-      if (typeof item.quantity !== 'number') {
-        issues.push(`Sale ${sale.id} item ${itemIndex} missing or invalid quantity`);
-      }
-    });
+    if (typeof sale.received_value !== 'number') {
+      issues.push(`Sale ${sale.id} missing or invalid received_value`);
+      invalid++;
+      return;
+    }
 
     valid++;
   });
@@ -212,9 +187,8 @@ export function generateSalesDataReport(
     }
   });
 
-  // Calculate average items per sale
-  const totalItems = sales.reduce((sum, sale) => sum + (sale.items?.length || 0), 0);
-  const averageItemsPerSale = sales.length > 0 ? totalItems / sales.length : 0;
+  // Calculate average items per sale (each sale is now one item)
+  const averageItemsPerSale = 1; // Each sale represents one item in the new structure
 
   // Get top products and suppliers
   const topProductsBySales = Object.entries(productSalesCount)

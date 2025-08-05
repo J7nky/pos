@@ -26,7 +26,7 @@ interface OfflineDataContextType {
   products: Tables['products']['Row'][];
   suppliers: Tables['suppliers']['Row'][];
   customers: Tables['customers']['Row'][];
-  sales: any[]; // Complex type with joins
+  sales: Tables['sale_items']['Row'][]; // Direct sale_items data
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
   transactions: Tables['transactions']['Row'][];
   expenseCategories: any[]; // Not in current schema
@@ -61,7 +61,9 @@ interface OfflineDataContextType {
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
-  addSale: (sale: any, items: any[]) => Promise<void>;
+  addSale: (sale :  Omit<Tables['sale_items']['Insert'], 'store_id'>, items: Tables['inventory_items']['Row'][]) => Promise<void>;
+  updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
+  deleteSale: (id: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: any) => Promise<void>;
   
@@ -79,6 +81,7 @@ interface OfflineDataContextType {
   // Additional offline-specific features
   sync: (isAutomatic?: boolean) => Promise<SyncResult>;
   fullResync: () => Promise<SyncResult>;
+  debouncedSync: () => void;
   getSyncStatus: () => {
     isOnline: boolean;
     lastSync: Date | null;
@@ -289,13 +292,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // Enhanced periodic auto-sync when online
   useEffect(() => {
     if (isOnline && storeId && !isSyncing) {
-      // Auto-sync every 30 seconds when online and has unsynced data
+      // Auto-sync every 15 seconds when online and has unsynced data
       const interval = setInterval(() => {
         if (!syncService.isCurrentlyRunning() && unsyncedCount > 0) {
           console.log('⏰ Periodic auto-sync triggered');
           performSync(true); // Mark as automatic sync
         }
-      }, 30000); // Reduced from 60s to 30s for better responsiveness
+      }, 15000); // Reduced from 30s to 15s for faster sync of critical data
 
       return () => clearInterval(interval);
     }
@@ -371,14 +374,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         receivedAt: item.received_at // Legacy compatibility
       })));
 
-      // Transform sale items to match expected structure
-      const salesWithItems = saleItemsData.map(item => ({
-        id: item.id,
-        items: [item],
-        customer: customersData.find(c => c.id === item.customer_id),
-        createdAt: item.created_at // Legacy compatibility
-      }));
-      setSales(salesWithItems);
+      // Set sales directly as sale_items (no transformation needed)
+      setSales(saleItemsData);
 
     } catch (error) {
       console.error('Error loading data from Dexie:', error);
@@ -478,14 +475,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       clearTimeout(debouncedSyncTimeout);
     }
     
-    // Set new timeout for 2 seconds
+    // Set new timeout for 1 second
     const timeout = setTimeout(() => {
       if (isOnline && !isSyncing && unsyncedCount > 0) {
         console.log('🔄 Debounced auto-sync triggered');
         performSync(true); // Mark as automatic sync
       }
       setDebouncedSyncTimeout(null);
-    }, 2000);
+    }, 1000);
     
     setDebouncedSyncTimeout(timeout);
   };
@@ -642,6 +639,39 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    await refreshData();
+    await updateUnsyncedCount();
+
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
+  };
+
+  const updateSale = async (id: string, updates: Partial<Tables['sale_items']['Update']>): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    // Mark as unsynced for sync
+    const updateData = {
+      ...updates,
+      _synced: false
+    };
+
+    await db.sale_items.update(id, updateData);
+    await refreshData();
+    await updateUnsyncedCount();
+
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
+  };
+
+  const deleteSale = async (id: string): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    // Get the sale item before deletion to potentially restore inventory
+    const saleItem = await db.sale_items.get(id);
+    if (!saleItem) throw new Error('Sale item not found');
+
+    // Delete the sale item
+    await db.sale_items.delete(id);
     await refreshData();
     await updateUnsyncedCount();
 
@@ -898,6 +928,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateCustomer,
       addInventoryItem,
       addSale,
+      updateSale,
+      deleteSale,
       addTransaction,
       addExpenseCategory,
       addNonPricedItem,
@@ -914,6 +946,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Additional offline-specific features
       sync: performSync,
       fullResync,
+      debouncedSync,
       getSyncStatus,
       validateAndCleanData
     }}>

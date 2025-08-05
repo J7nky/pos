@@ -41,6 +41,7 @@ import {
   CreditCard as CreditCardIcon,
   Building2,
   Users,
+  User,
   ShoppingCart,
   Award,
   AlertTriangle,
@@ -56,9 +57,11 @@ export default function Accounting() {
   const raw = useOfflineData();
   const addExpenseCategory = raw.addExpenseCategory;
   const addTransaction = raw.addTransaction;
+  const updateSale = raw.updateSale;
+  const deleteSale = raw.deleteSale;
   const transactions = raw.transactions.map(t => ({...t, createdAt: t.created_at}));
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance}));
-  const suppliers = raw.suppliers.map(s => ({...s, createdAt: s.created_at, balance: s.balance, type: s.type || 'cash'}));
+  const suppliers = raw.suppliers.map(s => ({...s, createdAt: s.created_at, balance: s.balance}));
   const expenseCategories = raw.expenseCategories || [];
   const inventory = raw.inventory || [];
   const sales = raw.sales || [];
@@ -91,6 +94,12 @@ export default function Accounting() {
   const [inventoryLogsSortDir, setInventoryLogsSortDir] = useState<'asc' | 'desc'>('desc');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<any>(null);
   const [showInventoryItemDetails, setShowInventoryItemDetails] = useState(false);
+  
+  // Sales logs edit/delete state
+  const [editingSale, setEditingSale] = useState<any>(null);
+  const [showEditSaleModal, setShowEditSaleModal] = useState(false);
+  const [showDeleteSaleModal, setShowDeleteSaleModal] = useState(false);
+  const [saleToDelete, setSaleToDelete] = useState<any>(null);
 
   // Form states
   const [receiveForm, setReceiveForm] = useState({
@@ -226,7 +235,7 @@ export default function Accounting() {
   // Calculate today's expenses with currency conversion
   // Note: amounts are now stored in USD, so convert to display currency
       const todayExpenses = transactions
-      .filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today)
+      .filter(t => t.type === 'expense' && t.createdAt.split('T')[0] === today)
       .reduce((sum, t) => {
         // Check if this transaction was originally LBP but converted to USD for storage
         const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
@@ -240,7 +249,7 @@ export default function Accounting() {
       }, 0);
 
     const todayIncome = transactions
-      .filter(t => t.type === 'income' && t.createdAt && t.createdAt.split('T')[0] === today)
+      .filter(t => t.type === 'income' && t.createdAt.split('T')[0] === today)
       .reduce((sum, t) => {
         // Check if this transaction was originally LBP but converted to USD for storage
         const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
@@ -673,11 +682,13 @@ export default function Accounting() {
 
   // Enhanced nonPricedItems for display: filter, sort, and resolve customer name
   const filteredNonPricedItems = nonPricedItems
-    .map(item => ({
+    .map(item => 
+      ({
+
       ...item,
       customerName: customers.find(c => c.id === item.customerId)?.name || item.customerId,
       supplierName: suppliers.find(s => s.id === item.supplierId)?.name || item.supplierName || 'Unknown',
-      date: item.createdAt || '',
+      date: item.created_at || '',
       totalValue: item.unitPrice && (item.weight || item.quantity) ? item.unitPrice * (item.weight || item.quantity) : 0,
       status: item.unitPrice > 0 && (item.quantity > 0 || item.weight > 0) ? 'ready' : 'incomplete'
     }))
@@ -689,6 +700,7 @@ export default function Accounting() {
         item.supplierName.toLowerCase().includes(q) ||
         (item.notes || '').toLowerCase().includes(q)
       );
+
     })
     .sort((a, b) => {
       let cmp = 0;
@@ -698,6 +710,7 @@ export default function Accounting() {
       if (nonPricedSort === 'value') cmp = a.totalValue - b.totalValue;
       return nonPricedSortDir === 'asc' ? cmp : -cmp;
     });
+
 
   const displayNonPricedItems = filteredNonPricedItems;
   const nonPricedTotalPages = Math.ceil(filteredNonPricedItems.length / NON_PRICED_PAGE_SIZE);
@@ -738,38 +751,37 @@ export default function Accounting() {
     });
     // Add sales transaction logs
     
-    sales.forEach(sale => {
-      sale.items?.forEach((saleItem: any) => {
-        const product = products.find(p => p.id === saleItem.productId);
-        const supplier = suppliers.find(s => s.id === saleItem.supplierId);
-        const customer = customers.find(c => c.id === sale.customer_id);
-        console.log('sale',sale)
+    
+      sales.forEach(sale => {
         
+        const product = products.find(p => p.id === sale.product_id);
+        const supplier = suppliers.find(s => s.id === sale.supplier_id);
+        const customer = customers.find(c => c.id === sale.customer_id);
+        const inventoryItem=inventory.find(i=>i.id===sale.inventory_item_id);
         logs.push({
           id: `sale-${sale.id}`,
           type: 'sale',
-          date: sale.created_at,
-          productId: saleItem.productId,
-          productName: product?.name || saleItem.productName || 'Unknown Product',
-          supplierId: saleItem.supplierId,
-          supplierName: supplier?.name || saleItem.supplierName || 'Unknown Supplier',
+          date: sale.created_at||'',
+          productId: product?.id,
+          productName: product?.name|| 'Unknown Product',
+          supplierId: supplier?.id||'',
+          supplierName: supplier?.name || 'Unknown Supplier',
           customerId: sale.customer_id,
           customerName: customer?.name || 'Walk-in Customer',
-          quantity: saleItem.quantity,
-          weight: saleItem.weight,
-          unitPrice: saleItem.unitPrice,
-          totalPrice: saleItem.totalPrice,
-          amount: saleItem.totalPrice,
+          quantity: inventoryItem?.quantity||'',
+          weight: sale.weight,
+          unitPrice: sale.unit_price,
+          totalPrice: sale.received_value,
           currency: 'USD',
-          description: `Sold ${saleItem.quantity} ${saleItem.weight ? `(${saleItem.weight} kg)` : ''} of ${product?.name || saleItem.productName || 'Unknown Product'} to ${customer?.name || 'Walk-in Customer'}`,
+          description: `Sold ${inventoryItem?.quantity||''} ${sale.weight ? `(${sale.weight} kg)` : ''} of ${product?.name || product?.name || 'Unknown Product'} to ${customer?.name || 'Walk-in Customer'}`,
           reference: `SALE-${sale.id.slice(-8)}`,
-          notes: saleItem.notes,
+          notes: sale.notes,
           transactionType: 'sale',
           paymentMethod: sale.payment_method,
-          saleStatus: sale.status
         });
       });
-    });
+
+    
     // Add financial transaction logs
     transactions.forEach(transaction => {
       logs.push({
@@ -789,7 +801,6 @@ export default function Accounting() {
         transactionCategory: transaction.type
       });
     });
-
     return logs;
   }, [inventory, sales, transactions, products, suppliers, customers]);
 
@@ -969,12 +980,12 @@ export default function Accounting() {
 
         // Calculate total sales for this specific inventory item (by received date)
         const relatedSales = sales.filter(sale => 
-          sale.items && Array.isArray(sale.items) && 
-          sale.items.some((saleItem: any) => 
+          sale && Array.isArray(sale) && 
+          sale.some((saleItem: any) => 
             saleItem.productId === item.product_id && 
             saleItem.supplierId === item.supplier_id &&
             // Check if this sale happened after this inventory item was received
-            new Date(sale.created_at || sale.createdAt).getTime() >= new Date(item.received_at || item.created_at).getTime()
+            new Date(sale.created_at || sale.created_at).getTime() >= new Date(item.received_at || item.created_at).getTime()
           )
         );
 
@@ -985,7 +996,7 @@ export default function Accounting() {
         
         // Sort sales by date to process them chronologically
         const sortedSales = relatedSales.sort((a, b) => 
-          new Date(a.created_at || a.createdAt).getTime() - new Date(b.created_at || b.createdAt).getTime()
+          new Date(a.created_at || a.created_at).getTime() - new Date(b.created_at || b.created_at).getTime()
         );
         
         // Track how much we've sold from this specific inventory item
@@ -993,8 +1004,8 @@ export default function Accounting() {
         let totalSoldFromThisItem = 0;
         
         for (const sale of sortedSales) {
-          if (sale.items && Array.isArray(sale.items)) {
-            for (const saleItem of sale.items) {
+          if (sale && Array.isArray(sale)) {
+            for (const saleItem of sale) {
               if (saleItem.productId === item.product_id && 
                   saleItem.supplierId === item.supplier_id &&
                   typeof saleItem.quantity === 'number' &&
@@ -1382,12 +1393,12 @@ export default function Accounting() {
 
         // Calculate total sales for this specific inventory item (by received date)
         const relatedSales = sales.filter(sale => 
-          sale.items && Array.isArray(sale.items) && 
-          sale.items.some((saleItem: any) => 
+          sale && Array.isArray(sale) && 
+          sale.some((saleItem: any) => 
             saleItem.productId === item.product_id && 
             saleItem.supplierId === item.supplier_id &&
             // Check if this sale happened after this inventory item was received
-            new Date(sale.created_at || sale.createdAt).getTime() >= new Date(item.received_at || item.created_at).getTime()
+            new Date(sale.created_at || sale.created_at).getTime() >= new Date(item.received_at || item.created_at).getTime()
           )
         );
 
@@ -1398,15 +1409,15 @@ export default function Accounting() {
         
         // Sort sales by date to process them chronologically
         const sortedSales = relatedSales.sort((a, b) => 
-          new Date(a.created_at || a.createdAt).getTime() - new Date(b.created_at || b.createdAt).getTime()
+          new Date(a.created_at || a.created_at).getTime() - new Date(b.created_at || b.created_at).getTime()
         );
         
         // Track how much we've sold from this specific inventory item
         let totalSoldFromThisItem = 0;
         
         for (const sale of sortedSales) {
-          if (sale.items && Array.isArray(sale.items)) {
-            for (const saleItem of sale.items) {
+          if (sale && Array.isArray(sale)) {
+            for (const saleItem of sale) {
               if (saleItem.productId === item.product_id && 
                   saleItem.supplierId === item.supplier_id &&
                   typeof saleItem.quantity === 'number' &&
@@ -1747,6 +1758,59 @@ export default function Accounting() {
     } catch (error) {
       console.error('Error during sale_items cleanup:', error);
       showToast('Error during cleanup. Check console for details.', 'error');
+    }
+  };
+
+  // Sales logs edit/delete handlers
+  const handleEditSale = (sale: any) => {
+    setEditingSale({
+      ...sale,
+      quantity: sale.quantity || 1,
+      weight: sale.weight || null,
+      unitPrice: sale.unit_price || 0,
+      paymentMethod: sale.payment_method || 'cash',
+      notes: sale.notes || ''
+    });
+    setShowEditSaleModal(true);
+  };
+
+  const handleSaveSaleEdit = async (updatedSale: any) => {
+    try {
+      await updateSale(editingSale.id, {
+        quantity: updatedSale.quantity,
+        weight: updatedSale.weight,
+        unit_price: updatedSale.unitPrice,
+        received_value: updatedSale.receivedValue,
+        payment_method: updatedSale.paymentMethod,
+        customer_id: updatedSale.customerId || null,
+        notes: updatedSale.notes
+      });
+      
+      showToast('Sale updated successfully', 'success');
+      setShowEditSaleModal(false);
+      setEditingSale(null);
+    } catch (error) {
+      console.error('Error updating sale:', error);
+      showToast('Error updating sale', 'error');
+    }
+  };
+
+  const handleDeleteSale = (sale: any) => {
+    setSaleToDelete(sale);
+    setShowDeleteSaleModal(true);
+  };
+
+  const handleConfirmDeleteSale = async () => {
+    if (!saleToDelete) return;
+    
+    try {
+      await deleteSale(saleToDelete.id);
+      showToast('Sale deleted successfully', 'success');
+      setShowDeleteSaleModal(false);
+      setSaleToDelete(null);
+    } catch (error) {
+      console.error('Error deleting sale:', error);
+      showToast('Error deleting sale', 'error');
     }
   };
 
@@ -2173,7 +2237,7 @@ export default function Accounting() {
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(supplier => (
                     <tr key={supplier.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4">
+                      {/* <td className="px-6 py-4">
                         <div className="flex items-center">
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 ${
                             supplier.type === 'commission' ? 'bg-purple-100' : 'bg-blue-100'
@@ -2189,7 +2253,7 @@ export default function Accounting() {
                             </div>
                           </div>
                         </div>
-                      </td>
+                      </td> */}
                       <td className="px-6 py-4">
                         <div>
                           <div className="text-lg font-semibold text-gray-900">
@@ -2209,7 +2273,7 @@ export default function Accounting() {
                       <td className="px-6 py-4">
                         <div>
                           <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                            {supplier.type === 'commission' ? 'Commission' : 'Cash'}
+                            {/* {supplier.type === 'commission' ? 'Commission' : 'Cash'} */}
                           </span>
                           <div className="text-xs text-gray-500 mt-1">
                           </div>
@@ -2263,7 +2327,7 @@ export default function Accounting() {
                 <div>
                   <p className="text-sm text-gray-600">Commission Suppliers</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {suppliers.filter(s => s.type === 'commission' ).length}
+                    {/* {suppliers.filter(s => s.type === 'commission' ).length} */}
                   </p>
                 </div>
                 <Target className="w-8 h-8 text-purple-500" />
@@ -2292,7 +2356,7 @@ export default function Accounting() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                   {expenseCategories.filter(c => c.is_active).map(category => {
                 const todayCategoryExpenses = transactions.filter(t => 
-                  t.type === 'expense' && t.category === category.name && t.createdAt && t.createdAt.split('T')[0] === today
+                  t.type === 'expense' && t.category === category.name && t.createdAt.split('T')[0] === today
                 );
                 const todayAmount = todayCategoryExpenses.reduce((sum, t) => {
                   const convertedAmount = getConvertedAmount(t.amount, 'USD'); // amounts stored in USD
@@ -2329,7 +2393,7 @@ export default function Accounting() {
                 <tbody className="divide-y divide-gray-200">
                   {transactions
                     .filter(t => t.type === 'expense')
-                    .filter(t => t.createdAt && t.createdAt.split('T')[0] === today)
+                    .filter(t => t.createdAt.split('T')[0] === today)
                     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                     .map(transaction => (
                     <tr key={transaction.id} className="hover:bg-gray-50">
@@ -2580,7 +2644,7 @@ export default function Accounting() {
                         ${item.totalValue.toFixed(2)}
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-sm">
-                        {item.date ? new Date(item.date).toLocaleDateString() : '-'}
+                        {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '-'}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex space-x-2">
@@ -3642,7 +3706,6 @@ export default function Accounting() {
                         id: supplier.id,
                         label: supplier.name,
                         value: supplier.id,
-                        category: supplier.type === 'commission' ? 'Commission' : 'Cash'
                       }))}
                       value={payForm.supplierId}
                       onChange={(value) => setPayForm(prev => ({ ...prev, supplierId: value as string }))}
@@ -3974,8 +4037,421 @@ export default function Accounting() {
           formatCurrency={formatCurrency}
         />
       )}
+
+      {/* Edit Sale Modal */}
+      {showEditSaleModal && editingSale && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b bg-gradient-to-r from-blue-600 to-blue-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold text-white">Edit Sale</h2>
+                  <p className="text-blue-100 text-sm mt-1">
+                    Sale ID: {editingSale.saleId?.slice(-8).toUpperCase() || editingSale.id?.slice(-8).toUpperCase()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowEditSaleModal(false)}
+                  className="text-blue-100 hover:text-white transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <EditSaleForm 
+                sale={editingSale}
+                onSave={handleSaveSaleEdit}
+                onCancel={() => setShowEditSaleModal(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Sale Confirmation Modal */}
+      {showDeleteSaleModal && saleToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full">
+            <div className="p-6 border-b bg-gradient-to-r from-red-600 to-red-700">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <AlertTriangle className="w-6 h-6 text-red-100 mr-3" />
+                  <h2 className="text-xl font-semibold text-white">Delete Sale</h2>
+                </div>
+                <button
+                  onClick={() => setShowDeleteSaleModal(false)}
+                  className="text-red-100 hover:text-white transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="mb-6">
+                <div className="flex items-center mb-4">
+                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mr-4">
+                    <Trash2 className="w-6 h-6 text-red-600" />
+                  </div>
+                  <div>
+                    <p className="text-gray-900 font-medium">Confirm Deletion</p>
+                    <p className="text-gray-600 text-sm">
+                      This action cannot be undone
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="bg-red-50 border border-red-200 p-4 rounded-lg">
+                  <h4 className="text-sm font-medium text-red-800 mb-2">Sale Details</h4>
+                  <div className="space-y-1 text-sm text-red-700">
+                    <p><strong>Sale ID:</strong> {saleToDelete.saleId?.slice(-8).toUpperCase()}</p>
+                    <p><strong>Customer:</strong> {saleToDelete.customerName}</p>
+                    <p><strong>Amount:</strong> {formatCurrency(saleToDelete.totalPrice || 0)}</p>
+                    <p><strong>Date:</strong> {new Date(saleToDelete.saleDate).toLocaleDateString()}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowDeleteSaleModal(false)}
+                  className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDeleteSale}
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Sale
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+
+  // Edit Sale Form Component
+  function EditSaleForm({ 
+    sale, 
+    onSave, 
+    onCancel 
+  }: {
+    sale: any;
+    onSave: (updatedSale: any) => void;
+    onCancel: () => void;
+  }) {
+    const [formData, setFormData] = useState({
+      quantity: sale.quantity || 1,
+      weight: sale.weight || '',
+      unitPrice: sale.unitPrice || 0,
+      receivedValue: sale.received_value || sale.receivedValue || 0,
+      paymentMethod: sale.paymentMethod || 'cash',
+      customerId: sale.customer_id || '',
+      notes: sale.notes || ''
+    });
+
+    const [errors, setErrors] = useState<Record<string, string>>({});
+
+    // Calculate total value
+    const totalValue = formData.quantity * formData.unitPrice;
+    const isPartialPayment = formData.receivedValue < totalValue;
+    const isCredit = formData.paymentMethod === 'credit';
+    const requiresCustomer = isCredit || isPartialPayment;
+
+    // Get customer name for display
+    const selectedCustomer = customers.find(c => c.id === formData.customerId);
+    const customerName = selectedCustomer?.name || '';
+
+    const validateForm = () => {
+      const newErrors: Record<string, string> = {};
+
+      if (formData.quantity <= 0) {
+        newErrors.quantity = 'Quantity must be greater than 0';
+      }
+
+      if (formData.unitPrice <= 0) {
+        newErrors.unitPrice = 'Unit price must be greater than 0';
+      }
+
+      if (formData.receivedValue < 0) {
+        newErrors.receivedValue = 'Received value cannot be negative';
+      }
+
+      if (requiresCustomer && !formData.customerId) {
+        newErrors.customerId = 'Customer is required for credit sales or partial payments';
+      }
+
+      if (formData.paymentMethod !== 'credit' && formData.receivedValue > totalValue) {
+        newErrors.receivedValue = 'Received value cannot exceed total value for non-credit transactions';
+      }
+
+      setErrors(newErrors);
+      return Object.keys(newErrors).length === 0;
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (validateForm()) {
+        onSave({
+          ...formData,
+          // Ensure weight is properly handled
+          weight: formData.weight ? parseFloat(formData.weight.toString()) : null,
+          receivedValue: formData.receivedValue
+        });
+      }
+    };
+
+    const handlePaymentMethodChange = (method: string) => {
+      setFormData(prev => ({
+        ...prev,
+        paymentMethod: method,
+        // Auto-set received value based on payment method
+        receivedValue: method === 'credit' ? 0 : prev.receivedValue || totalValue
+      }));
+    };
+
+    return (
+      <div className="space-y-6">
+        {/* Sale Overview Card */}
+        {/* <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">Sale Overview</h3>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <span className="text-gray-600">Total Value:</span>
+              <span className="ml-2 font-semibold text-gray-900">{formatCurrency(totalValue)}</span>
+            </div>
+            <div>
+              <span className="text-gray-600">Received:</span>
+              <span className="ml-2 font-semibold text-gray-900">{formatCurrency(formData.receivedValue)}</span>
+            </div>
+            {isPartialPayment && (
+              <div className="col-span-2">
+                <span className="text-amber-600">Outstanding:</span>
+                <span className="ml-2 font-semibold text-amber-700">{formatCurrency(totalValue - formData.receivedValue)}</span>
+              </div>
+            )}
+          </div>
+        </div> */}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Product Details Section */}
+          <div className="space-y-4">
+            <h4 className="text-md font-medium text-gray-800 border-b border-gray-200 pb-2">Product Details</h4>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Quantity <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={formData.quantity}
+                  onChange={(e) => setFormData({ ...formData, quantity: parseFloat(e.target.value) || 0 })}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                    errors.quantity ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
+                  required
+                />
+                {errors.quantity && <p className="text-red-500 text-xs mt-1">{errors.quantity}</p>}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Weight (kg)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.weight}
+                  onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Unit Price <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.unitPrice}
+                  onChange={(e) => setFormData({ ...formData, unitPrice: parseFloat(e.target.value) || 0 })}
+                  className={`w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                    errors.unitPrice ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
+                  required
+                />
+              </div>
+              {errors.unitPrice && <p className="text-red-500 text-xs mt-1">{errors.unitPrice}</p>}
+            </div>
+          </div>
+
+          {/* Payment Details Section */}
+          <div className="space-y-4">
+            <h4 className="text-md font-medium text-gray-800 border-b border-gray-200 pb-2">Payment Details</h4>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Payment Method <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { value: 'cash', label: 'Cash', icon: DollarSign },
+                  { value: 'card', label: 'Card', icon: CreditCard },
+                  { value: 'credit', label: 'Credit', icon: Clock }
+                ].map(({ value, label, icon: Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => handlePaymentMethodChange(value)}
+                    className={`p-3 rounded-lg border-2 transition-all ${
+                      formData.paymentMethod === value
+                        ? value === 'cash' ? 'border-green-500 bg-green-50 text-green-700' :
+                          value === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700' :
+                          'border-amber-500 bg-amber-50 text-amber-700'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Icon className="w-5 h-5 mx-auto mb-1" />
+                    <span className="text-sm font-medium">{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Received Amount <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.receivedValue}
+                  onChange={(e) => setFormData({ ...formData, receivedValue: parseFloat(e.target.value) || 0 })}
+                  className={`w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                    errors.receivedValue ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="Amount received"
+                />
+              </div>
+              {errors.receivedValue && <p className="text-red-500 text-xs mt-1">{errors.receivedValue}</p>}
+              
+              {/* Quick amount buttons */}
+              {/* <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, receivedValue: totalValue })}
+                  className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                >
+                  Full Amount
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, receivedValue: totalValue * 0.5 })}
+                  className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                >
+                  Half Amount
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, receivedValue: 0 })}
+                  className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                >
+                  No Payment
+                </button>
+              </div> */}
+            </div>
+
+            {/* Customer Selection - shown when required */}
+            {requiresCustomer && (
+              <div className={`p-4 rounded-lg border-2 ${
+                formData.customerId ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'
+              }`}>
+                <div className="flex items-center mb-2">
+                  <User className="w-4 h-4 mr-2 text-amber-600" />
+                  <label className="text-sm font-medium text-gray-700">
+                    Customer Required <span className="text-red-500">*</span>
+                  </label>
+                </div>
+                <SearchableSelect
+                  options={customers.map(c => ({ value: c.id, label: c.name }))}
+                  value={formData.customerId}
+                  onChange={(value) => setFormData({ ...formData, customerId: value })}
+                  placeholder="Select customer..."
+                  className={errors.customerId ? 'border-red-500' : ''}
+                />
+                {errors.customerId && <p className="text-red-500 text-xs mt-1">{errors.customerId}</p>}
+                
+                {isPartialPayment && customerName && (
+                  <p className="text-sm text-amber-700 mt-2">
+                    {formatCurrency(totalValue - formData.receivedValue)} will be added to {customerName}'s balance.
+                  </p>
+                )}
+                
+                {isCredit && customerName && (
+                  <p className="text-sm text-amber-700 mt-2">
+                    Full amount ({formatCurrency(totalValue)}) will be added to {customerName}'s credit balance.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Additional Details Section */}
+          <div className="space-y-4">
+            <h4 className="text-md font-medium text-gray-800 border-b border-gray-200 pb-2">Additional Details</h4>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Notes
+              </label>
+              <textarea
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                rows={3}
+                placeholder="Optional notes about this sale..."
+              />
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center"
+            >
+              <CheckCircle className="w-4 h-4 mr-2" />
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
 
   // Received Bill Sales Logs Modal Component
   function ReceivedBillSalesLogsModal({ 
@@ -3999,46 +4475,28 @@ export default function Accounting() {
 
           const salesDetails: any[] = [];
           
-          selectedReceivedBill.relatedSales.forEach((sale: any) => {
-            // Handle both nested items structure and direct sale items
-            let saleItems: any[] = [];
-            
-            if (sale.items && Array.isArray(sale.items)) {
-              // New structure with nested items
-              saleItems = sale.items;
-            } else {
-              // Check if this sale has items stored separately (old structure compatibility)
-              // For now, we'll try to find sale items from the raw sales data
-              const fullSale = sales.find(s => s.id === sale.id);
-              if (fullSale && fullSale.items) {
-                saleItems = fullSale.items;
-              }
-            }
+          // Filter sales that match this specific product and supplier
+          const matchingSales = sales.filter((sale: any) => {
+            const productMatch = sale.product_id === selectedReceivedBill.productId;
+            const supplierMatch = sale.supplier_id === selectedReceivedBill.supplierId;
+            return productMatch && supplierMatch;
+          });
 
-            // Filter items that match this specific product and supplier
-            const matchingItems = saleItems.filter((item: any) => {
-              const productMatch = item.productId === selectedReceivedBill.productId || 
-                                  item.product_id === selectedReceivedBill.productId;
-              const supplierMatch = item.supplierId === selectedReceivedBill.supplierId || 
-                                   item.supplier_id === selectedReceivedBill.supplierId;
-              return productMatch && supplierMatch;
-            });
-
-            matchingItems.forEach((item: any) => {
-              salesDetails.push({
-                saleId: sale.id,
-                saleDate: sale.created_at || sale.createdAt,
-                customerId: sale.customer_id,
-                customerName: customers.find(c => c.id === sale.customer_id)?.name || 'Walk-in Customer',
-                quantity: item.quantity,
-                weight: item.weight,
-                unitPrice: item.unitPrice || item.unit_price,
-                receivedValue: item.receivedValue || item.received_value,
-                paymentMethod: sale.payment_method || sale.paymentMethod || 'cash',
-                notes: item.notes,
-                productName: item.productName || item.product_name || selectedReceivedBill.productName,
-                supplierName: item.supplierName || item.supplier_name || selectedReceivedBill.supplierName
-              });
+          matchingSales.forEach((sale: any) => {
+            salesDetails.push({
+              ...sale, // Include the original sale object
+              saleId: sale.id,
+              saleDate: sale.created_at,
+              customerId: sale.customer_id,
+              customerName: customers.find(c => c.id === sale.customer_id)?.name || 'Walk-in Customer',
+              quantity: sale.quantity || 1,
+              weight: sale.weight,
+              unitPrice: sale.unit_price,
+              receivedValue: sale.received_value,
+              paymentMethod: sale.payment_method || 'cash',
+              notes: sale.notes,
+              productName: selectedReceivedBill.productName,
+              supplierName: selectedReceivedBill.supplierName
             });
           });
 
@@ -4052,12 +4510,10 @@ export default function Accounting() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900">Sales Logs</h2>
-                    <p className="text-sm text-gray-600 mt-1">
+                    <p className="text-md text-gray-600 mt-1">
                       {selectedReceivedBill.productName} - {selectedReceivedBill.supplierName}
                     </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Inventory Item ID: {selectedReceivedBill.id}
-                    </p>
+                   
                   </div>
                   <button
                     onClick={() => setShowReceivedBillSalesLogs(false)}
@@ -4110,6 +4566,7 @@ export default function Accounting() {
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Price</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Method</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -4160,6 +4617,38 @@ export default function Accounting() {
                               }`}>
                                 {item.paymentMethod}
                               </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center space-x-2">
+                                <button
+                                  onClick={() => handleEditSale({
+                                    ...item,
+                                    id: item.id,
+                                    quantity: item.quantity,
+                                    weight: item.weight,
+                                    unit_price: item.unitPrice,
+                                    payment_method: item.paymentMethod,
+                                    notes: item.notes
+                                  })}
+                                  className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 transition-colors"
+                                  title="Edit Sale"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteSale({
+                                    ...item,
+                                    id: item.id,
+                                    saleId: item.saleId,
+                                    customerName: item.customerName,
+                                    totalPrice: item.unitPrice * item.quantity
+                                  })}
+                                  className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
+                                  title="Delete Sale"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}

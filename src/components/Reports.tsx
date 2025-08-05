@@ -42,18 +42,17 @@ export default function Reports() {
   }, {} as Record<string, number>);
 
   const topProducts = filteredSales
-    .flatMap(sale => sale.items)
-    .reduce((acc, item) => {
-      const key = item.productId;
+    .reduce((acc, sale) => {
+      const key = sale.product_id;
       if (!acc[key]) {
         acc[key] = {
-          productName: item.productName,
+          productName: sale.productName || 'Unknown Product',
           quantity: 0,
           revenue: 0
         };
       }
-      acc[key].quantity += item.quantity;
-      acc[key].revenue += item.totalPrice;
+      acc[key].quantity += sale.quantity || 1;
+      acc[key].revenue += sale.received_value;
       return acc;
     }, {} as Record<string, { productName: string; quantity: number; revenue: number }>);
 

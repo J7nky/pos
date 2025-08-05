@@ -6,7 +6,7 @@ type Tables = Database['public']['Tables'];
 
 // Sync configuration
 const SYNC_CONFIG = {
-  batchSize: 50,
+  batchSize: 100, // Increased from 50 for fewer round trips
   maxRetries: 3,
   retryDelay: 1000, // ms
   syncInterval: 30000, // 30 seconds
@@ -38,6 +38,49 @@ export interface SyncResult {
 export class SyncService {
   private isRunning = false;
   private lastSyncAttempt: Date | null = null;
+  private validationCache: {
+    products: Set<string>;
+    suppliers: Set<string>;
+    users: Set<string>;
+    lastUpdated: Date | null;
+    storeId: string | null;
+  } = {
+    products: new Set(),
+    suppliers: new Set(), 
+    users: new Set(),
+    lastUpdated: null,
+    storeId: null
+  };
+
+  /**
+   * Refresh validation cache for foreign key validation
+   */
+  private async refreshValidationCache(storeId: string) {
+    const cacheAge = this.validationCache.lastUpdated 
+      ? Date.now() - this.validationCache.lastUpdated.getTime() 
+      : Infinity;
+    
+    // Cache is valid for 5 minutes and same store
+    if (cacheAge < 300000 && this.validationCache.storeId === storeId) {
+      return;
+    }
+
+    try {
+      const [productsResult, suppliersResult, usersResult] = await Promise.all([
+        supabase.from('products').select('id').eq('store_id', storeId),
+        supabase.from('suppliers').select('id').eq('store_id', storeId),
+        supabase.from('users').select('id').eq('store_id', storeId)
+      ]);
+
+      this.validationCache.products = new Set(productsResult.data?.map(p => p.id) || []);
+      this.validationCache.suppliers = new Set(suppliersResult.data?.map(s => s.id) || []);
+      this.validationCache.users = new Set(usersResult.data?.map(u => u.id) || []);
+      this.validationCache.lastUpdated = new Date();
+      this.validationCache.storeId = storeId;
+    } catch (error) {
+      console.warn('Failed to refresh validation cache:', error);
+    }
+  }
 
   /**
    * Main sync function - performs bi-directional sync
@@ -111,14 +154,11 @@ export class SyncService {
            const validRecords = [];
            const invalidRecords = [];
            
-                       // Get current products and suppliers from Supabase to validate foreign keys
-            const { data: remoteProducts } = await supabase.from('products').select('id').eq('store_id', storeId);
-            const { data: remoteSuppliers } = await supabase.from('suppliers').select('id').eq('store_id', storeId);
-            const { data: remoteUsers } = await supabase.from('users').select('id').eq('store_id', storeId);
-           
-           const validProductIds = new Set(remoteProducts?.map(p => p.id) || []);
-           const validSupplierIds = new Set(remoteSuppliers?.map(s => s.id) || []);
-           const validUserIds = new Set(remoteUsers?.map(u => u.id) || []);
+           // Use cached validation data to avoid repeated queries
+           await this.refreshValidationCache(storeId);
+           const validProductIds = this.validationCache.products;
+           const validSupplierIds = this.validationCache.suppliers;
+           const validUserIds = this.validationCache.users;
            
            for (const record of activeRecords) {
              // Check quantity constraint
