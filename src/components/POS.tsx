@@ -345,26 +345,52 @@ export default function POS() {
       }
       // Note: Inventory deduction is handled automatically by the addSale function
       // No need to manually deduct here as it would cause double deduction
-      console.log('handleCheckout', activeTab.cart);
+      
 
       await addSale(
-        {}, // Empty sale object since we only create sale_items
-        activeTab.cart.map(item => ({
-          inventory_item_id: item.inventoryItemId || '', // Added to match Supabase schema
-          product_id: item.productId,
-          supplier_id: item.supplierId,
-          weight: item.weight || null,
-          unit_price: item.unitPrice,
-          received_value: item.totalPrice || 0, // Changed from total_price to received_value
-          payment_method: item.paymentMethod || activeTab.paymentMethod, // Add payment method
-          notes: item.notes || null,
-          store_id: raw.storeId,
-          customer_id: activeTab.selectedCustomer || null, // Added to match Supabase schema
+        {
           created_at: new Date().toISOString(),
           created_by: userProfile?.id || '',
+          customer_id: activeTab.selectedCustomer || null,
+          payment_method: activeTab.paymentMethod,
+          received_value: activeTab.cart.reduce((sum, item) => sum + (item.totalPrice || 0), 0),
+          inventory_item_id: '',
+          product_id: '',
+          supplier_id: '',
+          unit_price: 0
+        },
+        activeTab.cart.map(item => ({
+          id: uuidv4(),
+          inventory_item_id: item.inventoryItemId || '',
+          product_id: item.productId,
+          supplier_id: item.supplierId,
+          type: item.inventoryType || 'cash',
+          quantity: item.quantity,
+          unit: 'piece',
+          weight: item.weight || null,
+          porterage: null,
+          unit_price: item.unitPrice,
+          received_value: item.totalPrice || 0,
+          payment_method: item.paymentMethod || activeTab.paymentMethod,
+          notes: item.notes || null,
+          store_id: raw.storeId,
+          customer_id: activeTab.selectedCustomer || null,
+          created_at: new Date().toISOString(),
+          created_by: userProfile?.id || '',
+          received_quantity: item.quantity,
+          transfer_fee: 0,
+          price: item.unitPrice,
+          commission_rate: 0,
+          received_at: new Date().toISOString(),
+          received_by: userProfile?.id || ''
         }))
       );
+      
       await raw.refreshData(); // Ensure UI is in sync with backend
+      
+      // Trigger immediate sync after sale completion for critical data
+      raw.debouncedSync?.();
+      
       if (activeTabs.length > 1) {
         closeTab(activeTabId);
       } else {
