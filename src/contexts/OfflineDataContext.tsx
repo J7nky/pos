@@ -821,6 +821,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const deductInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
+    console.log('deductInventoryQuantity', productId, supplierId, quantity);
     if (!storeId) return;
     
     try {

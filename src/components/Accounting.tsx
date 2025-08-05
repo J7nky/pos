@@ -226,7 +226,7 @@ export default function Accounting() {
   // Calculate today's expenses with currency conversion
   // Note: amounts are now stored in USD, so convert to display currency
       const todayExpenses = transactions
-      .filter(t => t.type === 'expense' && t.createdAt.split('T')[0] === today)
+      .filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today)
       .reduce((sum, t) => {
         // Check if this transaction was originally LBP but converted to USD for storage
         const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
@@ -240,7 +240,7 @@ export default function Accounting() {
       }, 0);
 
     const todayIncome = transactions
-      .filter(t => t.type === 'income' && t.createdAt.split('T')[0] === today)
+      .filter(t => t.type === 'income' && t.createdAt && t.createdAt.split('T')[0] === today)
       .reduce((sum, t) => {
         // Check if this transaction was originally LBP but converted to USD for storage
         const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
@@ -2292,7 +2292,7 @@ export default function Accounting() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                   {expenseCategories.filter(c => c.is_active).map(category => {
                 const todayCategoryExpenses = transactions.filter(t => 
-                  t.type === 'expense' && t.category === category.name && t.createdAt.split('T')[0] === today
+                  t.type === 'expense' && t.category === category.name && t.createdAt && t.createdAt.split('T')[0] === today
                 );
                 const todayAmount = todayCategoryExpenses.reduce((sum, t) => {
                   const convertedAmount = getConvertedAmount(t.amount, 'USD'); // amounts stored in USD
@@ -2329,7 +2329,7 @@ export default function Accounting() {
                 <tbody className="divide-y divide-gray-200">
                   {transactions
                     .filter(t => t.type === 'expense')
-                    .filter(t => t.createdAt.split('T')[0] === today)
+                    .filter(t => t.createdAt && t.createdAt.split('T')[0] === today)
                     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                     .map(transaction => (
                     <tr key={transaction.id} className="hover:bg-gray-50">

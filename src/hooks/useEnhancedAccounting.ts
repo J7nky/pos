@@ -157,7 +157,7 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
     }
 
     const filteredTransactions = transactions.filter(t => 
-      new Date(t.createdAt) >= startDate
+      t.createdAt && new Date(t.createdAt) >= startDate
     );
 
     const income = filteredTransactions
@@ -191,6 +191,7 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
     const prevEndDate = new Date(startDate.getTime() - 1);
 
     const prevTransactions = transactions.filter(t => {
+      if (!t.createdAt) return false;
       const date = new Date(t.createdAt);
       return date >= prevStartDate && date <= prevEndDate;
     });
@@ -227,11 +228,11 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
     const avgDebtPerCustomer = customersWithDebt > 0 ? totalCustomerDebt / customersWithDebt : 0;
     
     const recentTransactions = transactions
-      .filter(t => new Date(t.createdAt) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
+      .filter(t => t.createdAt && new Date(t.createdAt) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
       .length;
 
     const cashFlowTrend = transactions
-      .filter(t => new Date(t.createdAt) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
+      .filter(t => t.createdAt && new Date(t.createdAt) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
       .reduce((acc, t) => {
         const day = new Date(t.createdAt).toLocaleDateString();
         if (!acc[day]) acc[day] = { income: 0, expenses: 0 };
