@@ -27,6 +27,7 @@ export default function Reports() {
   const [reportType, setReportType] = useState<'sales' | 'inventory' | 'customers' | 'profit'>('sales');
 
   const filteredSales = sales.filter(sale => {
+    if (!sale.createdAt) return false;
     const saleDate = sale.createdAt.split('T')[0];
     return saleDate >= dateRange.startDate && saleDate <= dateRange.endDate;
   });

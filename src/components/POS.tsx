@@ -345,6 +345,7 @@ export default function POS() {
       }
       // Note: Inventory deduction is handled automatically by the addSale function
       // No need to manually deduct here as it would cause double deduction
+      console.log('handleCheckout', activeTab.cart);
 
       await addSale(
         {}, // Empty sale object since we only create sale_items

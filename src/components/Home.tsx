@@ -44,11 +44,11 @@ export default function Home() {
 
   const today = new Date().toISOString().split('T')[0];
   const todaySales = sales.filter(sale => 
-    sale.createdAt.split('T')[0] === today && sale.status === 'completed'
+    sale.createdAt && sale.createdAt.split('T')[0] === today && sale.status === 'completed'
   );
   const todayRevenue = todaySales.reduce((sum, sale) => sum + sale.total, 0);
   const todayExpenses = transactions.filter(t => 
-    t.type === 'expense' && t.createdAt.split('T')[0] === today
+    t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today
   ).reduce((sum, t) => {
     const convertedAmount = getConvertedAmount(t.amount, t.currency || 'USD');
     return sum + convertedAmount;
@@ -141,7 +141,7 @@ export default function Home() {
       value: formatCurrency(todayExpenses),
       icon: Receipt,
       color: 'bg-red-500',
-      change: `${transactions.filter(t => t.type === 'expense' && t.createdAt.split('T')[0] === today).length} transactions`
+      change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today).length} transactions`
     },
     {
       title: 'Low Stock Items',
@@ -153,7 +153,7 @@ export default function Home() {
   ];
 
   const recentSales = sales
-    .filter(sale => sale.status === 'completed')
+    .filter(sale => sale.status === 'completed' && sale.createdAt)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 5);
 
@@ -299,7 +299,7 @@ export default function Home() {
                       Sale #{sale.id.slice(-6)}
                     </p>
                     <p className="text-sm text-gray-600">
-                      {new Date(sale.createdAt).toLocaleTimeString()}
+                      {sale.createdAt ? new Date(sale.createdAt).toLocaleTimeString() : 'Unknown time'}
                     </p>
                   </div>
                   <div className="text-right">

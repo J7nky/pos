@@ -333,6 +333,7 @@ export class TransactionService {
       // Filter by date range if provided
       if (startDate || endDate) {
         filteredTransactions = filteredTransactions.filter((t: Transaction) => {
+          if (!t.createdAt) return false;
           const transactionDate = new Date(t.createdAt);
           const start = startDate ? new Date(startDate) : new Date(0);
           const end = endDate ? new Date(endDate) : new Date();
@@ -341,9 +342,11 @@ export class TransactionService {
         });
       }
 
-      return filteredTransactions.sort((a: Transaction, b: Transaction) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
+      return filteredTransactions
+        .filter((t: Transaction) => t.createdAt)
+        .sort((a: Transaction, b: Transaction) => 
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
 
     } catch (error) {
       console.error('Error getting transaction history:', error);
