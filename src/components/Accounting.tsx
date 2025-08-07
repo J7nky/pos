@@ -53,6 +53,7 @@ import {
   X
 } from 'lucide-react';
 import Toast from './common/Toast';
+import { CurrencyService } from '../services/currencyService';
 
 export default function Accounting() {
   const raw = useOfflineData();
@@ -61,8 +62,8 @@ export default function Accounting() {
   const updateSale = raw.updateSale;
   const deleteSale = raw.deleteSale;
   const transactions = raw.transactions.map(t => ({...t, createdAt: t.created_at}));
-  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance}));
-  const suppliers = raw.suppliers.map(s => ({...s, createdAt: s.created_at, balance: s.balance}));
+  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance}));
+  const suppliers = raw.suppliers.map(s => ({...s, createdAt: s.created_at, lb_balance: s.lb_balance, usd_balance: s.usd_balance}));
   const expenseCategories = raw.expenseCategories || [];
   const inventory = raw.inventory || [];
   const sales = raw.sales || [];
@@ -104,7 +105,8 @@ export default function Accounting() {
 
   // Form states
   const [receiveForm, setReceiveForm] = useState({
-    customerId: '',
+    entityType: 'customer' as 'customer' | 'supplier',
+    entityId: '',
     amount: '',
     currency: currency,
     description: '',
@@ -112,7 +114,8 @@ export default function Accounting() {
   });
 
   const [payForm, setPayForm] = useState({
-    supplierId: '',
+    entityType: 'supplier' as 'customer' | 'supplier',
+    entityId: '',
     amount: '',
     currency: currency,
     description: '',
@@ -267,8 +270,8 @@ export default function Accounting() {
   const kpiData = useMemo(() => {
     const totalCustomers = customers.filter(c => c.is_active).length;
     const totalSuppliers = suppliers.length;
-    const customersWithDebt = customers.filter(c => (c.balance || 0) > 0).length; // Updated to use balance field with null safety
-    const totalCustomerDebt = customers.reduce((sum, c) => sum + (c.balance || 0), 0); // Updated to use balance field with null safety
+      const customersWithDebt = customers.filter(c => (c.lb_balance || 0) > 0 || (c.usd_balance || 0) > 0).length;
+  const totalCustomerDebt = customers.reduce((sum, c) => sum + (c.lb_balance || 0) + (c.usd_balance || 0), 0);
     const avgDebtPerCustomer = customersWithDebt > 0 ? totalCustomerDebt / customersWithDebt : 0;
     
     const recentTransactions = transactions
@@ -331,14 +334,14 @@ export default function Accounting() {
       return;
     }
     
-    if (!receiveForm.customerId) {
-      showToast('Please select a customer', 'error');
+    if (!receiveForm.entityId) {
+      showToast('Please select an entity', 'error');
       return;
     }
     
-    const customer = customers.find(c => c.id === receiveForm.customerId);
-    if (!customer) {
-      showToast('Customer not found', 'error');
+    const entity = receiveForm.entityType === 'customer' ? customers.find(c => c.id === receiveForm.entityId) : suppliers.find(s => s.id === receiveForm.entityId);
+    if (!entity) {
+      showToast('Entity not found', 'error');
       return;
     }
     
@@ -346,50 +349,78 @@ export default function Accounting() {
       // Use the ERP Financial Service to process the payment
       const { erpFinancialService } = await import('../services/erpFinancialService');
       
-      // Sync current customers to ERP service
+      // Sync current entities to ERP service
       localStorage.setItem('erp_customers', JSON.stringify(customers));
+      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
       erpFinancialService.reloadData();
       
-      const result = erpFinancialService.processCustomerPayment(
-        receiveForm.customerId,
+      const result = erpFinancialService.processEntityPayment(
+        receiveForm.entityType,
+        receiveForm.entityId,
         parseFloat(receiveForm.amount),
         receiveForm.currency as 'USD' | 'LBP',
-        `Payment from ${customer.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
+        `Payment from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
         userProfile?.id || ''
       );
       
-      // Update customer balance in main application
-      // Store amounts as-is in their original currency, convert only for display
+      // Update entity balance in main application
+      // Store amounts in their respective currency fields
       const paymentAmount = parseFloat(receiveForm.amount);
-      const customerDebtInPaymentCurrency = receiveForm.currency === 'LBP' ? 
-        (customer.balance || 0) * 89500 : (customer.balance || 0); // Updated to use balance field with null safety
-      const newDebtInPaymentCurrency = Math.max(0, customerDebtInPaymentCurrency - paymentAmount);
-      const newDebtInUSD = receiveForm.currency === 'LBP' ? 
-        newDebtInPaymentCurrency / 89500 : newDebtInPaymentCurrency;
       
-      await raw.updateCustomer(receiveForm.customerId, { 
-        balance: newDebtInUSD 
-      });
+      if (receiveForm.entityType === 'customer') {
+        const currentLbBalance = entity.lb_balance || 0;
+        const currentUsdBalance = entity.usd_balance || 0;
+        
+        if (receiveForm.currency === 'LBP') {
+          await raw.updateCustomer(receiveForm.entityId, { 
+            lb_balance: currentLbBalance + paymentAmount 
+          });
+        } else {
+          await raw.updateCustomer(receiveForm.entityId, { 
+            usd_balance: currentUsdBalance + paymentAmount 
+          });
+        }
+      } else {
+        const currentLbBalance = entity.lb_balance || 0;
+        const currentUsdBalance = entity.usd_balance || 0;
+        
+        if (receiveForm.currency === 'LBP') {
+          await raw.updateSupplier(receiveForm.entityId, { 
+            lb_balance: currentLbBalance + paymentAmount 
+          });
+        } else {
+          await raw.updateSupplier(receiveForm.entityId, { 
+            usd_balance: currentUsdBalance + paymentAmount 
+          });
+        }
+      }
+      
+      // Safely convert amount for database storage
+      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
+        parseFloat(receiveForm.amount), 
+        receiveForm.currency as 'USD' | 'LBP'
+      );
       
       // Also add to legacy transaction system for compatibility
       addTransaction({
         type: 'income',
-        category: 'Customer Payment',
-        amount: parseFloat(receiveForm.amount),
-        currency: receiveForm.currency as 'USD' | 'LBP',
-        description: `Payment from ${customer.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
+        category: receiveForm.entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
+        amount: safeAmount.amount,
+        currency: safeAmount.currency,
+        description: `Payment from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${receiveForm.amount} ${receiveForm.currency})` : ''}`,
         reference: receiveForm.reference,
         created_by: userProfile?.id || ''
       });
       
-      showToast(`Payment received! ${customer.name} balance: ${formatCurrency(customerDebtInPaymentCurrency)} → ${formatCurrency(newDebtInPaymentCurrency)}`, 'success');
+      showToast(`Payment received! ${entity.name} balance: ${formatCurrency(entityDebtInPaymentCurrency)} → ${formatCurrency(newDebtInPaymentCurrency)}`, 'success');
     } catch (err) {
     console.log(err);
       showToast('Failed to record payment.', 'error');
     }
     
     setReceiveForm({
-      customerId: '',
+      entityType: 'customer' as 'customer' | 'supplier',
+      entityId: '',
       amount: '',
       currency: currency,
       description: '',
@@ -400,21 +431,21 @@ export default function Accounting() {
 
   const handlePaySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    console.log('Paying to:', payForm.entityType);
     // Validate required fields
     if (!payForm.amount || parseFloat(payForm.amount) <= 0) {
       showToast('Please enter a valid amount', 'error');
       return;
     }
     
-    if (!payForm.supplierId) {
-      showToast('Please select a supplier', 'error');
+    if (!payForm.entityId) {
+      showToast('Please select an entity', 'error');
       return;
     }
     
-    const supplier = suppliers.find(s => s.id === payForm.supplierId);
-    if (!supplier) {
-      showToast('Supplier not found', 'error');
+    const entity = payForm.entityType === 'customer' ? customers.find(c => c.id === payForm.entityId) : suppliers.find(s => s.id === payForm.entityId);
+    if (!entity) {
+      showToast('Entity not found', 'error');
       return;
     }
     
@@ -422,39 +453,80 @@ export default function Accounting() {
       // Use the ERP Financial Service to process the payment
       const { erpFinancialService } = await import('../services/erpFinancialService');
       
-      // Sync current suppliers to ERP service
-      console.log('Syncing suppliers to ERP service:', suppliers.length, 'suppliers');
+      // Sync current entities to ERP service
+      console.log('Syncing entities to ERP service:', payForm.entityType === 'customer' ? customers.length : suppliers.length, 'entities');
+      localStorage.setItem('erp_customers', JSON.stringify(customers));
       localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
       erpFinancialService.reloadData();
-      console.log('Supplier found for payment:', supplier.name);
+      console.log('Entity found for payment:', entity.name);
       
-      const result = erpFinancialService.processSupplierPayment(
-        payForm.supplierId,
+      const result = erpFinancialService.processEntityPayment(
+        payForm.entityType,
+        payForm.entityId,
         parseFloat(payForm.amount),
         payForm.currency as 'USD' | 'LBP',
-        `Payment to ${supplier.name}${payForm.description ? ': ' + payForm.description : ''}`,
+        `Payment to ${entity.name}${payForm.description ? ': ' + payForm.description : ''}`,
         userProfile?.id || ''
+      );
+      
+      // Update entity balance (reduce debt)
+      const paymentAmount = parseFloat(payForm.amount);
+      
+      if (payForm.entityType === 'customer') {
+        console.log('Paying to customer:', paymentAmount);
+        const currentLbBalance = entity.lb_balance || 0;
+        const currentUsdBalance = entity.usd_balance || 0;
+        
+        if (payForm.currency === 'LBP') {
+          await raw.updateCustomer(payForm.entityId, { 
+            lb_balance: currentLbBalance - paymentAmount 
+          });
+        } else {
+          await raw.updateCustomer(payForm.entityId, { 
+            usd_balance: currentUsdBalance - paymentAmount 
+          });
+        }
+      } else {
+        const currentLbBalance = entity.lb_balance || 0;
+        const currentUsdBalance = entity.usd_balance || 0;
+        
+        if (payForm.currency === 'LBP') {
+          await raw.updateSupplier(payForm.entityId, { 
+            lb_balance: currentLbBalance - paymentAmount 
+          });
+        } else {
+          await raw.updateSupplier(payForm.entityId, { 
+            usd_balance: currentUsdBalance - paymentAmount 
+          });
+        }
+      }
+      
+      // Safely convert amount for database storage
+      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
+        parseFloat(payForm.amount), 
+        payForm.currency as 'USD' | 'LBP'
       );
       
       // Also add to legacy transaction system for compatibility
       addTransaction({
         type: 'expense',
-        category: 'Supplier Payment',
-        amount: parseFloat(payForm.amount),
-        currency: payForm.currency as 'USD' | 'LBP',
-        description: `Payment to ${supplier.name}${payForm.description ? ': ' + payForm.description : ''}`,
+        category: payForm.entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
+        amount: safeAmount.amount,
+        currency: safeAmount.currency,
+        description: `Payment to ${entity.name}${payForm.description ? ': ' + payForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${payForm.amount} ${payForm.currency})` : ''}`,
         reference: payForm.reference,
         created_by: userProfile?.id || ''
       });
       
-      showToast(`Payment sent! ${formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency)} paid to ${supplier.name}`, 'success');
+      showToast(`Payment sent! ${formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency)} paid to ${entity.name}`, 'success');
     } catch (err) {
       console.log(err);
       showToast('Failed to record payment.', 'error');
     }
     
     setPayForm({
-      supplierId: '',
+      entityType: 'supplier' as 'customer' | 'supplier',
+      entityId: '',
       amount: '',
       currency: currency,
       description: '',
@@ -485,13 +557,19 @@ export default function Accounting() {
         userProfile?.id || ''
       );
       
+      // Safely convert amount for database storage
+      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
+        parseFloat(expenseForm.amount), 
+        expenseForm.currency as 'USD' | 'LBP'
+      );
+      
       // Also add to legacy transaction system for compatibility
       addTransaction({
         type: 'expense',
         category: category.name,
-        amount: parseFloat(expenseForm.amount),
-        currency: expenseForm.currency as 'USD' | 'LBP',
-        description: expenseForm.description,
+        amount: safeAmount.amount,
+        currency: safeAmount.currency,
+        description: `${expenseForm.description}${safeAmount.wasConverted ? ` (Originally ${expenseForm.amount} ${expenseForm.currency})` : ''}`,
         reference: expenseForm.reference,
         created_by: userProfile?.id || ''
       });
@@ -1181,13 +1259,17 @@ export default function Accounting() {
 
       // Bill closing processed without creating accounts payable
 
+      // Safely convert amounts for database storage
+      const safeCommissionAmount = CurrencyService.getInstance().safeConvertForDatabase(commissionAmount, 'USD');
+      const safeSupplierPayment = CurrencyService.getInstance().safeConvertForDatabase(supplierPayment, 'USD');
+      
       // Add commission transaction
       await addTransaction({
         type: 'expense',
         category: 'Commission',
-        amount: commissionAmount,
-        currency: 'USD',
-        description: `Commission fee for ${closingBill.productName} sold on behalf of ${closingBill.supplierName}`,
+        amount: safeCommissionAmount.amount,
+        currency: safeCommissionAmount.currency,
+        description: `Commission fee for ${closingBill.productName} sold on behalf of ${closingBill.supplierName}${safeCommissionAmount.wasConverted ? ` (Originally ${commissionAmount} USD)` : ''}`,
         reference: `COMM-${closingBill.inventoryItemId.slice(-8)}`,
         created_by: userProfile?.id || ''
       });
@@ -1196,9 +1278,9 @@ export default function Accounting() {
       await addTransaction({
         type: 'expense',
         category: 'Supplier Payment',
-        amount: supplierPayment,
-        currency: 'USD',
-        description: `Payment to ${closingBill.supplierName} for ${closingBill.productName} sales`,
+        amount: safeSupplierPayment.amount,
+        currency: safeSupplierPayment.currency,
+        description: `Payment to ${closingBill.supplierName} for ${closingBill.productName} sales${safeSupplierPayment.wasConverted ? ` (Originally ${supplierPayment} USD)` : ''}`,
         reference: `PAY-${closingBill.inventoryItemId.slice(-8)}`,
         created_by: userProfile?.id || ''
       });
@@ -1883,7 +1965,6 @@ export default function Accounting() {
       <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit overflow-x-auto">
         {[
           { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
-          { id: 'customer-balances', label: 'Customer Balances', icon: Users },
           { id: 'supplier-balances', label: 'Supplier Balances', icon: Building2 },
           { id: 'expenses', label: 'Expenses', icon: Receipt },
           { id: 'nonpriced', label: 'Non Priced Items', icon: AlertCircle },
@@ -1962,10 +2043,14 @@ export default function Accounting() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600 font-medium">Total Customer Debt</p>
-                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(customers.filter(c => (c.balance || 0) > 0).reduce((sum, c) => sum + (c.balance || 0), 0))}</p>
+                  <p className="text-2xl font-bold text-gray-900">
+          LBP: {formatCurrency(customers.filter(c => (c.lb_balance || 0) > 0).reduce((sum, c) => sum + (c.lb_balance || 0), 0))}
+          <br />
+          USD: {formatCurrency(customers.filter(c => (c.usd_balance || 0) > 0).reduce((sum, c) => sum + (c.usd_balance || 0), 0))}
+        </p>
                   <div className="flex items-center mt-2">
                     <Users className="w-4 h-4 text-blue-500 mr-1" />
-                    <span className="text-sm font-medium text-blue-600">{customers.filter(c => (c.balance || 0) > 0).length}</span>
+                    <span className="text-sm font-medium text-blue-600">{customers.filter(c => (c.lb_balance || 0) > 0 || (c.usd_balance || 0) > 0).length}</span>
                     <span className="text-xs text-gray-500 ml-1">customers with debt</span>
                   </div>
                 </div>
@@ -2035,164 +2120,170 @@ export default function Accounting() {
 
 
 
-      {activeTab === 'customer-balances' && (
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold text-gray-900">Customer Balances</h2>
-            <button
-              onClick={() => setShowForm('receive')}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
-            >
-              <Plus className="w-5 h-5 mr-2" />
-              Record Payment
-            </button>
-          </div>
+      {
+      // activeTab === 'customer-balances' && (
+        // <div className="space-y-6">
+        //   <div className="flex justify-between items-center">
+        //     <h2 className="text-xl font-semibold text-gray-900">Customer Balances</h2>
+        //     <button
+        //       onClick={() => setShowForm('receive')}
+        //       className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
+        //     >
+        //       <Plus className="w-5 h-5 mr-2" />
+        //       Record Payment
+        //     </button>
+        //   </div>
 
-          {/* Search */}
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="relative">
-              <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search customers..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-          </div>
+        //   {/* Search */}
+        //   <div className="bg-white p-4 rounded-lg shadow-sm">
+        //     <div className="relative">
+        //       <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+        //       <input
+        //         type="text"
+        //         placeholder="Search customers..."
+        //         value={searchTerm}
+        //         onChange={(e) => setSearchTerm(e.target.value)}
+        //         className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+        //       />
+        //     </div>
+        //   </div>
 
-          {/* Customer Balances Table */}
-          <div className="bg-white rounded-lg shadow-sm">
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-semibold text-gray-900">Customer Account Balances</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Balance</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Transaction</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {customers
-                    .filter(customer => customer.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                    .filter(customer => customer.is_active)
-                    .sort((a, b) => (b.balance || 0) - (a.balance || 0)) // Updated to use balance field with null safety
-                    .map(customer => (
-                    <tr key={customer.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center">
-                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mr-3">
-                            <Users className="w-5 h-5 text-blue-600" />
-                          </div>
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">{customer.name}</div>
-                            <div className="text-sm text-gray-500">Customer ID: {customer.id.slice(-8)}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">{customer.phone || 'N/A'}</div>
-                        <div className="text-sm text-gray-500">{customer.email || 'No email'}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className={`text-lg font-semibold ${(customer.balance || 0) > 0 ? 'text-red-600' : (customer.balance || 0) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
-                          {formatCurrency(Math.abs(customer.balance || 0))}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {(customer.balance || 0) > 0 ? 'Owes money' : (customer.balance || 0) < 0 ? 'Credit balance' : 'Balanced'}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 text-xs rounded-full ${
-                          (currency === 'LBP' ? (customer.balance || 0) * 89500 : (customer.balance || 0)) > 1000 ? 'bg-red-100 text-red-800' :
-                          (customer.balance || 0) > 0 ? 'bg-yellow-100 text-yellow-800' :
-                          (customer.balance || 0) < 0 ? 'bg-green-100 text-green-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          {(currency === 'LBP' ? (customer.balance || 0) * 89500 : (customer.balance || 0)) > 1000 ? 'High Debt' :
-                           (customer.balance || 0) > 0 ? 'Has Debt' :
-                           (customer.balance || 0) < 0 ? 'Credit' :
-                           'Balanced'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        {customer.createdAt ? new Date(customer.createdAt).toLocaleDateString() : 'N/A'}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex space-x-2">
-                                                     <button 
-                             onClick={() => {
-                               setReceiveForm(prev => ({ ...prev, customerId: customer.id }));
-                               setShowForm('receive');
-                             }}
-                             className="text-green-600 hover:text-green-800"
-                             title="Record payment"
-                           >
-                            <DollarSign className="w-4 h-4" />
-                          </button>
-                          <button className="text-blue-600 hover:text-blue-800" title="View details">
-                            <Eye className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        //   {/* Customer Balances Table */}
+        //   <div className="bg-white rounded-lg shadow-sm">
+        //     <div className="p-6 border-b">
+        //       <h3 className="text-lg font-semibold text-gray-900">Customer Account Balances</h3>
+        //     </div>
+        //     <div className="overflow-x-auto">
+        //       <table className="w-full">
+        //         <thead className="bg-gray-50">
+        //           <tr>
+        //             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+        //             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
+        //             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Balance</th>
+        //             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+        //             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Transaction</th>
+        //             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+        //           </tr>
+        //         </thead>
+        //         <tbody className="divide-y divide-gray-200">
+        //           {customers
+        //             .filter(customer => customer.name.toLowerCase().includes(searchTerm.toLowerCase()))
+        //             .filter(customer => customer.is_active)
+        //             .sort((a, b) => (b.balance || 0) - (a.balance || 0)) // Updated to use balance field with null safety
+        //             .map(customer => (
+        //             <tr key={customer.id} className="hover:bg-gray-50">
+        //               <td className="px-6 py-4">
+        //                 <div className="flex items-center">
+        //                   <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mr-3">
+        //                     <Users className="w-5 h-5 text-blue-600" />
+        //                   </div>
+        //                   <div>
+        //                     <div className="text-sm font-medium text-gray-900">{customer.name}</div>
+        //                     <div className="text-sm text-gray-500">Customer ID: {customer.id.slice(-8)}</div>
+        //                   </div>
+        //                 </div>
+        //               </td>
+        //               <td className="px-6 py-4">
+        //                 <div className="text-sm text-gray-900">{customer.phone || 'N/A'}</div>
+        //                 <div className="text-sm text-gray-500">{customer.email || 'No email'}</div>
+        //               </td>
+        //               <td className="px-6 py-4">
+        //                 <div className={`text-lg font-semibold ${(customer.balance || 0) > 0 ? 'text-red-600' : (customer.balance || 0) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+        //                   {formatCurrency(Math.abs(customer.balance || 0))}
+        //                 </div>
+        //                 <div className="text-xs text-gray-500">
+        //                   {(customer.balance || 0) > 0 ? 'Owes money' : (customer.balance || 0) < 0 ? 'Credit balance' : 'Balanced'}
+        //                 </div>
+        //               </td>
+        //               <td className="px-6 py-4">
+        //                 <span className={`px-2 py-1 text-xs rounded-full ${
+        //                   (currency === 'LBP' ? (customer.balance || 0) * 89500 : (customer.balance || 0)) > 1000 ? 'bg-red-100 text-red-800' :
+        //                   (customer.balance || 0) > 0 ? 'bg-yellow-100 text-yellow-800' :
+        //                   (customer.balance || 0) < 0 ? 'bg-green-100 text-green-800' :
+        //                   'bg-gray-100 text-gray-800'
+        //                 }`}>
+        //                   {(currency === 'LBP' ? (customer.balance || 0) * 89500 : (customer.balance || 0)) > 1000 ? 'High Debt' :
+        //                    (customer.balance || 0) > 0 ? 'Has Debt' :
+        //                    (customer.balance || 0) < 0 ? 'Credit' :
+        //                    'Balanced'}
+        //                 </span>
+        //               </td>
+        //               <td className="px-6 py-4 text-sm text-gray-500">
+        //                 {customer.createdAt ? new Date(customer.createdAt).toLocaleDateString() : 'N/A'}
+        //               </td>
+        //               <td className="px-6 py-4">
+        //                 <div className="flex space-x-2">
+        //                                              <button 
+        //                      onClick={() => {
+        //                        setReceiveForm(prev => ({ ...prev, customerId: customer.id }));
+        //                        setShowForm('receive');
+        //                      }}
+        //                      className="text-green-600 hover:text-green-800"
+        //                      title="Record payment"
+        //                    >
+        //                     <DollarSign className="w-4 h-4" />
+        //                   </button>
+        //                   <button className="text-blue-600 hover:text-blue-800" title="View details">
+        //                     <Eye className="w-4 h-4" />
+        //                   </button>
+        //                 </div>
+        //               </td>
+        //             </tr>
+        //           ))}
+        //         </tbody>
+        //       </table>
+        //     </div>
+        //   </div>
 
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Customer Debt</p>
-                  <p className="text-2xl font-bold text-red-600">
-                    {formatCurrency(customers.filter(c => (c.balance || 0) > 0).reduce((sum, c) => sum + (c.balance || 0), 0))}
-                  </p>
-                </div>
-                <AlertTriangle className="w-8 h-8 text-red-500" />
-              </div>
-            </div>
+        //   {/* Summary Cards */}
+        //   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        //     <div className="bg-white rounded-lg shadow-sm p-6">
+        //       <div className="flex items-center justify-between">
+        //         <div>
+        //           <p className="text-sm text-gray-600">Total Customer Debt</p>
+        //           <p className="text-2xl font-bold text-red-600">
+        //             {formatCurrency(customers.filter(c => (c.balance || 0) > 0).reduce((sum, c) => sum + (c.balance || 0), 0))}
+        //           </p>
+        //         </div>
+        //         <AlertTriangle className="w-8 h-8 text-red-500" />
+        //       </div>
+        //     </div>
 
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Customers with Debt</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {customers.filter(c => (c.balance || 0) > 0).length}
-                  </p>
-                </div>
-                <Users className="w-8 h-8 text-blue-500" />
-              </div>
-            </div>
+        //     <div className="bg-white rounded-lg shadow-sm p-6">
+        //       <div className="flex items-center justify-between">
+        //         <div>
+        //           <p className="text-sm text-gray-600">Customers with Debt</p>
+        //           <p className="text-2xl font-bold text-gray-900">
+        //             {customers.filter(c => (c.balance || 0) > 0).length}
+        //           </p>
+        //         </div>
+        //         <Users className="w-8 h-8 text-blue-500" />
+        //       </div>
+        //     </div>
 
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Average Debt per Customer</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {formatCurrency(customers.filter(c => (c.balance || 0) > 0).length > 0 ? 
-                      customers.filter(c => (c.balance || 0) > 0).reduce((sum, c) => sum + (c.balance || 0), 0) / 
-                      customers.filter(c => (c.balance || 0) > 0).length : 0)}
-                  </p>
-                </div>
-                <Target className="w-8 h-8 text-purple-500" />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        //     <div className="bg-white rounded-lg shadow-sm p-6">
+        //       <div className="flex items-center justify-between">
+        //         <div>
+        //           <p className="text-sm text-gray-600">Average Debt per Customer</p>
+        //           <p className="text-2xl font-bold text-gray-900">
+        //             {formatCurrency(customers.filter(c => (c.balance || 0) > 0).length > 0 ? 
+        //               customers.filter(c => (c.balance || 0) > 0).reduce((sum, c) => sum + (c.balance || 0), 0) / 
+        //               customers.filter(c => (c.balance || 0) > 0).length : 0)}
+        //           </p>
+        //         </div>
+        //         <Target className="w-8 h-8 text-purple-500" />
+        //       </div>
+        //     </div>
+        //   </div>
+        // </div>
+ 
+ 
+//  )
+}
 
-      {activeTab === 'supplier-balances' && (
+    
+      {
+      activeTab === 'supplier-balances' && (
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-semibold text-gray-900">Supplier Balances</h2>
@@ -2231,7 +2322,6 @@ export default function Accounting() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Balance</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Balance Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Transaction</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
@@ -2262,11 +2352,13 @@ export default function Accounting() {
                       <td className="px-6 py-4">
                         <div>
                           <div className="text-lg font-semibold text-gray-900">
-                            {formatCurrency(Math.abs(supplier.balance || 0))}
+                            LBP: {formatCurrency(Math.abs(supplier.lb_balance || 0))}
+                            <br />
+                            USD: {formatCurrency(Math.abs(supplier.usd_balance || 0))}
                           </div>
                           <div className="text-xs text-gray-500">
-                            {(supplier.balance || 0) > 0 ? 'Credit balance' : 
-                             (supplier.balance || 0) < 0 ? 'Amount owed' : 
+                            {(supplier.lb_balance || 0) > 0 || (supplier.usd_balance || 0) > 0 ? 'Credit balance' : 
+                             (supplier.lb_balance || 0) < 0 || (supplier.usd_balance || 0) < 0 ? 'Amount owed' : 
                              'No outstanding balance'}
                           </div>
                         </div>
@@ -2318,7 +2410,9 @@ export default function Accounting() {
                 <div>
                   <p className="text-sm text-gray-600">Total Supplier Credit Balance</p>
                   <p className="text-2xl font-bold text-green-600">
-                    {formatCurrency(Math.max(0, suppliers.reduce((sum, s) => sum + Math.max(0, s.balance || 0), 0)))}
+                    LBP: {formatCurrency(Math.max(0, suppliers.reduce((sum, s) => sum + Math.max(0, s.lb_balance || 0), 0)))}
+                    <br />
+                    USD: {formatCurrency(Math.max(0, suppliers.reduce((sum, s) => sum + Math.max(0, s.usd_balance || 0), 0)))}
                   </p>
                 </div>
                 <AlertTriangle className="w-8 h-8 text-green-500" />
@@ -2340,7 +2434,8 @@ export default function Accounting() {
             </div>
           </div>
         </div>
-      )}
+      )
+      }
 
       {activeTab === 'expenses' && (
         <div className="space-y-6">
@@ -3598,28 +3693,77 @@ export default function Accounting() {
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
                   <div className="flex items-center">
                     <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
-                    <span className="text-green-800 font-medium">Record a payment received from a customer</span>
+                    <span className="text-green-800 font-medium">Record a payment received from a customer or supplier</span>
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="md:col-span-2">
+                <div className="grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Entity Type *</label>
+                    <div className="space-y-2 p-2">
+                      <label className="flex items-center space-x-1 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="receiveEntityType"
+                          value="customer"
+                          checked={receiveForm.entityType === 'customer'}
+                          onChange={(e) => {
+                            setReceiveForm(prev => ({ 
+                              ...prev, 
+                              entityType: e.target.value as 'customer' | 'supplier',
+                              entityId: '' // Reset entity selection when type changes
+                            }));
+                          }}
+                          className="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500"
+                        />
+                        <span className="text-sm text-gray-700">Customer</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="receiveEntityType"
+                          value="supplier"
+                          checked={receiveForm.entityType === 'supplier'}
+                          onChange={(e) => {
+                            setReceiveForm(prev => ({ 
+                              ...prev, 
+                              entityType: e.target.value as 'customer' | 'supplier',
+                              entityId: '' // Reset entity selection when type changes
+                            }));
+                          }}
+                          className="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500"
+                        />
+                        <span className="text-sm text-gray-700">Supplier</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div>
                     <SearchableSelect
-                      options={customers.filter(c => c.is_active).map(customer => ({
-                        id: customer.id,
-                        label: customer.name,
-                        value: customer.id,
-                        category: 'Customer'
-                      }))}
-                      value={receiveForm.customerId}
-                      onChange={(value) => setReceiveForm(prev => ({ ...prev, customerId: value as string }))}
-                      placeholder="Select Customer *"
-                      searchPlaceholder="Search customers..."
-                      recentSelections={recentCustomers}
-                      onRecentUpdate={setRecentCustomers}
+                      options={
+                        receiveForm.entityType === 'customer' 
+                          ? customers.filter(c => c.is_active).map(customer => ({
+                              id: customer.id,
+                              label: customer.name,
+                              value: customer.id,
+                              category: 'Customer'
+                            }))
+                          : suppliers.map(supplier => ({
+                              id: supplier.id,
+                              label: supplier.name,
+                              value: supplier.id,
+                              category: 'Supplier'
+                            }))
+                      }
+                      value={receiveForm.entityId}
+                      onChange={(value) => setReceiveForm(prev => ({ ...prev, entityId: value as string }))}
+                      placeholder={`Select ${receiveForm.entityType === 'customer' ? 'Customer' : 'Supplier'} *`}
+                      searchPlaceholder={`Search ${receiveForm.entityType === 'customer' ? 'customers' : 'suppliers'}...`}
+                      recentSelections={receiveForm.entityType === 'customer' ? recentCustomers : recentSuppliers}
+                      onRecentUpdate={receiveForm.entityType === 'customer' ? setRecentCustomers : setRecentSuppliers}
                       showAddOption={true}
-                      addOptionText="Add New Customer"
-                      onAddNew={() => setShowAddCustomerForm(true)}
+                      addOptionText={`Add New ${receiveForm.entityType === 'customer' ? 'Customer' : 'Supplier'}`}
+                      onAddNew={() => receiveForm.entityType === 'customer' ? setShowAddCustomerForm(true) : setShowAddSupplierForm(true)}
                       className="w-full"
                     />
                   </div>
@@ -3629,12 +3773,22 @@ export default function Accounting() {
                     <input
                       type="number"
                       step="0.01"
+                      max="99999999.99"
                       value={receiveForm.amount}
-                      onChange={(e) => setReceiveForm(prev => ({ ...prev, amount: e.target.value }))}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        const numValue = parseFloat(value);
+                        if (numValue > 99999999.99) {
+                          showToast('Amount exceeds maximum allowed value (99,999,999.99)', 'error');
+                          return;
+                        }
+                        setReceiveForm(prev => ({ ...prev, amount: value }));
+                      }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
                       required
                       placeholder="0.00"
                     />
+                    <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
                   </div>
                   
                   <div>
@@ -3699,28 +3853,77 @@ export default function Accounting() {
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
                   <div className="flex items-center">
                     <TrendingDown className="w-5 h-5 text-red-600 mr-2" />
-                    <span className="text-red-800 font-medium">Record a payment sent to a supplier</span>
+                    <span className="text-red-800 font-medium">Record a payment sent to a customer or supplier</span>
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="md:col-span-2">
+                <div className="grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Entity Type *</label>
+                    <div className="space-y-2 p-2">
+                      <label className="flex items-center space-x-1 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="payEntityType"
+                          value="customer"
+                          checked={payForm.entityType === 'customer'}
+                          onChange={(e) => {
+                            setPayForm(prev => ({ 
+                              ...prev, 
+                              entityType: e.target.value as 'customer' | 'supplier',
+                              entityId: '' // Reset entity selection when type changes
+                            }));
+                          }}
+                          className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500"
+                        />
+                        <span className="text-sm text-gray-700">Customer</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="payEntityType"
+                          value="supplier"
+                          checked={payForm.entityType === 'supplier'}
+                          onChange={(e) => {
+                            setPayForm(prev => ({ 
+                              ...prev, 
+                              entityType: e.target.value as 'customer' | 'supplier',
+                              entityId: '' // Reset entity selection when type changes
+                            }));
+                          }}
+                          className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500"
+                        />
+                        <span className="text-sm text-gray-700">Supplier</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div>
                     <SearchableSelect
-                      options={suppliers.map(supplier => ({
-                        id: supplier.id,
-                        label: supplier.name,
-                        value: supplier.id,
-                      }))}
-                      value={payForm.supplierId}
-                      onChange={(value) => setPayForm(prev => ({ ...prev, supplierId: value as string }))}
-                      placeholder="Select Supplier *"
-                      searchPlaceholder="Search suppliers..."
-                      categories={['Commission', 'Cash']}
-                      recentSelections={recentSuppliers}
-                      onRecentUpdate={setRecentSuppliers}
+                      options={
+                        payForm.entityType === 'customer' 
+                          ? customers.filter(c => c.is_active).map(customer => ({
+                              id: customer.id,
+                              label: customer.name,
+                              value: customer.id,
+                              category: 'Customer'
+                            }))
+                          : suppliers.map(supplier => ({
+                              id: supplier.id,
+                              label: supplier.name,
+                              value: supplier.id,
+                              category: 'Supplier'
+                            }))
+                      }
+                      value={payForm.entityId}
+                      onChange={(value) => setPayForm(prev => ({ ...prev, entityId: value as string }))}
+                      placeholder={`Select ${payForm.entityType === 'customer' ? 'Customer' : 'Supplier'} *`}
+                      searchPlaceholder={`Search ${payForm.entityType === 'customer' ? 'customers' : 'suppliers'}...`}
+                      recentSelections={payForm.entityType === 'customer' ? recentCustomers : recentSuppliers}
+                      onRecentUpdate={payForm.entityType === 'customer' ? setRecentCustomers : setRecentSuppliers}
                       showAddOption={true}
-                      addOptionText="Add New Supplier"
-                      onAddNew={() => setShowAddSupplierForm(true)}
+                      addOptionText={`Add New ${payForm.entityType === 'customer' ? 'Customer' : 'Supplier'}`}
+                      onAddNew={() => payForm.entityType === 'customer' ? setShowAddCustomerForm(true) : setShowAddSupplierForm(true)}
                       className="w-full"
                     />
                   </div>
@@ -3730,12 +3933,22 @@ export default function Accounting() {
                     <input
                       type="number"
                       step="0.01"
+                      max="99999999.99"
                       value={payForm.amount}
-                      onChange={(e) => setPayForm(prev => ({ ...prev, amount: e.target.value }))}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        const numValue = parseFloat(value);
+                        if (numValue > 99999999.99) {
+                          showToast('Amount exceeds maximum allowed value (99,999,999.99)', 'error');
+                          return;
+                        }
+                        setPayForm(prev => ({ ...prev, amount: value }));
+                      }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
                       required
                       placeholder="0.00"
                     />
+                    <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
                   </div>
                   
                   <div>
@@ -3834,12 +4047,22 @@ export default function Accounting() {
                   <input
                     type="number"
                     step="0.01"
+                    max="99999999.99"
                     value={expenseForm.amount}
-                    onChange={(e) => setExpenseForm(prev => ({ ...prev, amount: e.target.value }))}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      const numValue = parseFloat(value);
+                      if (numValue > 99999999.99) {
+                        showToast('Amount exceeds maximum allowed value (99,999,999.99)', 'error');
+                        return;
+                      }
+                      setExpenseForm(prev => ({ ...prev, amount: value }));
+                    }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                     required
                     placeholder={`Enter amount in ${expenseForm.currency}`}
                   />
+                  <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
                 </div>
                 {expenseForm.currency !== currency && expenseForm.amount && (
                   <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">

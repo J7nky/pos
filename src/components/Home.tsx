@@ -25,7 +25,7 @@ import {
 export default function Home() {
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
-  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) : [];
+  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) : [];
   const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at, type: s.type || 'commission'})) : [];
   const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({...s, createdAt: s.created_at})) : [];
   const stockLevels = Array.isArray(raw.stockLevels) ? raw.stockLevels : [];

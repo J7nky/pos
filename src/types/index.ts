@@ -31,7 +31,8 @@ export interface Supplier {
   phone: string;
   email: string | null; // Updated to match database schema
   address: string;
-  balance: number | null; // Updated to match database schema
+  lb_balance: number | null; // Updated to match database schema
+  usd_balance: number | null; // Updated to match database schema
   createdAt: string;
 }
 
@@ -59,7 +60,8 @@ export interface Customer {
   phone: string;
   email: string | null; // Updated to match database schema
   address: string | null; // Updated to match database schema
-  balance: number; // Changed from currentDebt to balance to match Supabase schema
+  lb_balance: number; // Changed from currentDebt to balance to match Supabase schema
+  usd_balance: number; // Changed from currentDebt to balance to match Supabase schema
   isActive: boolean;
   createdAt: string;
 }

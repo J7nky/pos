@@ -571,21 +571,44 @@ export class SyncService {
       });
     }
     
-    // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow
+    // CRITICAL: Handle transaction amounts to avoid database precision overflow
     // Supabase numeric field has precision 10, scale 2 (max: 99,999,999.99)
-    // Only convert LBP amounts that exceed the database precision limit
-    if (tableName === 'transactions' && cleanRecord.currency === 'LBP' && cleanRecord.amount) {
+    if (tableName === 'transactions' && cleanRecord.amount) {
+      const MAX_DB_AMOUNT = 99999999.99;
       const USD_TO_LBP_RATE = 89500;
       const originalAmount = cleanRecord.amount;
+      const originalCurrency = cleanRecord.currency;
       
-      // Only convert if amount exceeds database precision limit
-      if (originalAmount > 99999999) {
-        cleanRecord.amount = originalAmount / USD_TO_LBP_RATE;
-        // Change currency to USD for the converted amount
-        cleanRecord.currency = 'USD';
-        // Add a note in the description about the conversion
-        cleanRecord.description = `${cleanRecord.description} (Originally ${originalAmount.toLocaleString()} LBP)`;
-        console.log(`💱 Converting large LBP transaction for upload: ${originalAmount.toLocaleString()} LBP → $${cleanRecord.amount.toFixed(2)} USD`);
+      // Validate and fix amount precision
+      if (typeof originalAmount === 'number' && !isNaN(originalAmount)) {
+        // Round to 2 decimal places to match database precision
+        cleanRecord.amount = Math.round(originalAmount * 100) / 100;
+        
+        // Check if amount exceeds database limit
+        if (cleanRecord.amount > MAX_DB_AMOUNT) {
+          if (originalCurrency === 'LBP') {
+            // Convert LBP to USD for large amounts
+            cleanRecord.amount = cleanRecord.amount / USD_TO_LBP_RATE;
+            cleanRecord.currency = 'USD';
+            cleanRecord.description = `${cleanRecord.description || ''} (Originally ${originalAmount.toLocaleString()} LBP)`.trim();
+            console.log(`💱 Converting large LBP transaction for upload: ${originalAmount.toLocaleString()} LBP → $${cleanRecord.amount.toFixed(2)} USD`);
+          } else {
+            // For USD amounts that are too large, cap them at the maximum
+            console.warn(`⚠️ USD transaction amount ${originalAmount} exceeds database limit, capping at ${MAX_DB_AMOUNT}`);
+            cleanRecord.amount = MAX_DB_AMOUNT;
+            cleanRecord.description = `${cleanRecord.description || ''} (Amount capped from ${originalAmount})`.trim();
+          }
+        }
+        
+        // Ensure amount is not negative (should be handled by business logic, but safety check)
+        if (cleanRecord.amount < 0) {
+          console.warn(`⚠️ Negative transaction amount detected: ${originalAmount}, setting to 0`);
+          cleanRecord.amount = 0;
+        }
+      } else {
+        // Invalid amount, set to 0
+        console.warn(`⚠️ Invalid transaction amount detected: ${originalAmount}, setting to 0`);
+        cleanRecord.amount = 0;
       }
     }
     

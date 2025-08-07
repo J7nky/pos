@@ -34,7 +34,7 @@ interface BillTab {
 export default function POS() {
   const raw = useOfflineData();
   const products = (raw.products || []).map(p => ({...p, createdAt: p.created_at})) as Array<any>;
-  const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<any>;
+  const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
   const stockLevels = (raw.stockLevels || []) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;

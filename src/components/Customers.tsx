@@ -1,17 +1,21 @@
 import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck, DollarSign, CreditCard, TrendingDown } from 'lucide-react';
 import { Customer, Supplier } from '../types';
 import Toast from './common/Toast';
+import SearchableSelect from './common/SearchableSelect';
+import { CurrencyService } from '../services/currencyService';
 
 export default function Customers() {
   const raw = useOfflineData();
-  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance || 0, email: c.email || '', address: c.address || ''})) : [];
+  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0, email: c.email || '', address: c.address || ''})) : [];
   const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at || 'commission', email: s.email || '', address: s.address || ''})) : [];
   const addCustomer = raw.addCustomer;
   const updateCustomer = raw.updateCustomer;
   const addSupplier = raw.addSupplier;
+  const updateSupplier = raw.updateSupplier;
+  const addTransaction = raw.addTransaction;
   const { userProfile } = useSupabaseAuth();
 
   const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>('customers');
@@ -42,10 +46,200 @@ export default function Customers() {
     visible: false,
   });
 
+  // Payment form states
+  const [showPaymentForm, setShowPaymentForm] = useState<'customer' | 'supplier' | null>(null);
+  const [paymentForm, setPaymentForm] = useState({
+    customerId: '',
+    supplierId: '',
+    amount: '',
+    currency: 'USD' as 'USD' | 'LBP',
+    description: '',
+    reference: ''
+  });
+
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type, visible: true });
   };
   const hideToast = () => setToast(t => ({ ...t, visible: false }));
+
+  // Payment handlers
+  const handleCustomerPaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
+      showToast('Please enter a valid amount', 'error');
+      return;
+    }
+    
+    if (!paymentForm.customerId) {
+      showToast('Please select a customer', 'error');
+      return;
+    }
+    
+    const customer = customers.find(c => c.id === paymentForm.customerId);
+    if (!customer) {
+      showToast('Customer not found', 'error');
+      return;
+    }
+    
+    try {
+      // Use the ERP Financial Service to process the payment
+      const { erpFinancialService } = await import('../services/erpFinancialService');
+      
+      // Sync current customers to ERP service
+      localStorage.setItem('erp_customers', JSON.stringify(customers));
+      erpFinancialService.reloadData();
+      
+      const result = erpFinancialService.processCustomerPayment(
+        paymentForm.customerId,
+        parseFloat(paymentForm.amount),
+        paymentForm.currency,
+        `Payment from ${customer.name}${paymentForm.description ? ': ' + paymentForm.description : ''}`,
+        userProfile?.id || ''
+      );
+      
+      // Update customer balance
+      const paymentAmount = parseFloat(paymentForm.amount);
+      const currentLbBalance = customer.lb_balance || 0;
+      const currentUsdBalance = customer.usd_balance || 0;
+      
+      if (paymentForm.currency === 'LBP') {
+        await updateCustomer(paymentForm.customerId, { 
+          lb_balance: Math.max(0, currentLbBalance - paymentAmount)
+        });
+      } else {
+        await updateCustomer(paymentForm.customerId, { 
+          usd_balance: Math.max(0, currentUsdBalance - paymentAmount)
+        });
+      }
+      
+      // Safely convert amount for database storage
+      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
+        parseFloat(paymentForm.amount), 
+        paymentForm.currency
+      );
+      
+      // Add to transaction system
+      addTransaction({
+        type: 'income',
+        category: 'Customer Payment',
+        amount: safeAmount.amount,
+        currency: safeAmount.currency,
+        description: `Payment from ${customer.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
+        reference: paymentForm.reference,
+        created_by: userProfile?.id || ''
+      });
+      
+      showToast(`Payment received! ${customer.name} balance updated`, 'success');
+    } catch (err) {
+      console.log(err);
+      showToast('Failed to record payment.', 'error');
+    }
+    
+    setPaymentForm({
+      customerId: '',
+      supplierId: '',
+      amount: '',
+      currency: 'USD',
+      description: '',
+      reference: ''
+    });
+    setShowPaymentForm(null);
+  };
+
+  const handleSupplierPaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
+      showToast('Please enter a valid amount', 'error');
+      return;
+    }
+    
+    if (!paymentForm.supplierId) {
+      showToast('Please select a supplier', 'error');
+      return;
+    }
+    
+    const supplier = suppliers.find(s => s.id === paymentForm.supplierId);
+    if (!supplier) {
+      showToast('Supplier not found', 'error');
+      return;
+    }
+    
+    try {
+      // Use the ERP Financial Service to process the payment
+      const { erpFinancialService } = await import('../services/erpFinancialService');
+      
+      // Sync current suppliers to ERP service
+      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
+      erpFinancialService.reloadData();
+      
+      const result = erpFinancialService.processSupplierPayment(
+        paymentForm.supplierId,
+        parseFloat(paymentForm.amount),
+        paymentForm.currency,
+        `Payment to ${supplier.name}${paymentForm.description ? ': ' + paymentForm.description : ''}`,
+        userProfile?.id || ''
+      );
+      
+      // Update supplier balance (reduce debt)
+      const paymentAmount = parseFloat(paymentForm.amount);
+      const currentLbBalance = supplier.lb_balance || 0;
+      const currentUsdBalance = supplier.usd_balance || 0;
+      
+      if (paymentForm.currency === 'LBP') {
+        await updateSupplier(paymentForm.supplierId, { 
+          lb_balance: Math.max(0, currentLbBalance - paymentAmount)
+        });
+      } else {
+        await updateSupplier(paymentForm.supplierId, { 
+          usd_balance: Math.max(0, currentUsdBalance - paymentAmount)
+        });
+      }
+      
+      // Safely convert amount for database storage
+      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
+        parseFloat(paymentForm.amount), 
+        paymentForm.currency
+      );
+      
+      // Add to transaction system
+      addTransaction({
+        type: 'expense',
+        category: 'Supplier Payment',
+        amount: safeAmount.amount,
+        currency: safeAmount.currency,
+        description: `Payment to ${supplier.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
+        reference: paymentForm.reference,
+        created_by: userProfile?.id || ''
+      });
+      
+      showToast(`Payment sent! ${supplier.name} payment recorded`, 'success');
+    } catch (err) {
+      console.log(err);
+      showToast('Failed to record payment.', 'error');
+    }
+    
+    setPaymentForm({
+      customerId: '',
+      supplierId: '',
+      amount: '',
+      currency: 'USD',
+      description: '',
+      reference: ''
+    });
+    setShowPaymentForm(null);
+  };
+
+  const handleRecordCustomerPayment = (customer: Customer) => {
+    setPaymentForm(prev => ({ ...prev, customerId: customer.id }));
+    setShowPaymentForm('customer');
+  };
+
+  const handleRecordSupplierPayment = (supplier: Supplier) => {
+    setPaymentForm(prev => ({ ...prev, supplierId: supplier.id }));
+    setShowPaymentForm('supplier');
+  };
 
   // Customer handlers
   const handleAddCustomerClick = () => {
@@ -104,7 +298,8 @@ export default function Customers() {
     if (editingCustomer) {
       updateCustomer(editingCustomer.id, {
         ...customerForm,
-        balance: editingCustomer.balance || 0,
+        lb_balance: editingCustomer.lb_balance || 0,
+        usd_balance: editingCustomer.usd_balance || 0,
       } as Customer);
       showToast('Customer updated successfully!', 'success');
     } else {
@@ -114,7 +309,8 @@ export default function Customers() {
         email: customerForm.email || '',
         address: customerForm.address || '',
         is_active: customerForm.isActive ?? true,
-        balance: 0,
+        lb_balance: 0,
+        usd_balance: 0,
       });
       showToast('Customer added successfully!', 'success');
     }
@@ -293,9 +489,15 @@ export default function Customers() {
                         <div className="text-sm text-gray-500">{customer.email}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className={`font-medium ${(customer.balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          ${(customer.balance || 0).toLocaleString()}
-                        </span>
+                        <div>
+                          <span className={`font-medium ${(customer.lb_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            LBP: {(customer.lb_balance || 0).toLocaleString()}
+                          </span>
+                          <br />
+                          <span className={`font-medium ${(customer.usd_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            USD: {(customer.usd_balance || 0).toLocaleString()}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
@@ -305,13 +507,22 @@ export default function Customers() {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-left text-sm font-medium">
-                        <button
-                          onClick={() => handleEditCustomerClick(customer)}
-                          className="text-blue-600 hover:text-blue-900 mr-3"
-                          title="Edit Customer"
-                        >
-                          <Edit className="w-5 h-5" />
-                        </button>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => handleEditCustomerClick(customer)}
+                            className="text-blue-600 hover:text-blue-900"
+                            title="Edit Customer"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => handleRecordCustomerPayment(customer)}
+                            className="text-green-600 hover:text-green-800"
+                            title="Record payment"
+                          >
+                            <DollarSign className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -357,19 +568,34 @@ export default function Customers() {
                         <div className="text-sm text-gray-500">{supplier.email}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className={`font-medium ${(supplier.balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          ${(supplier.balance || 0).toLocaleString()}
-                        </span>
+                        <div>
+                          <span className={`font-medium ${(supplier.lb_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            LBP: {(supplier.lb_balance || 0).toLocaleString()}
+                          </span>
+                          <br />
+                          <span className={`font-medium ${(supplier.usd_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            USD: {(supplier.usd_balance || 0).toLocaleString()}
+                          </span>
+                        </div>
                       </td>
                     
                        <td className="px-6 py-4 whitespace-nowrap text-left text-sm font-medium">
-                         <button
-                           onClick={() => handleEditSupplierClick(supplier)}
-                           className="text-blue-600 hover:text-blue-900 mr-3"
-                           title="Edit Supplier"
-                         >
-                           <Edit className="w-5 h-5" />
-                         </button>
+                         <div className="flex space-x-2">
+                           <button
+                             onClick={() => handleEditSupplierClick(supplier)}
+                             className="text-blue-600 hover:text-blue-900"
+                             title="Edit Supplier"
+                           >
+                             <Edit className="w-4 h-4" />
+                           </button>
+                                                       <button 
+                              onClick={() => handleRecordSupplierPayment(supplier)}
+                              className="text-red-600 hover:text-red-800"
+                              title="Make payment"
+                            >
+                              <CreditCard className="w-4 h-4" />
+                            </button>
+                         </div>
                        </td>
                      </tr>
                    ))
@@ -544,6 +770,208 @@ export default function Customers() {
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
                   {editingSupplier ? 'Save Changes' : 'Add Supplier'}
+                </button>
+              </div>
+              
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Customer Payment Form Modal */}
+      {showPaymentForm === 'customer' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b">
+              <h2 className="text-xl font-semibold text-gray-900">Add Payment Received</h2>
+            </div>
+            <form onSubmit={handleCustomerPaymentSubmit} className="p-6 space-y-6">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                <div className="flex items-center">
+                  <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
+                  <span className="text-green-800 font-medium">Record a payment received from a customer</span>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="md:col-span-2">
+                  <SearchableSelect
+                    options={customers.filter(c => c.isActive).map(customer => ({
+                      id: customer.id,
+                      label: customer.name,
+                      value: customer.id,
+                      category: 'Customer'
+                    }))}
+                    value={paymentForm.customerId}
+                    onChange={(value) => setPaymentForm(prev => ({ ...prev, customerId: value as string }))}
+                    placeholder="Select Customer *"
+                    searchPlaceholder="Search customers..."
+                    className="w-full"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    max="99999999.99"
+                    value={paymentForm.amount}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      const numValue = parseFloat(value);
+                      if (numValue > 99999999.99) {
+                        showToast('Amount exceeds maximum allowed value (99,999,999.99)', 'error');
+                        return;
+                      }
+                      setPaymentForm(prev => ({ ...prev, amount: value }));
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
+                    required
+                    placeholder="0.00"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency *</label>
+                  <select
+                    value={paymentForm.currency}
+                    onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
+                  >
+                    <option value="USD">USD ($)</option>
+                    <option value="LBP">LBP (ل.ل)</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description (optional)</label>
+                <input
+                  type="text"
+                  value={paymentForm.description}
+                  onChange={(e) => setPaymentForm(prev => ({ ...prev, description: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
+                  placeholder="e.g., Payment for invoice #123, Cash payment, etc."
+                />
+              </div>
+              
+              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentForm(null)}
+                  className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                >
+                  Record Payment
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Supplier Payment Form Modal */}
+      {showPaymentForm === 'supplier' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b">
+              <h2 className="text-xl font-semibold text-gray-900">Add Payment Sent</h2>
+            </div>
+            <form onSubmit={handleSupplierPaymentSubmit} className="p-6 space-y-6">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                <div className="flex items-center">
+                  <TrendingDown className="w-5 h-5 text-red-600 mr-2" />
+                  <span className="text-red-800 font-medium">Record a payment sent to a supplier</span>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="md:col-span-2">
+                  <SearchableSelect
+                    options={suppliers.map(supplier => ({
+                      id: supplier.id,
+                      label: supplier.name,
+                      value: supplier.id,
+                    }))}
+                    value={paymentForm.supplierId}
+                    onChange={(value) => setPaymentForm(prev => ({ ...prev, supplierId: value as string }))}
+                    placeholder="Select Supplier *"
+                    searchPlaceholder="Search suppliers..."
+                    categories={['Commission', 'Cash']}
+                    showAddOption={true}
+                    addOptionText="Add New Supplier"
+                    onAddNew={() => setShowSupplierForm(true)}
+                    className="w-full"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    max="99999999.99"
+                    value={paymentForm.amount}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      const numValue = parseFloat(value);
+                      if (numValue > 99999999.99) {
+                        showToast('Amount exceeds maximum allowed value (99,999,999.99)', 'error');
+                        return;
+                      }
+                      setPaymentForm(prev => ({ ...prev, amount: value }));
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
+                    required
+                    placeholder="0.00"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency *</label>
+                  <select
+                    value={paymentForm.currency}
+                    onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
+                  >
+                    <option value="USD">USD ($)</option>
+                    <option value="LBP">LBP (ل.ل)</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description (optional)</label>
+                <input
+                  type="text"
+                  value={paymentForm.description}
+                  onChange={(e) => setPaymentForm(prev => ({ ...prev, description: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
+                  placeholder="e.g., Payment for goods, Commission payment, etc."
+                />
+              </div>
+              
+              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentForm(null)}
+                  className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
+                >
+                  Record Payment
                 </button>
               </div>
             </form>

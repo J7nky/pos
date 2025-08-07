@@ -14,7 +14,7 @@ export default function Reports() {
   const raw = useOfflineData();
   // Map all arrays to camelCase for compatibility
   const products = raw.products.map(p => ({...p, createdAt: p.created_at})) as Array<{id: string, name: string, createdAt: string}>;
-  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<{id: string, name: string, isActive: boolean, createdAt: string, balance: number, phone: string, email?: string, address?: string}>;
+  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<{id: string, name: string, isActive: boolean, createdAt: string, lb_balance: number, usd_balance: number, phone: string, email?: string, address?: string}>;
   const suppliers = raw.suppliers.map(s => ({...s,  createdAt: s.created_at, type: s.type || 'commission'})) as Array<{id: string, name: string, createdAt: string, type: string}>;
   const sales = raw.sales.map(s => ({...s, createdAt: s.created_at})) as Array<any>;
   const stockLevels = raw.stockLevels as Array<any>;
@@ -61,8 +61,9 @@ export default function Reports() {
     .slice(0, 5);
 
   const customerDebtSummary = customers.reduce((acc, customer) => {
-    if ((customer.balance || 0) > 0) { // Updated to use balance field with null safety
-      acc.totalDebt += customer.balance || 0;
+    const totalDebt = (customer.lb_balance || 0) + (customer.usd_balance || 0);
+    if (totalDebt > 0) {
+      acc.totalDebt += totalDebt;
       acc.customersWithDebt += 1;
     }
     return acc;
@@ -356,11 +357,19 @@ export default function Reports() {
                       </td>
                       <td className="px-4 py-4 text-gray-900">{customer.phone}</td>
                       <td className="px-4 py-4">
-                        <span className={`font-medium ${
-                          (customer.balance || 0) > 0 ? 'text-red-600' : 'text-green-600'
-                        }`}>
-                          ${(customer.balance || 0).toLocaleString()}
-                        </span>
+                        <div>
+                          <span className={`font-medium ${
+                            (customer.lb_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'
+                          }`}>
+                            LBP: {(customer.lb_balance || 0).toLocaleString()}
+                          </span>
+                          <br />
+                          <span className={`font-medium ${
+                            (customer.usd_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'
+                          }`}>
+                            USD: {(customer.usd_balance || 0).toLocaleString()}
+                          </span>
+                        </div>
                       </td>
                      
                     </tr>
