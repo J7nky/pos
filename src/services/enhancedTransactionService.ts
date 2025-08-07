@@ -2,12 +2,10 @@ import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
 import { transactionService, TransactionResult } from './transactionService';
 import { 
-  Transaction, 
   AccountsReceivable, 
   AccountsPayable, 
   Customer, 
   Supplier,
-  Sale,
   SaleItem,
   InventoryItem
 } from '../types';
@@ -296,7 +294,14 @@ export class EnhancedTransactionService {
 
   // Enhanced sale processing with comprehensive logging
   public async processSale(
-    sale: Omit<Sale, 'id' | 'createdAt'>,
+    saleData: {
+      customerId?: string;
+      paymentMethod: 'cash' | 'card' | 'credit';
+      total: number;
+      amountPaid: number;
+      amountDue: number;
+      createdBy: string;
+    },
     items: Omit<SaleItem, 'id'>[],
     context: TransactionContext
   ): Promise<EnhancedTransactionResult> {
@@ -306,8 +311,8 @@ export class EnhancedTransactionService {
       const timestamp = new Date().toISOString();
 
       // Create sale record
-      const completeSale: Sale = {
-        ...sale,
+      const completeSale = {
+        ...saleData,
         id: saleId,
         createdAt: timestamp
       };
@@ -318,33 +323,33 @@ export class EnhancedTransactionService {
         id: this.generateId()
       }));
 
-      // Store sale data
-      const existingSales = JSON.parse(localStorage.getItem('erp_sales') || '[]');
-      existingSales.push(completeSale);
-      localStorage.setItem('erp_sales', JSON.stringify(existingSales));
+      // Store sale items data directly since there's no sales table
+      const existingSaleItems = JSON.parse(localStorage.getItem('erp_sale_items') || '[]');
+      existingSaleItems.push(...completeSaleItems);
+      localStorage.setItem('erp_sale_items', JSON.stringify(existingSaleItems));
 
       // Process customer balance if credit sale
       let customerBalanceChange: BalanceSnapshot | undefined;
       let customer: Customer | undefined;
 
-      if (sale.customerId && sale.amountDue > 0) {
+      if (saleData.customerId && saleData.amountDue > 0) {
         const customers = JSON.parse(localStorage.getItem('erp_customers') || '[]');
-        customer = customers.find((c: Customer) => c.id === sale.customerId);
+        customer = customers.find((c: Customer) => c.id === saleData.customerId);
         
         if (customer) {
           const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
-          const balanceAfter = balanceBefore + sale.amountDue;
+          const balanceAfter = balanceBefore + saleData.amountDue;
           
           // Update customer balance
           const updatedCustomers = customers.map((c: Customer) => 
-            c.id === sale.customerId 
+            c.id === saleData.customerId 
               ? { ...c, balance: balanceAfter } // Updated to use balance field
               : c
           );
           localStorage.setItem('erp_customers', JSON.stringify(updatedCustomers));
 
           customerBalanceChange = {
-            entityId: sale.customerId,
+            entityId: saleData.customerId,
             entityType: 'customer',
             balanceBefore,
             balanceAfter,
@@ -353,15 +358,15 @@ export class EnhancedTransactionService {
           };
 
           // Create accounts receivable for credit amount
-          if (sale.amountDue > 0) {
+          if (saleData.amountDue > 0) {
             const receivable: AccountsReceivable = {
               id: this.generateId(),
-              customerId: sale.customerId,
+              customerId: saleData.customerId,
               customerName: customer.name,
               invoiceNumber: `SALE-${saleId.slice(-8)}`,
-              amount: sale.total,
-              amountPaid: sale.amountPaid,
-              amountDue: sale.amountDue,
+              amount: saleData.total,
+              amountPaid: saleData.amountPaid,
+              amountDue: saleData.amountDue,
               dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
               status: 'pending',
               createdAt: timestamp
@@ -381,7 +386,7 @@ export class EnhancedTransactionService {
       const auditLogId = auditLogService.logSaleTransaction({
         sale: completeSale,
         items: completeSaleItems,
-        customerId: sale.customerId,
+        customerId: saleData.customerId,
         customerName: customer?.name,
         userId: context.userId,
         userEmail: context.userEmail,
@@ -418,9 +423,9 @@ export class EnhancedTransactionService {
       const activitySummary = this.generateActivitySummary('sale', {
         customerName: customer?.name || 'Walk-in Customer',
         itemCount: completeSaleItems.length,
-        total: sale.total,
-        paymentMethod: sale.paymentMethod,
-        amountDue: sale.amountDue
+        total: saleData.total,
+        paymentMethod: saleData.paymentMethod,
+        amountDue: saleData.amountDue
       });
 
       return {
@@ -428,7 +433,7 @@ export class EnhancedTransactionService {
         transactionId: saleId,
         balanceBefore: customerBalanceChange?.balanceBefore || 0,
         balanceAfter: customerBalanceChange?.balanceAfter || 0,
-        affectedRecords: [saleId, ...(sale.customerId ? [sale.customerId] : [])],
+        affectedRecords: [saleId, ...(saleData.customerId ? [saleData.customerId] : [])],
         auditLogId,
         correlationId,
         activitySummary

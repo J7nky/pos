@@ -3,6 +3,7 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from './common/SearchableSelect';
+import MoneyInput from './common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { 
   Plus, 
@@ -348,17 +349,6 @@ export default function POS() {
       
 
       await addSale(
-        {
-          created_at: new Date().toISOString(),
-          created_by: userProfile?.id || '',
-          customer_id: activeTab.selectedCustomer || null,
-          payment_method: activeTab.paymentMethod,
-          received_value: activeTab.cart.reduce((sum, item) => sum + (item.totalPrice || 0), 0),
-          inventory_item_id: '',
-          product_id: '',
-          supplier_id: '',
-          unit_price: 0
-        },
         activeTab.cart.map(item => ({
           id: uuidv4(),
           inventory_item_id: item.inventoryItemId || '',
@@ -753,16 +743,14 @@ export default function POS() {
                 // Only show Amount Received for cash or card
                 (activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Amount Received
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
+                    <MoneyInput
+                      label="Amount Received"
                       value={activeTab.amountReceived}
-                      onChange={(e) => updateActiveTab({ amountReceived: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                      onChange={(value) => updateActiveTab({ amountReceived: value })}
                       placeholder="0.00"
+                      step="0.01"
+                      min="0"
+                      autoCompleteValue={total}
                     />
                     {change > 0 && (
                       <p className="text-sm text-green-600 mt-1">
@@ -904,9 +892,11 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, for
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
                     value={item.unitPrice ?? ''}
-                    onChange={(e) => updateCartItem(item.id, 'unitPrice', parseFloat(e.target.value))}
+                    onChange={(e) => updateCartItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
                     className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                    placeholder="0.00"
                   />
                 </div>
               </div>

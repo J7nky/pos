@@ -4,7 +4,6 @@ import {
   Supplier, 
   Transaction, 
   InventoryItem,
-  Sale,
   SaleItem
 } from '../types';
 
@@ -42,7 +41,7 @@ export class DataSyncService {
   private initializeSyncStatus() {
     const tables = [
       'customers', 'suppliers', 'transactions', 
-      'inventory_items', 'sales', 'sale_items'
+      'inventory_items', 'sale_items'
     ];
 
     tables.forEach(table => {
@@ -143,6 +142,7 @@ export class DataSyncService {
         
         const mappedSaleItems = saleItems.map(item => ({
           id: item.id,
+          quantity: item.quantity,
           inventoryItemId: item.inventory_item_id,
           productId: item.product_id,
           supplierId: item.supplier_id,

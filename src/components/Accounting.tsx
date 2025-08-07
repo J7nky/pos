@@ -3,6 +3,7 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from './common/SearchableSelect';
+import MoneyInput from './common/MoneyInput';
 import { debugSalesData, validateSalesDataStructure, generateSalesDataReport } from '../utils/salesDataDebugger';
 import { cleanupAndValidateSaleItems } from '../utils/cleanupSaleItemsData';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -1776,6 +1777,10 @@ export default function Accounting() {
 
   const handleSaveSaleEdit = async (updatedSale: any) => {
     try {
+      // Get the original sale to compare quantities
+      const originalSale = editingSale;
+      const quantityChanged = originalSale.quantity !== updatedSale.quantity;
+      
       await updateSale(editingSale.id, {
         quantity: updatedSale.quantity,
         weight: updatedSale.weight,
@@ -2627,17 +2632,16 @@ export default function Accounting() {
                         />
                       </td>
                       <td className="px-4 py-3">
-                        <input 
-                          type="number" 
-                          className="w-24 border rounded px-2 py-1 text-sm" 
-                          value={item.unitPrice || ''} 
-                          min={0} 
-                          step={0.01} 
-                          onChange={e => {
-                            const newPrice = parseFloat(e.target.value) || 0;
+                        <MoneyInput
+                          value={item.unitPrice || ''}
+                          onChange={(value) => {
+                            const newPrice = parseFloat(value) || 0;
                             handleSaveNonPriced({ ...item, unitPrice: newPrice });
                           }}
                           placeholder="0.00"
+                          step="0.01"
+                          min="0"
+                          className="w-24 text-sm"
                         />
                       </td>
                       <td className="px-4 py-3 font-semibold text-gray-900">
@@ -4390,7 +4394,7 @@ export default function Accounting() {
                   </label>
                 </div>
                 <SearchableSelect
-                  options={customers.map(c => ({ value: c.id, label: c.name }))}
+                   options={customers.map(c => ({ value: c.id, label: c.name, id: c.id }))}
                   value={formData.customerId}
                   onChange={(value) => setFormData({ ...formData, customerId: value })}
                   placeholder="Select customer..."

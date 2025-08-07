@@ -64,18 +64,19 @@ export interface Customer {
   createdAt: string;
 }
 
+
 export interface SaleItem {
   id: string;
   inventoryItemId?: string; // Added to match Supabase schema
   productId: string;
-  productName?: string; // Added for UI display
+  productName: string; // Required for validation
   supplierId: string;
-  supplierName?: string; // Added for UI display
+  supplierName: string; // Required for validation
   customerId?: string; // Made optional to match Supabase schema
   quantity: number; // Added quantity field for cart items
   weight?: number;
   unitPrice: number;
-  totalPrice?: number; // Added for cart calculations
+  totalPrice: number; // Required for validation
   receivedValue?: number; // Matches received_value in database, optional for cart items
   paymentMethod?: 'cash' | 'card' | 'credit'; // Added payment method field
   notes?: string;
@@ -97,6 +98,7 @@ export interface AccountsReceivable {
   status: 'pending' | 'paid' | 'overdue' | 'partial';
   description?: string;
   createdAt: string;
+  lastPaymentDate?: string;
 }
 
 export interface AccountsPayable {
@@ -111,6 +113,7 @@ export interface AccountsPayable {
   status: 'pending' | 'paid' | 'overdue' | 'partial';
   description?: string;
   createdAt: string;
+  lastPaymentDate?: string;
 }
 
 export interface ExpenseCategory {

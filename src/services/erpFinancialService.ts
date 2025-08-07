@@ -4,11 +4,21 @@ import {
   Transaction, 
   AccountsReceivable, 
   AccountsPayable, 
-  Sale, 
   SaleItem, 
   InventoryItem,
   CashDrawer 
 } from '../types';
+
+export interface SaleData {
+  id: string;
+  customerId?: string;
+  paymentMethod: 'cash' | 'card' | 'credit';
+  total: number;
+  amountPaid: number;
+  amountDue: number;
+  createdBy: string;
+  createdAt: string;
+}
 
 export interface FinancialTransaction {
   id: string;
@@ -75,7 +85,6 @@ export class ERPFinancialService {
   private transactions: Transaction[] = [];
   private accountsReceivable: AccountsReceivable[] = [];
   private accountsPayable: AccountsPayable[] = [];
-  private sales: Sale[] = [];
   private inventory: InventoryItem[] = [];
   private cashDrawer: CashDrawer | null = null;
   private financialTransactions: FinancialTransaction[] = [];
@@ -92,7 +101,6 @@ export class ERPFinancialService {
     this.transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
     this.accountsReceivable = JSON.parse(localStorage.getItem('erp_accounts_receivable') || '[]');
     this.accountsPayable = JSON.parse(localStorage.getItem('erp_accounts_payable') || '[]');
-    this.sales = JSON.parse(localStorage.getItem('erp_sales') || '[]');
     this.inventory = JSON.parse(localStorage.getItem('erp_inventory') || '[]');
     this.cashDrawer = JSON.parse(localStorage.getItem('erp_cash_drawer') || 'null');
     this.financialTransactions = JSON.parse(localStorage.getItem('erp_financial_transactions') || '[]');
@@ -136,7 +144,6 @@ export class ERPFinancialService {
     localStorage.setItem('erp_transactions', JSON.stringify(this.transactions));
     localStorage.setItem('erp_accounts_receivable', JSON.stringify(this.accountsReceivable));
     localStorage.setItem('erp_accounts_payable', JSON.stringify(this.accountsPayable));
-    localStorage.setItem('erp_sales', JSON.stringify(this.sales));
     localStorage.setItem('erp_inventory', JSON.stringify(this.inventory));
     localStorage.setItem('erp_cash_drawer', JSON.stringify(this.cashDrawer));
     localStorage.setItem('erp_financial_transactions', JSON.stringify(this.financialTransactions));
@@ -197,7 +204,7 @@ export class ERPFinancialService {
   }
 
   // Process customer credit sale
-  processCustomerCreditSale(sale: Sale, items: SaleItem[]): TransactionSummary {
+  processCustomerCreditSale(sale: SaleData, items: SaleItem[]): TransactionSummary {
     const customer = this.customers.find(c => c.id === sale.customerId);
     if (!customer) {
       throw new Error('Customer not found');
@@ -241,10 +248,10 @@ export class ERPFinancialService {
       reference: receivable.invoiceNumber,
       relatedItems: items.map(item => ({
         itemId: item.id,
-        itemName: item.productName,
+        itemName: item.productName || 'Unknown Product',
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        totalValue: item.totalPrice
+        totalValue: item.totalPrice || (item.unitPrice * item.quantity)
       })),
       createdBy: sale.createdBy
     });
@@ -260,7 +267,7 @@ export class ERPFinancialService {
       balanceBefore,
       balanceAfter,
       cashDrawerImpact: 0,
-      itemsAffected: items.map(item => item.productName),
+      itemsAffected: items.map(item => item.productName || 'Unknown Product'),
       timestamp: financialTransaction.timestamp,
       status: 'completed',
       notes: `Credit sale processed. Invoice: ${receivable.invoiceNumber}`
@@ -415,7 +422,7 @@ export class ERPFinancialService {
       balanceBefore,
       balanceAfter,
       cashDrawerImpact: 0,
-      itemsAffected: items.map(item => `Product from ${supplier.name}`),
+      itemsAffected: items.map(() => `Product from ${supplier.name}`),
       timestamp: financialTransaction.timestamp,
       status: 'completed',
       notes: `Commission: ${commissionRate}% (${commissionAmount.toFixed(2)}), Net: ${netAmount.toFixed(2)}`
@@ -494,7 +501,7 @@ export class ERPFinancialService {
   }
 
   // Process cash sale
-  processCashSale(sale: Sale, items: SaleItem[]): TransactionSummary {
+  processCashSale(sale: SaleData, items: SaleItem[]): TransactionSummary {
     // Update cash drawer
     this.updateCashDrawer(sale.amountPaid, true);
 
@@ -509,10 +516,10 @@ export class ERPFinancialService {
       reference: `CASH-${Date.now()}`,
       relatedItems: items.map(item => ({
         itemId: item.id,
-        itemName: item.productName,
+        itemName: item.productName || 'Unknown Product',
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        totalValue: item.totalPrice
+        totalValue: item.totalPrice || (item.unitPrice * item.quantity)
       })),
       createdBy: sale.createdBy
     });
@@ -528,7 +535,7 @@ export class ERPFinancialService {
       balanceBefore: this.cashDrawer?.currentAmount || 0,
       balanceAfter: (this.cashDrawer?.currentAmount || 0) + sale.amountPaid,
       cashDrawerImpact: sale.amountPaid,
-      itemsAffected: items.map(item => item.productName),
+      itemsAffected: items.map(item => item.productName || 'Unknown Product'),
       timestamp: financialTransaction.timestamp,
       status: 'completed',
       notes: `Cash sale completed. Items: ${items.length}`

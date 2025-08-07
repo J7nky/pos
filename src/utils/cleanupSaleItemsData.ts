@@ -96,15 +96,15 @@ export async function validateSaleItemsStructure(): Promise<{
     const allSaleItems = await db.sale_items.toArray();
     result.totalRecords = allSaleItems.length;
 
-    // Expected fields for sale_items
+    // Expected fields for sale_items (matching Supabase schema)
     const requiredFields = [
-      'id', 'product_id', 'product_name', 
-      'supplier_id', 'supplier_name', 'quantity', 
-      'unit_price', 'total_price', 'payment_method', 'created_at'
+      'id', 'product_id', 'supplier_id', 'quantity', 
+      'unit_price', 'received_value', 'payment_method', 'created_at',
+      'inventory_item_id', 'store_id', 'created_by'
     ];
 
-    const optionalFields = ['weight', 'notes', 'store_id', '_synced', '_lastSyncedAt'];
-    const forbiddenFields = ['received_quantity', 'updated_at']; // These should not be in sale_items
+    // const optionalFields = ['weight', 'notes', 'customer_id', '_synced', '_lastSyncedAt']; // Currently unused
+    const forbiddenFields = ['received_quantity', 'updated_at', 'productName', 'supplierName', 'totalPrice', 'receivedValue', 'inventoryType']; // These should not be in sale_items
 
     for (const item of allSaleItems) {
       let isValid = true;
@@ -156,10 +156,10 @@ export async function validateSaleItemsStructure(): Promise<{
         isValid = false;
       }
 
-      if (typeof item.total_price !== 'number' || item.total_price < 0) {
+      if (typeof item.received_value !== 'number' || item.received_value < 0) {
         result.issues.push({
           id: item.id,
-          issue: `Invalid total_price: ${item.total_price} (should be non-negative number)`,
+          issue: `Invalid received_value: ${item.received_value} (should be non-negative number)`,
           severity: 'error'
         });
         isValid = false;
@@ -234,18 +234,249 @@ export async function validateSaleItemsStructure(): Promise<{
 }
 
 /**
- * Run both cleanup and validation
+ * Repair sale_items data to match Supabase schema
+ */
+export async function repairSaleItemsData(): Promise<{
+  recordsProcessed: number;
+  recordsRepaired: number;
+  errors: string[];
+}> {
+  const result = {
+    recordsProcessed: 0,
+    recordsRepaired: 0,
+    errors: [] as string[]
+  };
+
+  try {
+    console.log('🔧 Starting repair of sale_items data...');
+
+    const allSaleItems = await db.sale_items.toArray();
+    result.recordsProcessed = allSaleItems.length;
+
+    console.log(`📊 Found ${allSaleItems.length} sale_items records to process`);
+
+    for (const item of allSaleItems) {
+      try {
+        let needsRepair = false;
+        const repairedItem: any = { ...item };
+
+        // Remove forbidden fields that don't exist in Supabase
+        if (repairedItem.hasOwnProperty('productName')) {
+          delete repairedItem.productName;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('supplierName')) {
+          delete repairedItem.supplierName;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('totalPrice')) {
+          delete repairedItem.totalPrice;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('receivedValue')) {
+          delete repairedItem.receivedValue;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('inventoryType')) {
+          delete repairedItem.inventoryType;
+          needsRepair = true;
+        }
+
+        // Map camelCase to snake_case field names
+        if (repairedItem.inventoryItemId && !repairedItem.inventory_item_id) {
+          repairedItem.inventory_item_id = repairedItem.inventoryItemId;
+          needsRepair = true;
+        }
+        if (repairedItem.productId && !repairedItem.product_id) {
+          repairedItem.product_id = repairedItem.productId;
+          needsRepair = true;
+        }
+        if (repairedItem.supplierId && !repairedItem.supplier_id) {
+          repairedItem.supplier_id = repairedItem.supplierId;
+          needsRepair = true;
+        }
+        if (repairedItem.customerId !== undefined && repairedItem.customer_id === undefined) {
+          repairedItem.customer_id = repairedItem.customerId;
+          needsRepair = true;
+        }
+        if (repairedItem.unitPrice !== undefined && !repairedItem.unit_price) {
+          repairedItem.unit_price = repairedItem.unitPrice;
+          needsRepair = true;
+        }
+        if (repairedItem.paymentMethod && !repairedItem.payment_method) {
+          repairedItem.payment_method = repairedItem.paymentMethod;
+          needsRepair = true;
+        }
+        if (repairedItem.createdBy && !repairedItem.created_by) {
+          repairedItem.created_by = repairedItem.createdBy;
+          needsRepair = true;
+        }
+        if (repairedItem.storeId && !repairedItem.store_id) {
+          repairedItem.store_id = repairedItem.storeId;
+          needsRepair = true;
+        }
+        if (repairedItem.createdAt && !repairedItem.created_at) {
+          repairedItem.created_at = repairedItem.createdAt;
+          needsRepair = true;
+        }
+        // Map totalPrice to received_value
+        if (repairedItem.totalPrice !== undefined && !repairedItem.received_value) {
+          repairedItem.received_value = repairedItem.totalPrice;
+          needsRepair = true;
+        }
+        
+        // Remove legacy field names after mapping
+        if (repairedItem.hasOwnProperty('inventoryItemId')) {
+          delete repairedItem.inventoryItemId;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('productId')) {
+          delete repairedItem.productId;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('supplierId')) {
+          delete repairedItem.supplierId;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('customerId')) {
+          delete repairedItem.customerId;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('unitPrice')) {
+          delete repairedItem.unitPrice;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('totalPrice')) {
+          delete repairedItem.totalPrice;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('paymentMethod')) {
+          delete repairedItem.paymentMethod;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('createdBy')) {
+          delete repairedItem.createdBy;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('storeId')) {
+          delete repairedItem.storeId;
+          needsRepair = true;
+        }
+        if (repairedItem.hasOwnProperty('createdAt')) {
+          delete repairedItem.createdAt;
+          needsRepair = true;
+        }
+
+        // Fix missing required fields
+        if (!repairedItem.inventory_item_id) {
+          repairedItem.inventory_item_id = repairedItem.id || 'unknown';
+          needsRepair = true;
+        }
+        if (!repairedItem.created_by) {
+          repairedItem.created_by = 'system';
+          needsRepair = true;
+        }
+        if (!repairedItem.store_id) {
+          repairedItem.store_id = 'default-store';
+          needsRepair = true;
+        }
+        if (!repairedItem.payment_method) {
+          repairedItem.payment_method = 'cash';
+          needsRepair = true;
+        }
+
+        // Calculate received_value from unit_price and quantity if missing
+        if (!repairedItem.received_value && repairedItem.unit_price && repairedItem.quantity) {
+          repairedItem.received_value = repairedItem.unit_price * repairedItem.quantity;
+          needsRepair = true;
+        } else if (!repairedItem.received_value) {
+          repairedItem.received_value = 0;
+          needsRepair = true;
+        }
+
+        // Ensure numeric fields are valid
+        if (!repairedItem.quantity || repairedItem.quantity <= 0) {
+          repairedItem.quantity = 1;
+          needsRepair = true;
+        }
+        if (!repairedItem.unit_price || repairedItem.unit_price < 0) {
+          repairedItem.unit_price = 0;
+          needsRepair = true;
+        }
+
+        // Set customer_id to null if not specified
+        if (!repairedItem.customer_id) {
+          repairedItem.customer_id = null;
+          needsRepair = true;
+        }
+
+        if (needsRepair) {
+          // Mark as unsynced so it gets uploaded with correct data
+          repairedItem._synced = false;
+          
+          await db.sale_items.update(item.id, repairedItem);
+          console.log(`🔧 Repaired sale_item ${item.id}`);
+          result.recordsRepaired++;
+        }
+
+      } catch (error) {
+        const errorMsg = `Failed to repair sale_item ${item.id}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        console.error(`❌ ${errorMsg}`);
+        result.errors.push(errorMsg);
+      }
+    }
+
+    console.log(`✅ Repair completed: ${result.recordsRepaired}/${result.recordsProcessed} records repaired`);
+
+    if (result.errors.length > 0) {
+      console.warn(`⚠️ ${result.errors.length} errors occurred during repair:`);
+      result.errors.forEach(error => console.warn(`  - ${error}`));
+    }
+
+  } catch (error) {
+    const errorMsg = `Repair failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    console.error(`❌ ${errorMsg}`);
+    result.errors.push(errorMsg);
+  }
+
+  return result;
+}
+
+/**
+ * Quick debug function to show current sale_items data structure
+ */
+export async function debugSaleItemsData(): Promise<void> {
+  try {
+    const saleItems = await db.sale_items.limit(5).toArray();
+    console.log('🔍 Sample sale_items data:', saleItems.map(item => ({
+      id: item.id,
+      fields: Object.keys(item),
+      hasProblematicFields: Object.keys(item).filter(key => 
+        ['supplier_name', 'product_name', 'total_price', 'receivedValue', 'inventoryType'].includes(key)
+      )
+    })));
+  } catch (error) {
+    console.error('❌ Debug failed:', error);
+  }
+}
+
+/**
+ * Run cleanup, repair, and validation
  */
 export async function cleanupAndValidateSaleItems(): Promise<{
   cleanup: Awaited<ReturnType<typeof cleanupSaleItemsReceivedQuantity>>;
+  repair: Awaited<ReturnType<typeof repairSaleItemsData>>;
   validation: Awaited<ReturnType<typeof validateSaleItemsStructure>>;
 }> {
-  console.log('🔧 Running complete sale_items cleanup and validation...');
+  console.log('🔧 Running complete sale_items cleanup, repair, and validation...');
+  
+  await debugSaleItemsData();
   
   const cleanup = await cleanupSaleItemsReceivedQuantity();
+  const repair = await repairSaleItemsData();
   const validation = await validateSaleItemsStructure();
 
-  console.log('✅ Cleanup and validation completed');
+  console.log('✅ Cleanup, repair, and validation completed');
   
-  return { cleanup, validation };
+  return { cleanup, repair, validation };
 } 

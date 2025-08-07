@@ -61,7 +61,7 @@ interface OfflineDataContextType {
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
-  addSale: (sale :  Omit<Tables['sale_items']['Insert'], 'store_id'>, items: Tables['inventory_items']['Row'][]) => Promise<void>;
+  addSale: (items: any[]) => Promise<void>;
   updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
   deleteSale: (id: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
@@ -69,6 +69,7 @@ interface OfflineDataContextType {
   
   addNonPricedItem: (item: any) => Promise<void>;
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
+  restoreInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
   
   // Utility functions - exact match
   refreshData: () => Promise<void>;
@@ -583,21 +584,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const addSale = async (
-    saleData: any, 
+   
     items: any[]
   ): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
-
     const saleItemsWithIds = items.map(item => ({
       id: createId(),
+      quantity: item.quantity,
       created_at: new Date().toISOString(),
       _synced: false,
-      inventory_item_id: item.inventory_item_id || '', // Added to match Supabase schema
+      inventory_item_id: item.inventory_item_id || item.id || '', // Added to match Supabase schema
       product_id: item.product_id,
       supplier_id: item.supplier_id,
+      // Remove supplier_name - doesn't exist in Supabase schema
       weight: item.weight ?? null,
       unit_price: item.unit_price,
-      received_value: item.received_value || item.unit_price,
+      // Remove total_price - doesn't exist in Supabase schema, use received_value instead
+      received_value: item.received_value || item.total_price || (item.unit_price * item.quantity),
       payment_method: item.payment_method || 'cash', // Add payment method field
       notes: item.notes ?? null,
       store_id: storeId,
@@ -624,16 +627,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           const deduct = Math.min(inv.quantity, qtyToDeduct);
           const newQuantity = inv.quantity - deduct;
           
-          if (newQuantity <= 0) {
-            // Delete inventory item when quantity reaches 0 or below
-            await db.inventory_items.delete(inv.id);
-          } else {
+
             // Update with new quantity
             await db.inventory_items.update(inv.id, { 
               quantity: newQuantity,
               _synced: false
             });
-          }
+          
           qtyToDeduct -= deduct;
         }
       }
@@ -649,13 +649,35 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const updateSale = async (id: string, updates: Partial<Tables['sale_items']['Update']>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
-    // Mark as unsynced for sync
-    const updateData = {
-      ...updates,
-      _synced: false
-    };
+    // Get the original sale item to compare quantities
+    const originalSale = await db.sale_items.get(id);
+    if (!originalSale) throw new Error('Sale item not found');
 
-    await db.sale_items.update(id, updateData);
+    // Check if quantity has changed
+    const quantityChanged = updates.quantity !== undefined && updates.quantity !== originalSale.quantity;
+    const quantityDifference = quantityChanged ? (updates.quantity || 0) - (originalSale.quantity || 0) : 0;
+
+    // Use transaction to ensure atomicity
+    await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
+      // Update the sale item
+      const updateData = {
+        ...updates,
+        _synced: false
+      };
+      await db.sale_items.update(id, updateData);
+
+      // Handle inventory adjustments if quantity changed
+      if (quantityChanged && originalSale.product_id && originalSale.supplier_id) {
+        if (quantityDifference > 0) {
+          // Quantity increased - deduct additional inventory
+          await deductInventoryQuantity(originalSale.product_id, originalSale.supplier_id, quantityDifference);
+        } else if (quantityDifference < 0) {
+          // Quantity decreased - restore inventory
+          await restoreInventoryQuantity(originalSale.product_id, originalSale.supplier_id, Math.abs(quantityDifference));
+        }
+      }
+    });
+
     await refreshData();
     await updateUnsyncedCount();
 
@@ -666,12 +688,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const deleteSale = async (id: string): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
-    // Get the sale item before deletion to potentially restore inventory
+    // Get the sale item before deletion to restore inventory
     const saleItem = await db.sale_items.get(id);
     if (!saleItem) throw new Error('Sale item not found');
 
-    // Delete the sale item
-    await db.sale_items.delete(id);
+    // Use transaction to ensure atomicity
+    await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
+      // Delete the sale item
+      await db.sale_items.delete(id);
+      
+      // Restore inventory quantities
+      if (saleItem.quantity && saleItem.quantity > 0) {
+        await restoreInventoryQuantity(saleItem.product_id, saleItem.supplier_id, saleItem.quantity);
+      }
+    });
+
     await refreshData();
     await updateUnsyncedCount();
 
@@ -894,6 +925,56 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const restoreInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
+    console.log('restoreInventoryQuantity', productId, supplierId, quantity);
+    if (!storeId) return;
+    
+    try {
+      // Find existing inventory items for this product/supplier
+      const existingInventory = await db.inventory_items
+        .where('product_id')
+        .equals(productId)
+        .and(inv => inv.supplier_id === supplierId)
+        .sortBy('received_at');
+
+      if (existingInventory.length > 0) {
+        // Add to the most recent inventory item (LIFO for restoration)
+        const mostRecent = existingInventory[existingInventory.length - 1];
+        const newQuantity = mostRecent.quantity + quantity;
+        
+        await db.inventory_items.update(mostRecent.id, { 
+          quantity: newQuantity,
+          _synced: false
+        });
+      } else {
+        // Create new inventory item if none exists
+        const newInventoryItem = {
+          id: createId(),
+          store_id: storeId,
+          product_id: productId,
+          supplier_id: supplierId,
+          quantity: quantity,
+          received_at: new Date().toISOString(),
+          received_by: 'system', // Default user for restored inventory
+          _synced: false
+        };
+        
+        await db.inventory_items.add(newInventoryItem);
+      }
+      
+      // Refresh data to update stock levels
+      await refreshData();
+      await updateUnsyncedCount();
+      
+      // Use debounced sync to batch rapid changes
+      debouncedSync();
+      
+    } catch (error) {
+      console.error('Error restoring inventory for sale:', error);
+      throw error;
+    }
+  };
+
   return (
     <OfflineDataContext.Provider value={{
       // Data - exact match
@@ -934,6 +1015,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addExpenseCategory,
       addNonPricedItem,
       deductInventoryQuantity,
+      restoreInventoryQuantity,
 
       // Utility functions - exact match
       refreshData,

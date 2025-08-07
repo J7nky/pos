@@ -269,7 +269,7 @@ export default function Customers() {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Debt</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -334,6 +334,7 @@ export default function Customers() {
                  <tr>
                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                  </tr>
                </thead>
@@ -355,7 +356,11 @@ export default function Customers() {
                         <div className="text-sm text-gray-900">{supplier.phone}</div>
                         <div className="text-sm text-gray-500">{supplier.email}</div>
                       </td>
-                     
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <span className={`font-medium ${(supplier.balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          ${(supplier.balance || 0).toLocaleString()}
+                        </span>
+                      </td>
                     
                        <td className="px-6 py-4 whitespace-nowrap text-left text-sm font-medium">
                          <button

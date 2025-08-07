@@ -61,6 +61,7 @@ export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
   inventory_item_id: string; // Added to match Supabase schema
   product_id: string;
   supplier_id: string;
+  quantity: number;
   weight: number | null;
   unit_price: number;
   received_value: number; // Added to match Supabase schema

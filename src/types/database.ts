@@ -207,6 +207,7 @@ export interface Database {
       sale_items: {
         Row: {
           id: string;
+          quantity: number;
           inventory_item_id: string;
           product_id: string;
           supplier_id: string;
@@ -221,6 +222,7 @@ export interface Database {
           created_by: string;
         };
         Insert: {
+          quantity: number;
           id?: string;
           inventory_item_id: string;
           product_id: string;
@@ -237,6 +239,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          quantity?: number;
           inventory_item_id: string;
           product_id?: string;
           supplier_id?: string;
