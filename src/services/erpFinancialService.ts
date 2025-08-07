@@ -500,6 +500,110 @@ export class ERPFinancialService {
     };
   }
 
+  // Unified entity payment processing
+  processEntityPayment(entityType: 'customer' | 'supplier', entityId: string, amount: number, currency: 'USD' | 'LBP', description: string, createdBy: string): TransactionSummary {
+    const entity = entityType === 'customer' 
+      ? this.customers.find(c => c.id === entityId)
+      : this.suppliers.find(s => s.id === entityId);
+    
+    if (!entity) {
+      throw new Error(`${entityType === 'customer' ? 'Customer' : 'Supplier'} not found`);
+    }
+
+    const amountInUSD = this.convertCurrency(amount, currency, 'USD');
+    const balanceBefore = this.accountBalances.get(entityId)?.currentBalance || 0;
+    
+    // For customer payments (receiving money), reduce their debt
+    // For supplier payments (sending money), reduce our debt to them
+    const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
+
+    // Update entity balance
+    this.updateAccountBalance(entityId, amountInUSD, true);
+
+    // Update cash drawer if cash payment
+    if (currency === 'USD') {
+      // For customer payments: money comes in (positive)
+      // For supplier payments: money goes out (negative)
+      const cashImpact = entityType === 'customer' ? amountInUSD : -amountInUSD;
+      this.updateCashDrawer(Math.abs(cashImpact), entityType === 'customer');
+    }
+
+    // Update accounts receivable/payable
+    if (entityType === 'customer') {
+      const pendingReceivables = this.accountsReceivable.filter(ar => 
+        ar.customerId === entityId && ar.status !== 'paid'
+      );
+      
+      let remainingAmount = amountInUSD;
+      for (const receivable of pendingReceivables) {
+        if (remainingAmount <= 0) break;
+        
+        const paymentAmount = Math.min(remainingAmount, receivable.amountDue);
+        receivable.amountPaid += paymentAmount;
+        receivable.amountDue -= paymentAmount;
+        remainingAmount -= paymentAmount;
+        
+        if (receivable.amountDue === 0) {
+          receivable.status = 'paid';
+          receivable.lastPaymentDate = new Date().toISOString();
+        } else {
+          receivable.status = 'partial';
+        }
+      }
+    } else {
+      const pendingPayables = this.accountsPayable.filter(ap => 
+        ap.supplierId === entityId && ap.status !== 'paid'
+      );
+      
+      let remainingAmount = amountInUSD;
+      for (const payable of pendingPayables) {
+        if (remainingAmount <= 0) break;
+        
+        const paymentAmount = Math.min(remainingAmount, payable.amountDue);
+        payable.amountPaid += paymentAmount;
+        payable.amountDue -= paymentAmount;
+        remainingAmount -= paymentAmount;
+        
+        if (payable.amountDue === 0) {
+          payable.status = 'paid';
+          payable.lastPaymentDate = new Date().toISOString();
+        } else {
+          payable.status = 'partial';
+        }
+      }
+    }
+
+    // Log financial transaction
+    const transactionType = entityType === 'customer' ? 'customer_payment' : 'supplier_payment';
+    const financialTransaction = this.logFinancialTransaction({
+      type: transactionType,
+      entityId: entity.id,
+      entityName: entity.name,
+      amount: amountInUSD,
+      currency: 'USD',
+      description,
+      reference: `${entityType.toUpperCase()}-PAY-${Date.now()}`,
+      createdBy
+    });
+
+    this.saveData();
+
+    return {
+      transactionId: financialTransaction.id,
+      transactionType: entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
+      entityInvolved: entity.name,
+      amount: amountInUSD,
+      currency: 'USD',
+      balanceBefore,
+      balanceAfter,
+      cashDrawerImpact: currency === 'USD' ? (entityType === 'customer' ? amountInUSD : -amountInUSD) : 0,
+      itemsAffected: [],
+      timestamp: financialTransaction.timestamp,
+      status: 'completed',
+      notes: `${entityType === 'customer' ? 'Payment received' : 'Payment sent'}. Amount: ${currency} ${amount}`
+    };
+  }
+
   // Process cash sale
   processCashSale(sale: SaleData, items: SaleItem[]): TransactionSummary {
     // Update cash drawer

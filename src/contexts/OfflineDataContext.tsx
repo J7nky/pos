@@ -60,6 +60,7 @@ interface OfflineDataContextType {
   addSupplier: (supplier: Omit<Tables['suppliers']['Insert'], 'store_id'>) => Promise<void>;
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
+  updateSupplier: (id: string, updates: Tables['suppliers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
   addSale: (items: any[]) => Promise<void>;
   updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
@@ -362,7 +363,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Transform data to match SupabaseDataContext structure
       setProducts(productsData as Tables['products']['Row'][]);
       setSuppliers(suppliersData.map(s => ({ ...s, balance: null })) as Tables['suppliers']['Row'][]);
-      setCustomers(customersData.map(c => ({ ...c, balance: c.balance || 0 })) as Tables['customers']['Row'][]);
+              setCustomers(customersData.map(c => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
       setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
 
       // Store raw data
@@ -550,6 +551,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateCustomer = async (id: string, updates: Tables['customers']['Update']): Promise<void> => {
     await db.customers.update(id, { ...updates, _synced: false });
+    await refreshData();
+    await updateUnsyncedCount();
+    
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
+  };
+
+  const updateSupplier = async (id: string, updates: Tables['suppliers']['Update']): Promise<void> => {
+    await db.suppliers.update(id, { ...updates, _synced: false });
     await refreshData();
     await updateUnsyncedCount();
     
@@ -949,6 +959,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       } else {
         // Create new inventory item if none exists
         const newInventoryItem = {
+          
           id: createId(),
           store_id: storeId,
           product_id: productId,
@@ -1007,6 +1018,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addSupplier,
       addCustomer,
       updateCustomer,
+      updateSupplier,
       addInventoryItem,
       addSale,
       updateSale,

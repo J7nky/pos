@@ -38,7 +38,7 @@ export default function FinancialProcessor() {
   const { userProfile } = useSupabaseAuth();
   const { currency, formatCurrency, formatCurrencyWithSymbol, getConvertedAmount } = useCurrency();
   
-  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Array<any>;
+  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
   const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at, type: s.type || 'commission'})) as Array<any>;
   const sales = raw.sales;
   const inventory = raw.inventory;
@@ -155,7 +155,8 @@ export default function FinancialProcessor() {
         return customers.filter(c => c.isActive).map(c => ({
           id: c.id,
           name: c.name,
-          balance: c.balance || 0 // Updated to use balance field with null safety
+          lb_balance: c.lb_balance || 0,
+          usd_balance: c.usd_balance || 0
         }));
       case 'supplier_payment':
         return suppliers.filter(s => s.isActive).map(s => ({
@@ -534,7 +535,7 @@ export default function FinancialProcessor() {
                     <option value="">Select {transactionForm.type === 'customer_payment' ? 'Customer' : 'Supplier'}...</option>
                     {getEntityOptions().map(entity => (
                       <option key={entity.id} value={entity.id}>
-                        {entity.name} (Balance: {formatCurrency(entity.balance)})
+                        {entity.name} (LBP: {formatCurrency(entity.lb_balance)}, USD: {formatCurrency(entity.usd_balance)})
                       </option>
                     ))}
                   </select>

@@ -94,7 +94,8 @@ export interface Database {
           store_id: string;
           created_at: string;
           updated_at: string;
-          balance: number | null;
+          lb_balance: number | null;
+          usd_balance: number | null;
         };
         Insert: {
           id?: string;
@@ -105,7 +106,8 @@ export interface Database {
           store_id: string;
           created_at?: string;
           updated_at?: string;
-          balance?: number | null;
+          lb_balance?: number | null;
+          usd_balance?: number | null;
         };
         Update: {
           id?: string;
@@ -113,7 +115,8 @@ export interface Database {
           phone?: string;
           email?: string | null;
           address?: string;
-          balance?: number | null;
+          lb_balance?: number | null;
+          usd_balance?: number | null;
           updated_at?: string;
         };
       };
@@ -124,7 +127,8 @@ export interface Database {
           phone: string;
           email: string | null;
           address: string | null;
-          balance: number;
+          lb_balance: number;
+          usd_balance: number;
           is_active: boolean;
           store_id: string;
           created_at: string;
@@ -136,7 +140,8 @@ export interface Database {
           phone: string;
           email?: string | null;
           address?: string | null;
-          balance?: number;
+          lb_balance?: number;
+          usd_balance?: number;
           is_active?: boolean;
           store_id: string;
           created_at?: string;
@@ -148,7 +153,8 @@ export interface Database {
           phone?: string;
           email?: string | null;
           address?: string | null;
-          balance?: number;
+          lb_balance?: number;
+          usd_balance?: number;
           is_active?: boolean;
           updated_at?: string;
         };
