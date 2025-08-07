@@ -63,35 +63,40 @@ export class POSAccountingIntegration {
 
       const saleId = `pos-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
-      // Convert POS data to ERP format
-      const sale: Sale = {
+      // Convert POS data to ERP format - create sale items directly
+      const saleItems: SaleItem[] = items.map(item => ({
+        id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        inventory_item_id: '', // Will be populated by ERP service
+        productId: item.product_id,
+        supplierId: item.supplier_id,
+        quantity: item.quantity,
+        weight: item.weight || undefined,
+        unitPrice: item.unit_price,
+        receivedValue: item.received_value,
+        paymentMethod: saleData.payment_method === 'partial' ? 'cash' : saleData.payment_method,
+        notes: item.notes || undefined,
+        customerId: saleData.customer_id || undefined,   
+        createdBy: saleData.created_by,
+        storeId: item.store_id,
+        createdAt: new Date().toISOString(),
+        synced: false,
+        // Add ERP service compatibility fields
+        productName: item.product_name,
+        supplierName: item.supplier_name,
+        totalPrice: item.unit_price * item.quantity
+      }));
+
+      // Create temporary sale object for ERP service compatibility
+      const tempSale = {
         id: saleId,
         customerId: saleData.customer_id,
-        items: items.map(item => ({
-          id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          productId: item.product_id,
-          productName: item.product_name,
-          supplierId: item.supplier_id,
-          supplierName: item.supplier_name,
-          quantity: item.quantity,
-          weight: item.weight || undefined,
-          unitPrice: item.unit_price,
-          receivedValue: item.received_value,
-          notes: item.notes || ''
-        })),
-        subtotal: saleData.subtotal,
-        total: saleData.total,
-        // Map "partial" payment method to "cash" for ERP compatibility
         paymentMethod: saleData.payment_method === 'partial' ? 'cash' : saleData.payment_method,
+        total: saleData.total,
         amountPaid: saleData.amount_paid,
         amountDue: saleData.amount_due,
-        status: saleData.status,
-        notes: saleData.notes,
-        createdBy: saleData.created_by,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        createdBy: saleData.created_by
       };
-
-      const saleItems: SaleItem[] = sale.items;
 
       let transactionSummary;
       let customerName = 'Walk-in Customer';
@@ -99,7 +104,7 @@ export class POSAccountingIntegration {
       // Determine transaction type and process accordingly
       if (saleData.payment_method === 'cash' || (saleData.payment_method === 'partial' && saleData.amount_due === 0)) {
         // Cash sale
-        transactionSummary = erpFinancialService.processCashSale(sale, saleItems);
+        transactionSummary = erpFinancialService.processCashSale(tempSale, saleItems);
         
         if (saleData.customer_id) {
           const customers = JSON.parse(localStorage.getItem('erp_customers') || '[]');
@@ -121,7 +126,7 @@ export class POSAccountingIntegration {
         }
 
         customerName = customer.name;
-        transactionSummary = erpFinancialService.processCustomerCreditSale(sale, saleItems);
+        transactionSummary = erpFinancialService.processCustomerCreditSale(tempSale, saleItems);
 
         // If there was a partial payment, also process the payment
         if (saleData.amount_paid > 0) {
@@ -143,8 +148,8 @@ export class POSAccountingIntegration {
 
       return {
         success: true,
-        saleId: sale.id,
-        journalEntryId: transactionSummary.journalEntryId,
+        saleId: tempSale.id,
+        journalEntryId: transactionSummary.transactionId,
         summary: {
           transactionType: transactionSummary.transactionType,
           totalAmount: saleData.total,
@@ -193,7 +198,7 @@ export class POSAccountingIntegration {
       return {
         success: true,
         transactionId: result.transactionId,
-        journalEntryId: result.journalEntryId
+        journalEntryId: result.transactionId
       };
 
     } catch (error) {
@@ -220,8 +225,10 @@ export class POSAccountingIntegration {
     recentTransactions: any[];
   } | null {
     try {
-      const enhancedCustomer = erpFinancialService.getEnhancedCustomerData(customerId);
-      if (!enhancedCustomer) return null;
+      // Get customer data from localStorage
+      const customers = JSON.parse(localStorage.getItem('erp_customers') || '[]');
+      const customer = customers.find((c: Customer) => c.id === customerId);
+      if (!customer) return null;
 
       const recentTransactions = erpFinancialService
         .getTransactionHistory(customerId)
@@ -234,14 +241,19 @@ export class POSAccountingIntegration {
           description: t.description
         }));
 
+      // Calculate credit status
+      const balance = customer.balance || 0;
+      const creditLimit = 1000; // Default credit limit
+      const available = Math.max(0, creditLimit - balance);
+
       return {
-        customer: enhancedCustomer,
+        customer,
         creditStatus: {
-          available: enhancedCustomer.availableCredit,
-          limit: enhancedCustomer.creditLimit,
-          balance: enhancedCustomer.balance || 0, // Updated to use balance field with null safety
-          isOverLimit: (enhancedCustomer.balance || 0) > enhancedCustomer.creditLimit, // Updated to use balance field
-          agingDays: enhancedCustomer.daysSinceLastPayment
+          available,
+          limit: creditLimit,
+          balance,
+          isOverLimit: balance > creditLimit,
+          agingDays: 0 // TODO: Calculate from transaction history
         },
         recentTransactions
       };
@@ -337,44 +349,40 @@ export class POSAccountingIntegration {
     todaysTransactionCount: number;
     cashDrawerAmount: number;
     pendingReceivables: number;
-          topCustomers: Array<{
-        name: string;
-        totalSales: number;
-        balance: number; // Updated to use balance field instead of currentDebt
-      }>;
+    topCustomers: Array<{
+      name: string;
+      totalSales: number;
+      balance: number; // Updated to use balance field instead of currentDebt
+    }>;
   } {
     try {
-      const balanceSheet = erpFinancialService.generateBalanceSheet();
-      const incomeStatement = erpFinancialService.generateIncomeStatement();
       const cashDrawer = erpFinancialService.getCashDrawerStatus();
 
-      // Get today's transactions
+      // Get today's transactions from localStorage
       const today = new Date().toISOString().split('T')[0];
-      const todaysTransactions = erpFinancialService.getJournalEntries(today, today);
+      const transactions = JSON.parse(localStorage.getItem('erp_financial_transactions') || '[]');
+      const todaysTransactions = transactions.filter((t: any) => 
+        t.timestamp.startsWith(today) && t.type === 'cash_sale'
+      );
       
-      const todaysSales = todaysTransactions
-        .filter(je => je.sourceType === 'sale')
-        .reduce((sum, je) => sum + je.totalCredit, 0);
+      const todaysSales = todaysTransactions.reduce((sum: number, t: any) => sum + t.amount, 0);
 
       // Get customer data for top customers
       const customers = JSON.parse(localStorage.getItem('erp_customers') || '[]');
       const topCustomers = customers
-        .map((customer: Customer) => {
-          const enhancedData = erpFinancialService.getEnhancedCustomerData(customer.id);
-          return {
-            name: customer.name,
-            totalSales: enhancedData?.totalSales || 0,
-            balance: customer.balance || 0 // Updated to use balance field with null safety
-          };
-        })
+        .map((customer: Customer) => ({
+          name: customer.name,
+          totalSales: 0, // TODO: Calculate from transaction history
+          balance: customer.balance || 0 // Updated to use balance field with null safety
+        }))
         .sort((a: { totalSales: number }, b: { totalSales: number }) => b.totalSales - a.totalSales)
         .slice(0, 5);
 
       return {
         todaysSales,
-        todaysTransactionCount: todaysTransactions.filter(je => je.sourceType === 'sale').length,
-        cashDrawerAmount: balanceSheet.assets.current.cash,
-        pendingReceivables: balanceSheet.assets.current.accountsReceivable,
+        todaysTransactionCount: todaysTransactions.length,
+        cashDrawerAmount: cashDrawer?.currentAmount || 0,
+        pendingReceivables: 0, // TODO: Calculate from accounts receivable
         topCustomers
       };
 

@@ -12,6 +12,7 @@ export interface AuditLogEntry {
   timestamp: string;
   userId: string;
   userEmail?: string;
+  quantity?: number;
   userName?: string;
   action: AuditAction;
   entityType: EntityType;
@@ -63,7 +64,7 @@ export type AuditAction =
 
 export type EntityType = 
   | 'customer' | 'supplier' | 'transaction' | 'sale' | 'inventory_item'
-   | 'cash_drawer' | 'user' | 'system';
+   | 'cash_drawer' | 'user' | 'system' | 'accounts_receivable' | 'accounts_payable';
 
 export interface AuditQuery {
   startDate?: string;

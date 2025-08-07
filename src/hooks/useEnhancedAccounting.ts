@@ -105,7 +105,7 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
   );
   
   const suppliers = useMemo(() => 
-    raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Supplier[], 
+    raw.suppliers.map(s => ({...s,  createdAt: s.created_at})) as Supplier[], 
     [raw.suppliers]
   );
 
@@ -222,7 +222,7 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
   // KPI data calculation
   const kpiData = useMemo(() => {
     const totalCustomers = customers.filter(c => c.isActive).length;
-    const totalSuppliers = suppliers.filter(s => s.isActive).length;
+    const totalSuppliers = suppliers.length;
     const customersWithDebt = customers.filter(c => (c.balance || 0) > 0).length; // Updated to use balance field with null safety
     const totalCustomerDebt = customers.reduce((sum, c) => sum + (c.balance || 0), 0); // Updated to use balance field with null safety
     const avgDebtPerCustomer = customersWithDebt > 0 ? totalCustomerDebt / customersWithDebt : 0;
@@ -297,17 +297,17 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
   }, [customers, suppliers]);
 
   // Filtered receivables and payables (keeping original logic)
-  const filteredReceivables = useMemo(() => {
-    return raw.accountsReceivable.sort((a, b) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-  }, [raw.accountsReceivable]);
+  // const filteredReceivables = useMemo(() => {
+  //   return raw.accountsReceivable.sort((a, b) => 
+  //     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  //   );
+  // }, [raw.accountsReceivable]);
 
-  const filteredPayables = useMemo(() => {
-    return raw.accountsPayable.sort((a, b) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-  }, [raw.accountsPayable]);
+  // const filteredPayables = useMemo(() => {
+  //   return raw.accountsPayable.sort((a, b) => 
+  //     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  //   );
+  // }, [raw.accountsPayable]);
 
   // Actions
   const processCustomerPayment = useCallback(async (params: {
@@ -466,8 +466,8 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
     recentActivity,
     criticalEvents,
     balanceChanges,
-    filteredReceivables,
-    filteredPayables,
+      filteredReceivables,
+      filteredPayables,
     isLoading,
     isProcessing,
     lastSync

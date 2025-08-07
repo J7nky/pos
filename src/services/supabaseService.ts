@@ -250,6 +250,35 @@ export class SupabaseService {
     }
   }
 
+  static async deleteSaleItem(id: string) {
+    try {
+      const { error } = await supabase
+        .from('sale_items')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      return true; // Return success indicator instead of deleted data
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async updateSaleItem(id: string, updates: Tables['sale_items']['Update']) {
+    try {
+      const { data, error } = await supabase
+        .from('sale_items')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
   // Transactions
   static async getTransactions(storeId: string, type?: 'income' | 'expense') {
     try {

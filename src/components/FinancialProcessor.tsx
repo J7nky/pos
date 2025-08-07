@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
+import MoneyInput from './common/MoneyInput';
 import { erpFinancialService, TransactionSummary, AccountBalance } from '../services/erpFinancialService';
 import { 
   DollarSign, 
@@ -542,15 +543,14 @@ export default function FinancialProcessor() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
-                  <input
-                    type="number"
-                    step="0.01"
+                  <MoneyInput
+                    label="Amount"
                     value={transactionForm.amount}
-                    onChange={(e) => setTransactionForm(prev => ({ ...prev, amount: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    required
+                    onChange={(value) => setTransactionForm(prev => ({ ...prev, amount: value }))}
                     placeholder="0.00"
+                    step="0.01"
+                    min="0"
+                    required
                   />
                 </div>
                 

@@ -1,8 +1,8 @@
 import { db } from '../lib/db';
 import { supabase } from '../lib/supabase';
-import { Database } from '../types/database';
+// import { Database } from '../types/database'; // Currently unused
 
-type Tables = Database['public']['Tables'];
+// type Tables = Database['public']['Tables']; // Currently unused
 
 // Sync configuration
 const SYNC_CONFIG = {
@@ -162,8 +162,8 @@ export class SyncService {
            
            for (const record of activeRecords) {
              // Check quantity constraint
-             if (record.quantity <= 0) {
-               invalidRecords.push({ record, reason: 'quantity <= 0' });
+             if (record.quantity < 0) {
+               invalidRecords.push({ record, reason: 'quantity < 0' });
                continue;
              }
              
@@ -204,7 +204,7 @@ export class SyncService {
            const batch = activeRecords.slice(i, i + SYNC_CONFIG.batchSize);
            const cleanedBatch = batch.map((record: any) => this.cleanRecordForUpload(record));
 
-          const { error, data } = await supabase
+          const { error } = await supabase
             .from(tableName as any)
             .upsert(cleanedBatch, { onConflict: 'id' });
 
@@ -299,10 +299,8 @@ export class SyncService {
         // Get remote changes since last sync
         let query = supabase.from(tableName as any).select('*');
         
-        // Add store_id filter for tables that have it (all except sale_items)
-        if (tableName !== 'sale_items') {
-          query = query.eq('store_id', storeId);
-        }
+        // Add store_id filter for tables that have it (all tables have store_id)
+        query = query.eq('store_id', storeId);
         
         const { data: remoteRecords, error } = await query
           .gt(timestampField, lastSyncAt)
@@ -464,7 +462,7 @@ export class SyncService {
     // Remove updated_at for tables that don't have it in Supabase
     // Only these tables have updated_at: products, suppliers, customers
     const tableName = this.getTableFromRecord(record);
-    const tablesWithoutUpdatedAt = ['inventory_items', 'sales', 'sale_items', 'transactions'];
+    const tablesWithoutUpdatedAt = ['inventory_items', 'sale_items', 'transactions'];
     
     if (tablesWithoutUpdatedAt.includes(tableName)) {
       delete cleanRecord.updated_at;
@@ -472,17 +470,105 @@ export class SyncService {
     
     // Handle sale_items specific field cleanup (now keeping created_by and store_id as they're in database schema)
     if (tableName === 'sale_items') {
+      // First, map legacy/camelCase field names to Supabase snake_case field names
+      if (cleanRecord.inventoryItemId && !cleanRecord.inventory_item_id) {
+        cleanRecord.inventory_item_id = cleanRecord.inventoryItemId;
+      }
+      if (cleanRecord.productId && !cleanRecord.product_id) {
+        cleanRecord.product_id = cleanRecord.productId;
+      }
+      if (cleanRecord.supplierId && !cleanRecord.supplier_id) {
+        cleanRecord.supplier_id = cleanRecord.supplierId;
+      }
+      if (cleanRecord.customerId !== undefined && cleanRecord.customer_id === undefined) {
+        cleanRecord.customer_id = cleanRecord.customerId;
+      }
+      if (cleanRecord.unitPrice !== undefined && !cleanRecord.unit_price) {
+        cleanRecord.unit_price = cleanRecord.unitPrice;
+      }
+      if (cleanRecord.paymentMethod && !cleanRecord.payment_method) {
+        cleanRecord.payment_method = cleanRecord.paymentMethod;
+      }
+      if (cleanRecord.createdBy && !cleanRecord.created_by) {
+        cleanRecord.created_by = cleanRecord.createdBy;
+      }
+      if (cleanRecord.storeId && !cleanRecord.store_id) {
+        cleanRecord.store_id = cleanRecord.storeId;
+      }
+      if (cleanRecord.createdAt && !cleanRecord.created_at) {
+        cleanRecord.created_at = cleanRecord.createdAt;
+      }
+      // Map totalPrice to received_value if received_value is missing
+      if (cleanRecord.totalPrice !== undefined && !cleanRecord.received_value) {
+        cleanRecord.received_value = cleanRecord.totalPrice;
+      }
+      
+      // Remove all legacy/camelCase field names after mapping
+      delete cleanRecord.inventoryItemId;
+      delete cleanRecord.productId;
+      delete cleanRecord.supplierId;
+      delete cleanRecord.customerId;
+      delete cleanRecord.unitPrice;
+      delete cleanRecord.totalPrice;
+      delete cleanRecord.paymentMethod;
+      delete cleanRecord.createdBy;
+      delete cleanRecord.storeId;
+      delete cleanRecord.createdAt;
+      
+      // Define allowed fields for sale_items table (matching exact Supabase schema)
+      const allowedFields = [
+        'id', 'quantity', 'inventory_item_id', 'product_id', 'supplier_id',
+        'weight', 'unit_price', 'received_value', 'payment_method', 'notes',
+        'created_at', 'store_id', 'customer_id', 'created_by'
+      ];
+
+      // Remove any remaining fields that don't exist in Supabase schema
+      Object.keys(cleanRecord).forEach(key => {
+        if (!allowedFields.includes(key) && !key.startsWith('_')) {
+          delete cleanRecord[key];
+        }
+      });
+
+      // Calculate received_value from unit_price and quantity if missing
+      if (!cleanRecord.received_value && cleanRecord.unit_price && cleanRecord.quantity) {
+        cleanRecord.received_value = cleanRecord.unit_price * cleanRecord.quantity;
+      }
+      
       // Ensure required fields are present and valid
       if (!cleanRecord.inventory_item_id) {
-        cleanRecord.inventory_item_id = '';
+        cleanRecord.inventory_item_id = cleanRecord.id || '';
       }
       if (!cleanRecord.created_by) {
-        cleanRecord.created_by = '';
+        cleanRecord.created_by = 'system';
       }
       if (!cleanRecord.customer_id) {
         cleanRecord.customer_id = null;
       }
-      // Keep store_id as it's now part of the database schema
+      if (!cleanRecord.store_id) {
+        cleanRecord.store_id = 'default-store';
+      }
+      if (!cleanRecord.payment_method) {
+        cleanRecord.payment_method = 'cash';
+      }
+      if (!cleanRecord.unit_price || cleanRecord.unit_price < 0) {
+        cleanRecord.unit_price = 0;
+      }
+      if (!cleanRecord.received_value || cleanRecord.received_value < 0) {
+        cleanRecord.received_value = cleanRecord.unit_price * (cleanRecord.quantity || 1);
+      }
+      if (!cleanRecord.quantity || cleanRecord.quantity <= 0) {
+        cleanRecord.quantity = 1;
+      }
+      
+      // Debug logging for sale_items
+      console.log('🔧 Cleaned sale_item record for upload:', {
+        id: cleanRecord.id,
+        fields: Object.keys(cleanRecord),
+        hasAllRequired: allowedFields.every(field => 
+          field === 'weight' || field === 'notes' || field === 'customer_id' || 
+          cleanRecord.hasOwnProperty(field)
+        )
+      });
     }
     
     // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow
@@ -513,7 +599,7 @@ export class SyncService {
     // Simple heuristic based on record properties
     if (record.product_id && record.supplier_id && record.received_at) return 'inventory_items';
     if (record.inventory_item_id && record.product_id && record.supplier_id) return 'sale_items';
-    if (record.customer_id !== undefined && record.subtotal !== undefined) return 'sales';
+    if (record.customer_id !== undefined && record.subtotal !== undefined) return 'sale_items'; // Assuming 'sale_items' for sales
     if (record.type && record.amount && record.currency) return 'transactions';
     if (record.category && !record.amount) return 'products';
     // Updated supplier detection to handle new type field and distinguish from transactions

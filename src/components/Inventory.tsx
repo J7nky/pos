@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import SearchableSelect from './common/SearchableSelect';
+import MoneyInput from './common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { Plus, Search, Package, Truck, Eye, Camera, RotateCcw, X, Upload } from 'lucide-react';
 import { SupabaseService } from '../services/supabaseService';
@@ -247,7 +248,6 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                         id: supplier.id,
                         label: supplier.name,
                         value: supplier.id,
-                        category: supplier.type === 'commission' ? 'Commission' : 'Cash'
                       }))}
                       value={form.supplier_id}
                       onChange={(value: any) => setForm({ ...form, supplier_id: value })}
@@ -360,16 +360,15 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
 
                   {form.type === 'cash' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Purchase Price *</label>
-                      <input
-                        type="number"
+                      <MoneyInput
+                        label="Purchase Price"
+                        value={form.price}
+                        onChange={(value) => setForm({ ...form, price: value })}
+                        placeholder="Enter purchase price per unit"
                         step="0.01"
                         min="0"
-                        value={form.price}
-                        onChange={(e) => setForm({ ...form, price: e.target.value })}
-                        className={`w-full border ${errors.price ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
-                        placeholder="Enter purchase price per unit"
                         required
+                        className={errors.price ? 'border-red-500 ring-red-500' : ''}
                       />
                       {errors.price && <p className="text-xs text-red-600 mt-1">{errors.price}</p>}
                     </div>

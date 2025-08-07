@@ -48,11 +48,14 @@ interface SupabaseDataContextType {
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
-  addSale: (sale: Omit<Tables['sale_items']['Insert'], 'store_id'>, items: Omit<Tables['sale_items']['Insert'], 'id'>[]) => Promise<void>;
+  addSale: (items: any[]) => Promise<void>;
+  updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
+  deleteSale: (id: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
 
   addNonPricedItem: (item: any) => Promise<void>;
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
+  restoreInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
 
   // Utility functions
   refreshData: () => Promise<void>;
@@ -122,7 +125,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
         customersData,
         salesData,
         inventoryData,
-        transactionsData,
+        
         transactionsData
       ] = await Promise.all([
         SupabaseService.getProducts(storeId),
@@ -231,7 +234,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
   };
 
   const addSale = async (
-    sale: Omit<Tables['sale_items']['Insert'], 'store_id'>, 
+    // sale: Omit<Tables['sale_items']['Insert'], 'store_id'>, 
     items: Omit<Tables['sale_items']['Insert'], 'id'>[]
   ) => {
     if (!storeId) return;
@@ -244,6 +247,13 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
         saleItemsWithStore.map(item => SupabaseService.createSaleItem(item))
       );
       
+      // Deduct inventory for each sale item
+      for (const item of items) {
+        if (item.quantity && item.quantity > 0) {
+          await deductInventoryQuantity(item.product_id, item.supplier_id, item.quantity);
+        }
+      }
+      
       if (newSaleItems.length > 0) {
         // Refresh sales to get joined data
         const salesData = await SupabaseService.getSaleItems(storeId);
@@ -251,6 +261,70 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error('Error adding sale:', error);
+      throw error;
+    } finally {
+      setLoading(prev => ({ ...prev, sales: false }));
+    }
+  };
+
+  const updateSale = async (id: string, updates: Partial<Tables['sale_items']['Update']>) => {
+    if (!storeId) return;
+    
+    setLoading(prev => ({ ...prev, sales: true }));
+    try {
+      // Get the original sale item to compare quantities
+      const originalSale = sales.find(s => s.id === id);
+      if (!originalSale) throw new Error('Sale item not found');
+
+      // Check if quantity has changed
+      const quantityChanged = updates.quantity !== undefined && updates.quantity !== originalSale.quantity;
+      const quantityDifference = quantityChanged ? (updates.quantity || 0) - (originalSale.quantity || 0) : 0;
+
+      // Update the sale item
+      const updatedSale = await SupabaseService.updateSaleItem(id, updates);
+      
+      // Handle inventory adjustments if quantity changed
+      if (quantityChanged && originalSale.product_id && originalSale.supplier_id) {
+        if (quantityDifference > 0) {
+          // Quantity increased - deduct additional inventory
+          await deductInventoryQuantity(originalSale.product_id, originalSale.supplier_id, quantityDifference);
+        } else if (quantityDifference < 0) {
+          // Quantity decreased - restore inventory
+          await restoreInventoryQuantity(originalSale.product_id, originalSale.supplier_id, Math.abs(quantityDifference));
+        }
+      }
+
+      if (updatedSale) {
+        setSales(prev => prev.map(s => s.id === id ? updatedSale : s));
+      }
+    } catch (error) {
+      console.error('Error updating sale:', error);
+      throw error;
+    } finally {
+      setLoading(prev => ({ ...prev, sales: false }));
+    }
+  };
+
+  const deleteSale = async (id: string) => {
+    if (!storeId) return;
+    
+    setLoading(prev => ({ ...prev, sales: true }));
+    try {
+      // Get the sale item before deletion to restore inventory
+      const saleItem = sales.find(s => s.id === id);
+      if (!saleItem) throw new Error('Sale item not found');
+
+      // Delete the sale item
+      await SupabaseService.deleteSaleItem(id);
+      
+      // Restore inventory quantities
+      if (saleItem.quantity && saleItem.quantity > 0 && saleItem.product_id && saleItem.supplier_id) {
+        await restoreInventoryQuantity(saleItem.product_id, saleItem.supplier_id, saleItem.quantity);
+      }
+
+      setSales(prev => prev.filter(s => s.id !== id));
+    } catch (error) {
+      console.error('Error deleting sale:', error);
       throw error;
     } finally {
       setLoading(prev => ({ ...prev, sales: false }));
@@ -359,6 +433,44 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const restoreInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
+    if (!storeId) return;
+
+    try {
+      let qtyToRestore = quantity;
+      // Get inventory items for this product/supplier, oldest first (FIFO)
+      const { data: inventoryRows, error: inventoryError } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('product_id', productId)
+        .eq('supplier_id', supplierId)
+        .gt('quantity', 0)
+        .order('received_at', { ascending: true });
+      
+      if (inventoryError) throw inventoryError;
+      if (!inventoryRows) return;
+      
+      for (const inv of inventoryRows) {
+        if (qtyToRestore <= 0) break;
+        const restore = Math.min(inv.quantity, qtyToRestore);
+        const newQty = inv.quantity + restore;
+        await supabase
+          .from('inventory_items')
+          .update({ quantity: newQty })
+          .eq('id', inv.id);
+        qtyToRestore -= restore;
+      }
+      
+      // Refresh inventory data to update stock levels
+      const inventoryData = await SupabaseService.getInventoryItems(storeId);
+      setInventory(inventoryData || []);
+      
+    } catch (error) {
+      console.error('Error restoring inventory quantity:', error);
+      throw error;
+    }
+  };
+
   // Add legacy/compatibility methods
   const toggleLowStockAlerts = (enabled: boolean) => setLowStockAlertsEnabled(enabled);
   const updateLowStockThreshold = (threshold: number) => setLowStockThreshold(threshold);
@@ -455,6 +567,8 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       updateCustomer,
       addInventoryItem,
       addSale,
+      updateSale,
+      deleteSale,
       addTransaction,
       
       refreshData,
@@ -464,7 +578,8 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       updateDefaultCommissionRate,
       updateCurrency,
       addNonPricedItem,
-      deductInventoryQuantity
+      deductInventoryQuantity,
+      restoreInventoryQuantity
     }}>
       {children}
     </SupabaseDataContext.Provider>
