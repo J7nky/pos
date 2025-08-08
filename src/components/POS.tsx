@@ -40,7 +40,7 @@ export default function POS() {
   const inventory = (raw.inventory || []) as Array<any>;
   const addSale = raw.addSale;
   const addCustomer = raw.addCustomer;
-  const addNonPricedItem = raw.addNonPricedItem || (async (item: any) => { /* fallback: store in localStorage or show error */ });
+
   const { userProfile } = useSupabaseAuth();
   const { formatCurrency } = useCurrency();
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
@@ -281,48 +281,49 @@ export default function POS() {
   const handleCheckout = async () => {
     if (activeTab.cart.length === 0) return;
     // Check for non-priced items
-    const hasNonPriced = activeTab.cart.some(item => !item.unitPrice || item.unitPrice === 0);
-    if (hasNonPriced) {
-      if (!activeTab.selectedCustomer) {
-        setCustomerError('Customer is required for non-priced items.');
-        return;
-      }
-      setCustomerError(null);
-      setIsProcessing(true);
-      try {
-        // Store each non-priced item for later pricing
-        for (const item of activeTab.cart.filter(i => !i.unitPrice || i.unitPrice === 0)) {
-          await addNonPricedItem({
-            id: uuidv4(),
-            customerId: activeTab.selectedCustomer,
-            productId: item.productId,
-            productName: item.productName,
-            supplierId: item.supplierId,
-            supplierName: item.supplierName,
-            quantity: item.quantity,
-            weight: item.weight,
-            notes: item.notes,
-            inventoryItemId: item.inventoryItemId, // Add the specific inventory item ID
-            createdAt: new Date().toISOString(),
-            status: 'non-priced',
-          });
-        }
-        // Remove non-priced items from cart and proceed with regular sale if any
-        const pricedCart = activeTab.cart.filter(i => i.unitPrice && i.unitPrice > 0);
-        if (pricedCart.length > 0) {
-          updateActiveTab({ cart: pricedCart });
-          showToast('success', 'Non-priced items stored. Please complete sale for priced items.');
-        } else {
-          // All items were non-priced, clear cart
-          updateActiveTab({ cart: [], selectedCustomer: '', amountReceived: '', notes: '', paymentMethod: 'cash' });
-          showToast('success', 'Non-priced items stored for later pricing.');
-        }
-      } catch (error) {
-        showToast('error', 'Failed to store non-priced items!');
-      }
-      setIsProcessing(false);
-      return;
-    }
+    // if (hasNonPriced) {
+    //   if (!activeTab.selectedCustomer) {
+    //     setCustomerError('Customer is required for non-priced items.');
+    //     return;
+    //   }
+    //   setCustomerError(null);
+    //   setIsProcessing(true);
+    //   try {
+    //     // Store each non-priced item for later pricing
+    //     for (const item of activeTab.cart.filter(i => !i.unitPrice || i.unitPrice === 0)) {
+    //       await addNonPricedItem({
+    //         id: uuidv4(),
+    //         customerId: activeTab.selectedCustomer,
+    //         productId: item.productId,
+    //         productName: item.productName,
+    //         supplierId: item.supplierId,
+    //         supplierName: item.supplierName,
+    //         quantity: item.quantity,
+    //         weight: item.weight,
+    //         notes: item.notes,
+    //         inventoryItemId: item.inventoryItemId, // Add the specific inventory item ID
+    //         createdAt: new Date().toISOString(),
+    //         status: 'non-priced',
+    //       });
+    //     }
+    //     // Remove non-priced items from cart and proceed with regular sale if any
+    //     const pricedCart = activeTab.cart.filter(i => i.unitPrice && i.unitPrice > 0);
+    //     if (pricedCart.length > 0) {
+    //       updateActiveTab({ cart: pricedCart });
+    //       showToast('success', 'Non-priced items stored. Please complete sale for priced items.');
+    //     } else {
+    //       // All items were non-priced, clear cart
+    //       updateActiveTab({ cart: [], selectedCustomer: '', amountReceived: '', notes: '', paymentMethod: 'cash' });
+    //       showToast('success', 'Non-priced items stored for later pricing.');
+    //     }
+    //   } catch (error) {
+    //     showToast('error', 'Failed to store non-priced items!');
+    //   }
+    //   setIsProcessing(false);
+    //   return;
+    // }
+  
+  
     // Validation: if credit, require customer; if not credit and amountReceived < total, require customer
     if (
       (activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||

@@ -68,7 +68,7 @@ interface OfflineDataContextType {
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: any) => Promise<void>;
   
-  addNonPricedItem: (item: any) => Promise<void>;
+
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
   restoreInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
   
@@ -625,7 +625,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       if (customer) { 
         await db.customers.update(customer.id, {
-           lb_balance: customer.lb_balance + creditAmount});
+           lb_balance: customer.lb_balance + creditAmount,
+           _synced: false
+        });
       }
     }
 
@@ -887,75 +889,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setCurrency(newCurrency);
   };
 
-  const addNonPricedItem = async (item: any): Promise<void> => {
-    if (!storeId) return;
-    
-    // Store the non-priced item in localStorage
-    const key = 'erp_non_priced_items';
-    const existing = JSON.parse(localStorage.getItem(key) || '[]');
-    const updated = [...existing, item];
-    localStorage.setItem(key, JSON.stringify(updated));
-    
-    // Deduct from specific inventory item if provided, otherwise use FIFO
-    try {
-      if (item.inventoryItemId) {
-        // Use the specific inventory item ID if provided
-        const inventoryItem = await db.inventory_items.get(item.inventoryItemId);
-        if (inventoryItem && inventoryItem.quantity >= item.quantity) {
-          const newQuantity = inventoryItem.quantity - item.quantity;
-          
-     
-            // Update with new quantity
-            await db.inventory_items.update(item.inventoryItemId, { 
-              quantity: newQuantity,
-              _synced: false
-            });
-          
-        }
-      } else {
-        // Fallback to FIFO if no specific inventory item ID (legacy support)
-        const inventoryRecords = await db.inventory_items
-          .where('product_id')
-          .equals(item.productId)
-          .and(inv => inv.supplier_id === item.supplierId && inv.quantity > 0)
-          .sortBy('received_at');
 
-        let qtyToDeduct = item.quantity;
-        for (const inv of inventoryRecords) {
-          if (qtyToDeduct <= 0) break;
-          
-          const deduct = Math.min(inv.quantity, qtyToDeduct);
-          const newQuantity = inv.quantity - deduct;
-          
-          if (newQuantity <= 0) {
-            // Keep inventory item with quantity = 0 for received bills review instead of deleting
-            await db.inventory_items.update(inv.id, { 
-              quantity: 0,
-              _synced: false
-            });
-          } else {
-            // Update with new quantity
-            await db.inventory_items.update(inv.id, { 
-              quantity: newQuantity,
-              _synced: false
-            });
-          }
-          qtyToDeduct -= deduct;
-        }
-      }
-      
-      // Refresh data to update stock levels
-      await refreshData();
-      await updateUnsyncedCount();
-      
-      // Use debounced sync to batch rapid changes
-      debouncedSync();
-      
-    } catch (error) {
-      console.error('Error deducting inventory for non-priced item:', error);
-      throw error;
-    }
-  };
 
   const deductInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
     console.log('deductInventoryQuantity', productId, supplierId, quantity);
@@ -1104,7 +1038,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       deleteSale,
       addTransaction,
       addExpenseCategory,
-      addNonPricedItem,
+  
       deductInventoryQuantity,
       restoreInventoryQuantity,
 
