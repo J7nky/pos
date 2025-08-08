@@ -250,7 +250,13 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       // Deduct inventory for each sale item
       for (const item of items) {
         if (item.quantity && item.quantity > 0) {
-          await deductInventoryQuantity(item.product_id, item.supplier_id, item.quantity);
+          if (item.inventory_item_id) {
+            // Use specific inventory item ID if provided
+            await deductSpecificInventoryQuantity(item.inventory_item_id, item.quantity);
+          } else {
+            // Fallback to FIFO approach for legacy support
+            await deductInventoryQuantity(item.product_id, item.supplier_id, item.quantity);
+          }
         }
       }
       
@@ -359,30 +365,36 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     const updated = [...existing, item];
     localStorage.setItem(key, JSON.stringify(updated));
     
-    // Deduct inventory (FIFO, as much as possible) - same logic as createSale
+    // Deduct from specific inventory item if provided, otherwise use FIFO
     try {
-      let qtyToDeduct = item.quantity;
-      // Get inventory items for this product/supplier, oldest first
-      const { data: inventoryRows, error: inventoryError } = await supabase
-        .from('inventory_items')
-        .select('*')
-        .eq('product_id', item.productId)
-        .eq('supplier_id', item.supplierId)
-        .gt('quantity', 0)
-        .order('received_at', { ascending: true });
-      
-      if (inventoryError) throw inventoryError;
-      if (!inventoryRows) return;
-      
-      for (const inv of inventoryRows) {
-        if (qtyToDeduct <= 0) break;
-        const deduct = Math.min(inv.quantity, qtyToDeduct);
-        const newQty = inv.quantity - deduct;
-        await supabase
+      if (item.inventoryItemId) {
+        // Use the specific inventory item ID if provided
+        await deductSpecificInventoryQuantity(item.inventoryItemId, item.quantity);
+      } else {
+        // Fallback to FIFO if no specific inventory item ID (legacy support)
+        let qtyToDeduct = item.quantity;
+        // Get inventory items for this product/supplier, oldest first
+        const { data: inventoryRows, error: inventoryError } = await supabase
           .from('inventory_items')
-          .update({ quantity: newQty })
-          .eq('id', inv.id);
-        qtyToDeduct -= deduct;
+          .select('*')
+          .eq('product_id', item.productId)
+          .eq('supplier_id', item.supplierId)
+          .gt('quantity', 0)
+          .order('received_at', { ascending: true });
+        
+        if (inventoryError) throw inventoryError;
+        if (!inventoryRows) return;
+        
+        for (const inv of inventoryRows) {
+          if (qtyToDeduct <= 0) break;
+          const deduct = Math.min(inv.quantity, qtyToDeduct);
+          const newQty = inv.quantity - deduct;
+          await supabase
+            .from('inventory_items')
+            .update({ quantity: newQty })
+            .eq('id', inv.id);
+          qtyToDeduct -= deduct;
+        }
       }
       
       // Refresh inventory data to update stock levels
@@ -391,6 +403,50 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       
     } catch (error) {
       console.error('Error deducting inventory for non-priced item:', error);
+      throw error;
+    }
+  };
+
+  const deductSpecificInventoryQuantity = async (inventoryItemId: string, quantity: number): Promise<void> => {
+    if (!storeId) return;
+
+    try {
+      // Get the specific inventory item
+      const { data: inventoryItem, error: inventoryError } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('id', inventoryItemId)
+        .single();
+      
+      if (inventoryError) throw inventoryError;
+      if (!inventoryItem) throw new Error('Inventory item not found');
+      
+      if (inventoryItem.quantity < quantity) {
+        throw new Error(`Insufficient stock. Available: ${inventoryItem.quantity}, Requested: ${quantity}`);
+      }
+      
+      const newQuantity = inventoryItem.quantity - quantity;
+      
+      if (newQuantity <= 0) {
+        // Keep inventory item with quantity = 0 for received bills review instead of deleting
+        await supabase
+          .from('inventory_items')
+          .update({ quantity: 0 })
+          .eq('id', inventoryItemId);
+      } else {
+        // Update with new quantity
+        await supabase
+          .from('inventory_items')
+          .update({ quantity: newQuantity })
+          .eq('id', inventoryItemId);
+      }
+      
+      // Refresh inventory data to update stock levels
+      const inventoryData = await SupabaseService.getInventoryItems(storeId);
+      setInventory(inventoryData || []);
+      
+    } catch (error) {
+      console.error('Error deducting specific inventory quantity:', error);
       throw error;
     }
   };

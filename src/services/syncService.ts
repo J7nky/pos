@@ -1,8 +1,8 @@
 import { db } from '../lib/db';
 import { supabase } from '../lib/supabase';
-// import { Database } from '../types/database'; // Currently unused
+import { Database } from '../types/database';
 
-// type Tables = Database['public']['Tables']; // Currently unused
+type Tables = Database['public']['Tables'];
 
 // Sync configuration
 const SYNC_CONFIG = {
@@ -163,6 +163,7 @@ export class SyncService {
            for (const record of activeRecords) {
              // Check quantity constraint
              if (record.quantity < 0) {
+               // Allow quantity = 0 to preserve historical inventory entries
                invalidRecords.push({ record, reason: 'quantity < 0' });
                continue;
              }
@@ -204,7 +205,7 @@ export class SyncService {
            const batch = activeRecords.slice(i, i + SYNC_CONFIG.batchSize);
            const cleanedBatch = batch.map((record: any) => this.cleanRecordForUpload(record));
 
-          const { error } = await supabase
+          const { error, data } = await supabase
             .from(tableName as any)
             .upsert(cleanedBatch, { onConflict: 'id' });
 
@@ -299,8 +300,10 @@ export class SyncService {
         // Get remote changes since last sync
         let query = supabase.from(tableName as any).select('*');
         
-        // Add store_id filter for tables that have it (all tables have store_id)
-        query = query.eq('store_id', storeId);
+        // Add store_id filter for tables that have it (all except sale_items)
+        if (tableName !== 'sale_items') {
+          query = query.eq('store_id', storeId);
+        }
         
         const { data: remoteRecords, error } = await query
           .gt(timestampField, lastSyncAt)
@@ -470,145 +473,34 @@ export class SyncService {
     
     // Handle sale_items specific field cleanup (now keeping created_by and store_id as they're in database schema)
     if (tableName === 'sale_items') {
-      // First, map legacy/camelCase field names to Supabase snake_case field names
-      if (cleanRecord.inventoryItemId && !cleanRecord.inventory_item_id) {
-        cleanRecord.inventory_item_id = cleanRecord.inventoryItemId;
-      }
-      if (cleanRecord.productId && !cleanRecord.product_id) {
-        cleanRecord.product_id = cleanRecord.productId;
-      }
-      if (cleanRecord.supplierId && !cleanRecord.supplier_id) {
-        cleanRecord.supplier_id = cleanRecord.supplierId;
-      }
-      if (cleanRecord.customerId !== undefined && cleanRecord.customer_id === undefined) {
-        cleanRecord.customer_id = cleanRecord.customerId;
-      }
-      if (cleanRecord.unitPrice !== undefined && !cleanRecord.unit_price) {
-        cleanRecord.unit_price = cleanRecord.unitPrice;
-      }
-      if (cleanRecord.paymentMethod && !cleanRecord.payment_method) {
-        cleanRecord.payment_method = cleanRecord.paymentMethod;
-      }
-      if (cleanRecord.createdBy && !cleanRecord.created_by) {
-        cleanRecord.created_by = cleanRecord.createdBy;
-      }
-      if (cleanRecord.storeId && !cleanRecord.store_id) {
-        cleanRecord.store_id = cleanRecord.storeId;
-      }
-      if (cleanRecord.createdAt && !cleanRecord.created_at) {
-        cleanRecord.created_at = cleanRecord.createdAt;
-      }
-      // Map totalPrice to received_value if received_value is missing
-      if (cleanRecord.totalPrice !== undefined && !cleanRecord.received_value) {
-        cleanRecord.received_value = cleanRecord.totalPrice;
-      }
-      
-      // Remove all legacy/camelCase field names after mapping
-      delete cleanRecord.inventoryItemId;
-      delete cleanRecord.productId;
-      delete cleanRecord.supplierId;
-      delete cleanRecord.customerId;
-      delete cleanRecord.unitPrice;
-      delete cleanRecord.totalPrice;
-      delete cleanRecord.paymentMethod;
-      delete cleanRecord.createdBy;
-      delete cleanRecord.storeId;
-      delete cleanRecord.createdAt;
-      
-      // Define allowed fields for sale_items table (matching exact Supabase schema)
-      const allowedFields = [
-        'id', 'quantity', 'inventory_item_id', 'product_id', 'supplier_id',
-        'weight', 'unit_price', 'received_value', 'payment_method', 'notes',
-        'created_at', 'store_id', 'customer_id', 'created_by'
-      ];
-
-      // Remove any remaining fields that don't exist in Supabase schema
-      Object.keys(cleanRecord).forEach(key => {
-        if (!allowedFields.includes(key) && !key.startsWith('_')) {
-          delete cleanRecord[key];
-        }
-      });
-
-      // Calculate received_value from unit_price and quantity if missing
-      if (!cleanRecord.received_value && cleanRecord.unit_price && cleanRecord.quantity) {
-        cleanRecord.received_value = cleanRecord.unit_price * cleanRecord.quantity;
-      }
-      
       // Ensure required fields are present and valid
       if (!cleanRecord.inventory_item_id) {
-        cleanRecord.inventory_item_id = cleanRecord.id || '';
+        cleanRecord.inventory_item_id = '';
       }
       if (!cleanRecord.created_by) {
-        cleanRecord.created_by = 'system';
+        cleanRecord.created_by = '';
       }
       if (!cleanRecord.customer_id) {
         cleanRecord.customer_id = null;
       }
-      if (!cleanRecord.store_id) {
-        cleanRecord.store_id = 'default-store';
-      }
-      if (!cleanRecord.payment_method) {
-        cleanRecord.payment_method = 'cash';
-      }
-      if (!cleanRecord.unit_price || cleanRecord.unit_price < 0) {
-        cleanRecord.unit_price = 0;
-      }
-      if (!cleanRecord.received_value || cleanRecord.received_value < 0) {
-        cleanRecord.received_value = cleanRecord.unit_price * (cleanRecord.quantity || 1);
-      }
-      if (!cleanRecord.quantity || cleanRecord.quantity <= 0) {
-        cleanRecord.quantity = 1;
-      }
-      
-      // Debug logging for sale_items
-      console.log('🔧 Cleaned sale_item record for upload:', {
-        id: cleanRecord.id,
-        fields: Object.keys(cleanRecord),
-        hasAllRequired: allowedFields.every(field => 
-          field === 'weight' || field === 'notes' || field === 'customer_id' || 
-          cleanRecord.hasOwnProperty(field)
-        )
-      });
+      // Keep store_id as it's now part of the database schema
     }
     
-    // CRITICAL: Handle transaction amounts to avoid database precision overflow
+    // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow
     // Supabase numeric field has precision 10, scale 2 (max: 99,999,999.99)
-    if (tableName === 'transactions' && cleanRecord.amount) {
-      const MAX_DB_AMOUNT = 99999999.99;
+    // Only convert LBP amounts that exceed the database precision limit
+    if (tableName === 'transactions' && cleanRecord.currency === 'LBP' && cleanRecord.amount) {
       const USD_TO_LBP_RATE = 89500;
       const originalAmount = cleanRecord.amount;
-      const originalCurrency = cleanRecord.currency;
       
-      // Validate and fix amount precision
-      if (typeof originalAmount === 'number' && !isNaN(originalAmount)) {
-        // Round to 2 decimal places to match database precision
-        cleanRecord.amount = Math.round(originalAmount * 100) / 100;
-        
-        // Check if amount exceeds database limit
-        if (cleanRecord.amount > MAX_DB_AMOUNT) {
-          if (originalCurrency === 'LBP') {
-            // Convert LBP to USD for large amounts
-            cleanRecord.amount = cleanRecord.amount / USD_TO_LBP_RATE;
-            cleanRecord.currency = 'USD';
-            cleanRecord.description = `${cleanRecord.description || ''} (Originally ${originalAmount.toLocaleString()} LBP)`.trim();
-            console.log(`💱 Converting large LBP transaction for upload: ${originalAmount.toLocaleString()} LBP → $${cleanRecord.amount.toFixed(2)} USD`);
-          } else {
-            // For USD amounts that are too large, cap them at the maximum
-            console.warn(`⚠️ USD transaction amount ${originalAmount} exceeds database limit, capping at ${MAX_DB_AMOUNT}`);
-            cleanRecord.amount = MAX_DB_AMOUNT;
-            cleanRecord.description = `${cleanRecord.description || ''} (Amount capped from ${originalAmount})`.trim();
-          }
-        }
-        
-        // Ensure amount is not negative (should be handled by business logic, but safety check)
-        if (cleanRecord.amount < 0) {
-          console.warn(`⚠️ Negative transaction amount detected: ${originalAmount}, setting to 0`);
-          cleanRecord.amount = 0;
-        }
-      } else {
-        // Invalid amount, set to 0
-        console.warn(`⚠️ Invalid transaction amount detected: ${originalAmount}, setting to 0`);
-        cleanRecord.amount = 0;
+      // Only convert if amount exceeds database precision limit
+      if (originalAmount > 99999999) {
+        cleanRecord.amount = originalAmount / USD_TO_LBP_RATE;
+        // Change currency to USD for the converted amount
+        cleanRecord.currency = 'USD';
+        // Add a note in the description about the conversion
+        cleanRecord.description = `${cleanRecord.description} (Originally ${originalAmount.toLocaleString()} LBP)`;
+        console.log(`💱 Converting large LBP transaction for upload: ${originalAmount.toLocaleString()} LBP → $${cleanRecord.amount.toFixed(2)} USD`);
       }
     }
     

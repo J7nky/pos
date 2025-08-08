@@ -362,8 +362,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Transform data to match SupabaseDataContext structure
       setProducts(productsData as Tables['products']['Row'][]);
-      setSuppliers(suppliersData.map(s => ({ ...s, balance: null })) as Tables['suppliers']['Row'][]);
-              setCustomers(customersData.map(c => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
+      setSuppliers(suppliersData.map(s => ({ ...s, lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0 })) as Tables['suppliers']['Row'][]);
+      setCustomers(customersData.map(c => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
       setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
 
       // Store raw data
@@ -618,33 +618,79 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       created_by: item.created_by || 'system'
     }));
 
+    if (items.some(item => item.payment_method === 'credit') || items.some(item => item.received_value < item.unit_price * item.quantity)) {
+      const creditItems = items.filter(item => item.payment_method === 'credit' || item.received_value < item.unit_price * item.quantity);
+      const creditAmount = creditItems.reduce((sum, item) => sum + item.received_value, 0);
+      const customer = await db.customers.get(creditItems[0].customer_id);
+
+      if (customer) { 
+        await db.customers.update(customer.id, {
+           lb_balance: customer.lb_balance + creditAmount});
+      }
+    }
+
     // Use transaction to ensure atomicity
     await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
+
+      
       await db.sale_items.bulkAdd(saleItemsWithIds);
+      
+      // Add the value of the sale to the supplier's balance
+      // Add the value of the credit to the customer's balance
+  
+      // Deduct from specific inventory items
+  for (const item of items) {
+        if (item.inventory_item_id) {
+          // Use the specific inventory item ID if provided
+          const inventoryItem = await db.inventory_items.get(item.inventory_item_id);
+          if (inventoryItem && inventoryItem.quantity >= item.quantity) {
+            const newQuantity = inventoryItem.quantity - item.quantity;
+            
+            if (newQuantity <= 0) {
+              // Keep inventory item with quantity = 0 for received bills review instead of deleting
+              await db.inventory_items.update(item.inventory_item_id, { 
+                quantity: 0,
+                _synced: false
+              });
+            } else {
+              // Update with new quantity
+              await db.inventory_items.update(item.inventory_item_id, { 
+                quantity: newQuantity,
+                _synced: false
+              });
+            }
+          }
+        } else {
 
-      // Deduct inventory (simplified FIFO)
-      for (const item of items) {
-        const inventoryRecords = await db.inventory_items
-          .where('product_id')
-          .equals(item.product_id)
-          .and(inv => inv.supplier_id === item.supplier_id && inv.quantity > 0)
-          .sortBy('received_at');
+          // Fallback to FIFO if no specific inventory item ID (legacy support)
+          const inventoryRecords = await db.inventory_items
+            .where('product_id')
+            .equals(item.product_id)
+            .and(inv => inv.supplier_id === item.supplier_id && inv.quantity > 0)
+            .sortBy('received_at');
 
-        let qtyToDeduct = item.quantity || 1; // Default to 1 if not specified
-        for (const inv of inventoryRecords) {
-          if (qtyToDeduct <= 0) break;
-          
-          const deduct = Math.min(inv.quantity, qtyToDeduct);
-          const newQuantity = inv.quantity - deduct;
-          
-
-            // Update with new quantity
-            await db.inventory_items.update(inv.id, { 
-              quantity: newQuantity,
-              _synced: false
-            });
-          
-          qtyToDeduct -= deduct;
+          let qtyToDeduct = item.quantity || 1; // Default to 1 if not specified
+          for (const inv of inventoryRecords) {
+            if (qtyToDeduct <= 0) break;
+            
+            const deduct = Math.min(inv.quantity, qtyToDeduct);
+            const newQuantity = inv.quantity - deduct;
+            
+            if (newQuantity <= 0) {
+              // Keep inventory item with quantity = 0 for received bills review instead of deleting
+              await db.inventory_items.update(inv.id, { 
+                quantity: 0,
+                _synced: false
+              });
+            } else {
+              // Update with new quantity
+              await db.inventory_items.update(inv.id, { 
+                quantity: newQuantity,
+                _synced: false
+              });
+            }
+            qtyToDeduct -= deduct;
+          }
         }
       }
     });
@@ -850,32 +896,52 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const updated = [...existing, item];
     localStorage.setItem(key, JSON.stringify(updated));
     
-    // Deduct inventory (FIFO, as much as possible) - same logic as addSale
+    // Deduct from specific inventory item if provided, otherwise use FIFO
     try {
-      const inventoryRecords = await db.inventory_items
-        .where('product_id')
-        .equals(item.productId)
-        .and(inv => inv.supplier_id === item.supplierId && inv.quantity > 0)
-        .sortBy('received_at');
-
-      let qtyToDeduct = item.quantity;
-      for (const inv of inventoryRecords) {
-        if (qtyToDeduct <= 0) break;
-        
-        const deduct = Math.min(inv.quantity, qtyToDeduct);
-        const newQuantity = inv.quantity - deduct;
-        
-        if (newQuantity <= 0) {
-          // Delete inventory item when quantity reaches 0 or below
-          await db.inventory_items.delete(inv.id);
-        } else {
-          // Update with new quantity
-          await db.inventory_items.update(inv.id, { 
-            quantity: newQuantity,
-            _synced: false
-          });
+      if (item.inventoryItemId) {
+        // Use the specific inventory item ID if provided
+        const inventoryItem = await db.inventory_items.get(item.inventoryItemId);
+        if (inventoryItem && inventoryItem.quantity >= item.quantity) {
+          const newQuantity = inventoryItem.quantity - item.quantity;
+          
+     
+            // Update with new quantity
+            await db.inventory_items.update(item.inventoryItemId, { 
+              quantity: newQuantity,
+              _synced: false
+            });
+          
         }
-        qtyToDeduct -= deduct;
+      } else {
+        // Fallback to FIFO if no specific inventory item ID (legacy support)
+        const inventoryRecords = await db.inventory_items
+          .where('product_id')
+          .equals(item.productId)
+          .and(inv => inv.supplier_id === item.supplierId && inv.quantity > 0)
+          .sortBy('received_at');
+
+        let qtyToDeduct = item.quantity;
+        for (const inv of inventoryRecords) {
+          if (qtyToDeduct <= 0) break;
+          
+          const deduct = Math.min(inv.quantity, qtyToDeduct);
+          const newQuantity = inv.quantity - deduct;
+          
+          if (newQuantity <= 0) {
+            // Keep inventory item with quantity = 0 for received bills review instead of deleting
+            await db.inventory_items.update(inv.id, { 
+              quantity: 0,
+              _synced: false
+            });
+          } else {
+            // Update with new quantity
+            await db.inventory_items.update(inv.id, { 
+              quantity: newQuantity,
+              _synced: false
+            });
+          }
+          qtyToDeduct -= deduct;
+        }
       }
       
       // Refresh data to update stock levels
@@ -910,8 +976,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const newQuantity = inv.quantity - deduct;
         
         if (newQuantity <= 0) {
-          // Delete inventory item when quantity reaches 0 or below
-          await db.inventory_items.delete(inv.id);
+          // Keep inventory item with quantity = 0 for received bills review instead of deleting
+          await db.inventory_items.update(inv.id, { 
+            quantity: 0,
+            _synced: false
+          });
         } else {
           // Update with new quantity
           await db.inventory_items.update(inv.id, { 
@@ -967,7 +1036,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           quantity: quantity,
           received_at: new Date().toISOString(),
           received_by: 'system', // Default user for restored inventory
-          _synced: false
+          _synced: false,
+          type: 'commission',
+          unit: 'kg',
+          weight: null,
+          porterage: null,
+          transfer_fee: null,
+          price: null,
+          commission_rate: null,
+          notes: null,
+          received_quantity: quantity,
+          created_at: new Date().toISOString()
         };
         
         await db.inventory_items.add(newInventoryItem);

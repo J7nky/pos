@@ -26,7 +26,8 @@ export interface Supplier extends BaseEntity {
   address: string;
   type: 'commission' | 'cash'; // Added to match database schema
   is_active: boolean;
-  balance: number | null; // Added balance field to match Supabase schema
+  lb_balance: number | null; // Added balance field to match Supabase schema
+  usd_balance: number | null; // Added balance field to match Supabase schema
 }
 
 export interface  Customer extends BaseEntity {
@@ -34,17 +35,18 @@ export interface  Customer extends BaseEntity {
   phone: string;
   email: string | null;
   address: string | null;
-  balance: number; // Changed from current_debt to balance to match Supabase schema
+  lb_balance: number; // Changed from current_debt to balance to match Supabase schema
+  usd_balance: number; // Changed from current_debt to balance to match Supabase schema
   is_active: boolean;
 }
 
 export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
+  id: string;
   product_id: string;
   supplier_id: string;
-  type: 'commission' | 'cash';
+  type: string;
   quantity: number;
-  received_quantity: number;
-  unit: 'kg' | 'piece' | 'box' | 'bag';
+  unit: string;
   weight: number | null;
   porterage: number | null;
   transfer_fee: number | null;
@@ -53,6 +55,9 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
   notes: string | null;
   received_at: string;
   received_by: string;
+  store_id: string;
+  created_at: string;
+  received_quantity: number;
 }
 
 
@@ -65,7 +70,7 @@ export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
   weight: number | null;
   unit_price: number;
   received_value: number; // Added to match Supabase schema
-  payment_method: 'cash' | 'card' | 'credit'; // Added payment method field
+  payment_method: string; // Added payment method field
   notes: string | null;
   customer_id: string | null; // Added to match Supabase schema
   created_by: string; // Added to match Supabase schema
@@ -142,8 +147,8 @@ class POSDatabase extends Dexie {
       // Core tables with enhanced indexing to match database schema
       // Tables WITH updated_at: products, suppliers, customers
       products: 'id, store_id, name, category, updated_at',
-      suppliers: 'id, store_id, name, type, is_active, updated_at, balance', // Added balance index
-      customers: 'id, store_id, name, phone, is_active, updated_at, balance', // Added balance index
+      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
+      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
 
       // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity', // Added received_quantity index
@@ -162,15 +167,21 @@ class POSDatabase extends Dexie {
         if (!supplier.type) {
           supplier.type = 'commission'; // Default to commission for existing suppliers
         }
-        if (supplier.balance === undefined || supplier.balance === null) {
-          supplier.balance = 0; // Default balance for existing suppliers
+        if (supplier.lb_balance === undefined || supplier.lb_balance === null) {
+          supplier.lb_balance = 0; // Default balance for existing suppliers
+        }
+        if (supplier.usd_balance === undefined || supplier.usd_balance === null) {
+          supplier.usd_balance = 0; // Default balance for existing suppliers
         }
       });
 
       // Update customers to ensure balance field exists  
       trans.table('customers').toCollection().modify(customer => {
-        if (customer.balance === undefined || customer.balance === null) {
-          customer.balance = 0; // Default balance for existing customers
+        if (customer.lb_balance === undefined || customer.lb_balance === null) {
+          customer.lb_balance = 0; // Default balance for existing customers
+        }
+        if (customer.usd_balance === undefined || customer.usd_balance === null) {
+          customer.usd_balance = 0; // Default balance for existing customers
         }
       });
 
