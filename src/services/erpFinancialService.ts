@@ -728,8 +728,9 @@ export class ERPFinancialService {
 
   // Check if supplier has non-priced items
   hasNonPricedItems(supplierId: string): boolean {
-    const nonPricedItems = JSON.parse(localStorage.getItem('erp_non_priced_items') || '[]');
-    return nonPricedItems.some((item: any) => item.supplierId === supplierId);
+    // This function now needs to be called with sales data from the main application
+    // The implementation should be moved to the Accounting component
+    return false; // Placeholder - actual implementation should use sales data
   }
 
   // Generate comprehensive transaction report

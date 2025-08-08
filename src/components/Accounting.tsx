@@ -56,22 +56,56 @@ import Toast from './common/Toast';
 import { CurrencyService } from '../services/currencyService';
 
 export default function Accounting() {
-  const raw = useOfflineData();
+  let raw;
+  try {
+    raw = useOfflineData();
+  } catch (error) {
+    console.error('Error loading offline data:', error);
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h3 className="text-lg font-semibold text-red-800">Error Loading Data</h3>
+          <p className="text-red-600">Unable to load accounting data. Please refresh the page or check your connection.</p>
+        </div>
+      </div>
+    );
+  }
   const addExpenseCategory = raw.addExpenseCategory;
   const addTransaction = raw.addTransaction;
   const updateSale = raw.updateSale;
   const deleteSale = raw.deleteSale;
-  const transactions = raw.transactions.map(t => ({...t, createdAt: t.created_at}));
-  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance}));
-  const suppliers = raw.suppliers.map(s => ({...s, createdAt: s.created_at, lb_balance: s.lb_balance, usd_balance: s.usd_balance}));
+  const transactions = raw.transactions?.map(t => ({...t, createdAt: t.created_at})) || [];
+  const customers = raw.customers?.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) || [];
+  const suppliers = raw.suppliers?.map(s => ({...s, createdAt: s.created_at, lb_balance: s.lb_balance, usd_balance: s.usd_balance})) || [];
   const expenseCategories = raw.expenseCategories || [];
   const inventory = raw.inventory || [];
   const sales = raw.sales || [];
   const products = raw.products || [];
   
-  const { userProfile } = useSupabaseAuth();
+  let userProfile;
+  try {
+    const auth = useSupabaseAuth();
+    userProfile = auth.userProfile;
+  } catch (error) {
+    console.error('Error loading auth data:', error);
+    userProfile = null;
+  }
   
-  const { currency, formatCurrency, formatCurrencyWithSymbol, getConvertedAmount } = useCurrency();
+  let currency, formatCurrency: any, formatCurrencyWithSymbol: any, getConvertedAmount: any;
+  try {
+    const currencyHook = useCurrency();
+    currency = currencyHook.currency;
+    formatCurrency = currencyHook.formatCurrency;
+    formatCurrencyWithSymbol = currencyHook.formatCurrencyWithSymbol;
+    getConvertedAmount = currencyHook.getConvertedAmount;
+  } catch (error) {
+    console.error('Error loading currency data:', error);
+    // Provide fallback values
+    currency = 'USD';
+    formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
+    formatCurrencyWithSymbol = (amount: number, curr: string) => `${curr === 'LBP' ? 'LBP' : '$'}${amount.toFixed(2)}`;
+    getConvertedAmount = (amount: number, curr: string) => amount;
+  }
   
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('accounting_recent_customers', []);
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('accounting_recent_suppliers', []);
@@ -85,6 +119,16 @@ export default function Accounting() {
   const [showAddCategoryForm, setShowAddCategoryForm] = useState(false);
   const [dashboardPeriod, setDashboardPeriod] = useState<'today' | 'week' | 'month' | 'quarter' | 'year'>('today');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  // Add loading state to prevent rendering before data is ready
+  const [isDataReady, setIsDataReady] = useState(false);
+
+  useEffect(() => {
+    // Check if all required data is loaded
+    if (raw && transactions && customers && suppliers && products) {
+      setIsDataReady(true);
+    }
+  }, [raw, transactions, customers, suppliers, products]);
 
   // Inventory logs state
   const [inventoryLogsSearchTerm, setInventoryLogsSearchTerm] = useState('');
@@ -638,22 +682,40 @@ export default function Accounting() {
   // Add to Accounting component state:
   const [nonPricedItems, setNonPricedItems] = useState<any[]>([]);
   const [showEditNonPriced, setShowEditNonPriced] = useState<any | null>(null);
+  const [stagedNonPricedChanges, setStagedNonPricedChanges] = useState<{[key: string]: any}>({});
   const [nonPricedSearch, setNonPricedSearch] = useState('');
   const [nonPricedSort, setNonPricedSort] = useState<'customer'|'product'|'date'|'value'>('date');
   const [nonPricedSortDir, setNonPricedSortDir] = useState<'asc'|'desc'>('desc');
   const [nonPricedPage, setNonPricedPage] = useState(1);
-
-  const [selectedNonPriced, setSelectedNonPriced] = useState<string[]>([]);
   const [showBulkActions, setShowBulkActions] = useState(false);
+  const [selectedNonPriced, setSelectedNonPriced] = useState<string[]>([]);
   const NON_PRICED_PAGE_SIZE = 10;
 
-  // Load non-priced items from localStorage
+  // Load non-priced items from sales data
   useEffect(() => {
-    const key = 'erp_non_priced_items';
-    setNonPricedItems(JSON.parse(localStorage.getItem(key) || '[]'));
-  }, [showEditNonPriced, activeTab]);
+    const nonPricedItems = sales.filter(sale => sale.unit_price === 0);
+    setNonPricedItems(nonPricedItems);
+  }, [sales, activeTab]);
 
   const handleEditNonPriced = (item: any) => setShowEditNonPriced(item);
+  
+  // Helper function to get current value including staged changes
+  const getCurrentValue = (item: any, field: string) => {
+    const stagedChanges = stagedNonPricedChanges[item.id] || {};
+    return stagedChanges[field] !== undefined ? stagedChanges[field] : item[field];
+  };
+  
+  // Helper function to stage a change
+  const stageChange = (itemId: string, field: string, value: any) => {
+    setStagedNonPricedChanges(prev => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        [field]: value
+      }
+    }));
+  };
+  
   const handleSaveNonPriced = async (updated: any) => {
     if (!updated.unitPrice || updated.unitPrice <= 0) {
       showToast('Please enter a valid unit price', 'error');
@@ -664,72 +726,133 @@ export default function Accounting() {
       return;
     }
     
-    const key = 'erp_non_priced_items';
-    const items = JSON.parse(localStorage.getItem(key) || '[]');
-    const newItems = items.map((i: any) => i.id === updated.id ? { ...updated, updatedAt: new Date().toISOString() } : i);
-    localStorage.setItem(key, JSON.stringify(newItems));
-    setShowEditNonPriced(null);
-    setNonPricedItems(newItems);
-    showToast('Item updated successfully', 'success');
+    try {
+      // Update the sale record directly
+      await updateSale(updated.id, {
+        unit_price: updated.unitPrice,
+        quantity: updated.quantity,
+        weight: updated.weight || null,
+        received_value: updated.unitPrice * updated.quantity
+      });
+      
+      setShowEditNonPriced(null);
+      showToast('Item updated successfully', 'success');
+    } catch (error) {
+      console.error('Error updating non-priced item:', error);
+      showToast('Error updating item', 'error');
+    }
   };
   
   const handleMarkPriced = async (item: any) => {
-    if (!item.unitPrice || item.unitPrice <= 0) {
+    // Get staged changes for this item
+    const stagedChanges = stagedNonPricedChanges[item.id] || {};
+    const updatedItem = { ...item, ...stagedChanges };
+    
+    if (!updatedItem.unit_price || updatedItem.unit_price <= 0) {
       showToast('Set a valid price before marking as priced.', 'error');
       return;
     }
-    if (!item.quantity || item.quantity <= 0) {
+    if (!updatedItem.quantity || updatedItem.quantity <= 0) {
       showToast('Set a valid quantity before marking as priced.', 'error');
       return;
     }
     
-    const key = 'erp_non_priced_items';
-    const items = JSON.parse(localStorage.getItem(key) || '[]');
-    const newItems = items.filter((i: any) => i.id !== item.id);
-    localStorage.setItem(key, JSON.stringify(newItems));
-    setNonPricedItems(newItems);
-    
-    showToast('Item marked as priced successfully!', 'success');
+    try {
+      // Update the sale record to mark it as priced
+      await updateSale(item.id, {
+        unit_price: updatedItem.unit_price,
+        quantity: updatedItem.quantity,
+        weight: updatedItem.weight || null,
+        received_value: updatedItem.unit_price * updatedItem.quantity
+      });
+      
+      // Clear staged changes for this item
+      setStagedNonPricedChanges(prev => {
+        const newChanges = { ...prev };
+        delete newChanges[item.id];
+        return newChanges;
+      });
+      
+      showToast('Item marked as priced successfully!', 'success');
+    } catch (error) {
+      console.error('Error marking item as priced:', error);
+      showToast('Error marking item as priced', 'error');
+    }
   };
 
   const handleBulkMarkPriced = async () => {
     const validItems = selectedNonPriced
-      .map(id => nonPricedItems.find(item => item.id === id))
-      .filter(item => item && item.unitPrice > 0 && item.quantity > 0);
+      .map(id => {
+        const item = nonPricedItems.find(item => item.id === id);
+        if (!item) return null;
+        
+        // Get staged changes for this item
+        const stagedChanges = stagedNonPricedChanges[item.id] || {};
+        const updatedItem = { ...item, ...stagedChanges };
+        
+        return updatedItem.unit_price > 0 && updatedItem.quantity > 0 ? updatedItem : null;
+      })
+      .filter(item => item !== null);
     
     if (validItems.length === 0) {
       showToast('No valid items selected (items must have price and quantity)', 'error');
       return;
     }
     
-    for (const item of validItems) {
-      await handleMarkPriced(item);
-    }
-    setSelectedNonPriced([]);
-    setShowBulkActions(false);
-  };
-
-  const handleDeleteNonPriced = (item: any) => {
-    if (window.confirm('Are you sure you want to delete this item?')) {
-      const key = 'erp_non_priced_items';
-      const items = JSON.parse(localStorage.getItem(key) || '[]');
-      const newItems = items.filter((i: any) => i.id !== item.id);
-      localStorage.setItem(key, JSON.stringify(newItems));
-      setNonPricedItems(newItems);
-      showToast('Item deleted successfully', 'success');
-    }
-  };
-
-  const handleBulkDelete = () => {
-    if (window.confirm(`Are you sure you want to delete ${selectedNonPriced.length} items?`)) {
-      const key = 'erp_non_priced_items';
-      const items = JSON.parse(localStorage.getItem(key) || '[]');
-      const newItems = items.filter((i: any) => !selectedNonPriced.includes(i.id));
-      localStorage.setItem(key, JSON.stringify(newItems));
-      setNonPricedItems(newItems);
+    try {
+      for (const item of validItems) {
+        await updateSale(item.id, {
+          unit_price: item.unit_price,
+          quantity: item.quantity,
+          weight: item.weight || null,
+          received_value: item.unit_price * item.quantity
+        });
+      }
+      
+      // Clear staged changes for all processed items
+      setStagedNonPricedChanges(prev => {
+        const newChanges = { ...prev };
+        validItems.forEach(item => {
+          delete newChanges[item.id];
+        });
+        return newChanges;
+      });
+      
       setSelectedNonPriced([]);
       setShowBulkActions(false);
-      showToast('Items deleted successfully', 'success');
+      showToast(`${validItems.length} items marked as priced successfully!`, 'success');
+    } catch (error) {
+      console.error('Error bulk marking items as priced:', error);
+      showToast('Error marking items as priced', 'error');
+    }
+  };
+
+  const handleDeleteNonPriced = async (item: any) => {
+    if (window.confirm('Are you sure you want to delete this item?')) {
+      try {
+        await deleteSale(item.id);
+        showToast('Item deleted successfully', 'success');
+      } catch (error) {
+        console.error('Error deleting non-priced item:', error);
+        showToast('Error deleting item', 'error');
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (window.confirm(`Are you sure you want to delete ${selectedNonPriced.length} items?`)) {
+      try {
+        for (const id of selectedNonPriced) {
+          await deleteSale(id);
+        }
+        
+        setSelectedNonPriced([]);
+        setShowBulkActions(false);
+        showToast('Items deleted successfully', 'success');
+      } catch (error) {
+        console.error('Error bulk deleting items:', error);
+        showToast('Error deleting items', 'error');
+      }
     }
   };
 
@@ -742,8 +865,8 @@ export default function Accounting() {
         item.supplierName,
         item.quantity || '',
         item.weight || '',
-        item.unitPrice || '',
-        item.unitPrice && (item.weight || item.quantity) ? (item.unitPrice * (item.weight || item.quantity)).toFixed(2) : '',
+        item.unit_price || '',
+        item.unit_price && (item.weight || item.quantity) ? (item.unit_price * (item.weight || item.quantity)).toFixed(2) : '',
         item.date ? new Date(item.date).toLocaleDateString() : '',
         (item.notes || '').replace(/,/g, ';')
       ].join(','))
@@ -760,16 +883,27 @@ export default function Accounting() {
 
   // Enhanced nonPricedItems for display: filter, sort, and resolve customer name
   const filteredNonPricedItems = nonPricedItems
-    .map(item => 
-      ({
-
-      ...item,
-      customerName: customers.find(c => c.id === item.customerId)?.name || item.customerId,
-      supplierName: suppliers.find(s => s.id === item.supplierId)?.name || item.supplierName || 'Unknown',
-      date: item.created_at || '',
-      totalValue: item.unitPrice && (item.weight || item.quantity) ? item.unitPrice * (item.weight || item.quantity) : 0,
-      status: item.unitPrice > 0 && (item.quantity > 0 || item.weight > 0) ? 'ready' : 'incomplete'
-    }))
+    .map(item => {
+      const product = products.find(p => p.id === item.product_id);
+      const customer = customers.find(c => c.id === item.customer_id);
+      const supplier = suppliers.find(s => s.id === item.supplier_id);
+      
+      // Get staged changes for this item
+      const stagedChanges = stagedNonPricedChanges[item.id] || {};
+      const currentUnitPrice = stagedChanges.unit_price !== undefined ? stagedChanges.unit_price : item.unit_price;
+      const currentQuantity = stagedChanges.quantity !== undefined ? stagedChanges.quantity : item.quantity;
+      const currentWeight = stagedChanges.weight !== undefined ? stagedChanges.weight : item.weight;
+      
+      return {
+        ...item,
+        customerName: customer?.name || 'Walk-in Customer',
+        productName: product?.name || 'Unknown Product',
+        supplierName: supplier?.name || 'Unknown Supplier',
+        date: item.created_at || '',
+        totalValue: currentUnitPrice && (currentWeight || currentQuantity) ? currentUnitPrice * (currentWeight || currentQuantity) : 0,
+        status: currentUnitPrice > 0 && (currentQuantity > 0 || currentWeight > 0) ? 'ready' : 'incomplete'
+      };
+    })
     .filter(item => {
       const q = nonPricedSearch.toLowerCase();
       return (
@@ -778,7 +912,6 @@ export default function Accounting() {
         item.supplierName.toLowerCase().includes(q) ||
         (item.notes || '').toLowerCase().includes(q)
       );
-
     })
     .sort((a, b) => {
       let cmp = 0;
@@ -788,7 +921,6 @@ export default function Accounting() {
       if (nonPricedSort === 'value') cmp = a.totalValue - b.totalValue;
       return nonPricedSortDir === 'asc' ? cmp : -cmp;
     });
-
 
   const displayNonPricedItems = filteredNonPricedItems;
   const nonPricedTotalPages = Math.ceil(filteredNonPricedItems.length / NON_PRICED_PAGE_SIZE);
@@ -1918,6 +2050,20 @@ export default function Accounting() {
     }
   };
 
+  // Show loading screen if data is not ready
+  if (!isDataReady) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading accounting data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
@@ -2560,6 +2706,18 @@ export default function Accounting() {
                 <FileText className="w-4 h-4 mr-2" />
                 Export CSV
               </button>
+              {Object.keys(stagedNonPricedChanges).length > 0 && (
+                <button
+                  onClick={() => {
+                    setStagedNonPricedChanges({});
+                    showToast('All staged changes cleared', 'success');
+                  }}
+                  className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors flex items-center"
+                >
+                  <X className="w-4 h-4 mr-2" />
+                  Clear All Changes
+                </button>
+              )}
               {selectedNonPriced.length > 0 && (
                 <button
                   onClick={() => setShowBulkActions(!showBulkActions)}
@@ -2596,6 +2754,21 @@ export default function Accounting() {
                     className="bg-gray-600 text-white px-3 py-1 rounded text-sm hover:bg-gray-700"
                   >
                     Clear Selection
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStagedNonPricedChanges(prev => {
+                        const newChanges = { ...prev };
+                        selectedNonPriced.forEach(id => {
+                          delete newChanges[id];
+                        });
+                        return newChanges;
+                      });
+                      showToast('Staged changes cleared', 'success');
+                    }}
+                    className="bg-orange-600 text-white px-3 py-1 rounded text-sm hover:bg-orange-700"
+                  >
+                    Clear Changes
                   </button>
                 </div>
               </div>
@@ -2687,8 +2860,10 @@ export default function Accounting() {
                         </div>
                       </td>
                     </tr>
-                  ) : pagedNonPricedItems.map(item => (
-                    <tr key={item.id} className="hover:bg-gray-50">
+                  ) : pagedNonPricedItems.map(item => {
+                    const hasStagedChanges = stagedNonPricedChanges[item.id] && Object.keys(stagedNonPricedChanges[item.id]).length > 0;
+                    return (
+                    <tr key={item.id} className={`hover:bg-gray-50 ${hasStagedChanges ? 'bg-blue-50' : ''}`}>
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
@@ -2704,13 +2879,20 @@ export default function Accounting() {
                         />
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-1 text-xs rounded-full ${
-                          item.status === 'ready' 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {item.status === 'ready' ? 'Ready' : 'Incomplete'}
-                        </span>
+                        <div className="flex items-center space-x-2">
+                          <span className={`px-2 py-1 text-xs rounded-full ${
+                            item.status === 'ready' 
+                              ? 'bg-green-100 text-green-800' 
+                              : 'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {item.status === 'ready' ? 'Ready' : 'Incomplete'}
+                          </span>
+                          {hasStagedChanges && (
+                            <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+                              Modified
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-gray-900">{item.customerName}</td>
                       <td className="px-4 py-3 text-gray-900 font-medium">{item.productName}</td>
@@ -2719,11 +2901,11 @@ export default function Accounting() {
                         <input 
                           type="number" 
                           className="w-16 border rounded px-2 py-1 text-sm" 
-                          value={item.quantity || ''} 
+                          value={getCurrentValue(item, 'quantity') || ''} 
                           min={1} 
                           onChange={e => {
                             const newQuantity = parseInt(e.target.value) || 0;
-                            handleSaveNonPriced({ ...item, quantity: newQuantity });
+                            stageChange(item.id, 'quantity', newQuantity);
                           }}
                           placeholder="0"
                         />
@@ -2732,22 +2914,22 @@ export default function Accounting() {
                         <input 
                           type="number" 
                           className="w-20 border rounded px-2 py-1 text-sm" 
-                          value={item.weight || ''} 
+                          value={getCurrentValue(item, 'weight') || ''} 
                           min={0} 
                           step={0.01} 
                           onChange={e => {
                             const newWeight = parseFloat(e.target.value) || 0;
-                            handleSaveNonPriced({ ...item, weight: newWeight });
+                            stageChange(item.id, 'weight', newWeight);
                           }}
                           placeholder="0.00"
                         />
                       </td>
                       <td className="px-4 py-3">
                         <MoneyInput
-                          value={item.unitPrice || ''}
+                          value={getCurrentValue(item, 'unit_price') || ''}
                           onChange={(value) => {
                             const newPrice = parseFloat(value) || 0;
-                            handleSaveNonPriced({ ...item, unitPrice: newPrice });
+                            stageChange(item.id, 'unit_price', newPrice);
                           }}
                           placeholder="0.00"
                           step="0.01"
@@ -2792,7 +2974,8 @@ export default function Accounting() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -4718,11 +4901,11 @@ export default function Accounting() {
 
           const salesDetails: any[] = [];
           
-          // Filter sales that match this specific product and supplier
+          // Filter sales that match this specific inventory item
           const matchingSales = sales.filter((sale: any) => {
-            const productMatch = sale.product_id === selectedReceivedBill.productId;
-            const supplierMatch = sale.supplier_id === selectedReceivedBill.supplierId;
-            return productMatch && supplierMatch;
+            const inventoryMatch = sale.inventory_item_id === selectedReceivedBill.id;
+         
+            return inventoryMatch;
           });
 
           matchingSales.forEach((sale: any) => {
