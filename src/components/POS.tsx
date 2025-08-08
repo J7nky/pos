@@ -167,70 +167,69 @@ export default function POS() {
     return null;
   };
 
-  const getProductSuppliers = (productId: string) => {
-    // Get unique suppliers for this product from inventory
-    const supplierIds = [...new Set(
-      inventory
-        .filter(item => item.product_id === productId && item.quantity > 0)
-        .map(item => item.supplier_id)
-    )];
+  const getProductInventoryItems = (productId: string) => {
+    // Get all individual inventory items for this product
+    const productInventoryItems = inventory
+      .filter(item => item.product_id === productId && item.quantity > 0)
+      .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime());
     
-    return supplierIds.map(supplierId => {
-      const supplier = suppliers.find(s => s.id === supplierId);
-      const totalStock = getSupplierStock(productId, supplierId);
+    return productInventoryItems.map(inventoryItem => {
+      const supplier = suppliers.find(s => s.id === inventoryItem.supplier_id);
       return {
-        supplierId,
+        inventoryItemId: inventoryItem.id,
+        supplierId: inventoryItem.supplier_id,
         supplierName: supplier?.name || 'Unknown Supplier',
-        quantity: totalStock
+        quantity: inventoryItem.quantity,
+        receivedQuantity: inventoryItem.received_quantity,
+        price: inventoryItem.price || 0,
+        type: inventoryItem.type || 'cash',
+        receivedAt: inventoryItem.received_at || inventoryItem.created_at
       };
     });
   };
 
-  // In addToCart, only allow up to available stock
-  const addToCart = (productId: string, supplierId: string) => {
+  // In addToCart, add specific inventory item to cart
+  const addToCart = (productId: string, inventoryItemId: string) => {
     const product = products.find(p => p.id === productId);
-    const supplier = suppliers.find(s => s.id === supplierId);
-    if (!product || !supplier) return;
+    const inventoryItem = inventory.find(item => item.id === inventoryItemId);
+    if (!product || !inventoryItem) return;
     
+    const supplier = suppliers.find(s => s.id === inventoryItem.supplier_id);
+    if (!supplier) return;
+    
+    // Check if we already have this specific inventory item in the cart
     const existingItem = activeTab.cart.find(item => 
-      item.productId === productId && item.supplierId === supplierId
+      item.inventoryItemId === inventoryItemId
     );
-    const availableStock = getSupplierStock(productId, supplierId);
-    const currentQty = existingItem ? existingItem.quantity : 0;
-    
-    if (currentQty >= availableStock) return; // Prevent adding more than available
     
     if (existingItem) {
-      const updatedCart = activeTab.cart.map(item =>
-        item.productId === productId && item.supplierId === supplierId && item.quantity < availableStock
-          ? { ...item, quantity: item.quantity + 1, totalPrice: (item.quantity + 1) * item.unitPrice }
-          : item
-      );
-      updateActiveTab({ cart: updatedCart });
-    } else {
-      if (availableStock > 0) {
-        // Get the oldest inventory item for this product-supplier to determine type and price
-        const oldestInventoryItem = inventory
-          .filter(item => item.product_id === productId && item.supplier_id === supplierId && item.quantity > 0)
-          .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime())[0];
-        
-        const newItem: SaleItem = {
-          id: uuidv4(),
-          productId,
-          productName: product.name,
-          supplierId,
-          supplierName: supplier.name,
-          quantity: 1,
-          weight: undefined, // Weight will be entered manually during sale
-          unitPrice: oldestInventoryItem?.price || 0.00, // Use price from oldest inventory item
-          totalPrice: Math.round((oldestInventoryItem?.price || 0.00) * 100) / 100,
-          paymentMethod: activeTab.paymentMethod, // Set payment method from current tab
-          notes: '',
-          inventoryType: oldestInventoryItem?.type || 'cash', // Track the inventory type
-          inventoryItemId: oldestInventoryItem?.id || '' // Added to match database schema
-        };
-        updateActiveTab({ cart: [...activeTab.cart, newItem] });
+      // If this specific inventory item is already in cart, increase quantity
+      if (existingItem.quantity < inventoryItem.quantity) {
+        const updatedCart = activeTab.cart.map(item =>
+          item.inventoryItemId === inventoryItemId
+            ? { ...item, quantity: item.quantity + 1, totalPrice: (item.quantity + 1) * item.unitPrice }
+            : item
+        );
+        updateActiveTab({ cart: updatedCart });
       }
+    } else {
+      // Add new item with this specific inventory item
+      const newItem: SaleItem = {
+        id: uuidv4(),
+        productId,
+        productName: product.name,
+        supplierId: inventoryItem.supplier_id,
+        supplierName: supplier.name,
+        quantity: 1,
+        weight: undefined, // Weight will be entered manually during sale
+        unitPrice: inventoryItem.price || 0.00, // Use price from this specific inventory item
+        totalPrice: Math.round((inventoryItem.price || 0.00) * 100) / 100,
+        paymentMethod: activeTab.paymentMethod, // Set payment method from current tab
+        notes: '',
+        inventoryType: inventoryItem.type || 'cash', // Track the inventory type
+        inventoryItemId: inventoryItem.id // Use the specific inventory item ID
+      };
+      updateActiveTab({ cart: [...activeTab.cart, newItem] });
     }
   };
 
@@ -245,9 +244,9 @@ export default function POS() {
           if (isNaN(numValue) || numValue < 1) {
             updatedItem.quantity = 1;
           } else {
-            // For non-priced items, we might want to be more lenient with stock limits
-            // but still enforce basic constraints
-            const availableStock = getSupplierStock(item.productId, item.supplierId);
+            // Get the specific inventory item to check its available quantity
+            const inventoryItem = inventory.find(inv => inv.id === item.inventoryItemId);
+            const availableStock = inventoryItem ? inventoryItem.quantity : 0;
             if (availableStock > 0 && numValue > availableStock) {
               updatedItem.quantity = availableStock;
             } else {
@@ -303,6 +302,7 @@ export default function POS() {
             quantity: item.quantity,
             weight: item.weight,
             notes: item.notes,
+            inventoryItemId: item.inventoryItemId, // Add the specific inventory item ID
             createdAt: new Date().toISOString(),
             status: 'non-priced',
           });
@@ -344,10 +344,6 @@ export default function POS() {
           await raw.openCashDrawer(openingAmount, userProfile.id);
         }
       }
-      // Note: Inventory deduction is handled automatically by the addSale function
-      // No need to manually deduct here as it would cause double deduction
-      
-
       await addSale(
         activeTab.cart.map(item => ({
           id: uuidv4(),
@@ -434,7 +430,8 @@ export default function POS() {
         email: customerForm.email || '',
         address: customerForm.address || '',
         is_active: customerForm.isActive ?? true,
-        balance: 0,
+        lb_balance: 0,
+        usd_balance: 0,
       });
       await raw.refreshData();
       // Find the new customer by name and phone (best effort)
@@ -622,9 +619,8 @@ export default function POS() {
           <ProductGrid 
             filteredProducts={filteredProducts} 
             getProductStock={getProductStock} 
-            getProductSuppliers={getProductSuppliers} 
+            getProductInventoryItems={getProductInventoryItems} 
             addToCart={addToCart} 
-            getSupplierStock={getSupplierStock} 
           />
         </div>
 
@@ -635,8 +631,8 @@ export default function POS() {
             activeTab={activeTab} 
             updateCartItem={updateCartItem} 
             removeFromCart={removeFromCart} 
-            getSupplierStock={getSupplierStock} 
             formatCurrency={formatCurrency} 
+            inventory={inventory}
           />
 
           {/* Totals and Payment */}
@@ -795,29 +791,35 @@ export default function POS() {
   );
 }
 
-const ProductGrid = ({ filteredProducts, getProductStock, getProductSuppliers, addToCart, getSupplierStock }: any) => (
+const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryItems, addToCart }: any) => (
   <div className="bg-white rounded-lg shadow-sm p-6">
     <h2 className="text-lg font-semibold text-gray-900 mb-4">Products</h2>
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
       {(filteredProducts || []).map((product: any) => {
         const stock = getProductStock(product.id);
-        const productSuppliers = getProductSuppliers(product.id) || [];
+        const productInventoryItems = getProductInventoryItems(product.id) || [];
         return (
           <div key={product.id} className="border border-gray-200 rounded-lg p-3">
             <img src={product.image} alt={product.name} className="w-full h-24 object-cover rounded-lg mb-2" />
             <h3 className="font-medium text-gray-900 text-sm">{product.name}</h3>
             <p className={`text-xs mb-2 ${stock < 5 ? 'text-red-600 font-bold' : 'text-gray-500'}`}>Stock: {stock}</p>
-            {productSuppliers.length > 0 ? (
+            {productInventoryItems.length > 0 ? (
               <div className="space-y-1">
-                {productSuppliers.map((supplier: any) => (
+                {productInventoryItems.map((inventoryItem: any) => (
                   <button
-                    key={supplier.supplierId}
-                    onClick={() => addToCart(product.id, supplier.supplierId)}
+                    key={inventoryItem.inventoryItemId}
+                    onClick={() => addToCart(product.id, inventoryItem.inventoryItemId)}
                     className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs py-1 px-2 rounded transition-colors"
-                    disabled={getSupplierStock(product.id, supplier.supplierId) === 0}
+                    disabled={inventoryItem.quantity === 0}
                   >
                     <div className="text-left">
-                      <div>{supplier.supplierName} ({getSupplierStock(product.id, supplier.supplierId)})</div>
+                      <div>{inventoryItem.supplierName} ({inventoryItem.quantity})</div>
+                      {inventoryItem.price > 0 && (
+                        <div className="text-xs text-gray-600">${inventoryItem.price.toFixed(2)}</div>
+                      )}
+                      <div className="text-xs text-gray-500">
+                        {"Recieved Quantity: " + inventoryItem.receivedQuantity}
+                      </div>
                     </div>
                   </button>
                 ))}
@@ -832,7 +834,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductSuppliers, a
   </div>
 );
 
-const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, formatCurrency }: any) => (
+const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory }: any) => (
   <div className="bg-white rounded-lg shadow-sm">
     <div className="p-4 border-b flex items-center">
       <ShoppingCart className="w-5 h-5 mr-2 text-gray-600" />
@@ -841,71 +843,76 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, getSupplierStock, for
     <div className="max-h-64 overflow-y-auto">
       {(activeTab?.cart || []).length > 0 ? (
         <div className="divide-y divide-gray-200">
-          {(activeTab?.cart || []).map((item: any) => (
-            <div key={item.id} className="p-4">
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex-1">
-                  <h4 className="font-medium text-gray-900 text-sm">{item.productName}</h4>
-                  <p className="text-xs text-gray-500">{item.supplierName}</p>
+          {(activeTab?.cart || []).map((item: any) => {
+            // Get the specific inventory item for this cart item
+            const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
+            const availableStock = inventoryItem ? inventoryItem.quantity : 0;
+            
+            return (
+              <div key={item.id} className="p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1">
+                    <h4 className="font-medium text-gray-900 text-sm">{item.productName}</h4>
+                    <p className="text-xs text-gray-500">{item.supplierName}</p>
+                  </div>
+                  <button onClick={() => removeFromCart(item.id)} className="text-red-500 hover:text-red-700 p-1">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
-                <button onClick={() => removeFromCart(item.id)} className="text-red-500 hover:text-red-700 p-1">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-xs text-gray-500">Qty</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max={getSupplierStock(item.productId, item.supplierId)}
-                    value={item.quantity ?? ''}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === '') {
-                        updateCartItem(item.id, 'quantity', 1);
-                      } else {
-                        const numValue = parseInt(value);
-                        if (!isNaN(numValue)) {
-                          const availableStock = getSupplierStock(item.productId, item.supplierId);
-                          const clampedValue = Math.max(1, Math.min(availableStock, numValue));
-                          updateCartItem(item.id, 'quantity', clampedValue);
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-xs text-gray-500">Qty</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max={availableStock}
+                      value={item.quantity ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === '') {
+                          updateCartItem(item.id, 'quantity', 1);
+                        } else {
+                          const numValue = parseInt(value);
+                          if (!isNaN(numValue)) {
+                            const clampedValue = Math.max(1, Math.min(availableStock, numValue));
+                            updateCartItem(item.id, 'quantity', clampedValue);
+                          }
                         }
-                      }
-                    }}
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
-                  />
+                      }}
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500">Weight</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={item.weight ?? ''}
+                      onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="kg"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500">Price</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={item.unitPrice ?? ''}
+                      onChange={(e) => updateCartItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="0.00"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs text-gray-500">Weight</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={item.weight ?? ''}
-                    onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
-                    placeholder="kg"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Price</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={item.unitPrice ?? ''}
-                    onChange={(e) => updateCartItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
-                    placeholder="0.00"
-                  />
+                <div className="mt-2 text-right">
+                  <span className="font-medium text-gray-900">{formatCurrency(item.totalPrice)}</span>
+                  {item.weight && <div className="text-xs text-blue-600">{item.weight} kg</div>}
                 </div>
               </div>
-              <div className="mt-2 text-right">
-                <span className="font-medium text-gray-900">{formatCurrency(item.totalPrice)}</span>
-                {item.weight && <div className="text-xs text-blue-600">{item.weight} kg</div>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="p-8 text-center text-gray-500">

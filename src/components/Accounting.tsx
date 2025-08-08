@@ -412,7 +412,6 @@ export default function Accounting() {
         created_by: userProfile?.id || ''
       });
       
-      showToast(`Payment received! ${entity.name} balance: ${formatCurrency(entityDebtInPaymentCurrency)} → ${formatCurrency(newDebtInPaymentCurrency)}`, 'success');
     } catch (err) {
     console.log(err);
       showToast('Failed to record payment.', 'error');
@@ -1457,12 +1456,14 @@ export default function Accounting() {
     const bills: any[] = [];
 
     try {
-      // Get all inventory items (both commission and cash)
+      // Get all inventory items (both commission and cash) - including items with quantity = 0 for review purposes
       const allInventoryItems = inventory.filter(item => 
         item.product_id && 
         item.supplier_id
+        // Note: We include items with quantity = 0 for received bills review
+        // These items are kept in the database instead of being deleted when quantity reaches 0
       );
-      
+      console.log('Inventory', inventory);
       console.log('Debug - All inventory items found:', allInventoryItems.length);
       
       allInventoryItems.forEach(item => {
@@ -1526,6 +1527,19 @@ export default function Accounting() {
           // For existing items without received_quantity, calculate it from current quantity + sold items
           originalReceivedQuantity = item.quantity + totalSoldFromThisItem;
           
+          // Special handling for items with quantity = 0 that haven't been sold yet
+          // These items might need received_quantity to be set manually
+          if (item.quantity === 0 && totalSoldFromThisItem === 0) {
+            console.log('Debug - Item with quantity = 0 and no sales, needs received_quantity:', {
+              itemId: item.id,
+              productName: product.name,
+              received_quantity: item.received_quantity,
+              quantity: item.quantity,
+              totalSoldFromThisItem,
+              calculated_original: originalReceivedQuantity
+            });
+          }
+          
           // Debug: Log items that need received_quantity
           console.log('Debug - Item needs received_quantity:', {
             itemId: item.id,
@@ -1544,7 +1558,10 @@ export default function Accounting() {
         
         // Calculate progress based on original received quantity
         // Progress = (Total Sold / Original Received Quantity) × 100
-        const progress = originalReceivedQuantity > 0 ? (originalReceivedQuantity-remainingQuantity) : 0;
+        const soldFromThisItem = Math.max(originalReceivedQuantity - remainingQuantity, 0);
+        const progress = originalReceivedQuantity > 0 
+          ? (soldFromThisItem / originalReceivedQuantity) * 100 
+          : 0;
         
         // Ensure we have valid values
         const validOriginalQuantity = Math.max(originalReceivedQuantity, 0);
@@ -1965,7 +1982,6 @@ export default function Accounting() {
       <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit overflow-x-auto">
         {[
           { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
-          { id: 'supplier-balances', label: 'Supplier Balances', icon: Building2 },
           { id: 'expenses', label: 'Expenses', icon: Receipt },
           { id: 'nonpriced', label: 'Non Priced Items', icon: AlertCircle },
           { id: 'inventory-logs', label: 'Inventory Logs', icon: Package },
@@ -2283,158 +2299,158 @@ export default function Accounting() {
 
     
       {
-      activeTab === 'supplier-balances' && (
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold text-gray-900">Supplier Balances</h2>
-            <button
-              onClick={() => setShowForm('pay')}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center"
-            >
-              <Plus className="w-5 h-5 mr-2" />
-              Make Payment
-            </button>
-          </div>
+      // activeTab === 'supplier-balances' && (
+      //   <div className="space-y-6">
+      //     <div className="flex justify-between items-center">
+      //       <h2 className="text-xl font-semibold text-gray-900">Supplier Balances</h2>
+      //       <button
+      //         onClick={() => setShowForm('pay')}
+      //         className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center"
+      //       >
+      //         <Plus className="w-5 h-5 mr-2" />
+      //         Make Payment
+      //       </button>
+      //     </div>
 
-          {/* Search */}
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="relative">
-              <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search suppliers..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-          </div>
+      //     {/* Search */}
+      //     <div className="bg-white p-4 rounded-lg shadow-sm">
+      //       <div className="relative">
+      //         <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+      //         <input
+      //           type="text"
+      //           placeholder="Search suppliers..."
+      //           value={searchTerm}
+      //           onChange={(e) => setSearchTerm(e.target.value)}
+      //           className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+      //         />
+      //       </div>
+      //     </div>
 
-          {/* Supplier Balances Table */}
-          <div className="bg-white rounded-lg shadow-sm">
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-semibold text-gray-900">Supplier Account Balances</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Balance</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Transaction</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {suppliers
-                    .filter(supplier => supplier.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                    .sort((a, b) => a.name.localeCompare(b.name))
-                    .map(supplier => (
-                    <tr key={supplier.id} className="hover:bg-gray-50">
-                      {/* <td className="px-6 py-4">
-                        <div className="flex items-center">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 ${
-                            supplier.type === 'commission' ? 'bg-purple-100' : 'bg-blue-100'
-                          }`}>
-                            <Building2 className={`w-5 h-5 ${
-                              supplier.type === 'commission' ? 'text-purple-600' : 'text-blue-600'
-                            }`} />
-                          </div>
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
-                            <div className="text-sm text-gray-500">
-                              {supplier.type === 'commission' ? 'Commission' : 'Cash'} • ID: {supplier.id.slice(-8)}
-                            </div>
-                          </div>
-                        </div>
-                      </td> */}
-                      <td className="px-6 py-4">
-                        <div>
-                          <div className="text-lg font-semibold text-gray-900">
-                            LBP: {formatCurrency(Math.abs(supplier.lb_balance || 0))}
-                            <br />
-                            USD: {formatCurrency(Math.abs(supplier.usd_balance || 0))}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {(supplier.lb_balance || 0) > 0 || (supplier.usd_balance || 0) > 0 ? 'Credit balance' : 
-                             (supplier.lb_balance || 0) < 0 || (supplier.usd_balance || 0) < 0 ? 'Amount owed' : 
-                             'No outstanding balance'}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">{supplier.phone || 'N/A'}</div>
-                        <div className="text-sm text-gray-500">{supplier.email || 'No email'}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div>
-                          <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                            {/* {supplier.type === 'commission' ? 'Commission' : 'Cash'} */}
-                          </span>
-                          <div className="text-xs text-gray-500 mt-1">
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        {supplier.createdAt ? new Date(supplier.createdAt).toLocaleDateString() : 'N/A'}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex space-x-2">
-                                                     <button 
-                             onClick={() => {
-                               setPayForm(prev => ({ ...prev, supplierId: supplier.id }));
-                               setShowForm('pay');
-                             }}
-                             className="text-red-600 hover:text-red-800"
-                             title="Make payment"
-                           >
-                            <CreditCard className="w-4 h-4" />
-                          </button>
-                          <button className="text-blue-600 hover:text-blue-800" title="View details">
-                            <Eye className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+      //     {/* Supplier Balances Table */}
+      //     <div className="bg-white rounded-lg shadow-sm">
+      //       <div className="p-6 border-b">
+      //         <h3 className="text-lg font-semibold text-gray-900">Supplier Account Balances</h3>
+      //       </div>
+      //       <div className="overflow-x-auto">
+      //         <table className="w-full">
+      //           <thead className="bg-gray-50">
+      //             <tr>
+      //               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
+      //               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Balance</th>
+      //               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
+      //               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Transaction</th>
+      //               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+      //             </tr>
+      //           </thead>
+      //           <tbody className="divide-y divide-gray-200">
+      //             {suppliers
+      //               .filter(supplier => supplier.name.toLowerCase().includes(searchTerm.toLowerCase()))
+      //               .sort((a, b) => a.name.localeCompare(b.name))
+      //               .map(supplier => (
+      //               <tr key={supplier.id} className="hover:bg-gray-50">
+      //                 {/* <td className="px-6 py-4">
+      //                   <div className="flex items-center">
+      //                     <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 ${
+      //                       supplier.type === 'commission' ? 'bg-purple-100' : 'bg-blue-100'
+      //                     }`}>
+      //                       <Building2 className={`w-5 h-5 ${
+      //                         supplier.type === 'commission' ? 'text-purple-600' : 'text-blue-600'
+      //                       }`} />
+      //                     </div>
+      //                     <div>
+      //                       <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
+      //                       <div className="text-sm text-gray-500">
+      //                         {supplier.type === 'commission' ? 'Commission' : 'Cash'} • ID: {supplier.id.slice(-8)}
+      //                       </div>
+      //                     </div>
+      //                   </div>
+      //                 </td> */}
+      //                 <td className="px-6 py-4">
+      //                   <div>
+      //                     <div className="text-lg font-semibold text-gray-900">
+      //                       LBP: {formatCurrency(Math.abs(supplier.lb_balance || 0))}
+      //                       <br />
+      //                       USD: {formatCurrency(Math.abs(supplier.usd_balance || 0))}
+      //                     </div>
+      //                     <div className="text-xs text-gray-500">
+      //                       {(supplier.lb_balance || 0) > 0 || (supplier.usd_balance || 0) > 0 ? 'Credit balance' : 
+      //                        (supplier.lb_balance || 0) < 0 || (supplier.usd_balance || 0) < 0 ? 'Amount owed' : 
+      //                        'No outstanding balance'}
+      //                     </div>
+      //                   </div>
+      //                 </td>
+      //                 <td className="px-6 py-4">
+      //                   <div className="text-sm text-gray-900">{supplier.phone || 'N/A'}</div>
+      //                   <div className="text-sm text-gray-500">{supplier.email || 'No email'}</div>
+      //                 </td>
+      //                 <td className="px-6 py-4">
+      //                   <div>
+      //                     <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
+      //                       {/* {supplier.type === 'commission' ? 'Commission' : 'Cash'} */}
+      //                     </span>
+      //                     <div className="text-xs text-gray-500 mt-1">
+      //                     </div>
+      //                   </div>
+      //                 </td>
+      //                 <td className="px-6 py-4 text-sm text-gray-500">
+      //                   {supplier.createdAt ? new Date(supplier.createdAt).toLocaleDateString() : 'N/A'}
+      //                 </td>
+      //                 <td className="px-6 py-4">
+      //                   <div className="flex space-x-2">
+      //                                                <button 
+      //                        onClick={() => {
+      //                          setPayForm(prev => ({ ...prev, supplierId: supplier.id }));
+      //                          setShowForm('pay');
+      //                        }}
+      //                        className="text-red-600 hover:text-red-800"
+      //                        title="Make payment"
+      //                      >
+      //                       <CreditCard className="w-4 h-4" />
+      //                     </button>
+      //                     <button className="text-blue-600 hover:text-blue-800" title="View details">
+      //                       <Eye className="w-4 h-4" />
+      //                     </button>
+      //                   </div>
+      //                 </td>
+      //               </tr>
+      //             ))}
+      //           </tbody>
+      //         </table>
+      //       </div>
+      //     </div>
 
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Supplier Credit Balance</p>
-                  <p className="text-2xl font-bold text-green-600">
-                    LBP: {formatCurrency(Math.max(0, suppliers.reduce((sum, s) => sum + Math.max(0, s.lb_balance || 0), 0)))}
-                    <br />
-                    USD: {formatCurrency(Math.max(0, suppliers.reduce((sum, s) => sum + Math.max(0, s.usd_balance || 0), 0)))}
-                  </p>
-                </div>
-                <AlertTriangle className="w-8 h-8 text-green-500" />
-              </div>
-            </div>
+      //     {/* Summary Cards */}
+      //     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      //       <div className="bg-white rounded-lg shadow-sm p-6">
+      //         <div className="flex items-center justify-between">
+      //           <div>
+      //             <p className="text-sm text-gray-600">Total Supplier Credit Balance</p>
+      //             <p className="text-2xl font-bold text-green-600">
+      //               LBP: {formatCurrency(Math.max(0, suppliers.reduce((sum, s) => sum + Math.max(0, s.lb_balance || 0), 0)))}
+      //               <br />
+      //               USD: {formatCurrency(Math.max(0, suppliers.reduce((sum, s) => sum + Math.max(0, s.usd_balance || 0), 0)))}
+      //             </p>
+      //           </div>
+      //           <AlertTriangle className="w-8 h-8 text-green-500" />
+      //         </div>
+      //       </div>
 
           
 
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Commission Suppliers</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {/* {suppliers.filter(s => s.type === 'commission' ).length} */}
-                  </p>
-                </div>
-                <Target className="w-8 h-8 text-purple-500" />
-              </div>
-            </div>
-          </div>
-        </div>
-      )
+      //       <div className="bg-white rounded-lg shadow-sm p-6">
+      //         <div className="flex items-center justify-between">
+      //           <div>
+      //             <p className="text-sm text-gray-600">Commission Suppliers</p>
+      //             <p className="text-2xl font-bold text-gray-900">
+      //               {/* {suppliers.filter(s => s.type === 'commission' ).length} */}
+      //             </p>
+      //           </div>
+      //           <Target className="w-8 h-8 text-purple-500" />
+      //         </div>
+      //       </div>
+      //     </div>
+      //   </div>
+      // )
       }
 
       {activeTab === 'expenses' && (
