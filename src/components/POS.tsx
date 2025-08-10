@@ -277,9 +277,18 @@ export default function POS() {
   const total = Math.round(subtotal * 100) / 100; // Fix floating point precision
   const change = activeTab.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
+  // Validation helpers
+  const isWalkInCustomer = activeTab.selectedCustomer === 'Walk-in Customer'; // Empty string represents Walk-in Customer
+  const hasZeroPricedItem = activeTab.cart.some(i => (i.unitPrice ?? 0) === 0);
+
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
   const handleCheckout = async () => {
     if (activeTab.cart.length === 0) return;
+    // Disallow completing sale if walk-in customer and any item has zero price
+    if (!activeTab.selectedCustomer && activeTab.cart.some(i => (i.unitPrice ?? 0) === 0)) {
+      setCustomerError('Please set a price or select a customer. Walk-in sales cannot include zero-priced items.');
+      return;
+    }
     // Check for non-priced items
     // if (hasNonPriced) {
     //   if (!activeTab.selectedCustomer) {
@@ -325,9 +334,10 @@ export default function POS() {
   
   
     // Validation: if credit, require customer; if not credit and amountReceived < total, require customer
+    console.log(activeTab.paymentMethod, activeTab.amountReceived, total);
     if (
-      (activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
-      (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived || '0') < total && !activeTab.selectedCustomer)
+      (activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||  
+      (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived) < total && !activeTab.selectedCustomer)
     ) {
       setCustomerError('Customer is required for credit sales or when amount received is less than total.');
       return;
@@ -335,6 +345,15 @@ export default function POS() {
     setCustomerError(null);
     setIsProcessing(true);
     try {
+      // if credit, or the received value is less than the total, add the amount received to the customer's balance
+      if (activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived) < total) {
+        const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
+        if (customer) {
+          await raw.updateCustomer(customer.id, {
+            lb_balance: customer.lb_balance + parseFloat(activeTab.amountReceived || '0'),
+          });
+        }
+      }
       // Auto open cash drawer if not open
       if (!raw.cashDrawer || raw.cashDrawer.status !== 'open') {
         let openingAmount = 0;
@@ -356,7 +375,7 @@ export default function POS() {
           unit: 'piece',
           weight: item.weight || null,
           porterage: null,
-          unit_price: item.unitPrice,
+          unit_price: item.unitPrice||0,
           received_value: item.totalPrice || 0,
           payment_method: item.paymentMethod || activeTab.paymentMethod,
           notes: item.notes || null,
@@ -679,8 +698,9 @@ export default function POS() {
                     updateActiveTab({ selectedCustomer: value as string });
                     setCustomerError(null);
                   }}
-                  placeholder={activeTab.paymentMethod === 'credit' ? 'Select Customer' : 'Walk-in Customer'}
                   searchPlaceholder="Search customers..."
+                  placeholder={activeTab.paymentMethod === 'credit' ? 'Select Customer' : 'Walk-in Customer'}
+
                   recentSelections={recentCustomers}
                   onRecentUpdate={setRecentCustomers}
                   showAddOption={true}
@@ -773,9 +793,11 @@ export default function POS() {
 
               <button
                 onClick={handleCheckout}
-                disabled={
+                disabled={  
                   isProcessing ||
                   activeTab.cart.length === 0 ||
+                  // Block walk-in sales when any item has price 0
+                  (isWalkInCustomer && hasZeroPricedItem) ||
                   (activeTab.paymentMethod !== 'credit' && !activeTab.amountReceived) ||
                   ((activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
                   (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived || '0') < total && !activeTab.selectedCustomer))
@@ -896,12 +918,11 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                   </div>
                   <div>
                     <label className="text-xs text-gray-500">Price</label>
-                    <input
-                      type="number"
+                    <MoneyInput
                       step="0.01"
                       min="0"
                       value={item.unitPrice ?? ''}
-                      onChange={(e) => updateCartItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
+                      onChange={(value) => updateCartItem(item.id, 'unitPrice', value ? parseFloat(value) : undefined)}
                       className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
                       placeholder="0.00"
                     />

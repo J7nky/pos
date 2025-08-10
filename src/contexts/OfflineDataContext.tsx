@@ -618,7 +618,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       created_by: item.created_by || 'system'
     }));
 
-    if (items.some(item => item.payment_method === 'credit') || items.some(item => item.received_value < item.unit_price * item.quantity)) {
+    if (items.some(item => item.payment_method === 'credit') ||  items.some(item =>( item.received_value < item.unit_price * item.quantity) && item.payment_method === 'credit')) {
       const creditItems = items.filter(item => item.payment_method === 'credit' || item.received_value < item.unit_price * item.quantity);
       const creditAmount = creditItems.reduce((sum, item) => sum + item.received_value, 0);
       const customer = await db.customers.get(creditItems[0].customer_id);
