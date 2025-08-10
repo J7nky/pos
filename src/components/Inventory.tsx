@@ -1277,9 +1277,22 @@ export default function Inventory() {
     });
   };
   const deleteInventoryItem = async (item: any) => {
-    await SupabaseService.deleteInventoryItem(item.id);
-    // Mark as deleted in local database to ensure UI updates
-    await db.softDelete('inventory_items', item.id);
+    // Local-first: mark related sale_items and the inventory item as deleted for offline support
+    await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
+      const relatedSaleItems = await db.sale_items.where('inventory_item_id').equals(item.id).toArray();
+      for (const si of relatedSaleItems) {
+        await db.softDelete('sale_items', si.id);
+      }
+      await db.softDelete('inventory_items', item.id);
+    });
+
+    // Best-effort remote cleanup (safe if offline; sync will handle later)
+    try {
+      await SupabaseService.deleteSaleItemsByInventoryItem(item.id);
+      await SupabaseService.deleteInventoryItem(item.id);
+    } catch (err) {
+      console.warn('Remote delete skipped or failed; will sync later:', err);
+    }
   };
 
   // Add modal components for edit and delete

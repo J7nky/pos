@@ -125,33 +125,32 @@ export default function MoneyInput({
       
       <input
         ref={inputRef}
-        type="number"
+        type="text"
+        inputMode="decimal"
+        pattern="[0-9]*[.,]?[0-9]*"
         step={step}
         min={min}
         value={stringValue}
         onChange={handleInputChange}
         onFocus={handleInputFocus}
         onBlur={handleInputBlur}
-        className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 ${className}`}
+        className={`w-full border border-gray-300 rounded px-3 py-1.5 mb-2 pr-16 text-sm ${className}`}
         placeholder={placeholder}
         disabled={disabled}
         required={required}
       />
 
-      {/* Recommendation popup */}
-      {showRecommendation && (
-        <div 
-          className="absolute z-10 mt-1 w-auto min-w-full bg-white border border-blue-200 rounded-lg shadow-lg"
-          onMouseDown={(e) => e.preventDefault()} // Prevent blur when clicking
-        >
+      {/* Inline recommendation pill */}
+      {showRecommendation && recommendedValue && (
+        <div className="absolute inset-y-0 right-1 flex items-center">
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={handleRecommendationClick}
-            className="w-full px-3 py-2 text-left hover:bg-blue-50 rounded-lg focus:outline-none focus:bg-blue-50 text-sm transition-colors duration-150 ease-in-out"
+            title="Use recommended value"
+            className="px-3 py-2 text-[10px] leading-none bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-100 focus:outline-none"
           >
-            <div className="flex justify-between items-center gap-3">
-              <span className="font-bold text-blue-600">{recommendedValue}</span>
-            </div>
+            {recommendedValue}
           </button>
         </div>
       )}

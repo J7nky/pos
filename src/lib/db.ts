@@ -330,12 +330,13 @@ class POSDatabase extends Dexie {
   }
 
   async cleanupInvalidInventoryItems(): Promise<number> {
-    // Remove inventory items with quantity <= 0
-    const invalidItems = await this.inventory_items.filter(item => item.quantity <= 0).toArray();
+    // Keep inventory items with quantity = 0 for Received Bills history.
+    // Only remove truly invalid rows (negative quantities).
+    const invalidItems = await this.inventory_items.filter(item => item.quantity < 0).toArray();
     
     if (invalidItems.length > 0) {
       await this.inventory_items.bulkDelete(invalidItems.map(item => item.id));
-      console.log(`🧹 Cleaned up ${invalidItems.length} invalid inventory items`);
+      console.log(`🧹 Cleaned up ${invalidItems.length} invalid inventory items (negative quantity)`);
     }
     
     return invalidItems.length;

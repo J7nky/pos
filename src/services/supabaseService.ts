@@ -263,6 +263,19 @@ export class SupabaseService {
     }
   }
 
+  static async deleteSaleItemsByInventoryItem(inventoryItemId: string) {
+    try {
+      const { error } = await supabase
+        .from('sale_items')
+        .delete()
+        .eq('inventory_item_id', inventoryItemId);
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
   static async updateSaleItem(id: string, updates: Tables['sale_items']['Update']) {
     try {
       const { data, error } = await supabase
