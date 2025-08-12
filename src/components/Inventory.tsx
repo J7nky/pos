@@ -22,12 +22,19 @@ function useDebounce(value: string, delay: number) {
 const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userProfile, defaultCommissionRate, recentProducts, setRecentProducts, recentSuppliers, setRecentSuppliers, form, setForm, errors, setErrors }: any) => {
   const [loading, setLoading] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
-  const [isChecked, setIsChecked] = useState(false);
   const [bulkProducts, setBulkProducts] = useState<string[]>([]);
   const [bulkItems, setBulkItems] = useState<Record<string, { quantity: string; unit: 'kg'|'piece'|'box'|'bag'|'bundle'|'dozen'; price?: string; weight?: string }>>({});
   // Auto-focus first field when modal opens
   useEffect(() => { 
     if (open && firstInputRef.current) firstInputRef.current.focus(); 
+  }, [open]);
+  
+  // Add default product row when modal opens
+  useEffect(() => {
+    if (open && bulkProducts.length === 0) {
+      // Add a default product row when modal opens
+      addProductRow();
+    }
   }, [open]);
   
   // Keyboard support - Escape to close
@@ -39,88 +46,38 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
     return () => window.removeEventListener('keydown', handleEsc);
   }, [open, onClose]);
 
-  // Get selected product and supplier for context display
-  const selectedProduct = products.find((p: any) => p.id === form.product_id);
+  // Get selected supplier for context display
   const selectedSupplier = suppliers.find((s: any) => s.id === form.supplier_id);
 
-  // Calculate cost summary for cash purchases
-  const calculateCostSummary = () => {
-    const price = parseFloat(form.price) || 0;
-    const quantity = parseFloat(form.quantity) || 0;
-    const porterage = parseFloat(form.porterage) || 0;
-    const transferFee = parseFloat(form.transfer_fee) || 0;
-    
-    const subtotal = price * quantity;
-    const totalFees = porterage + transferFee;
-    const total = subtotal + totalFees;
-    
-    return { subtotal, totalFees, total };
-  };
 
-  const costSummary = form.type === 'cash' ? calculateCostSummary() : null;
 
   // Enhanced validation with comprehensive field checking
   const validate = () => {
     const errors: any = {};
     
-    // Bulk mode validation
-    if (isChecked) {
-      if (!form.supplier_id) errors.supplier_id = 'Supplier is required.';
-      if (!bulkProducts || bulkProducts.length === 0) {
-        errors.product_id = 'Select at least one product.';
-      } else {
-        for (const pid of bulkProducts) {
-          const item = bulkItems[pid];
-          if (!item || !item.quantity || isNaN(Number(item.quantity)) || Number(item.quantity) < 1) {
-            errors[`quantity_${pid}`] = 'Quantity must be at least 1.';
-          }
-          if (form.type === 'cash') {
-            if (!item || !item.price || isNaN(Number(item.price)) || Number(item.price) < 0) {
-              errors[`price_${pid}`] = 'Price is required for cash purchases.';
-            }
+    // Always validate bulk mode now
+    if (!form.supplier_id) errors.supplier_id = 'Supplier is required.';
+    if (!bulkProducts || bulkProducts.length === 0) {
+      errors.product_id = 'Select at least one product.';
+    } else {
+      for (const pid of bulkProducts) {
+        const item = bulkItems[pid];
+        if (!item || !item.quantity || isNaN(Number(item.quantity)) || Number(item.quantity) < 1) {
+          errors[`quantity_${pid}`] = 'Quantity must be at least 1.';
+        }
+        if (form.type === 'cash') {
+          if (!item || !item.price || isNaN(Number(item.price)) || Number(item.price) < 0) {
+            errors[`price_${pid}`] = 'Price is required for cash purchases.';
           }
         }
       }
-      // Fees validation applies once per batch
-      if (form.porterage && (isNaN(Number(form.porterage)) || Number(form.porterage) < 0)) errors.porterage = 'Porterage fee must be a valid positive number.';
-      if (form.transfer_fee && (isNaN(Number(form.transfer_fee)) || Number(form.transfer_fee) < 0)) errors.transfer_fee = 'Transfer fee must be a valid positive number.';
-      if (form.type === 'commission') {
-        if (!form.commission_rate || isNaN(Number(form.commission_rate)) || Number(form.commission_rate) < 0) errors.commission_rate = 'Commission rate must be a valid percentage.';
-      }
-      return errors;
     }
-
-    // Required fields (single mode)
-    if (!form.product_id) errors.product_id = 'Product is required.';
-    if (!form.supplier_id) errors.supplier_id = 'Supplier is required.';
-    if (!form.quantity || isNaN(Number(form.quantity)) || Number(form.quantity) < 1) {
-      errors.quantity = 'Quantity must be at least 1.';
-    }
-    
-    // Type-specific validation
+    // Fees validation applies once per batch
+    if (form.porterage && (isNaN(Number(form.porterage)) || Number(form.porterage) < 0)) errors.porterage = 'Porterage fee must be a valid positive number.';
+    if (form.transfer_fee && (isNaN(Number(form.transfer_fee)) || Number(form.transfer_fee) < 0)) errors.transfer_fee = 'Transfer fee must be a valid positive number.';
     if (form.type === 'commission') {
-      if (!form.commission_rate || isNaN(Number(form.commission_rate)) || Number(form.commission_rate) < 0) {
-        errors.commission_rate = 'Commission rate must be a valid percentage.';
-      }
+      if (!form.commission_rate || isNaN(Number(form.commission_rate)) || Number(form.commission_rate) < 0) errors.commission_rate = 'Commission rate must be a valid percentage.';
     }
-    
-    if (form.type === 'cash') {
-      if (!form.price || isNaN(Number(form.price)) || Number(form.price) < 0) {
-        errors.price = 'Purchase price is required and must be positive.';
-      }
-    }
-    
-    // Optional field validation
-    if (form.weight && (isNaN(Number(form.weight)) || Number(form.weight) < 0)) {
-      errors.weight = 'Weight must be a valid positive number.';
-    }
-    if (form.porterage && (isNaN(Number(form.porterage)) || Number(form.porterage) < 0)) {
-      errors.porterage = 'Porterage fee must be a valid positive number.';
-    }
-    if (form.transfer_fee && (isNaN(Number(form.transfer_fee)) || Number(form.transfer_fee) < 0)) {
-      errors.transfer_fee = 'Transfer fee must be a valid positive number.';
-    }
-    
     return errors;
   };
 
@@ -132,61 +89,39 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
     
     setLoading(true);
     try {
-      if (isChecked) {
-        const items = bulkProducts.map(pid => {
-          const bi = bulkItems[pid];
-          return {
-            product_id: pid,
-            supplier_id: form.supplier_id,
-            type: form.type,
-            quantity: parseInt(bi.quantity),
-            received_quantity: parseInt(bi.quantity),
-            unit: bi.unit,
-            weight: bi.weight ? parseFloat(bi.weight) : undefined,
-            price: form.type === 'cash' && bi.price ? parseFloat(bi.price) : undefined,
-            commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
-            notes: form.notes || undefined,
-          };
-        });
-        await onSuccess({
-          mode: 'batch',
-          batch: {
-            supplier_id: form.supplier_id,
-            notes: form.notes || undefined,
-            porterage: form.porterage ? parseFloat(form.porterage) : undefined,
-            transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
-            items
-          }
-        });
-      } else {
-        await onSuccess({
-          product_id: form.product_id,
+      // Always use bulk mode now
+      const items = bulkProducts.map(pid => {
+        const bi = bulkItems[pid];
+        return {
+          product_id: pid,
           supplier_id: form.supplier_id,
           type: form.type,
-          quantity: parseInt(form.quantity),
-          received_quantity: parseInt(form.quantity),
-          unit: form.unit,
-          weight: form.weight ? parseFloat(form.weight) : undefined,
-          porterage: form.porterage ? parseFloat(form.porterage) : undefined,
-          transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
-          price: form.price ? parseFloat(form.price) : undefined,
+          quantity: parseInt(bi.quantity),
+          received_quantity: parseInt(bi.quantity),
+          unit: bi.unit,
+          weight: bi.weight ? parseFloat(bi.weight) : undefined,
+          price: form.type === 'cash' && bi.price ? parseFloat(bi.price) : undefined,
           commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
           notes: form.notes || undefined,
-          received_by: userProfile?.id || ''
-        });
-      }
+        };
+      });
+      await onSuccess({
+        mode: 'batch',
+        batch: {
+          supplier_id: form.supplier_id,
+          notes: form.notes || undefined,
+          porterage: form.porterage ? parseFloat(form.porterage) : undefined,
+          transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
+          items
+        }
+      });
       
       // Reset form after successful submission
       setForm({
-        product_id: '',
         supplier_id: '',
         type: 'commission',
-        quantity: '',
-        unit: 'kg',
-        weight: '',
         porterage: '',
         transfer_fee: '',
-        price: '',
         commission_rate: '',
         notes: ''
       });
@@ -200,11 +135,31 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
     setLoading(false);
   };
 
+  // Function to add a new product row
+  const addProductRow = () => {
+    const newProductId = `new_${Date.now()}`;
+    setBulkProducts(prev => [...prev, newProductId]);
+    setBulkItems(prev => ({
+      ...prev,
+      [newProductId]: { quantity: '', unit: 'kg', price: '', weight: '' }
+    }));
+  };
+
+  // Function to remove a product row
+  const removeProductRow = (productId: string) => {
+    setBulkProducts(prev => prev.filter(id => id !== productId));
+    setBulkItems(prev => {
+      const newItems = { ...prev };
+      delete newItems[productId];
+      return newItems;
+    });
+  };
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
         {/* Enhanced Header with Visual Context */}
         <div className="p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
           <div className="flex items-center justify-between">
@@ -221,24 +176,9 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
           </div>
           
           {/* Item Context Header */}
-          {(selectedProduct || selectedSupplier) && (
+          {(selectedSupplier) && (
             <div className="mt-4 p-4 bg-white rounded-lg border border-gray-200">
               <div className="flex items-center space-x-4">
-                {selectedProduct && (
-                  <div className="flex items-center space-x-3">
-                    <img
-                      src={selectedProduct.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
-                      alt={selectedProduct.name}
-                      className="w-12 h-12 rounded-lg object-cover border border-gray-200"
-                      onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
-                    />
-                    <div>
-                      <p className="font-semibold text-gray-900">{selectedProduct.name}</p>
-                      <p className="text-sm text-gray-500">{selectedProduct.category}</p>
-                    </div>
-                  </div>
-                )}
-                
                 {selectedSupplier && (
                   <div className="flex items-center space-x-3">
                     <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
@@ -267,133 +207,16 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
             tabIndex={-1} 
           />
           
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Left Column - Basic Information */}
             <div className="space-y-6">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                   <Package className="w-5 h-5 mr-2 text-blue-600" />
-                  Product & Supplier Information
+                  Supplier Information
                 </h3>
                 
-                <div className="space-y-0">
-                  <div>
-                  <label className="flex items-center space-x-2 cursor-pointer pl-2 mb-2">
-      <input
-        type="checkbox"
-        checked={isChecked}
-        onChange={(e) => setIsChecked(e.target.checked)}
-        className="h-4 w-4 rounded-full border-gray-300 text-blue-600 focus:ring-blue-500"
-      />
-      <span className="text-gray-700">Add Bulk Products</span>
-    </label>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Product *</label>
-                    {isChecked ? (
-                      <>
-                        <SearchableSelect
-                          options={products.map((product: any) => ({
-                            id: product.id,
-                            label: product.name,
-                            value: product.id,
-                            category: product.category
-                          }))}
-                          value={bulkProducts}
-                          onChange={(value: any) => setBulkProducts(value as string[])}
-                          multiple
-                          placeholder="Select Products *"
-                          searchPlaceholder="Search products..."
-                          categories={['Fruits', 'Vegetables']}
-                          recentSelections={recentProducts}
-                          onRecentUpdate={setRecentProducts}
-                          showAddOption={true}
-                          addOptionText="Add New Product"
-                          className={`w-full ${errors.product_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
-                        />
-                        {errors.product_id && <p className="text-xs text-red-600 mt-1">{errors.product_id}</p>}
-                        {bulkProducts.length > 0 && (
-                          <div className="mt-4 space-y-4">
-                            {bulkProducts.map(pid => {
-                              const product = products.find((p: any) => p.id === pid);
-                              const item = bulkItems[pid] || { quantity: '', unit: form.unit, price: '', weight: '' };
-                              return (
-                                <div key={pid} className="p-3 border rounded-lg">
-                                  <div className="font-medium text-gray-900 mb-2">{product?.name}</div>
-                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
-                                      <input
-                                        type="number"
-                                        value={item.quantity}
-                                        onChange={(e) => setBulkItems(prev => ({ ...prev, [pid]: { ...item, quantity: e.target.value } }))}
-                                        className={`w-full border ${errors[`quantity_${pid}`] ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
-                                        min="1"
-                                        step="0.01"
-                                        placeholder="Enter quantity"
-                                      />
-                                      {errors[`quantity_${pid}`] && <p className="text-xs text-red-600 mt-1">{errors[`quantity_${pid}`]}</p>}
-                                    </div>
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 mb-2">Unit *</label>
-                                      <select
-                                        value={item.unit}
-                                        onChange={(e) => setBulkItems(prev => ({ ...prev, [pid]: { ...item, unit: e.target.value as any } }))}
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                                      >
-                                        <option value="kg">Kilogram (kg)</option>
-                                        <option value="piece">Piece</option>
-                                        <option value="box">Box</option>
-                                        <option value="bag">Bag</option>
-                                        <option value="bundle">Bundle</option>
-                                        <option value="dozen">Dozen</option>
-                                      </select>
-                                    </div>
-                                    {form.type === 'cash' && (
-                                      <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">Unit Price *</label>
-                                        <input
-                                          type="number"
-                                          value={item.price || ''}
-                                          onChange={(e) => setBulkItems(prev => ({ ...prev, [pid]: { ...item, price: e.target.value } }))}
-                                          className={`w-full border ${errors[`price_${pid}`] ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
-                                          min="0"
-                                          step="0.01"
-                                          placeholder="Enter price per unit"
-                                        />
-                                        {errors[`price_${pid}`] && <p className="text-xs text-red-600 mt-1">{errors[`price_${pid}`]}</p>}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <SearchableSelect
-                          options={products.map((product: any) => ({
-                            id: product.id,
-                            label: product.name,
-                            value: product.id,
-                            category: product.category
-                          }))}
-                          value={form.product_id}
-                          onChange={(value: any) => setForm({ ...form, product_id: value })}
-                          placeholder="Select Product *"
-                          searchPlaceholder="Search products..."
-                          categories={['Fruits', 'Vegetables']}
-                          recentSelections={recentProducts}
-                          onRecentUpdate={setRecentProducts}
-                          showAddOption={true}
-                          addOptionText="Add New Product"
-                          className={`w-full ${errors.product_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
-                        />
-                        {errors.product_id && <p className="text-xs text-red-600 mt-1">{errors.product_id}</p>}
-                      </>
-                    )}
-                  </div>
-
+                <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Supplier *</label>
                     <SearchableSelect
@@ -430,64 +253,11 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                 </div>
               </div>
 
-              {!isChecked && (
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                  <Truck className="w-5 h-5 mr-2 text-green-600" />
-                  Quantity & Unit Details
-                </h3>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Unit *</label>
-                    <select
-                      value={form.unit}
-                      onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="kg">Kilogram (kg)</option>
-                      <option value="piece">Piece</option>
-                      <option value="box">Box</option>
-                      <option value="bag">Bag</option>
-                      <option value="bundle">Bundle</option>
-                      <option value="dozen">Dozen</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
-                    <input
-                      type="number"
-                      value={form.quantity}
-                      onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-                      className={`w-full border ${errors.quantity ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
-                      required
-                      min="1"
-                      step="0.01"
-                      placeholder={`Enter quantity in ${form.unit}`}
-                    />
-                    {errors.quantity && <p className="text-xs text-red-600 mt-1">{errors.quantity}</p>}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Weight (optional)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.weight}
-                      onChange={(e) => setForm({ ...form, weight: e.target.value })}
-                      className={`w-full border ${errors.weight ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
-                      placeholder="Enter weight in kg"
-                    />
-                    {errors.weight && <p className="text-xs text-red-600 mt-1">{errors.weight}</p>}
-                  </div>
-                </div>
-              </div>
-              )}
+                {/* Right Column - Products Table */}
+           
             </div>
 
-            {/* Right Column - Financial & Additional Details */}
+            {/* Middle Column - Financial Information */}
             <div className="space-y-6">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
@@ -510,22 +280,6 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                         placeholder={`Default: ${defaultCommissionRate}%`}
                       />
                       {errors.commission_rate && <p className="text-xs text-red-600 mt-1">{errors.commission_rate}</p>}
-                    </div>
-                  )}
-
-                  {form.type === 'cash' && (
-                    <div>
-                      <MoneyInput
-                        label="Purchase Price"
-                        value={form.price}
-                        onChange={(value) => setForm({ ...form, price: value })}
-                        placeholder="Enter purchase price per unit"
-                        step="0.01"
-                        min="0"
-                        required
-                        className={errors.price ? 'border-red-500 ring-red-500' : ''}
-                      />
-                      {errors.price && <p className="text-xs text-red-600 mt-1">{errors.price}</p>}
                     </div>
                   )}
 
@@ -560,48 +314,29 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                   </div>
                 </div>
               </div>
-
-              {/* Cost Summary for Cash Purchases */}
-              {!isChecked && form.type === 'cash' && costSummary && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h4 className="text-sm font-semibold text-blue-900 mb-3">Cost Summary</h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-blue-700">Subtotal:</span>
-                      <span className="font-medium text-blue-900">${costSummary.subtotal.toFixed(2)}</span>
-                    </div>
-                    {costSummary.totalFees > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-blue-700">Additional Fees:</span>
-                        <span className="font-medium text-blue-900">${costSummary.totalFees.toFixed(2)}</span>
-                      </div>
-                    )}
-                    <div className="border-t border-blue-200 pt-2 flex justify-between">
-                      <span className="font-semibold text-blue-900">Total Cost:</span>
-                      <span className="font-bold text-blue-900">${costSummary.total.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div>
+            </div>
+             <div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                   <Upload className="w-5 h-5 mr-2 text-orange-600" />
                   Additional Information
                 </h3>
                 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Notes (optional)</label>
-                  <textarea
-                    value={form.notes}
-                    onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    rows={4}
-                    placeholder="Add any additional notes or comments..."
-                  />
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Notes (optional)</label>
+                    <textarea
+                      value={form.notes}
+                      onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                      rows={4}
+                      placeholder="Add any additional notes or comments..."
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+             
+
+         
           </div>
 
           {/* Error Display */}
@@ -610,7 +345,186 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
               <p className="text-sm text-red-600">{errors.form}</p>
             </div>
           )}
-
+ <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 mt-4 flex items-center justify-between">
+                  <div className="flex items-center">
+                    <Truck className="w-5 h-5 mr-2 text-green-600" />
+                    Products
+                  </div>
+                
+                </h3>
+                
+                <div className="bg-gray-50 rounded-lg p-4">
+                  {bulkProducts.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <Package className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                      <p>No products added yet</p>
+                      <p className="text-sm">Click "Add Row" to start adding products</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Product</th>
+                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Qty</th>
+                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Unit</th>
+                            {form.type === 'cash' && (
+                              <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Price</th>
+                            )}
+                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Weight</th>
+                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {bulkProducts.map((productId, index) => {
+                            const item = bulkItems[productId] || { quantity: '', unit: 'kg', price: '', weight: '' };
+                            const isNewRow = productId.startsWith('new_');
+                            
+                            return (
+                              <tr key={productId} className="hover:bg-gray-100">
+                                <td className="py-2">
+                                  {isNewRow ? (
+                                    <SearchableSelect
+                                      options={products.map((product: any) => ({
+                                        id: product.id,
+                                        label: product.name,
+                                        value: product.id,
+                                        category: product.category
+                                      }))}
+                                      value=""
+                                      onChange={(value: any) => {
+                                        // Replace the new row with the actual product
+                                        const actualProductId = value as string;
+                                        setBulkProducts(prev => prev.map(id => id === productId ? actualProductId : id));
+                                        setBulkItems(prev => ({
+                                          ...prev,
+                                          [actualProductId]: { ...item, unit: 'kg' },
+                                          [productId]: undefined
+                                        }));
+                                      }}
+                                      placeholder="Select Product *"
+                                      searchPlaceholder="Search products..."
+                                      categories={['Fruits', 'Vegetables']}
+                                      recentSelections={recentProducts}
+                                      onRecentUpdate={setRecentProducts}
+                                      showAddOption={true}
+                                      addOptionText="Add New Product"
+                                      className="w-full min-w-[200px]"
+                                    />
+                                  ) : (
+                                    <div className="flex items-center">
+                                      <img
+                                        src={products.find((p: any) => p.id === productId)?.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
+                                        alt="Product"
+                                        className="w-8 h-8 rounded-lg object-cover mr-2"
+                                        onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
+                                      />
+                                      <span className="font-medium text-gray-900">
+                                        {products.find((p: any) => p.id === productId)?.name}
+                                      </span>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-2">
+                                  <input
+                                    type="number"
+                                    value={item.quantity}
+                                    onChange={(e) => setBulkItems(prev => ({ 
+                                      ...prev, 
+                                      [productId]: { ...item, quantity: e.target.value } 
+                                    }))}
+                                    className={`w-20 border ${errors[`quantity_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500`}
+                                    min="1"
+                                    step="0.01"
+                                    placeholder="Qty"
+                                  />
+                                  {errors[`quantity_${productId}`] && (
+                                    <p className="text-xs text-red-600 mt-1">{errors[`quantity_${productId}`]}</p>
+                                  )}
+                                </td>
+                                <td className="py-2">
+                                  <select
+                                    value={item.unit}
+                                    onChange={(e) => setBulkItems(prev => ({ 
+                                      ...prev, 
+                                      [productId]: { ...item, unit: e.target.value as any } 
+                                    }))}
+                                    className="w-24 border border-gray-300 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500"
+                                  >
+                                    <option value="kg">kg</option>
+                                    <option value="piece">piece</option>
+                                    <option value="box">box</option>
+                                    <option value="bag">bag</option>
+                                    <option value="bundle">bundle</option>
+                                    <option value="dozen">dozen</option>
+                                  </select>
+                                </td>
+                                {form.type === 'cash' && (
+                                  <td className="py-2">
+                                    <input
+                                      type="number"
+                                      value={item.price || ''}
+                                      onChange={(e) => setBulkItems(prev => ({ 
+                                        ...prev, 
+                                        [productId]: { ...item, price: e.target.value } 
+                                      }))}
+                                      className={`w-24 border ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500`}
+                                      min="0"
+                                      step="0.01"
+                                      placeholder="Price"
+                                    />
+                                    {errors[`price_${productId}`] && (
+                                      <p className="text-xs text-red-600 mt-1">{errors[`price_${productId}`]}</p>
+                                    )}
+                                  </td>
+                                )}
+                                <td className="py-2">
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={item.weight || ''}
+                                    onChange={(e) => setBulkItems(prev => ({ 
+                                      ...prev, 
+                                      [productId]: { ...item, weight: e.target.value } 
+                                    }))}
+                                    className="w-20 border border-gray-300 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="kg"
+                                  />
+                                </td>
+                                <td className="py-2 flex items-center pt-5 gap-2">
+                                
+                               
+                                  
+                                  <button
+                                    type="button"
+                                    onClick={addProductRow}
+                                    className="border-green-600 text-black text-sm rounded-lg  transition-colors flex items-center"
+                                  >
+                                    <Plus className="w-4 h-4" /> 
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeProductRow(productId)}
+                                    className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
+                                    title="Remove product"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+              
           {/* Action Buttons */}
           <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
             <button
@@ -633,7 +547,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
               ) : (
                 <>
                   <Truck className="w-4 h-4 mr-2" />
-                  Receive Product
+                  Receive Products
                 </>
               )}
             </button>
@@ -1218,15 +1132,10 @@ export default function Inventory() {
   });
 
   const [receiveForm, setReceiveForm] = useState({
-    product_id: '',
     supplier_id: '',
     type: 'commission' as 'commission' | 'cash',
-    quantity: '',
-    unit: 'kg' as 'kg' | 'piece' | 'box' | 'bag',
-    weight: '',
     porterage: '',
     transfer_fee: '',
-    price: '',
     commission_rate: '',
     notes: ''
   });
@@ -1260,15 +1169,6 @@ export default function Inventory() {
   const [productErrors, setProductErrors] = useState<any>({});
   const [supplierErrors, setSupplierErrors] = useState<any>({});
 
-  const validateReceiveForm = () => {
-    const errors: any = {};
-    if (!receiveForm.product_id) errors.product_id = 'Product is required.';
-    if (!receiveForm.supplier_id) errors.supplier_id = 'Supplier is required.';
-    if (!receiveForm.quantity || isNaN(Number(receiveForm.quantity)) || Number(receiveForm.quantity) < 1) errors.quantity = 'Quantity must be at least 1.';
-    if (receiveForm.type === 'commission' && (receiveForm.commission_rate === '' || isNaN(Number(receiveForm.commission_rate)))) errors.commission_rate = 'Commission rate is required.';
-    if (receiveForm.type === 'cash' && (receiveForm.price === '' || isNaN(Number(receiveForm.price)))) errors.price = 'Purchase price is required.';
-    return errors;
-  };
   const validateProductForm = () => {
     const errors: any = {};
     if (!productForm.name) errors.name = 'Product name is required.';
@@ -1280,50 +1180,6 @@ export default function Inventory() {
     if (!supplierForm.name) errors.name = 'Supplier name is required.';
     if (!supplierForm.phone) errors.phone = 'Phone is required.';
     return errors;
-  };
-
-  const handleReceiveSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const errors = validateReceiveForm();
-    setReceiveErrors(errors);
-    if (Object.keys(errors).length > 0) return;
-    setLoading(l => ({ ...l, form: true }));
-    try {
-      await addInventoryItem({
-        product_id: receiveForm.product_id,
-        supplier_id: receiveForm.supplier_id,
-        type: receiveForm.type,
-        quantity: parseInt(receiveForm.quantity),
-        received_quantity: parseInt(receiveForm.quantity),
-        unit: receiveForm.unit,
-        weight: receiveForm.weight ? parseFloat(receiveForm.weight) : undefined,
-        porterage: receiveForm.porterage ? parseFloat(receiveForm.porterage) : undefined,
-        transfer_fee: receiveForm.transfer_fee ? parseFloat(receiveForm.transfer_fee) : undefined,
-        price: receiveForm.price ? parseFloat(receiveForm.price) : undefined,
-        commission_rate: receiveForm.type === 'commission' && receiveForm.commission_rate ? parseFloat(receiveForm.commission_rate) : undefined,
-        notes: receiveForm.notes || undefined,
-        received_by: userProfile?.id || ''
-      });
-      setReceiveForm({
-        product_id: '',
-        supplier_id: '',
-        type: 'commission',
-        quantity: '',
-        unit: 'kg',
-        weight: '',
-        porterage: '',
-        transfer_fee: '',
-        price: '',
-        commission_rate: '',
-        notes: ''
-      });
-      setShowReceiveForm(false);
-      setReceiveErrors({});
-      showToast('success', 'Inventory received successfully!');
-    } catch (err) {
-      showToast('error', 'Failed to receive inventory.');
-    }
-    setLoading(l => ({ ...l, form: false }));
   };
 
   const handleProductSubmit = async (e: React.FormEvent) => {
