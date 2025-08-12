@@ -294,6 +294,7 @@ export interface Database {
       };
       transactions: {
         Row: {
+
           id: string;
           type: 'income' | 'expense';
           category: string;
@@ -304,6 +305,8 @@ export interface Database {
           store_id: string;
           created_by: string;
           created_at: string;
+          supplier_id: string | null;
+          customer_id: string | null;
         };
         Insert: {
           id?: string;
@@ -316,12 +319,16 @@ export interface Database {
           store_id: string;
           created_by: string;
           created_at?: string;
+          supplier_id?: string | null;
+          customer_id?: string | null;
         };
         Update: {
           id?: string;
           amount?: number;
           description?: string;
           reference?: string | null;
+          supplier_id?: string | null;
+          customer_id?: string | null;
         };
       };
     };
