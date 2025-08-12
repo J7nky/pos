@@ -3,6 +3,7 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { ShoppingCart, Eye, EyeOff } from 'lucide-react';
 import SearchableSelect from './common/SearchableSelect';
 import { SupabaseService } from '../services/supabaseService';
+import { useI18n } from '../i18n';
 
 export default function SupabaseLogin() {
   const [email, setEmail] = useState('');
@@ -17,6 +18,7 @@ export default function SupabaseLogin() {
   const [storeId, setStoreId] = useState('');
   const [stores, setStores] = useState<any[]>([]);
   const [storesLoading, setStoresLoading] = useState(false);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (showSignUp) {
@@ -67,28 +69,28 @@ export default function SupabaseLogin() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
             <ShoppingCart className="w-8 h-8 text-blue-600" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">ProducePOS</h1>
-          <p className="text-gray-600 mt-2">Wholesale Produce Market ERP</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('login.title')}</h1>
+          <p className="text-gray-600 mt-2">{t('login.subtitle')}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {showSignUp && (
             <>
               <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-700">Full Name</label>
+                <label htmlFor="name" className="block text-sm font-medium text-gray-700">{t('login.fullName')}</label>
                 <input
                   id="name"
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Enter your name"
+                  placeholder={t('login.fullName')}
                   required
                   disabled={isLoading}
                 />
               </div>
               <div>
-                <label htmlFor="role" className="block text-sm font-medium text-gray-700">Role</label>
+                <label htmlFor="role" className="block text-sm font-medium text-gray-700">{t('login.role')}</label>
                 <select
                   id="role"
                   value={role}
@@ -103,14 +105,14 @@ export default function SupabaseLogin() {
                 </select>
               </div>
               <div>
-                <label htmlFor="store" className="block text-sm font-medium text-gray-700">Store</label>
+                <label htmlFor="store" className="block text-sm font-medium text-gray-700">{t('login.store')}</label>
                 <SearchableSelect
                   options={stores.map((s) => ({ id: s.id, label: s.name, value: s.id }))}
                   value={storeId}
                   onChange={(val) => {
                     if (typeof val === 'string') setStoreId(val);
                   }}
-                  placeholder="Select a store"
+                  placeholder={t('login.selectStore')}
                   loading={storesLoading}
                   disabled={isLoading || storesLoading}
                 />
@@ -118,24 +120,20 @@ export default function SupabaseLogin() {
             </>
           )}
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-              Email Address
-            </label>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700">{t('login.email')}</label>
             <input
               id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Enter your email"
+              placeholder={t('login.emailPlaceholder')}
               required
               disabled={isLoading}
             />
           </div>
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-              Password
-            </label>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700">{t('login.password')}</label>
             <div className="mt-1 relative">
               <input
                 id="password"
@@ -143,7 +141,7 @@ export default function SupabaseLogin() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Enter your password"
+                placeholder={t('login.passwordPlaceholder')}
                 required
                 disabled={isLoading}
               />
@@ -163,9 +161,7 @@ export default function SupabaseLogin() {
           </div>
 
           {error && (
-            <div className="text-red-600 text-sm text-center bg-red-50 p-3 rounded-md">
-              {error}
-            </div>
+            <div className="text-red-600 text-sm text-center bg-red-50 p-3 rounded-md">{error}</div>
           )}
 
           <button
@@ -176,10 +172,10 @@ export default function SupabaseLogin() {
             {isLoading ? (
               <div className="flex items-center">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                {showSignUp ? 'Signing Up...' : 'Signing In...'}
+                {showSignUp ? t('login.signingUp') : t('login.signingIn')}
               </div>
             ) : (
-              showSignUp ? 'Sign Up' : 'Sign In'
+              showSignUp ? t('login.signUp') : t('login.signIn')
             )}
           </button>
         </form>
@@ -192,7 +188,7 @@ export default function SupabaseLogin() {
               onClick={() => { setShowSignUp(false); setError(''); }}
               disabled={isLoading}
             >
-              Already have an account? Sign In
+              {t('login.signIn')}
             </button>
           ) : (
             <button
@@ -201,14 +197,14 @@ export default function SupabaseLogin() {
               onClick={() => { setShowSignUp(true); setError(''); }}
               disabled={isLoading}
             >
-              Don&apos;t have an account? Sign Up
+              {t('login.signUp')}
             </button>
           )}
         </div>
 
         {!showSignUp && (
           <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm text-gray-600 mb-2">Demo Account:</p>
+            <p className="text-sm text-gray-600 mb-2">{t('login.demoAccount')}:</p>
             <div className="text-xs space-y-1">
               <div>Email: demo@market.com</div>
               <div>Password: demo123</div>

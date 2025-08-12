@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
+import { useI18n } from '../i18n';
 import { 
   Settings as SettingsIcon,
   Bell,
@@ -29,6 +30,7 @@ export default function Settings() {
     updateCurrency
   } = useOfflineData();
   const { userProfile } = useSupabaseAuth();
+  const { t, language, setLanguage } = useI18n();
 
   const [tempThreshold, setTempThreshold] = useState(lowStockThreshold.toString());
   const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate.toString());
@@ -68,11 +70,11 @@ export default function Settings() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
+        <h1 className="text-3xl font-bold text-gray-900">{t('settings.header')}</h1>
         {showSaveMessage && (
           <div className="flex items-center px-4 py-2 bg-green-100 text-green-800 rounded-lg">
             <CheckCircle className="w-5 h-5 mr-2" />
-            Settings saved successfully!
+            {t('settings.saved')}
           </div>
         )}
       </div>
@@ -82,11 +84,11 @@ export default function Settings() {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center mb-4">
             <User className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">User Information</h2>
+            <h2 className="text-xl font-semibold text-gray-900">{t('settings.userInfo')}</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.name')}</label>
               <input
                 type="text"
                 value={userProfile?.name || ''}
@@ -95,7 +97,7 @@ export default function Settings() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.email')}</label>
               <input
                 type="email"
                 value={userProfile?.email || ''}
@@ -104,7 +106,7 @@ export default function Settings() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.role')}</label>
               <input
                 type="text"
                 value={userProfile?.role || ''}
@@ -119,7 +121,7 @@ export default function Settings() {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center mb-4">
             <Bell className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">Inventory Alerts</h2>
+            <h2 className="text-xl font-semibold text-gray-900">{t('settings.inventoryAlerts')}</h2>
           </div>
           
           <div className="space-y-4">
@@ -128,8 +130,8 @@ export default function Settings() {
               <div className="flex items-center">
                 <AlertTriangle className="w-5 h-5 text-amber-500 mr-3" />
                 <div>
-                  <h3 className="font-medium text-gray-900">Low Stock Alerts</h3>
-                  <p className="text-sm text-gray-600">Get notified when products are running low</p>
+                  <h3 className="font-medium text-gray-900">{t('settings.lowStockAlerts')}</h3>
+                  <p className="text-sm text-gray-600">{t('settings.lowStockDescription')}</p>
                 </div>
               </div>
               <button
@@ -151,11 +153,9 @@ export default function Settings() {
               <div className="p-4 border border-gray-200 rounded-lg">
                 <div className="flex items-center mb-3">
                   <Package className="w-5 h-5 text-blue-500 mr-3" />
-                  <h3 className="font-medium text-gray-900">Low Stock Threshold</h3>
+                  <h3 className="font-medium text-gray-900">{t('settings.lowStockThreshold')}</h3>
                 </div>
-                <p className="text-sm text-gray-600 mb-3">
-                  Alert when product quantity falls below this number
-                </p>
+                <p className="text-sm text-gray-600 mb-3">{t('settings.lowStockDescription')}</p>
                 <div className="flex items-center space-x-3">
                   <input
                     type="number"
@@ -165,19 +165,17 @@ export default function Settings() {
                     onChange={(e) => setTempThreshold(e.target.value)}
                     className="w-24 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   />
-                  <span className="text-gray-600">units</span>
+                  <span className="text-gray-600">{t('settings.units')}</span>
                   <button
                     onClick={handleThresholdSave}
                     disabled={tempThreshold === lowStockThreshold.toString()}
                     className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
                   >
                     <Save className="w-4 h-4 mr-2" />
-                    Save
+                    {t('settings.save')}
                   </button>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Current threshold: {lowStockThreshold} units
-                </p>
+                <p className="text-xs text-gray-500 mt-2">{t('settings.currentThreshold', { value: lowStockThreshold })}</p>
               </div>
             )}
           </div>
@@ -187,18 +185,15 @@ export default function Settings() {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center mb-4">
             <Calculator className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">Commission Settings</h2>
+            <h2 className="text-xl font-semibold text-gray-900">{t('settings.commissionSettings')}</h2>
           </div>
           
           <div className="space-y-4">
             <div className="p-4 border border-gray-200 rounded-lg">
               <div className="flex items-center mb-3">
                 <DollarSign className="w-5 h-5 text-green-500 mr-3" />
-                <h3 className="font-medium text-gray-900">Default Commission Rate</h3>
+                <h3 className="font-medium text-gray-900">{t('settings.defaultCommissionRate')}</h3>
               </div>
-              <p className="text-sm text-gray-600 mb-3">
-                Default commission percentage for new commission-based product receives
-              </p>
               <div className="flex items-center space-x-3">
                 <input
                   type="number"
@@ -216,12 +211,10 @@ export default function Settings() {
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
                 >
                   <Save className="w-4 h-4 mr-2" />
-                  Save
+                  {t('settings.save')}
                 </button>
               </div>
-              <p className="text-xs text-gray-500 mt-2">
-                Current default rate: {defaultCommissionRate}% (can be overridden per transaction)
-              </p>
+              <p className="text-xs text-gray-500 mt-2">{t('settings.currentDefaultRate', { value: defaultCommissionRate })}</p>
             </div>
           </div>
         </div>
@@ -230,17 +223,17 @@ export default function Settings() {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center mb-4">
             <DollarSign className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">Currency Settings</h2>
+            <h2 className="text-xl font-semibold text-gray-900">{t('settings.currencySettings')}</h2>
           </div>
           
           <div className="space-y-4">
             <div className="p-4 border border-gray-200 rounded-lg">
               <div className="flex items-center mb-3">
                 <DollarSign className="w-5 h-5 text-blue-500 mr-3" />
-                <h3 className="font-medium text-gray-900">Display Currency</h3>
+                <h3 className="font-medium text-gray-900">{t('settings.displayCurrency')}</h3>
               </div>
               <p className="text-sm text-gray-600 mb-3">
-                Choose the currency for displaying prices throughout the application
+                {t('settings.displayCurrency')}
               </p>
               <div className="flex items-center space-x-3">
                 <select
@@ -257,12 +250,10 @@ export default function Settings() {
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
                 >
                   <Save className="w-4 h-4 mr-2" />
-                  Save
+                  {t('settings.save')}
                 </button>
               </div>
-              <p className="text-xs text-gray-500 mt-2">
-                Current currency: {currency === 'USD' ? 'USD ($)' : 'LBP (ل.ل)'}
-              </p>
+              <p className="text-xs text-gray-500 mt-2">{t('settings.currentCurrency', { value: currency === 'USD' ? 'USD ($)' : 'LBP (ل.ل)' })}</p>
             </div>
           </div>
         </div>
@@ -271,26 +262,26 @@ export default function Settings() {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center mb-4">
             <Database className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">System Information</h2>
+            <h2 className="text-xl font-semibold text-gray-900">{t('settings.systemInfo')}</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">Application Version</h3>
+              <h3 className="font-medium text-gray-900 mb-2">{t('settings.appVersion')}</h3>
               <p className="text-gray-600">ProducePOS v1.0.0</p>
             </div>
             <div className="p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">Data Storage</h3>
+              <h3 className="font-medium text-gray-900 mb-2">{t('settings.dataStorage')}</h3>
               <p className="text-gray-600">Local Storage (Offline-first)</p>
             </div>
             <div className="p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">Last Sync</h3>
+              <h3 className="font-medium text-gray-900 mb-2">{t('settings.lastSync')}</h3>
               <p className="text-gray-600">Never (Local only)</p>
             </div>
             <div className="p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">Device Type</h3>
+              <h3 className="font-medium text-gray-900 mb-2">{t('settings.deviceType')}</h3>
               <div className="flex items-center text-gray-600">
                 <Smartphone className="w-4 h-4 mr-2" />
-                Web Application
+                {t('settings.webApp')}
               </div>
             </div>
           </div>
@@ -300,18 +291,33 @@ export default function Settings() {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center mb-4">
             <Shield className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">Security</h2>
+            <h2 className="text-xl font-semibold text-gray-900">{t('settings.security')}</h2>
           </div>
           <div className="space-y-4">
             <div className="p-4 border border-gray-200 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">Session Management</h3>
-              <p className="text-sm text-gray-600 mb-3">
-                Your session will remain active until you manually log out
-              </p>
-              <button className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">
-                Change Password
-              </button>
+              <h3 className="font-medium text-gray-900 mb-2">{t('settings.sessionManagement')}</h3>
+              <p className="text-sm text-gray-600 mb-3">{t('settings.sessionNote')}</p>
+              <button className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">{t('settings.changePassword')}</button>
             </div>
+          </div>
+        </div>
+
+        {/* Language */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <div className="flex items-center mb-4">
+            <SettingsIcon className="w-6 h-6 text-gray-600 mr-3" />
+            <h2 className="text-xl font-semibold text-gray-900">{t('settings.language')}</h2>
+          </div>
+          <div className="flex items-center space-x-3">
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="ar">{t('settings.language_ar')}</option>
+              <option value="en">{t('settings.language_en')}</option>
+              <option value="fr">{t('settings.language_fr')}</option>
+            </select>
           </div>
         </div>
       </div>

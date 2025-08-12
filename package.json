@@ -14,7 +14,7 @@
     "@types/node": "^24.1.0",
     "@types/uuid": "^10.0.0",
     "dexie": "^4.0.11",
-    "lucide-react": "^0.344.0",
+    "lucide-react": "^0.539.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "uuid": "^11.1.0"

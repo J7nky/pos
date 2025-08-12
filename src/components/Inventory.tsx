@@ -4,7 +4,7 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import SearchableSelect from './common/SearchableSelect';
 import MoneyInput from './common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { Plus, Search, Package, Truck, Eye, Camera, RotateCcw, X, Upload } from 'lucide-react';
+import { Plus, Search, Package, Truck, Eye, Camera, X, Upload } from 'lucide-react';
 import { SupabaseService } from '../services/supabaseService';
 import { db } from '../lib/db';
 
@@ -22,7 +22,9 @@ function useDebounce(value: string, delay: number) {
 const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userProfile, defaultCommissionRate, recentProducts, setRecentProducts, recentSuppliers, setRecentSuppliers, form, setForm, errors, setErrors }: any) => {
   const [loading, setLoading] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
-  
+  const [isChecked, setIsChecked] = useState(false);
+  const [bulkProducts, setBulkProducts] = useState<string[]>([]);
+  const [bulkItems, setBulkItems] = useState<Record<string, { quantity: string; unit: 'kg'|'piece'|'box'|'bag'|'bundle'|'dozen'; price?: string; weight?: string }>>({});
   // Auto-focus first field when modal opens
   useEffect(() => { 
     if (open && firstInputRef.current) firstInputRef.current.focus(); 
@@ -61,7 +63,34 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
   const validate = () => {
     const errors: any = {};
     
-    // Required fields
+    // Bulk mode validation
+    if (isChecked) {
+      if (!form.supplier_id) errors.supplier_id = 'Supplier is required.';
+      if (!bulkProducts || bulkProducts.length === 0) {
+        errors.product_id = 'Select at least one product.';
+      } else {
+        for (const pid of bulkProducts) {
+          const item = bulkItems[pid];
+          if (!item || !item.quantity || isNaN(Number(item.quantity)) || Number(item.quantity) < 1) {
+            errors[`quantity_${pid}`] = 'Quantity must be at least 1.';
+          }
+          if (form.type === 'cash') {
+            if (!item || !item.price || isNaN(Number(item.price)) || Number(item.price) < 0) {
+              errors[`price_${pid}`] = 'Price is required for cash purchases.';
+            }
+          }
+        }
+      }
+      // Fees validation applies once per batch
+      if (form.porterage && (isNaN(Number(form.porterage)) || Number(form.porterage) < 0)) errors.porterage = 'Porterage fee must be a valid positive number.';
+      if (form.transfer_fee && (isNaN(Number(form.transfer_fee)) || Number(form.transfer_fee) < 0)) errors.transfer_fee = 'Transfer fee must be a valid positive number.';
+      if (form.type === 'commission') {
+        if (!form.commission_rate || isNaN(Number(form.commission_rate)) || Number(form.commission_rate) < 0) errors.commission_rate = 'Commission rate must be a valid percentage.';
+      }
+      return errors;
+    }
+
+    // Required fields (single mode)
     if (!form.product_id) errors.product_id = 'Product is required.';
     if (!form.supplier_id) errors.supplier_id = 'Supplier is required.';
     if (!form.quantity || isNaN(Number(form.quantity)) || Number(form.quantity) < 1) {
@@ -103,21 +132,49 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
     
     setLoading(true);
     try {
-      await onSuccess({
-        product_id: form.product_id,
-        supplier_id: form.supplier_id,
-        type: form.type,
-        quantity: parseInt(form.quantity),
-        received_quantity: parseInt(form.quantity),
-        unit: form.unit,
-        weight: form.weight ? parseFloat(form.weight) : undefined,
-        porterage: form.porterage ? parseFloat(form.porterage) : undefined,
-        transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
-        price: form.price ? parseFloat(form.price) : undefined,
-        commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
-        notes: form.notes || undefined,
-        received_by: userProfile?.id || ''
-      });
+      if (isChecked) {
+        const items = bulkProducts.map(pid => {
+          const bi = bulkItems[pid];
+          return {
+            product_id: pid,
+            supplier_id: form.supplier_id,
+            type: form.type,
+            quantity: parseInt(bi.quantity),
+            received_quantity: parseInt(bi.quantity),
+            unit: bi.unit,
+            weight: bi.weight ? parseFloat(bi.weight) : undefined,
+            price: form.type === 'cash' && bi.price ? parseFloat(bi.price) : undefined,
+            commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
+            notes: form.notes || undefined,
+          };
+        });
+        await onSuccess({
+          mode: 'batch',
+          batch: {
+            supplier_id: form.supplier_id,
+            notes: form.notes || undefined,
+            porterage: form.porterage ? parseFloat(form.porterage) : undefined,
+            transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
+            items
+          }
+        });
+      } else {
+        await onSuccess({
+          product_id: form.product_id,
+          supplier_id: form.supplier_id,
+          type: form.type,
+          quantity: parseInt(form.quantity),
+          received_quantity: parseInt(form.quantity),
+          unit: form.unit,
+          weight: form.weight ? parseFloat(form.weight) : undefined,
+          porterage: form.porterage ? parseFloat(form.porterage) : undefined,
+          transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
+          price: form.price ? parseFloat(form.price) : undefined,
+          commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
+          notes: form.notes || undefined,
+          received_by: userProfile?.id || ''
+        });
+      }
       
       // Reset form after successful submission
       setForm({
@@ -133,6 +190,8 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
         commission_rate: '',
         notes: ''
       });
+      setBulkProducts([]);
+      setBulkItems({});
       setErrors({});
       onClose();
     } catch {
@@ -217,28 +276,122 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                   Product & Supplier Information
                 </h3>
                 
-                <div className="space-y-4">
+                <div className="space-y-0">
                   <div>
+                  <label className="flex items-center space-x-2 cursor-pointer pl-2 mb-2">
+      <input
+        type="checkbox"
+        checked={isChecked}
+        onChange={(e) => setIsChecked(e.target.checked)}
+        className="h-4 w-4 rounded-full border-gray-300 text-blue-600 focus:ring-blue-500"
+      />
+      <span className="text-gray-700">Add Bulk Products</span>
+    </label>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Product *</label>
-                    <SearchableSelect
-                      options={products.map((product: any) => ({
-                        id: product.id,
-                        label: product.name,
-                        value: product.id,
-                        category: product.category
-                      }))}
-                      value={form.product_id}
-                      onChange={(value: any) => setForm({ ...form, product_id: value })}
-                      placeholder="Select Product *"
-                      searchPlaceholder="Search products..."
-                      categories={['Fruits', 'Vegetables']}
-                      recentSelections={recentProducts}
-                      onRecentUpdate={setRecentProducts}
-                      showAddOption={true}
-                      addOptionText="Add New Product"
-                      className={`w-full ${errors.product_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
-                    />
-                    {errors.product_id && <p className="text-xs text-red-600 mt-1">{errors.product_id}</p>}
+                    {isChecked ? (
+                      <>
+                        <SearchableSelect
+                          options={products.map((product: any) => ({
+                            id: product.id,
+                            label: product.name,
+                            value: product.id,
+                            category: product.category
+                          }))}
+                          value={bulkProducts}
+                          onChange={(value: any) => setBulkProducts(value as string[])}
+                          multiple
+                          placeholder="Select Products *"
+                          searchPlaceholder="Search products..."
+                          categories={['Fruits', 'Vegetables']}
+                          recentSelections={recentProducts}
+                          onRecentUpdate={setRecentProducts}
+                          showAddOption={true}
+                          addOptionText="Add New Product"
+                          className={`w-full ${errors.product_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
+                        />
+                        {errors.product_id && <p className="text-xs text-red-600 mt-1">{errors.product_id}</p>}
+                        {bulkProducts.length > 0 && (
+                          <div className="mt-4 space-y-4">
+                            {bulkProducts.map(pid => {
+                              const product = products.find((p: any) => p.id === pid);
+                              const item = bulkItems[pid] || { quantity: '', unit: form.unit, price: '', weight: '' };
+                              return (
+                                <div key={pid} className="p-3 border rounded-lg">
+                                  <div className="font-medium text-gray-900 mb-2">{product?.name}</div>
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
+                                      <input
+                                        type="number"
+                                        value={item.quantity}
+                                        onChange={(e) => setBulkItems(prev => ({ ...prev, [pid]: { ...item, quantity: e.target.value } }))}
+                                        className={`w-full border ${errors[`quantity_${pid}`] ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
+                                        min="1"
+                                        step="0.01"
+                                        placeholder="Enter quantity"
+                                      />
+                                      {errors[`quantity_${pid}`] && <p className="text-xs text-red-600 mt-1">{errors[`quantity_${pid}`]}</p>}
+                                    </div>
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-2">Unit *</label>
+                                      <select
+                                        value={item.unit}
+                                        onChange={(e) => setBulkItems(prev => ({ ...prev, [pid]: { ...item, unit: e.target.value as any } }))}
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                                      >
+                                        <option value="kg">Kilogram (kg)</option>
+                                        <option value="piece">Piece</option>
+                                        <option value="box">Box</option>
+                                        <option value="bag">Bag</option>
+                                        <option value="bundle">Bundle</option>
+                                        <option value="dozen">Dozen</option>
+                                      </select>
+                                    </div>
+                                    {form.type === 'cash' && (
+                                      <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">Unit Price *</label>
+                                        <input
+                                          type="number"
+                                          value={item.price || ''}
+                                          onChange={(e) => setBulkItems(prev => ({ ...prev, [pid]: { ...item, price: e.target.value } }))}
+                                          className={`w-full border ${errors[`price_${pid}`] ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
+                                          min="0"
+                                          step="0.01"
+                                          placeholder="Enter price per unit"
+                                        />
+                                        {errors[`price_${pid}`] && <p className="text-xs text-red-600 mt-1">{errors[`price_${pid}`]}</p>}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <SearchableSelect
+                          options={products.map((product: any) => ({
+                            id: product.id,
+                            label: product.name,
+                            value: product.id,
+                            category: product.category
+                          }))}
+                          value={form.product_id}
+                          onChange={(value: any) => setForm({ ...form, product_id: value })}
+                          placeholder="Select Product *"
+                          searchPlaceholder="Search products..."
+                          categories={['Fruits', 'Vegetables']}
+                          recentSelections={recentProducts}
+                          onRecentUpdate={setRecentProducts}
+                          showAddOption={true}
+                          addOptionText="Add New Product"
+                          className={`w-full ${errors.product_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
+                        />
+                        {errors.product_id && <p className="text-xs text-red-600 mt-1">{errors.product_id}</p>}
+                      </>
+                    )}
                   </div>
 
                   <div>
@@ -277,6 +430,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                 </div>
               </div>
 
+              {!isChecked && (
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                   <Truck className="w-5 h-5 mr-2 text-green-600" />
@@ -330,6 +484,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                   </div>
                 </div>
               </div>
+              )}
             </div>
 
             {/* Right Column - Financial & Additional Details */}
@@ -407,7 +562,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
               </div>
 
               {/* Cost Summary for Cash Purchases */}
-              {form.type === 'cash' && costSummary && (
+              {!isChecked && form.type === 'cash' && costSummary && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <h4 className="text-sm font-semibold text-blue-900 mb-3">Cost Summary</h4>
                   <div className="space-y-2 text-sm">
@@ -1879,7 +2034,20 @@ export default function Inventory() {
         open={showReceiveForm}
         onClose={() => setShowReceiveForm(false)}
         onSuccess={async (data: any) => {
-          await addInventoryItem(data);
+          if (data?.mode === 'batch') {
+            console.log('batch123', data);
+            const { batch } = data;
+            await raw.addInventoryBatch({
+              supplier_id: batch.supplier_id,
+              created_by: userProfile?.id || '',
+              notes: batch.notes,
+              porterage: batch.porterage,
+              transfer_fee: batch.transfer_fee,
+              items: batch.items
+            });
+          } else {
+            await addInventoryItem(data);
+          }
           await raw.refreshData();
           showToast('success', 'Inventory received successfully!');
         }}

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { SaleItem, Customer } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { useI18n } from '../i18n';
 
 interface BillTab {
   id: string;
@@ -43,6 +44,7 @@ export default function POS() {
 
   const { userProfile } = useSupabaseAuth();
   const { formatCurrency } = useCurrency();
+  const { t } = useI18n();
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
   const [activeTabs, setActiveTabs] = useLocalStorage<BillTab[]>('pos_active_tabs', []);
   const [activeTabId, setActiveTabId] = useLocalStorage<string>('pos_active_tab_id', '');
@@ -471,7 +473,7 @@ export default function POS() {
 
   return (
     <div className="p-6">
-      <h1 className="text-3xl font-bold text-gray-900 mb-6">Point of Sale</h1>
+      <h1 className="text-3xl font-bold text-gray-900 mb-6">{t('pos.header')}</h1>
 
       {/* Bill Tabs */}
       <div className="mb-6">
@@ -510,7 +512,7 @@ export default function POS() {
             className="flex items-center px-3 py-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
           >
             <PlusCircle className="w-4 h-4 mr-1" />
-            New Bill
+            {t('pos.newBill')}
           </button>
         </div>
       </div>
@@ -626,7 +628,7 @@ export default function POS() {
               <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search products..."
+                placeholder={t('pos.searchProducts')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
@@ -814,11 +816,13 @@ export default function POS() {
   );
 }
 
-const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryItems, addToCart }: any) => (
-  <div className="bg-white rounded-lg shadow-sm p-6">
-    <h2 className="text-lg font-semibold text-gray-900 mb-4">Products</h2>
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-      {(filteredProducts || []).map((product: any) => {
+const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryItems, addToCart }: any) => {
+  const { t } = useI18n();
+  return (
+    <div className="bg-white rounded-lg shadow-sm p-6">
+      <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('pos.products')}</h2>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {(filteredProducts || []).map((product: any) => {
         const stock = getProductStock(product.id);
         const productInventoryItems = getProductInventoryItems(product.id) || [];
         return (
@@ -852,10 +856,11 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
             )}
           </div>
         );
-      })}
+        })}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory }: any) => (
   <div className="bg-white rounded-lg shadow-sm">

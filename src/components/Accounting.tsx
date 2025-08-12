@@ -4,7 +4,6 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from './common/SearchableSelect';
 import MoneyInput from './common/MoneyInput';
-import { debugSalesData, validateSalesDataStructure, generateSalesDataReport } from '../utils/salesDataDebugger';
 import { cleanupAndValidateSaleItems } from '../utils/cleanupSaleItemsData';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { 
@@ -1921,80 +1920,6 @@ export default function Accounting() {
       showToast('Error exporting received bills', 'error');
     }
   };
-
-  const debugSalesDataIssues = () => {
-    try {
-      console.log('🔍 Starting comprehensive sales data debug...');
-      
-      // Generate comprehensive report
-      const report = generateSalesDataReport(inventory, sales, products, suppliers);
-      
-      // Validate sales data structure
-      const validation = validateSalesDataStructure(sales);
-      
-      // Show debug summary
-      showToast(`Debug complete: ${report.itemsWithSales}/${report.totalInventoryItems} items have sales. Check console for details.`, 'success');
-      
-      console.log('📋 Sales Data Debug Summary:');
-      console.log(`- Total Inventory Items: ${report.totalInventoryItems}`);
-      console.log(`- Items With Sales: ${report.itemsWithSales}`);
-      console.log(`- Items Without Sales: ${report.itemsWithoutSales}`);
-      console.log(`- Total Sales: ${report.totalSales}`);
-      console.log(`- Valid Sales: ${report.validSales}`);
-      console.log(`- Invalid Sales: ${validation.invalid}`);
-      
-      if (validation.issues.length > 0) {
-        console.log('⚠️ Data Issues Found:');
-        validation.issues.forEach(issue => console.log(`  - ${issue}`));
-      }
-
-      if (report.topProductsBySales.length > 0) {
-        console.log('🏆 Top Products by Sales:');
-        report.topProductsBySales.forEach((product, index) => 
-          console.log(`  ${index + 1}. ${product.productName}: ${product.salesCount} sales`)
-        );
-      }
-
-    } catch (error) {
-      console.error('Error during sales data debug:', error);
-      showToast('Error during debug analysis. Check console for details.', 'error');
-    }
-  };
-
-  const cleanupSaleItemsData = async () => {
-    try {
-      console.log('🧹 Starting sale_items data cleanup...');
-      showToast('Cleaning up sale_items data...', 'success');
-      
-      const result = await cleanupAndValidateSaleItems();
-      
-      const { cleanup, validation } = result;
-      
-      console.log('🔍 Cleanup Results:');
-      console.log(`- Records Found: ${cleanup.recordsFound}`);
-      console.log(`- Records Cleaned: ${cleanup.recordsCleaned}`);
-      console.log(`- Cleanup Errors: ${cleanup.errors.length}`);
-      
-      console.log('🔍 Validation Results:');
-      console.log(`- Total Records: ${validation.totalRecords}`);
-      console.log(`- Valid Records: ${validation.validRecords}`);
-      console.log(`- Invalid Records: ${validation.invalidRecords}`);
-      console.log(`- Issues Found: ${validation.issues.length}`);
-      
-      if (cleanup.recordsCleaned > 0) {
-        showToast(`Cleanup complete: ${cleanup.recordsCleaned} records fixed. Check console for details.`, 'success');
-      } else if (validation.issues.length > 0) {
-        showToast(`Validation found ${validation.issues.length} issues. Check console for details.`, 'error');
-      } else {
-        showToast('All sale_items data is clean and valid!', 'success');
-      }
-
-    } catch (error) {
-      console.error('Error during sale_items cleanup:', error);
-      showToast('Error during cleanup. Check console for details.', 'error');
-    }
-  };
-
   // Sales logs edit/delete handlers
   const handleEditSale = (sale: any) => {
     setEditingSale({

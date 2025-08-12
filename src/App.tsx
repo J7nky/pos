@@ -11,18 +11,19 @@ import Reports from './components/Reports';
 import Customers from './components/Customers';
 import Accounting from './components/Accounting';
 import Settings from './components/Settings';
-import OfflineDemo from './components/OfflineDemo';
+import { I18nProvider, useI18n } from './i18n';
 
 function AppContent() {
   const { userProfile, loading } = useSupabaseAuth();
   const [currentPage, setCurrentPage] = useState('home');
+  const { t } = useI18n();
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <p className="mt-4 text-gray-600">{t('app.loading')}</p>
         </div>
       </div>
     );
@@ -49,8 +50,7 @@ function AppContent() {
         return <Customers />;
       case 'settings':
         return <Settings />;
-      case 'demo':
-        return <OfflineDemo />;
+     
       default:
         return <Home />;
     }
@@ -65,11 +65,13 @@ function AppContent() {
 
 function App() {
   return (
-    <SupabaseAuthProvider>
-      <OfflineDataProvider>
-        <AppContent />
-      </OfflineDataProvider>
-    </SupabaseAuthProvider>
+    <I18nProvider>
+      <SupabaseAuthProvider>
+        <OfflineDataProvider>
+          <AppContent />
+        </OfflineDataProvider>
+      </SupabaseAuthProvider>
+    </I18nProvider>
   );
 }
 

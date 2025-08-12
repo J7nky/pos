@@ -62,11 +62,22 @@ interface OfflineDataContextType {
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   updateSupplier: (id: string, updates: Tables['suppliers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
+  addInventoryBatch: (args: {
+    supplier_id: string;
+    created_by: string;
+    notes?: string | null;
+    porterage?: number | null;
+    transfer_fee?: number | null;
+    received_at?: string;
+    items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_by' | 'received_at'>>;
+  }) => Promise<{ batchId: string }>;
   addSale: (items: any[]) => Promise<void>;
   updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
   deleteSale: (id: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: any) => Promise<void>;
+  updateInventoryBatch: (id: string, updates: Tables['inventory_batches']['Update']) => Promise<void>;
+  applyCommissionRateToBatch: (batchId: string, commissionRate: number) => Promise<void>;
   
 
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
@@ -349,6 +360,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         salesData,
         saleItemsData,
         transactionsData,
+        batchesData,
       ] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
@@ -357,6 +369,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         Promise.resolve([]), // sales not in current schema
         db.sale_items.filter(item => !item._deleted).toArray(),
         db.transactions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.inventory_batches.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
 
       ]);
 
@@ -370,11 +383,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setInventoryItems(inventoryData);
       setSaleItems(saleItemsData);
 
-      // Transform inventory to match expected structure
-      setInventory(inventoryData.map(item => ({
-        ...item,
-        receivedAt: item.received_at // Legacy compatibility
-      })));
+      // Transform inventory to match expected structure and attach batch info for grouping/export
+      const batchById = (batchesData || []).reduce((acc: any, b: any) => {
+        acc[b.id] = b;
+        return acc;
+      }, {});
+
+      setInventory(inventoryData.map(item => {
+        const batch = item.batch_id ? batchById[item.batch_id] : null;
+        return {
+          ...item,
+          receivedAt: item.received_at, // Legacy compatibility
+          batch_porterage: batch ? batch.porterage : null,
+          batch_transfer_fee: batch ? batch.transfer_fee : null,
+          batch_notes: batch ? batch.notes : null,
+        };
+      }));
 
       // Set sales directly as sale_items (no transformation needed)
       setSales(saleItemsData);
@@ -582,7 +606,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       transfer_fee: itemData.transfer_fee ?? null,
       price: itemData.price ?? null,
       commission_rate: itemData.commission_rate ?? null,
-      notes: itemData.notes ?? null
+      notes: itemData.notes ?? null,
+      batch_id: itemData.batch_id ?? null
     };
 
     await db.inventory_items.add(item);
@@ -591,6 +616,70 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Use debounced sync to batch rapid changes
     debouncedSync();
+  };
+
+  const addInventoryBatch: OfflineDataContextType['addInventoryBatch'] = async ({
+    supplier_id,
+    created_by,
+    notes = null, 
+    porterage = null,
+    transfer_fee = null,
+    received_at,
+    items
+  }) => {
+    if (!storeId) throw new Error('No store ID available');
+    if (!items || items.length === 0) throw new Error('No items provided');
+
+    const batchId = createId();
+    const batchRecord = {
+      id: batchId,
+      supplier_id,
+      notes,
+      porterage,
+      transfer_fee,
+      received_at: received_at || new Date().toISOString(),
+      store_id: storeId,
+      created_by,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      _synced: false
+    } as any;
+
+    // For now, we just persist batch locally; sync service currently does not upload batches
+    // but storing locally allows future extension and UI references.
+    await db.transaction('rw', [db.inventory_batches, db.inventory_items], async () => {
+      await db.inventory_batches.add(batchRecord);
+
+      const now = new Date().toISOString();
+      const receiveTs = received_at || now;
+
+      const mappedItems = items.map((it) => ({
+        id: createId(),
+        store_id: storeId,
+        created_at: now,
+        received_at: receiveTs,
+        _synced: false,
+        ...it,
+        supplier_id,
+        received_by: created_by,
+        weight: it.weight ?? null,
+        porterage: it.porterage ?? null,
+        transfer_fee: it.transfer_fee ?? null,
+        price: it.price ?? null,
+        commission_rate: it.commission_rate ?? null,
+        notes: it.notes ?? null,
+        received_quantity: it.received_quantity ?? it.quantity,
+        batch_id: batchId as string | null
+      }));
+
+      await db.inventory_items.bulkAdd(mappedItems);
+    });
+
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+
+    return { batchId };
   };
 
   const addSale = async (
@@ -618,18 +707,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       created_by: item.created_by || 'system'
     }));
 
-    if (items.some(item => item.payment_method === 'credit') ||  items.some(item =>( item.received_value < item.unit_price * item.quantity) && item.payment_method === 'credit')) {
-      const creditItems = items.filter(item => item.payment_method === 'credit' || item.received_value < item.unit_price * item.quantity);
-      const creditAmount = creditItems.reduce((sum, item) => sum + item.received_value, 0);
-      const customer = await db.customers.get(creditItems[0].customer_id);
+    // if (items.some(item => item.payment_method === 'credit') ||  items.some(item =>( item.received_value < item.unit_price * item.quantity) && item.payment_method !== 'credit')) {
+    //   const creditItems = items.filter(item => item.payment_method === 'credit' || item.received_value < item.unit_price * item.quantity);
+    //   const creditAmount = creditItems.reduce((sum, item) => sum + item.received_value, 0);
+    //   const customer = await db.customers.get(creditItems[0].customer_id);
 
-      if (customer) { 
-        await db.customers.update(customer.id, {
-           lb_balance: customer.lb_balance + creditAmount,
-           _synced: false
-        });
-      }
-    }
+    
+    // }
 
     // Use transaction to ensure atomicity
     await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
@@ -799,6 +883,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return;
   };
 
+  const updateInventoryBatch = async (id: string, updates: Tables['inventory_batches']['Update']): Promise<void> => {
+    await db.inventory_batches.update(id, { ...updates, _synced: false });
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+  };
+
+  const applyCommissionRateToBatch = async (batchId: string, commissionRate: number): Promise<void> => {
+    const items = await db.inventory_items.where('batch_id').equals(batchId).toArray();
+    await db.transaction('rw', [db.inventory_items], async () => {
+      for (const it of items) {
+        await db.inventory_items.update(it.id, { commission_rate: commissionRate, _synced: false });
+      }
+    });
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+  };
+
   const fullResync = async (): Promise<SyncResult> => {
     if (!storeId) {
       return { success: false, errors: ['No store ID available'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
@@ -961,7 +1064,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         });
       } else {
         // Create new inventory item if none exists
-        const newInventoryItem = {
+        const newInventoryItem: InventoryItem = {
           
           id: createId(),
           store_id: storeId,
@@ -980,7 +1083,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           commission_rate: null,
           notes: null,
           received_quantity: quantity,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          batch_id: null
         };
         
         await db.inventory_items.add(newInventoryItem);
@@ -1033,11 +1137,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateCustomer,
       updateSupplier,
       addInventoryItem,
+      addInventoryBatch,
       addSale,
       updateSale,
       deleteSale,
       addTransaction,
       addExpenseCategory,
+      updateInventoryBatch,
+      applyCommissionRateToBatch,
   
       deductInventoryQuantity,
       restoreInventoryQuantity,
