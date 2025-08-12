@@ -25,6 +25,7 @@ type ReceivedBillsProps = {
   onDeleteSale: (sale: any) => void;
   onUpdateBatch?: (batchId: string, updates: { porterage?: number | null; transfer_fee?: number | null; notes?: string | null }) => Promise<void>;
   onApplyBatchCommission?: (batchId: string, commissionRate: number) => Promise<void>;
+  onCloseBill?: (bill: any, fees: { commission: number; porterage: number; transfer: number; supplierAmount: number }) => Promise<void>;
 };
 
 export default function ReceivedBills({
@@ -38,7 +39,8 @@ export default function ReceivedBills({
   onEditSale,
   onDeleteSale,
   onUpdateBatch,
-  onApplyBatchCommission
+  onApplyBatchCommission,
+  onCloseBill
 }: ReceivedBillsProps) {
   const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
   const [receivedBillsSupplierFilter, setReceivedBillsSupplierFilter] = useState('');
@@ -53,6 +55,8 @@ export default function ReceivedBills({
   const [showBatchEdit, setShowBatchEdit] = useState(false);
   const [batchEditForm, setBatchEditForm] = useState<{ porterage?: string; transfer_fee?: string; notes?: string; commission_rate?: string }>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [closedBillIds, setClosedBillIds] = useState<Set<string>>(new Set());
+
 
   const getReceivedBills = useMemo(() => {
     const bills: any[] = [];
@@ -115,6 +119,12 @@ export default function ReceivedBills({
         else if (progress >= 50) status = 'halfway';
         else if (progress > 0) status = 'in-progress';
 
+        // Determine closed status from local state or possible item fields
+        const isClosed = closedBillIds.has(item.id) || (item as any).status === 'closed' || (item as any).is_closed === true;
+        if (isClosed) {
+          status = 'closed';
+        }
+
         const totalCost = item.type === 'commission'
           ? (item.porterage || 0) + (item.transfer_fee || 0)
           : (item.price || 0) * originalReceivedQuantity;
@@ -141,6 +151,7 @@ export default function ReceivedBills({
           estimatedTotalValue,
           progress: validProgress,
           status,
+          isClosed,
           saleCount,
           receivedAt: item.received_at || item.created_at,
           receivedBy: item.received_by,
@@ -159,7 +170,7 @@ export default function ReceivedBills({
       showToast('Error processing received bills data', 'error');
     }
     return bills;
-  }, [inventory, products, suppliers, sales, showToast]);
+  }, [inventory, products, suppliers, sales, showToast, closedBillIds]);
 
   const filteredReceivedBills = useMemo(() => {
     try {
@@ -282,6 +293,11 @@ export default function ReceivedBills({
         else if (progress >= 75) status = 'nearly-complete';
         else if (progress >= 50) status = 'halfway';
         else if (progress > 0) status = 'in-progress';
+        // If all items in the group are closed, mark the group as closed
+        const allClosed = g.items.length > 0 && g.items.every((it: any) => it.isClosed === true);
+        if (allClosed) {
+          status = 'closed';
+        }
         const type = g.typeSet.size === 1 ? Array.from(g.typeSet)[0] : 'mixed';
         const productName = g.items.length === 1 ? g.items[0].productName : `${g.items.length} items`;
         const avgUnitPrice = g.items.length === 1 ? g.items[0].avgUnitPrice : (g.totalSoldQuantity > 0 ? g.totalRevenue / g.totalSoldQuantity : 0);
@@ -289,6 +305,7 @@ export default function ReceivedBills({
           ...g,
           progress,
           status,
+          isClosed: allClosed,
           type,
           productName,
           avgUnitPrice,
@@ -433,7 +450,8 @@ export default function ReceivedBills({
       'in-progress': { color: 'bg-blue-100 text-blue-800', icon: Activity },
       'halfway': { color: 'bg-yellow-100 text-yellow-800', icon: TrendingUpIcon },
       'nearly-complete': { color: 'bg-orange-100 text-orange-800', icon: TargetIcon },
-      'completed': { color: 'bg-green-100 text-green-800', icon: CheckCircle }
+      'completed': { color: 'bg-green-100 text-green-800', icon: CheckCircle },
+      'closed': { color: 'bg-gray-200 text-gray-800', icon: CheckCircle }
     };
     const config = statusConfig[status] || statusConfig['pending'];
     const IconComponent = config.icon;
@@ -562,6 +580,7 @@ export default function ReceivedBills({
               <option value="halfway">Halfway</option>
               <option value="nearly-complete">Nearly Complete</option>
               <option value="completed">Completed</option>
+              <option value="closed">Closed</option>
             </select>
           </div>
           <div>
@@ -1014,8 +1033,20 @@ export default function ReceivedBills({
           formatCurrency={formatCurrency}
           onEditSale={onEditSale}
           onDeleteSale={onDeleteSale}
+          onCloseBill={onCloseBill}
+          showToast={showToast}
+          onMarkBillClosed={(id: string) => {
+            setClosedBillIds(prev => {
+              const next = new Set(prev);
+              next.add(id);
+              return next;
+            });
+          }}
         />
       )}
+
+      {/* Removed parent-level Close Bill modal. The Sales Logs modal now manages its own confirmation modal. */}
+      
     </div>
   );
 }
@@ -1028,7 +1059,10 @@ function ReceivedBillSalesLogsModal({
   customers, 
   formatCurrency,
   onEditSale,
-  onDeleteSale
+  onDeleteSale,
+  onCloseBill,
+  showToast,
+  onMarkBillClosed
 }: {
   selectedReceivedBill: any;
   setShowReceivedBillSalesLogs: (show: boolean) => void;
@@ -1038,7 +1072,12 @@ function ReceivedBillSalesLogsModal({
   formatCurrency: (amount: number) => string;
   onEditSale: (sale: any) => void;
   onDeleteSale: (sale: any) => void;
+  onCloseBill?: (bill: any, fees: { commission: number; porterage: number; transfer: number; supplierAmount: number }) => Promise<void>;
+  showToast: (message: string, type?: 'success' | 'error') => void;
+  onMarkBillClosed: (id: string) => void;
 }) {
+  const [showCloseBillModal, setShowCloseBillModal] = useState(false);
+  const [closeBillFees, setCloseBillFees] = useState<{ commission: number; porterage: number; transfer: number; supplierAmount: number } | null>(null);
   const processedSalesData = useMemo(() => {
     if (!selectedReceivedBill.relatedSales || !Array.isArray(selectedReceivedBill.relatedSales)) {
       return [];
@@ -1065,13 +1104,55 @@ function ReceivedBillSalesLogsModal({
     return salesDetails.sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
   }, [selectedReceivedBill, sales, customers]);
 
-  const closeBill = () => {
-    
-    setShowReceivedBillSalesLogs(false);
-  }
+  const closeBill = async () => {
+    try {
+      if (selectedReceivedBill.isClosed) {
+        showToast('Bill is already closed.', 'error');
+        return;
+      }
+      // Calculate total revenue from sales
+      const totalRevenue = selectedReceivedBill.totalRevenue || 0;
+      
+      // Calculate fees based on bill type
+      let commissionAmount = 0;
+      let porterageAmount = 0;
+      let transferAmount = 0;
+      let supplierAmount = 0;
+
+      if (selectedReceivedBill.type === 'commission') {
+        // For commission items, calculate commission percentage
+        const commissionRate = selectedReceivedBill.commissionRate || 0;
+        commissionAmount = (totalRevenue * commissionRate) / 100;
+        
+        // Porterage and transfer fees are fixed amounts
+        porterageAmount = selectedReceivedBill.porterage || selectedReceivedBill.batchPorterage || 0;
+        transferAmount = selectedReceivedBill.transferFee || selectedReceivedBill.batchTransferFee || 0;
+        
+        // Supplier gets the remaining amount after deducting all fees
+        supplierAmount = totalRevenue - commissionAmount - porterageAmount - transferAmount;
+      } else {
+        // For cash items, supplier gets the full amount
+        supplierAmount = totalRevenue;
+      }
+
+      const fees = {
+        commission: commissionAmount,
+        porterage: porterageAmount,
+        transfer: transferAmount,
+        supplierAmount: supplierAmount
+      };
+
+      // Set fees and show confirmation modal
+      setCloseBillFees(fees);
+      setShowCloseBillModal(true);
+    } catch (e) {
+      console.error('Error closing bill:', e);
+      showToast('Failed to close bill. Please try again.', 'error');
+    }
+  };
   const hasInvalidSalesLines = useMemo(() => {
     return processedSalesData.some((item: any) => {
-      const invalidQuantity =  selectedReceivedBill.originalQuantity     >selectedReceivedBill.totalSoldQuantity;
+      const invalidQuantity =  selectedReceivedBill.originalQuantity > selectedReceivedBill.totalSoldQuantity;
       const invalidPrice = !item.unitPrice || item.unitPrice <= 0;
       return invalidQuantity || invalidPrice;
       
@@ -1282,17 +1363,17 @@ function ReceivedBillSalesLogsModal({
           <div className="flex items-center gap-2">
           <button
               onClick={exportSelectedBill}
-              disabled={hasInvalidSalesLines}
+              disabled={!selectedReceivedBill.isClosed}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={hasInvalidSalesLines ? 'Cannot close bill: missing quantity or non-priced item(s) present' : 'Export this received bill'}
+              title={!selectedReceivedBill.isClosed ? 'Export is only available after closing the bill' : 'Export this received bill'}
             >
               {'Export Bill' }
             </button>
             <button
               onClick={closeBill}
-              disabled={hasInvalidSalesLines}
+              disabled={hasInvalidSalesLines || selectedReceivedBill.isClosed}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={hasInvalidSalesLines ? 'Cannot close bill: missing quantity or non-priced item(s) present' : 'Export this received bill'}
+              title={selectedReceivedBill.isClosed ? 'Bill already closed' : hasInvalidSalesLines ? 'Cannot close bill: missing quantity or non-priced item(s) present' : 'Close this received bill'}
             >
               {'Close Bill'}
             </button>
@@ -1301,6 +1382,103 @@ function ReceivedBillSalesLogsModal({
           </div>
         </div>
       </div>
+
+      {showCloseBillModal && closeBillFees && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto">
+            <div className="p-6 border-b">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900">Close Bill Confirmation</h2>
+                <button onClick={() => setShowCloseBillModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="text-sm font-medium text-gray-700 mb-3">Bill Summary</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Product:</span>
+                    <span className="font-medium">{selectedReceivedBill.productName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Supplier:</span>
+                    <span className="font-medium">{selectedReceivedBill.supplierName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Type:</span>
+                    <span className="font-medium capitalize">{selectedReceivedBill.type}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total Revenue:</span>
+                    <span className="font-medium text-green-600">{formatCurrency(selectedReceivedBill.totalRevenue)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-yellow-50 p-4 rounded-lg">
+                <h3 className="text-sm font-medium text-yellow-700 mb-3">Fee Breakdown</h3>
+                <div className="space-y-2 text-sm">
+                  {selectedReceivedBill.type === 'commission' && (
+                    <>
+                      <div className="flex justify-between">
+                        <span>Commission ({selectedReceivedBill.commissionRate || 0}%):</span>
+                        <span className="font-medium text-red-600">-{formatCurrency(closeBillFees.commission)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Porterage:</span>
+                        <span className="font-medium text-red-600">-{formatCurrency(closeBillFees.porterage)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Transfer Fee:</span>
+                        <span className="font-medium text-red-600">-{formatCurrency(closeBillFees.transfer)}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="border-t pt-2 mt-2">
+                    <div className="flex justify-between font-medium">
+                      <span>Supplier Amount:</span>
+                      <span className="text-green-600">{formatCurrency(closeBillFees.supplierAmount)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+       
+            </div>
+            <div className="px-6 py-4 border-t flex justify-end gap-3">
+              <button
+                onClick={() => setShowCloseBillModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    if (onCloseBill) {
+                      await onCloseBill(selectedReceivedBill, closeBillFees);
+                      setShowCloseBillModal(false);
+                      setCloseBillFees(null);
+                      setShowReceivedBillSalesLogs(false);
+                      showToast('Bill closed successfully! Commission, porterage, and transfer fees deducted. Supplier balance updated.', 'success');
+                      // notify parent to mark as closed locally
+                      onMarkBillClosed(String(selectedReceivedBill.id));
+                    }
+                  } catch (e) {
+                    console.error('Error closing bill:', e);
+                    showToast('Failed to close bill. Please try again.', 'error');
+                  }
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Confirm Close Bill
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

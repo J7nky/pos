@@ -6,6 +6,7 @@ import SearchableSelect from './common/SearchableSelect';
 import MoneyInput from './common/MoneyInput';
 import { cleanupAndValidateSaleItems } from '../utils/cleanupSaleItemsData';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { SupabaseService } from '../services/supabaseService';
 import { 
   Calculator,
   DollarSign,
@@ -1379,6 +1380,101 @@ export default function Accounting() {
   const handleCloseBill = (bill: any) => {
     setClosingBill(bill);
     setShowCloseBillModal(true);
+  };
+
+  const handleCloseReceivedBill = async (bill: any, fees: { commission: number; porterage: number; transfer: number; supplierAmount: number }) => {
+    try {
+      // Guard: do not allow closing an already closed bill
+      if (bill?.notes && typeof bill.notes === 'string' && bill.notes.includes('[CLOSED]')) {
+        showToast('This bill is already closed.', 'error');
+        return;
+      }
+
+      // Calculate total revenue from the bill
+      const totalRevenue = fees.commission + fees.porterage + fees.transfer + fees.supplierAmount;
+      
+      // Add commission transaction (if applicable)
+      if (fees.commission > 0) {
+        const safeCommissionAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.commission, 'USD');
+        await addTransaction({
+          type: 'income',
+          category: 'Commission',
+          amount: safeCommissionAmount.amount,
+          currency: safeCommissionAmount.currency,
+          description: `Commission fee for ${bill.productName} sold on behalf of ${bill.supplierName}${safeCommissionAmount.wasConverted ? ` (Originally ${fees.commission} USD)` : ''}`,
+          reference: `COMM-${bill.id.slice(-8)}`,
+          created_by: userProfile?.id || ''
+        });
+      }
+
+      // Add porterage transaction (if applicable)
+      if (fees.porterage > 0) {
+        const safePorterageAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.porterage, 'USD');
+        await addTransaction({
+          type: 'income',
+          category: 'Porterage',
+          amount: safePorterageAmount.amount,
+          currency: safePorterageAmount.currency,
+          description: `Porterage fee for ${bill.productName} from ${bill.supplierName}${safePorterageAmount.wasConverted ? ` (Originally ${fees.porterage} USD)` : ''}`,
+          reference: `PORT-${bill.id.slice(-8)}`,
+          created_by: userProfile?.id || ''
+        });
+      }
+
+      // Add transfer fee transaction (if applicable)
+      if (fees.transfer > 0) {
+        const safeTransferAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.transfer, 'USD');
+        await addTransaction({
+          type: 'income',
+          category: 'Transfer Fee',
+          amount: safeTransferAmount.amount,
+          currency: safeTransferAmount.currency,
+          description: `Transfer fee for ${bill.productName} from ${bill.supplierName}${safeTransferAmount.wasConverted ? ` (Originally ${fees.transfer} USD)` : ''}`,
+          reference: `TRANS-${bill.id.slice(-8)}`,
+          created_by: userProfile?.id || ''
+        });
+      }
+
+      // Add supplier payment transaction
+      if (fees.supplierAmount > 0) {
+        const safeSupplierAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.supplierAmount, 'USD');
+        await addTransaction({
+          supplier_id: bill.supplier_id,
+          type: 'expense',
+          category: 'Supplier Payment',
+          amount: safeSupplierAmount.amount,
+          currency: safeSupplierAmount.currency,
+          description: `Payment to ${bill.supplierName} for ${bill.productName} sales${safeSupplierAmount.wasConverted ? ` (Originally ${fees.supplierAmount} USD)` : ''}`,
+          reference: `PAY-${bill.id.slice(-8)}`,
+          created_by: userProfile?.id || ''
+        });
+        console.log('supplier', bill.supplier_id, 'fees.supplierAmount', fees.supplierAmount);
+        // Update supplier balance
+        const supplier = suppliers.find(s => s.id === bill.supplier_id);
+        if (supplier) {
+          const currentUsdBalance = supplier.usd_balance || 0;
+          const newBalance = currentUsdBalance + fees.supplierAmount;
+          
+          await raw.updateSupplier(bill.supplier_id, {
+            usd_balance: newBalance
+          });
+        }
+      }
+
+      // Persist closed flag onto the inventory item by appending a marker in notes
+      try {
+        const existingNotes = bill.notes || '';
+        const closedNote = existingNotes.includes('[CLOSED]') ? existingNotes : `${existingNotes ? existingNotes + ' ' : ''}[CLOSED]`;
+        await SupabaseService.updateInventoryItem(bill.id, { notes: closedNote });
+      } catch (e) {
+        console.warn('Failed to persist closed flag on inventory item:', e);
+      }
+
+      showToast('Bill closed successfully! All fees deducted and supplier balance updated.', 'success');
+    } catch (error) {
+      console.error('Error closing received bill:', error);
+      throw new Error('Failed to close bill. Please try again.');
+    }
   };
 
   const handleConfirmCloseBill = async () => {
@@ -2963,6 +3059,7 @@ export default function Accounting() {
           showToast={showToast}
           onEditSale={handleEditSale}
           onDeleteSale={handleDeleteSale}
+          onCloseBill={handleCloseReceivedBill}
         />
       )}
 
