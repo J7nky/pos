@@ -20,6 +20,7 @@ const SYNC_TABLES = [
   'inventory_items',
   'sale_items',
   'transactions',
+  'inventory_batches',
 
 ] as const;
 
@@ -465,7 +466,7 @@ export class SyncService {
     // Remove updated_at for tables that don't have it in Supabase
     // Only these tables have updated_at: products, suppliers, customers
     const tableName = this.getTableFromRecord(record);
-    const tablesWithoutUpdatedAt = ['inventory_items', 'sale_items', 'transactions'];
+    const tablesWithoutUpdatedAt = ['inventory_items', 'sale_items', 'transactions', 'inventory_batches'];
     
     if (tablesWithoutUpdatedAt.includes(tableName)) {
       delete cleanRecord.updated_at;
@@ -520,6 +521,7 @@ export class SyncService {
     // Updated supplier detection to handle new type field and distinguish from transactions
     if (record.phone && record.type && (record.type === 'commission' || record.type === 'cash') && !record.amount) return 'suppliers';
     if (record.phone && record.balance !== undefined && !record.type) return 'customers';
+    if (record.supplier_id && record.received_at && record.created_by && !record.product_id) return 'inventory_batches';
 
     return 'unknown';
   }

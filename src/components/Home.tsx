@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
+import { useI18n } from '../i18n';
 import { 
   DollarSign, 
   Package, 
@@ -26,7 +27,7 @@ export default function Home() {
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) : [];
-  const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at, type: s.type || 'commission'})) : [];
+  const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at})) : [];
   const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({...s, createdAt: s.created_at})) : [];
   const stockLevels = Array.isArray(raw.stockLevels) ? raw.stockLevels : [];
   const cashDrawer = raw.cashDrawer;
@@ -37,6 +38,7 @@ export default function Home() {
   const { userProfile } = useSupabaseAuth();
   const { formatCurrency, getConvertedAmount } = useCurrency();
   const [showFastActions, setShowFastActions] = useState(true);
+  const { t } = useI18n();
   const inventory = Array.isArray(raw.inventory) ? raw.inventory : [];
   const recentReceivesCount = inventory
     .sort((a, b) => new Date(b.received_at || b.receivedAt).getTime() - new Date(a.received_at || a.receivedAt).getTime())
@@ -44,9 +46,9 @@ export default function Home() {
 
   const today = new Date().toISOString().split('T')[0];
   const todaySales = sales.filter(sale => 
-    sale.createdAt && sale.createdAt.split('T')[0] === today && sale.status === 'completed'
+    sale.createdAt && sale.createdAt.split('T')[0] 
   );
-  const todayRevenue = todaySales.reduce((sum, sale) => sum + sale.total, 0);
+  const todayRevenue = todaySales.reduce((sum, sale) => sum + sale.received_value, 0);
   const todayExpenses = transactions.filter(t => 
     t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today
   ).reduce((sum, t) => {
@@ -68,8 +70,8 @@ export default function Home() {
   const fastActions = [
     {
       id: 'quick-sale',
-      title: 'Quick Sale',
-      description: 'Start a new sale transaction',
+      title: t('home.quickSale'),
+      description: t('home.quickSaleDesc'),
       icon: ShoppingCart,
       color: 'bg-green-500',
       hoverColor: 'hover:bg-green-600',
@@ -78,8 +80,8 @@ export default function Home() {
     },
     {
       id: 'receive-products',
-      title: 'Receive Products',
-      description: 'Add new inventory from suppliers',
+      title: t('home.receiveProducts'),
+      description: t('home.receiveProductsDesc'),
       icon: Truck,
       color: 'bg-blue-500',
       hoverColor: 'hover:bg-blue-600',
@@ -88,8 +90,8 @@ export default function Home() {
     },
     {
       id: 'add-customer',
-      title: 'Add Customer',
-      description: 'Register a new customer',
+      title: t('home.addCustomer'),
+      description: t('home.addCustomerDesc'),
       icon: UserPlus,
       color: 'bg-purple-500',
       hoverColor: 'hover:bg-purple-600',
@@ -98,8 +100,8 @@ export default function Home() {
     },
     {
       id: 'record-expense',
-      title: 'Record Expense',
-      description: 'Log business expenses',
+      title: t('home.recordExpense'),
+      description: t('home.recordExpenseDesc'),
       icon: Receipt,
       color: 'bg-amber-500',
       hoverColor: 'hover:bg-amber-600',
@@ -108,8 +110,8 @@ export default function Home() {
     },
     {
       id: 'today-sales',
-      title: "Today's Sales",
-      description: 'View sales performance',
+      title: t('home.todaySales'),
+      description: t('home.todaySalesDesc'),
       icon: Eye,
       color: 'bg-indigo-500',
       hoverColor: 'hover:bg-indigo-600',
@@ -118,8 +120,8 @@ export default function Home() {
     },
     {
       id: 'check-stock',
-      title: 'Check Stock',
-      description: 'Monitor inventory levels',
+      title: t('home.checkStock'),
+      description: t('home.checkStockDesc'),
       icon: Package,
       color: 'bg-teal-500',
       hoverColor: 'hover:bg-teal-600',
@@ -153,18 +155,16 @@ export default function Home() {
   ];
 
   const recentSales = sales
-    .filter(sale => sale.status === 'completed' && sale.createdAt)
+    .filter(sale => sale.createdAt)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 5);
 
   return (
     <div className="p-6">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">
-          Welcome back, {userProfile?.name}
-        </h1>
+        <h1 className="text-3xl font-bold text-gray-900">{t('home.welcome', { name: userProfile?.name || '' })}</h1>
         <p className="text-gray-600 mt-2">
-          Here's what's happening at your store today.
+          {t('home.subtitle')}
         </p>
       </div>
 
@@ -173,23 +173,23 @@ export default function Home() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center">
             <Zap className="w-6 h-6 text-yellow-500 mr-2" />
-            <h2 className="text-2xl font-bold text-gray-900">Fast Actions</h2>
+            <h2 className="text-2xl font-bold text-gray-900">{t('home.fastActions')}</h2>
           </div>
           <button
             onClick={() => setShowFastActions(!showFastActions)}
             className="flex items-center px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-            title={showFastActions ? "Hide Fast Actions" : "Show Fast Actions"}
+            title={showFastActions ? t('home.hide') : t('home.show')}
           >
             {showFastActions ? (
               <>
                 <EyeOff className="w-4 h-4 mr-2" />
-                <span className="text-sm font-medium">Hide</span>
+                <span className="text-sm font-medium">{t('home.hide')}</span>
                 <ChevronUp className="w-4 h-4 ml-1" />
               </>
             ) : (
               <>
                 <Eye className="w-4 h-4 mr-2" />
-                <span className="text-sm font-medium">Show</span>
+                <span className="text-sm font-medium">{t('home.show')}</span>
                 <ChevronDown className="w-4 h-4 ml-1" />
               </>
             )}
@@ -262,7 +262,7 @@ export default function Home() {
         {lowStockAlertsEnabled && (
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Low Stock Alert</h2>
+              <h2 className="text-lg font-semibold text-gray-900">{t('home.lowStockAlert')}</h2>
               <AlertTriangle className="w-5 h-5 text-amber-500" />
             </div>
             {lowStockItems.length > 0 ? (
@@ -271,23 +271,23 @@ export default function Home() {
                   <div key={item.productId} className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
                     <div>
                       <p className="font-medium text-gray-900">{item.productName}</p>
-                      <p className="text-sm text-gray-600">{item.currentStock} {item.unit} remaining</p>
+                      <p className="text-sm text-gray-600">{item.currentStock} {item.unit} {t('inventory.remaining')}</p>
                     </div>
                     <span className="px-2 py-1 bg-amber-200 text-amber-800 text-xs rounded-full">
-                      Low Stock
+                      {t('inventory.lowStock')}
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-gray-500 text-center py-4">All products are well stocked!</p>
+              <p className="text-gray-500 text-center py-4">{t('home.allWellStocked')}</p>
             )}
           </div>
         )}
         {/* Recent Sales */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Sales</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{t('home.recentSales')}</h2>
             <Clock className="w-5 h-5 text-gray-400" />
           </div>
           {recentSales.length > 0 ? (
@@ -303,14 +303,14 @@ export default function Home() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold text-gray-900">{formatCurrency(sale.total)}</p>
-                    <p className="text-sm text-gray-600 capitalize">{sale.paymentMethod}</p>
+                    <p className="font-semibold text-gray-900">{formatCurrency(sale.received_value)}</p>
+                    <p className="text-sm text-gray-600 capitalize">{sale.payment_method}</p>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-gray-500 text-center py-4">No recent sales</p>
+            <p className="text-gray-500 text-center py-4">{t('home.noRecentSales')}</p>
           )}
         </div>
       </div>

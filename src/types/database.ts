@@ -178,6 +178,7 @@ export interface Database {
           store_id: string;
           created_at: string;
           received_quantity: number;
+          batch_id: string | null;
         };
         Insert: {
           id?: string;
@@ -197,6 +198,7 @@ export interface Database {
           store_id: string;
           created_at?: string;
           received_quantity: number;
+          batch_id?: string | null;
         };
         Update: {
           id?: string;
@@ -208,6 +210,39 @@ export interface Database {
           commission_rate?: number | null;
           notes?: string | null;
           received_quantity?: number;
+          batch_id?: string | null;
+        };
+      };
+      inventory_batches: {
+        Row: {
+          id: string;
+          supplier_id: string;
+          porterage: number | null;
+          transfer_fee: number | null;
+          received_at: string;
+          store_id: string;
+          created_by: string;
+          notes?: string | null;
+        };
+        Insert: {
+          id?: string;
+          supplier_id: string;
+          porterage?: number | null;
+          transfer_fee?: number | null;
+          received_at?: string;
+          store_id?: string;
+          created_by?: string;
+          notes?: string | null;
+        };
+        Update: {
+          id?: string;
+          supplier_id?: string;
+          notes?: string | null;
+          porterage?: number | null;
+          transfer_fee?: number | null;
+          received_at?: string;
+          store_id?: string;
+          created_by?: string;
         };
       };
       sale_items: {

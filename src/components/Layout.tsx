@@ -1,6 +1,7 @@
 import React, { ReactNode } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
+import { useI18n } from '../i18n';
 import { 
   LayoutDashboard, 
   Package, 
@@ -24,6 +25,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
   const { userProfile, signOut } = useSupabaseAuth();
   const { isOnline, products, customers, inventory, getSyncStatus } = useOfflineData();
   const { unsyncedCount, isSyncing } = getSyncStatus();
+  const { t } = useI18n();
 
   // Listen for navigation events from Fast Actions
   React.useEffect(() => {
@@ -36,15 +38,13 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
   }, [onPageChange]);
 
   const menuItems = [
-    { id: 'home', label: 'Home', icon: LayoutDashboard },
-    { id: 'inventory', label: 'Inventory', icon: Package },
-
-    { id: 'pos', label: 'Point of Sale', icon: ShoppingCart },
-    { id: 'customers', label: 'Customers', icon: Users },
-    { id: 'accounting', label: 'Accounting', icon: Calculator },
-    { id: 'reports', label: 'Reports', icon: FileText },
-    { id: 'demo', label: '🚀 Offline Demo', icon: () => <span className="text-lg">🚀</span> },
-    { id: 'settings', label: 'Settings', icon: Settings }
+    { id: 'home', label: t('nav.home'), icon: LayoutDashboard },
+    { id: 'inventory', label: t('nav.inventory'), icon: Package },
+    { id: 'pos', label: t('nav.pos'), icon: ShoppingCart },
+    { id: 'customers', label: t('nav.customers'), icon: Users },
+    { id: 'accounting', label: t('nav.accounting'), icon: Calculator },
+    { id: 'reports', label: t('nav.reports'), icon: FileText },
+    { id: 'settings', label: t('nav.settings'), icon: Settings }
   ];
 
   return (
@@ -52,16 +52,16 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
       {/* Sidebar */}
       <div className="w-64 bg-white shadow-lg">
         <div className="p-6 border-b">
-          <h1 className="text-xl font-bold text-gray-800">ProducePOS</h1>
+          <h1 className="text-xl font-bold text-gray-800">{t('layout.title')}</h1>
           <div className="flex items-center mt-2 text-sm text-gray-600">
             {isOnline ? (
-              <><Wifi className="w-4 h-4 mr-2 text-green-500" /> Online</>
+              <><Wifi className="w-4 h-4 mr-2 text-green-500" /> {t('layout.connection.online')}</>
             ) : (
-              <><WifiOff className="w-4 h-4 mr-2 text-red-500" /> Offline</>
+              <><WifiOff className="w-4 h-4 mr-2 text-red-500" /> {t('layout.connection.offline')}</>
             )}
             {unsyncedCount > 0 && (
               <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
-                {unsyncedCount} unsynced
+                {t('common.status.unsyncedCount', { count: unsyncedCount })}
               </span>
             )}
           </div>

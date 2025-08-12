@@ -58,6 +58,7 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
   store_id: string;
   created_at: string;
   received_quantity: number;
+  batch_id: string | null;
 }
 
 
@@ -126,6 +127,16 @@ export interface JournalEntry extends BaseEntity {
   total_credit: number;
   created_by: string;
 }
+export interface inventory_batches extends BaseEntity {
+  id: string;
+  supplier_id: string;
+  notes: string | null;
+  porterage: number | null;
+  transfer_fee: number | null;
+  received_at: string;
+  store_id: string;
+  created_by: string;
+}
 
 class POSDatabase extends Dexie {
   // Core tables
@@ -135,6 +146,7 @@ class POSDatabase extends Dexie {
   inventory_items!: Table<InventoryItem, string>;
   sale_items!: Table<SaleItem, string>;
   transactions!: Table<Transaction, string>;
+  inventory_batches!: Table<inventory_batches, string>;
 
   // Sync management tables
   sync_metadata!: Table<SyncMetadata, string>;
@@ -143,7 +155,7 @@ class POSDatabase extends Dexie {
   constructor() {
     super('POSDatabase');
     
-    this.version(7).stores({
+    this.version(8).stores({
       // Core tables with enhanced indexing to match database schema
       // Tables WITH updated_at: products, suppliers, customers
       products: 'id, store_id, name, category, updated_at',
@@ -151,9 +163,10 @@ class POSDatabase extends Dexie {
       customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
 
       // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
-      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity', // Added received_quantity index
+      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
       sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id and created_by indexes
       transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
+      inventory_batches: 'id, store_id, supplier_id, received_at, created_by',
   
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
@@ -235,10 +248,11 @@ class POSDatabase extends Dexie {
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
 
-    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
+    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_batches
     this.inventory_items.hook('creating', this.addCreateFields);
     this.sale_items.hook('creating', this.addCreateFields);
     this.transactions.hook('creating', this.addCreateFields);
+    this.inventory_batches.hook('creating', this.addCreateFields);
 
     // Only add update hooks for tables that have updated_at
     this.products.hook('updating', this.addUpdateFields);

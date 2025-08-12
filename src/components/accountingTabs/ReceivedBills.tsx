@@ -12,8 +12,6 @@ import {
   X,
   Edit
 } from 'lucide-react';
-import { debugSalesData, validateSalesDataStructure, generateSalesDataReport } from '../../utils/salesDataDebugger';
-import { cleanupAndValidateSaleItems } from '../../utils/cleanupSaleItemsData';
 
 type ReceivedBillsProps = {
   inventory: any[];
@@ -25,6 +23,8 @@ type ReceivedBillsProps = {
   showToast: (message: string, type?: 'success' | 'error') => void;
   onEditSale: (sale: any) => void;
   onDeleteSale: (sale: any) => void;
+  onUpdateBatch?: (batchId: string, updates: { porterage?: number | null; transfer_fee?: number | null; notes?: string | null }) => Promise<void>;
+  onApplyBatchCommission?: (batchId: string, commissionRate: number) => Promise<void>;
 };
 
 export default function ReceivedBills({
@@ -36,7 +36,9 @@ export default function ReceivedBills({
   formatCurrency,
   showToast,
   onEditSale,
-  onDeleteSale
+  onDeleteSale,
+  onUpdateBatch,
+  onApplyBatchCommission
 }: ReceivedBillsProps) {
   const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
   const [receivedBillsSupplierFilter, setReceivedBillsSupplierFilter] = useState('');
@@ -48,6 +50,9 @@ export default function ReceivedBills({
   const [selectedReceivedBill, setSelectedReceivedBill] = useState<any>(null);
   const [showReceivedBillDetails, setShowReceivedBillDetails] = useState(false);
   const [showReceivedBillSalesLogs, setShowReceivedBillSalesLogs] = useState(false);
+  const [showBatchEdit, setShowBatchEdit] = useState(false);
+  const [batchEditForm, setBatchEditForm] = useState<{ porterage?: string; transfer_fee?: string; notes?: string; commission_rate?: string }>({});
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const getReceivedBills = useMemo(() => {
     const bills: any[] = [];
@@ -122,6 +127,10 @@ export default function ReceivedBills({
           supplierId: item.supplier_id,
           supplierName: supplier.name,
           type: item.type,
+          batchId: item.batch_id || null,
+          batchPorterage: (item as any).batch_porterage ?? null,
+          batchTransferFee: (item as any).batch_transfer_fee ?? null,
+          batchNotes: (item as any).batch_notes ?? null,
           originalQuantity: validOriginalQuantity,
           remainingQuantity: validRemainingQuantity,
           totalSoldQuantity: validSoldQuantity,
@@ -220,14 +229,142 @@ export default function ReceivedBills({
     }
   }, [getReceivedBills, receivedBillsSearchTerm, receivedBillsSupplierFilter, receivedBillsProductFilter, receivedBillsStatusFilter, receivedBillsSort, receivedBillsSortDir]);
 
-  const paginatedReceivedBills = useMemo(() => {
+  // Group received bills by batch (bulk) so a batch appears as a single bill with expandable sub-items
+  const groupedReceivedBills = useMemo(() => {
+    try {
+      // Key is batchId if present, otherwise the individual item id
+      const groupMap = new Map<string, any>();
+      for (const bill of filteredReceivedBills) {
+        const key = bill.batchId || bill.id;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            groupId: key,
+            isBatch: !!bill.batchId,
+            supplierId: bill.supplierId,
+            supplierName: bill.supplierName,
+            batchId: bill.batchId || null,
+            batchPorterage: bill.batchPorterage ?? null,
+            batchTransferFee: bill.batchTransferFee ?? null,
+            batchNotes: bill.batchNotes ?? null,
+            items: [] as any[],
+            originalQuantity: 0,
+            remainingQuantity: 0,
+            totalSoldQuantity: 0,
+            totalRevenue: 0,
+            totalCost: 0,
+            totalProfit: 0,
+            receivedAt: bill.receivedAt,
+            typeSet: new Set<string>(),
+          });
+        }
+        const g = groupMap.get(key);
+        g.items.push(bill);
+        g.originalQuantity += bill.originalQuantity || 0;
+        g.remainingQuantity += bill.remainingQuantity || 0;
+        g.totalSoldQuantity += bill.totalSoldQuantity || 0;
+        g.totalRevenue += bill.totalRevenue || 0;
+        g.totalCost += bill.totalCost || 0;
+        g.totalProfit += bill.totalProfit || 0;
+        g.typeSet.add(bill.type);
+        // Use the earliest received date among group items
+        const currentTs = new Date(g.receivedAt).getTime();
+        const billTs = new Date(bill.receivedAt).getTime();
+        if (!currentTs || billTs < currentTs) {
+          g.receivedAt = bill.receivedAt;
+        }
+      }
+
+      const groups = Array.from(groupMap.values()).map((g: any) => {
+        const progressBase = g.originalQuantity > 0 ? (Math.max(g.originalQuantity - g.remainingQuantity, 0) / g.originalQuantity) * 100 : 0;
+        const progress = isNaN(progressBase) || !isFinite(progressBase) ? 0 : Math.max(0, Math.min(100, progressBase));
+        let status = 'pending';
+        if (progress >= 100) status = 'completed';
+        else if (progress >= 75) status = 'nearly-complete';
+        else if (progress >= 50) status = 'halfway';
+        else if (progress > 0) status = 'in-progress';
+        const type = g.typeSet.size === 1 ? Array.from(g.typeSet)[0] : 'mixed';
+        const productName = g.items.length === 1 ? g.items[0].productName : `${g.items.length} items`;
+        const avgUnitPrice = g.items.length === 1 ? g.items[0].avgUnitPrice : (g.totalSoldQuantity > 0 ? g.totalRevenue / g.totalSoldQuantity : 0);
+        return {
+          ...g,
+          progress,
+          status,
+          type,
+          productName,
+          avgUnitPrice,
+        };
+      });
+
+      // Sort groups following the current sort selection
+      groups.sort((a: any, b: any) => {
+        let aValue: any;
+        let bValue: any;
+        switch (receivedBillsSort) {
+          case 'date':
+            aValue = new Date(a.receivedAt).getTime();
+            bValue = new Date(b.receivedAt).getTime();
+            break;
+          case 'supplier':
+            aValue = (a.supplierName || '').toLowerCase();
+            bValue = (b.supplierName || '').toLowerCase();
+            break;
+          case 'product':
+            aValue = (a.productName || '').toLowerCase();
+            bValue = (b.productName || '').toLowerCase();
+            break;
+          case 'amount':
+            // Use totalRevenue as a proxy for amount
+            aValue = a.totalRevenue || 0;
+            bValue = b.totalRevenue || 0;
+            break;
+          case 'progress':
+            aValue = a.progress || 0;
+            bValue = b.progress || 0;
+            break;
+          case 'revenue':
+            aValue = a.totalRevenue || 0;
+            bValue = b.totalRevenue || 0;
+            break;
+          case 'status':
+            aValue = a.status || '';
+            bValue = b.status || '';
+            break;
+          default:
+            aValue = new Date(a.receivedAt).getTime();
+            bValue = new Date(b.receivedAt).getTime();
+        }
+        if (receivedBillsSortDir === 'asc') {
+          return aValue > bValue ? 1 : -1;
+        } else {
+          return aValue < bValue ? 1 : -1;
+        }
+      });
+
+      return groups;
+    } catch (e) {
+      console.error('Error grouping received bills:', e);
+      return [] as any[];
+    }
+  }, [filteredReceivedBills, receivedBillsSort, receivedBillsSortDir]);
+
+  const paginatedGroups = useMemo(() => {
     const itemsPerPage = 10;
     const startIndex = (receivedBillsPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
-    return filteredReceivedBills.slice(startIndex, endIndex);
-  }, [filteredReceivedBills, receivedBillsPage]);
+    return groupedReceivedBills.slice(startIndex, endIndex);
+  }, [groupedReceivedBills, receivedBillsPage]);
 
-  const totalReceivedBillsPages = Math.ceil(filteredReceivedBills.length / 10);
+  const groupTotalPages = Math.ceil(groupedReceivedBills.length / 10);
+
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      return next;
+    });
+  };
+
+  // replaced by paginatedGroups and groupTotalPages
 
   const handleReceivedBillsSort = (sort: 'date' | 'supplier' | 'product' | 'amount' | 'progress' | 'revenue' | 'status') => {
     if (receivedBillsSort === sort) {
@@ -308,58 +445,16 @@ export default function ReceivedBills({
     );
   };
 
-  const updateInventoryItemsWithReceivedQuantity = async () => {
-    try {
-      const itemsToUpdate = inventory.filter(item => 
-        item.received_quantity === null || item.received_quantity === undefined || item.received_quantity === 0
-      );
-      if (itemsToUpdate.length > 0) {
-        showToast(`Found ${itemsToUpdate.length} items that need received_quantity field. Please add new inventory items to see proper progress tracking.`, 'error');
-      } else {
-        showToast('All inventory items have received_quantity field set!', 'success');
-      }
-    } catch (error) {
-      console.error('Error checking inventory items:', error);
-      showToast('Error checking inventory items', 'error');
-    }
-  };
 
-  const debugSalesDataIssues = () => {
-    try {
-      const report = generateSalesDataReport(inventory, sales, products, suppliers);
-      const validation = validateSalesDataStructure(sales);
-      showToast(`Debug complete: ${report.itemsWithSales}/${report.totalInventoryItems} items have sales. Check console for details.`, 'success');
-      console.log('📋 Sales Data Debug Summary:', report, validation);
-    } catch (error) {
-      console.error('Error during sales data debug:', error);
-      showToast('Error during debug analysis. Check console for details.', 'error');
-    }
-  };
 
-  const cleanupSaleItemsData = async () => {
-    try {
-      showToast('Cleaning up sale_items data...', 'success');
-      const result = await cleanupAndValidateSaleItems();
-      const { cleanup, validation } = result;
-      if (cleanup.recordsCleaned > 0) {
-        showToast(`Cleanup complete: ${cleanup.recordsCleaned} records fixed. Check console for details.`, 'success');
-      } else if (validation.issues.length > 0) {
-        showToast(`Validation found ${validation.issues.length} issues. Check console for details.`, 'error');
-      } else {
-        showToast('All sale_items data is clean and valid!', 'success');
-      }
-    } catch (error) {
-      console.error('Error during sale_items cleanup:', error);
-      showToast('Error during cleanup. Check console for details.', 'error');
-    }
-  };
+ 
 
   return (
     <div className="space-y-0">
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Received Bills</h2>
-          <p className="text-sm text-gray-600 mt-1">Track all received inventory items and their sales progress from point of sale</p>
+          <p className="mt-1"></p>
           {(() => {
             const problematicItems = inventory.filter(item => item.received_quantity === null || item.received_quantity === undefined || item.received_quantity === 0);
             return problematicItems.length > 0 ? (
@@ -369,19 +464,7 @@ export default function ReceivedBills({
             ) : null;
           })()}
         </div>
-        <div className="flex items-center space-x-2">
-          <button onClick={cleanupSaleItemsData} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center" title="Clean up sale_items data structure issues - fixes sync errors">
-            <Trash2 className="w-4 h-4 mr-2" />
-            Fix Sync
-          </button>
-          <button onClick={debugSalesDataIssues} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center" title="Debug sales data issues - check console for detailed analysis">
-            <AlertCircle className="w-4 h-4 mr-2" />
-            Debug Sales
-          </button>
-          <button onClick={updateInventoryItemsWithReceivedQuantity} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center">
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Fix Data
-          </button>
+        <div className="flex items-center space-x-2 pb-4">
           <button onClick={exportReceivedBills} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center">
             <FileText className="w-4 h-4 mr-2" />
             Export CSV
@@ -389,12 +472,13 @@ export default function ReceivedBills({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pb-4">
         <div className="bg-white p-4 rounded-lg shadow-sm border">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Total Bills</p>
-              <p className="text-2xl font-bold text-gray-900">{filteredReceivedBills.length}</p>
+             
+              <p className="text-2xl font-bold text-gray-900">{groupedReceivedBills.length}</p>
             </div>
             <div className="p-2 bg-blue-100 rounded-full">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -405,7 +489,7 @@ export default function ReceivedBills({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">In Progress</p>
-              <p className="text-2xl font-bold text-blue-600">{filteredReceivedBills.filter(bill => bill.status === 'in-progress').length}</p>
+              <p className="text-2xl font-bold text-blue-600">{groupedReceivedBills.filter(bill => bill.status === 'in-progress').length}</p>
             </div>
             <div className="p-2 bg-blue-100 rounded-full">
               <Activity className="w-5 h-5 text-blue-600" />
@@ -416,7 +500,7 @@ export default function ReceivedBills({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Completed</p>
-              <p className="text-2xl font-bold text-green-600">{filteredReceivedBills.filter(bill => bill.status === 'completed').length}</p>
+              <p className="text-2xl font-bold text-green-600">{groupedReceivedBills.filter(bill => bill.status === 'completed').length}</p>
             </div>
             <div className="p-2 bg-green-100 rounded-full">
               <CheckCircle className="w-5 h-5 text-green-600" />
@@ -427,7 +511,7 @@ export default function ReceivedBills({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Total Revenue</p>
-              <p className="text-2xl font-bold text-green-600">{formatCurrency(filteredReceivedBills.reduce((sum, bill) => sum + bill.totalRevenue, 0))}</p>
+              <p className="text-2xl font-bold text-green-600">{formatCurrency(groupedReceivedBills.reduce((sum, g) => sum + (g.totalRevenue || 0), 0))}</p>
             </div>
             <div className="p-2 bg-green-100 rounded-full">
               <DollarSign className="w-5 h-5 text-green-600" />
@@ -533,75 +617,205 @@ export default function ReceivedBills({
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {paginatedReceivedBills.map((bill) => (
-                <tr key={bill.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{new Date(bill.receivedAt).toLocaleDateString()}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{bill.productName}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{bill.supplierName}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bill.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
-                      {bill.type}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">
-                      <div>Original: {bill.originalQuantity} {bill.unit}</div>
-                      <div>Remaining: {bill.remainingQuantity} {bill.unit}</div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="w-32 bg-gray-200 rounded-full h-2 mr-2">
-                        <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${bill.progress}%` }}></div>
+              {paginatedGroups.map((group: any) => (
+                <>
+                  <tr key={`group-${group.groupId}`} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        {group.isBatch && (
+                          <button
+                            onClick={() => toggleGroup(group.groupId)}
+                            className="p-1 rounded hover:bg-gray-100"
+                            aria-label={expandedGroups.has(group.groupId) ? 'Collapse' : 'Expand'}
+                          >
+                            <ChevronRight className={`w-4 h-4 text-gray-500 transition-transform ${expandedGroups.has(group.groupId) ? 'rotate-90' : ''}`} />
+                          </button>
+                        )}
+                        <div className="text-sm text-gray-900">{new Date(group.receivedAt).toLocaleDateString()}</div>
                       </div>
-                      <span className="text-sm text-gray-900">{bill.progress.toFixed(1)}%</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{formatCurrency(bill.totalRevenue)}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(bill.status)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleViewReceivedBillDetails(bill)}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                        aria-label="View details"
-                      >
-                        <FileText className="w-3.5 h-3.5 text-gray-500" />
-                        <span>Details</span>
-                      </button>
-                      <button
-                        onClick={() => handleViewReceivedBillSalesLogs(bill)}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                        aria-label="View sales logs"
-                      >
-                        <Activity className="w-3.5 h-3.5 text-gray-500" />
-                        <span>Sales Logs</span>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                        {group.isBatch && <span className="px-1.5 py-0.5 text-[10px] bg-indigo-100 text-indigo-700 rounded">Batch</span>}
+                        <span>{group.productName}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{group.supplierName}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {group.type === 'mixed' ? (
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800`}>
+                          mixed
+                        </span>
+                      ) : (
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${group.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
+                          {group.type}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        <div>Original: {group.originalQuantity}</div>
+                        <div>Remaining: {group.remainingQuantity}</div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <div className="w-32 bg-gray-200 rounded-full h-2 mr-2">
+                          <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${group.progress}%` }}></div>
+                        </div>
+                        <span className="text-sm text-gray-900">{group.progress.toFixed(1)}%</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{formatCurrency(group.totalRevenue || 0)}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(group.status)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        {group.isBatch ? (
+                          <>
+                            <button
+                              onClick={() => toggleGroup(group.groupId)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                            >
+                              {expandedGroups.has(group.groupId) ? 'Collapse' : 'Expand'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                // Use first item to prefill batch edit
+                                const first = group.items[0];
+                                const synthetic = {
+                                  ...first,
+                                  batchId: group.batchId,
+                                  batchPorterage: group.batchPorterage,
+                                  batchTransferFee: group.batchTransferFee,
+                                  batchNotes: group.batchNotes,
+                                  supplierName: group.supplierName,
+                                };
+                                setSelectedReceivedBill(synthetic);
+                                setBatchEditForm({
+                                  porterage: (group.batchPorterage ?? '').toString(),
+                                  transfer_fee: (group.batchTransferFee ?? '').toString(),
+                                  notes: group.batchNotes ?? '',
+                                  commission_rate: (first?.commissionRate ?? '').toString()
+                                });
+                                setShowBatchEdit(true);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                            >
+                              Edit Batch
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleViewReceivedBillDetails(group.items[0])}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                            >
+                              <FileText className="w-3.5 h-3.5 text-gray-500" />
+                              <span>Details</span>
+                            </button>
+                            <button
+                              onClick={() => handleViewReceivedBillSalesLogs(group.items[0])}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                            >
+                              <Activity className="w-3.5 h-3.5 text-gray-500" />
+                              <span>Sales Logs</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {group.isBatch && expandedGroups.has(group.groupId) && (
+                    <tr key={`group-${group.groupId}-details`} className="bg-gray-50">
+                      <td colSpan={9} className="px-6 py-4">
+                        <div className="border rounded-lg overflow-hidden">
+                          <div className="bg-gray-100 px-4 py-2 text-sm text-gray-700 flex items-center justify-between">
+                            <div>
+                              {group.items.length} item{group.items.length !== 1 ? 's' : ''} in this {group.isBatch ? 'batch' : 'bill'}
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-200">
+                              <thead className="bg-gray-50">
+                                <tr>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="bg-white divide-y divide-gray-200">
+                                {group.items.map((bill: any) => (
+                                  <tr key={bill.id} className="hover:bg-gray-50">
+                                    <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{bill.productName}</td>
+                                    <td className="px-6 py-3 whitespace-nowrap">
+                                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bill.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
+                                        {bill.type}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">
+                                      <div>Original: {bill.originalQuantity} {bill.unit}</div>
+                                      <div>Remaining: {bill.remainingQuantity} {bill.unit}</div>
+                                    </td>
+                                    <td className="px-6 py-3 whitespace-nowrap">
+                                      <div className="flex items-center">
+                                        <div className="w-24 bg-gray-200 rounded-full h-2 mr-2">
+                                          <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${bill.progress}%` }}></div>
+                                        </div>
+                                        <span className="text-sm text-gray-900">{bill.progress.toFixed(1)}%</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{formatCurrency(bill.totalRevenue)}</td>
+                                    <td className="px-6 py-3 whitespace-nowrap">{getStatusBadge(bill.status)}</td>
+                                    <td className="px-6 py-3 whitespace-nowrap">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={() => handleViewReceivedBillDetails(bill)}
+                                          className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                                        >
+                                          <FileText className="w-3.5 h-3.5 text-gray-500" />
+                                          <span>Details</span>
+                                        </button>
+                                        <button
+                                          onClick={() => handleViewReceivedBillSalesLogs(bill)}
+                                          className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                                        >
+                                          <Activity className="w-3.5 h-3.5 text-gray-500" />
+                                          <span>Sales Logs</span>
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>
         </div>
 
-        {totalReceivedBillsPages > 1 && (
+        {groupTotalPages > 1 && (
           <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
             <div className="text-sm text-gray-700">
-              Showing {((receivedBillsPage - 1) * 10) + 1} to {Math.min(receivedBillsPage * 10, filteredReceivedBills.length)} of {filteredReceivedBills.length} results
+              Showing {((receivedBillsPage - 1) * 10) + 1} to {Math.min(receivedBillsPage * 10, groupedReceivedBills.length)} of {groupedReceivedBills.length} results
             </div>
             <div className="flex items-center space-x-2">
               <button onClick={() => setReceivedBillsPage(Math.max(1, receivedBillsPage - 1))} disabled={receivedBillsPage === 1} className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">Previous</button>
-              <span className="text-sm text-gray-700">Page {receivedBillsPage} of {totalReceivedBillsPages}</span>
-              <button onClick={() => setReceivedBillsPage(Math.min(totalReceivedBillsPages, receivedBillsPage + 1))} disabled={receivedBillsPage === totalReceivedBillsPages} className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
+              <span className="text-sm text-gray-700">Page {receivedBillsPage} of {groupTotalPages}</span>
+              <button onClick={() => setReceivedBillsPage(Math.min(groupTotalPages, receivedBillsPage + 1))} disabled={receivedBillsPage === groupTotalPages} className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
             </div>
           </div>
         )}
@@ -733,10 +947,68 @@ export default function ReceivedBills({
         </div>
       )}
 
+      {showBatchEdit && selectedReceivedBill?.batchId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Edit Batch</h2>
+              <button onClick={() => setShowBatchEdit(false)} className="text-gray-400 hover:text-gray-600"><X className="w-6 h-6" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Commission Rate (%)</label>
+                <input type="number" value={batchEditForm.commission_rate || ''} onChange={(e) => setBatchEditForm(f => ({ ...f, commission_rate: e.target.value }))} min="0" max="100" step="0.1" className="w-full border border-gray-300 rounded px-3 py-2" />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Porterage</label>
+                  <input type="number" value={batchEditForm.porterage || ''} onChange={(e) => setBatchEditForm(f => ({ ...f, porterage: e.target.value }))} min="0" step="0.01" className="w-full border border-gray-300 rounded px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Transfer Fee</label>
+                  <input type="number" value={batchEditForm.transfer_fee || ''} onChange={(e) => setBatchEditForm(f => ({ ...f, transfer_fee: e.target.value }))} min="0" step="0.01" className="w-full border border-gray-300 rounded px-3 py-2" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea value={batchEditForm.notes || ''} onChange={(e) => setBatchEditForm(f => ({ ...f, notes: e.target.value }))} rows={3} className="w-full border border-gray-300 rounded px-3 py-2" />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t flex justify-end gap-2">
+              <button onClick={() => setShowBatchEdit(false)} className="px-4 py-2 border rounded">Cancel</button>
+              <button
+                onClick={async () => {
+                  try {
+                    if (onUpdateBatch) {
+                      await onUpdateBatch(selectedReceivedBill.batchId, {
+                        porterage: batchEditForm.porterage ? parseFloat(batchEditForm.porterage) : null,
+                        transfer_fee: batchEditForm.transfer_fee ? parseFloat(batchEditForm.transfer_fee) : null,
+                        notes: batchEditForm.notes || null
+                      });
+                    }
+                    if (onApplyBatchCommission && batchEditForm.commission_rate) {
+                      await onApplyBatchCommission(selectedReceivedBill.batchId, parseFloat(batchEditForm.commission_rate));
+                    }
+                    setShowBatchEdit(false);
+                    showToast('Batch updated', 'success');
+                  } catch (e) {
+                    showToast('Failed to update batch', 'error');
+                  }
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showReceivedBillSalesLogs && selectedReceivedBill && (
         <ReceivedBillSalesLogsModal
           selectedReceivedBill={selectedReceivedBill}
           setShowReceivedBillSalesLogs={setShowReceivedBillSalesLogs}
+          inventory={inventory}
           sales={sales}
           customers={customers}
           formatCurrency={formatCurrency}
@@ -751,6 +1023,7 @@ export default function ReceivedBills({
 function ReceivedBillSalesLogsModal({ 
   selectedReceivedBill, 
   setShowReceivedBillSalesLogs, 
+  inventory,
   sales, 
   customers, 
   formatCurrency,
@@ -759,6 +1032,7 @@ function ReceivedBillSalesLogsModal({
 }: {
   selectedReceivedBill: any;
   setShowReceivedBillSalesLogs: (show: boolean) => void;
+  inventory: any[];
   sales: any[];
   customers: any[];
   formatCurrency: (amount: number) => string;
@@ -791,6 +1065,10 @@ function ReceivedBillSalesLogsModal({
     return salesDetails.sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
   }, [selectedReceivedBill, sales, customers]);
 
+  const closeBill = () => {
+    
+    setShowReceivedBillSalesLogs(false);
+  }
   const hasInvalidSalesLines = useMemo(() => {
     return processedSalesData.some((item: any) => {
       const invalidQuantity =  selectedReceivedBill.originalQuantity     >selectedReceivedBill.totalSoldQuantity;
@@ -803,25 +1081,62 @@ function ReceivedBillSalesLogsModal({
   const exportSelectedBill = () => {
     
     try {
-      const billHeaders = [
-        'Product', 'Supplier', 'Type', 'Original Qty', 'Remaining Qty', 'Sold Qty', 'Progress %',
-        'Revenue', 'Cost', 'Profit', 'Status', 'Avg Unit Price', 'Received Date'
-      ];
-      const billRow = [
-        `"${selectedReceivedBill.productName}"`,
-        `"${selectedReceivedBill.supplierName}"`,
-        selectedReceivedBill.type,
-        selectedReceivedBill.originalQuantity,
-        selectedReceivedBill.remainingQuantity,
-        selectedReceivedBill.totalSoldQuantity,
-        `${selectedReceivedBill.progress.toFixed(1)}%`,
-        (selectedReceivedBill.totalRevenue || 0).toFixed(2),
-        (selectedReceivedBill.totalCost || 0).toFixed(2),
-        (selectedReceivedBill.totalProfit || 0).toFixed(2),
-        selectedReceivedBill.status,
-        (selectedReceivedBill.avgUnitPrice || 0).toFixed(2),
-        new Date(selectedReceivedBill.receivedAt).toLocaleString()
-      ];
+      const isBatch = !!selectedReceivedBill.batchId;
+      const billHeaders = isBatch
+        ? ['Batch ID', 'Supplier', 'Type', 'Batch Porterage', 'Batch Transfer Fee', 'Batch Notes', 'Total Items', 'Total Original Qty', 'Total Remaining Qty', 'Total Sold Qty', 'Total Revenue', 'Total Cost', 'Total Profit', 'Received Date']
+        : ['Product', 'Supplier', 'Type', 'Original Qty', 'Remaining Qty', 'Sold Qty', 'Progress %', 'Revenue', 'Cost', 'Profit', 'Status', 'Avg Unit Price', 'Received Date'];
+
+      let billRow: any[] = [];
+      if (isBatch) {
+        const batchItems = inventory.filter((i: any) => i.batch_id === selectedReceivedBill.batchId);
+        const totals = batchItems.reduce((acc: any, it: any) => {
+          const relatedSales = sales.filter((s: any) => s.product_id === it.product_id && s.supplier_id === it.supplier_id && new Date(s.created_at).getTime() >= new Date(it.received_at || it.created_at).getTime());
+          const soldQty = relatedSales.reduce((s: number, r: any) => s + (r.quantity || 0), 0);
+          const revenue = relatedSales.reduce((s: number, r: any) => s + (r.unit_price || 0) * (r.quantity || 0), 0);
+          const origQty = it.received_quantity || it.quantity || 0;
+          const cost = it.type === 'commission' ? ((it.porterage || 0) + (it.transfer_fee || 0)) : (it.price || 0) * origQty;
+          acc.totalItems += 1;
+          acc.totalOriginal += origQty;
+          acc.totalRemaining += (it.quantity || 0);
+          acc.totalSold += soldQty;
+          acc.totalRevenue += revenue;
+          acc.totalCost += cost;
+          acc.totalProfit += revenue - cost;
+          return acc;
+        }, { totalItems: 0, totalOriginal: 0, totalRemaining: 0, totalSold: 0, totalRevenue: 0, totalCost: 0, totalProfit: 0 });
+        billRow = [
+          selectedReceivedBill.batchId,
+          `"${selectedReceivedBill.supplierName}"`,
+          selectedReceivedBill.type,
+          (selectedReceivedBill.batchPorterage || 0).toFixed(2),
+          (selectedReceivedBill.batchTransferFee || 0).toFixed(2),
+          selectedReceivedBill.batchNotes ? `"${String(selectedReceivedBill.batchNotes).replace(/\"/g, '"')}"` : '',
+          totals.totalItems,
+          totals.totalOriginal,
+          totals.totalRemaining,
+          totals.totalSold,
+          totals.totalRevenue.toFixed(2),
+          totals.totalCost.toFixed(2),
+          totals.totalProfit.toFixed(2),
+          new Date(selectedReceivedBill.receivedAt).toLocaleString()
+        ];
+      } else {
+        billRow = [
+          `"${selectedReceivedBill.productName}"`,
+          `"${selectedReceivedBill.supplierName}"`,
+          selectedReceivedBill.type,
+          selectedReceivedBill.originalQuantity,
+          selectedReceivedBill.remainingQuantity,
+          selectedReceivedBill.totalSoldQuantity,
+          `${selectedReceivedBill.progress.toFixed(1)}%`,
+          (selectedReceivedBill.totalRevenue || 0).toFixed(2),
+          (selectedReceivedBill.totalCost || 0).toFixed(2),
+          (selectedReceivedBill.totalProfit || 0).toFixed(2),
+          selectedReceivedBill.status,
+          (selectedReceivedBill.avgUnitPrice || 0).toFixed(2),
+          new Date(selectedReceivedBill.receivedAt).toLocaleString()
+        ];
+      }
 
       const salesHeader = ['Date', 'Customer', 'Quantity', 'Weight', 'Unit Price', 'Total Price', 'Payment Method', 'Notes'];
       const salesRows = processedSalesData.map((s: any) => [
@@ -974,12 +1289,12 @@ function ReceivedBillSalesLogsModal({
               {'Export Bill' }
             </button>
             <button
-              onClick={exportSelectedBill}
+              onClick={closeBill}
               disabled={hasInvalidSalesLines}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title={hasInvalidSalesLines ? 'Cannot close bill: missing quantity or non-priced item(s) present' : 'Export this received bill'}
             >
-              {hasInvalidSalesLines ? 'Close Bill' : ''}
+              {'Close Bill'}
             </button>
             
             <button onClick={() => setShowReceivedBillSalesLogs(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">Close</button>

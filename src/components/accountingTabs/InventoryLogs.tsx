@@ -206,9 +206,7 @@ export default function InventoryLogs({
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Inventory Transaction Logs</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            View and export all transaction logs for inventory items including receiving, sales, and financial transactions
-          </p>
+        
         </div>
         <div className="flex items-center space-x-2">
           <button
