@@ -23,7 +23,8 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
   const [loading, setLoading] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
   const [bulkProducts, setBulkProducts] = useState<string[]>([]);
-  const [bulkItems, setBulkItems] = useState<Record<string, { quantity: string; unit: 'kg'|'piece'|'box'|'bag'|'bundle'|'dozen'; price?: string; weight?: string }>>({});
+  const [bulkItems, setBulkItems] = useState<Record<string, { product_id?: string; quantity: string; unit: 'kg'|'piece'|'box'|'bag'|'bundle'|'dozen'; price?: string; weight?: string }>>({});
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   // Auto-focus first field when modal opens
   useEffect(() => { 
     if (open && firstInputRef.current) firstInputRef.current.focus(); 
@@ -62,6 +63,9 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
     } else {
       for (const pid of bulkProducts) {
         const item = bulkItems[pid];
+        if (!item || !item.product_id) {
+          errors[`product_${pid}`] = 'Select a product.';
+        }
         if (!item || !item.quantity || isNaN(Number(item.quantity)) || Number(item.quantity) < 1) {
           errors[`quantity_${pid}`] = 'Quantity must be at least 1.';
         }
@@ -93,7 +97,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
       const items = bulkProducts.map(pid => {
         const bi = bulkItems[pid];
         return {
-          product_id: pid,
+          product_id: bi.product_id as string,
           supplier_id: form.supplier_id,
           type: form.type,
           quantity: parseInt(bi.quantity),
@@ -141,7 +145,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
     setBulkProducts(prev => [...prev, newProductId]);
     setBulkItems(prev => ({
       ...prev,
-      [newProductId]: { quantity: '', unit: 'kg', price: '', weight: '' }
+      [newProductId]: { product_id: '', quantity: '', unit: 'kg', price: '', weight: '' }
     }));
   };
 
@@ -159,17 +163,17 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
         {/* Enhanced Header with Visual Context */}
-        <div className="p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+        <div className="p-6 border-b border-gray-200 dark:border-slate-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">Receive Products</h2>
-              <p className="text-sm text-gray-600 mt-1">Add new inventory items to your stock</p>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Receive Products</h2>
+              <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">Add new inventory items to your stock</p>
             </div>
             <button
               onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
             >
               <X className="w-6 h-6" />
             </button>
@@ -177,13 +181,13 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
           
           {/* Item Context Header */}
           {(selectedSupplier) && (
-            <div className="mt-4 p-4 bg-white rounded-lg border border-gray-200">
+            <div className="mt-4 p-4 bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800">
               <div className="flex items-center space-x-4">
                 {selectedSupplier && (
                   <div className="flex items-center space-x-3">
                     <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
                     <div>
-                      <p className="font-semibold text-gray-900">{selectedSupplier.name}</p>
+                      <p className="font-semibold text-gray-900 dark:text-slate-100">{selectedSupplier.name}</p>
                       <span className={`px-2 py-1 text-xs rounded-full ${
                         selectedSupplier.type === 'commission' 
                           ? 'bg-green-100 text-green-800' 
@@ -211,14 +215,14 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
             {/* Left Column - Basic Information */}
             <div className="space-y-6">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
                   <Package className="w-5 h-5 mr-2 text-blue-600" />
                   Supplier Information
                 </h3>
                 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Supplier *</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Supplier *</label>
                     <SearchableSelect
                       options={suppliers.map((supplier: any) => ({
                         id: supplier.id,
@@ -226,7 +230,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                         value: supplier.id,
                       }))}
                       value={form.supplier_id}
-                      onChange={(value: any) => setForm({ ...form, supplier_id: value })}
+                      onChange={(value: any) => setForm({ ...form, supplier_id: value })} 
                       placeholder="Select Supplier *"
                       searchPlaceholder="Search suppliers..."
                       categories={['Commission', 'Cash']}
@@ -234,17 +238,18 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                       onRecentUpdate={setRecentSuppliers}
                       showAddOption={true}
                       addOptionText="Add New Supplier"
-                      className={`w-full ${errors.supplier_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
+                       className={`w-full ${errors.supplier_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
+                       portal={true}
                     />
                     {errors.supplier_id && <p className="text-xs text-red-600 mt-1">{errors.supplier_id}</p>}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Supply Type *</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Supply Type *</label>
                     <select
                       value={form.type}
                       onChange={(e) => setForm({ ...form, type: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                     >
                       <option value="commission">Commission</option>
                       <option value="cash">Cash Purchase</option>
@@ -253,14 +258,12 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                 </div>
               </div>
 
-                {/* Right Column - Products Table */}
-           
             </div>
 
             {/* Middle Column - Financial Information */}
             <div className="space-y-6">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
                   <Eye className="w-5 h-5 mr-2 text-purple-600" />
                   Financial Information
                 </h3>
@@ -268,7 +271,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                 <div className="space-y-4">
                   {form.type === 'commission' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Commission Rate (%) *</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Commission Rate (%) *</label>
                       <input
                         type="number"
                         step="0.1"
@@ -276,7 +279,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                         max="100"
                         value={form.commission_rate}
                         onChange={(e) => setForm({ ...form, commission_rate: e.target.value })}
-                        className={`w-full border ${errors.commission_rate ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
+                        className={`w-full border ${errors.commission_rate ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                         placeholder={`Default: ${defaultCommissionRate}%`}
                       />
                       {errors.commission_rate && <p className="text-xs text-red-600 mt-1">{errors.commission_rate}</p>}
@@ -285,28 +288,28 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Porterage Fee (optional)</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Porterage Fee (optional)</label>
                       <input
                         type="number"
                         step="0.01"
                         min="0"
                         value={form.porterage}
                         onChange={(e) => setForm({ ...form, porterage: e.target.value })}
-                        className={`w-full border ${errors.porterage ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
+                        className={`w-full border ${errors.porterage ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                         placeholder="Enter porterage fee"
                       />
                       {errors.porterage && <p className="text-xs text-red-600 mt-1">{errors.porterage}</p>}
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Transfer Fee (optional)</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Transfer Fee (optional)</label>
                       <input
                         type="number"
                         step="0.01"
                         min="0"
                         value={form.transfer_fee}
                         onChange={(e) => setForm({ ...form, transfer_fee: e.target.value })}
-                        className={`w-full border ${errors.transfer_fee ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
+                        className={`w-full border ${errors.transfer_fee ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                         placeholder="Enter transfer fee"
                       />
                       {errors.transfer_fee && <p className="text-xs text-red-600 mt-1">{errors.transfer_fee}</p>}
@@ -315,77 +318,85 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                 </div>
               </div>
             </div>
-             <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+
+            {/* Right Column - Additional Information */}
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
                   <Upload className="w-5 h-5 mr-2 text-orange-600" />
                   Additional Information
                 </h3>
                 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Notes (optional)</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Notes (optional)</label>
                     <textarea
                       value={form.notes}
                       onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                       rows={4}
                       placeholder="Add any additional notes or comments..."
                     />
                   </div>
                 </div>
               </div>
-             
-
-         
+            </div>
           </div>
 
           {/* Error Display */}
           {errors.form && (
-            <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
               <p className="text-sm text-red-600">{errors.form}</p>
             </div>
           )}
  <div className="space-y-6">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 mt-4 flex items-center justify-between">
-                  <div className="flex items-center">
-                    <Truck className="w-5 h-5 mr-2 text-green-600" />
-                    Products
-                  </div>
+                                 <h3 className="text-lg font-semibold text-gray-900 mb-4 mt-4 flex items-center justify-between">
+                   <div className="flex items-center">
+                     <Truck className="w-5 h-5 mr-2 text-green-600" />
+                     Products
+                   </div>
+                   <button
+                     type="button"
+                     onClick={addProductRow}
+                     className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                   >
+                     <Plus className="w-4 h-4" />
+                     Add Row
+                   </button>
+                 </h3>
                 
-                </h3>
-                
-                <div className="bg-gray-50 rounded-lg p-4">
+                <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-4 border border-gray-200 dark:border-slate-700">
                   {bulkProducts.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      <Package className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                    <div className="text-center py-8 text-gray-500 dark:text-slate-400">
+                      <Package className="w-12 h-12 mx-auto mb-2 text-gray-300 dark:text-slate-600" />
                       <p>No products added yet</p>
                       <p className="text-sm">Click "Add Row" to start adding products</p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <div className=" border border-gray-200 dark:border-slate-700 rounded-lg scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 dark:scrollbar-thumb-slate-700 dark:scrollbar-track-slate-800">
                       <table className="w-full">
-                        <thead>
+                        <thead className="sticky top-0 bg-gray-50 dark:bg-slate-800 z-10 shadow-sm">
                           <tr className="border-b border-gray-200">
-                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Product</th>
-                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Qty</th>
-                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Unit</th>
+                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Product</th>
+                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Qty</th>
+                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Unit</th>
                             {form.type === 'cash' && (
-                              <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Price</th>
+                              <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Price</th>
                             )}
-                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Weight</th>
-                            <th className="text-left text-xs font-medium text-gray-500 uppercase py-2">Actions</th>
+                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Weight</th>
+                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
                           {bulkProducts.map((productId, index) => {
-                            const item = bulkItems[productId] || { quantity: '', unit: 'kg', price: '', weight: '' };
-                            const isNewRow = productId.startsWith('new_');
+                            const item = bulkItems[productId] || { product_id: '', quantity: '', unit: 'kg', price: '', weight: '' };
+                            const hasSelectedProduct = !!item.product_id;
                             
                             return (
-                              <tr key={productId} className="hover:bg-gray-100">
-                                <td className="py-2">
-                                  {isNewRow ? (
+                              <tr key={productId} className="hover:bg-gray-50 transition-colors duration-150">
+                                <td className="py-3 px-2">
+                                  {!hasSelectedProduct ? (
                                     <SearchableSelect
                                       options={products.map((product: any) => ({
                                         id: product.id,
@@ -393,15 +404,12 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                         value: product.id,
                                         category: product.category
                                       }))}
-                                      value=""
+                                      value={item.product_id || ''}
                                       onChange={(value: any) => {
-                                        // Replace the new row with the actual product
-                                        const actualProductId = value as string;
-                                        setBulkProducts(prev => prev.map(id => id === productId ? actualProductId : id));
+                                        const selectedId = value as string;
                                         setBulkItems(prev => ({
                                           ...prev,
-                                          [actualProductId]: { ...item, unit: 'kg' },
-                                          [productId]: undefined
+                                          [productId]: { ...item, product_id: selectedId, unit: 'kg' }
                                         }));
                                       }}
                                       placeholder="Select Product *"
@@ -412,22 +420,27 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                       showAddOption={true}
                                       addOptionText="Add New Product"
                                       className="w-full min-w-[200px]"
+                                      portal={false}
+                                      onOpenChange={(open: boolean) => setIsProductDropdownOpen(open)}
                                     />
                                   ) : (
                                     <div className="flex items-center">
                                       <img
-                                        src={products.find((p: any) => p.id === productId)?.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
+                                        src={products.find((p: any) => p.id === item.product_id)?.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
                                         alt="Product"
                                         className="w-8 h-8 rounded-lg object-cover mr-2"
                                         onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
                                       />
                                       <span className="font-medium text-gray-900">
-                                        {products.find((p: any) => p.id === productId)?.name}
+                                        {products.find((p: any) => p.id === item.product_id)?.name}
                                       </span>
                                     </div>
                                   )}
+                                  {errors[`product_${productId}`] && (
+                                    <p className="text-xs text-red-600 mt-1">{errors[`product_${productId}`]}</p>
+                                  )}
                                 </td>
-                                <td className="py-2">
+                                <td className="py-3 px-2">
                                   <input
                                     type="number"
                                     value={item.quantity}
@@ -435,7 +448,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                       ...prev, 
                                       [productId]: { ...item, quantity: e.target.value } 
                                     }))}
-                                    className={`w-20 border ${errors[`quantity_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500`}
+                                    className={`w-20 border ${errors[`quantity_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                                     min="1"
                                     step="0.01"
                                     placeholder="Qty"
@@ -444,14 +457,14 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                     <p className="text-xs text-red-600 mt-1">{errors[`quantity_${productId}`]}</p>
                                   )}
                                 </td>
-                                <td className="py-2">
+                                <td className="py-3 px-2">
                                   <select
                                     value={item.unit}
                                     onChange={(e) => setBulkItems(prev => ({ 
                                       ...prev, 
                                       [productId]: { ...item, unit: e.target.value as any } 
                                     }))}
-                                    className="w-24 border border-gray-300 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500"
+                                    className="w-24 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                                   >
                                     <option value="kg">kg</option>
                                     <option value="piece">piece</option>
@@ -462,7 +475,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                   </select>
                                 </td>
                                 {form.type === 'cash' && (
-                                  <td className="py-2">
+                                  <td className="py-3 px-2">
                                     <input
                                       type="number"
                                       value={item.price || ''}
@@ -470,7 +483,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                         ...prev, 
                                         [productId]: { ...item, price: e.target.value } 
                                       }))}
-                                      className={`w-24 border ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500`}
+                                      className={`w-24 border ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                                       min="0"
                                       step="0.01"
                                       placeholder="Price"
@@ -480,7 +493,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                     )}
                                   </td>
                                 )}
-                                <td className="py-2">
+                                <td className="py-3 px-2">
                                   <input
                                     type="number"
                                     step="0.01"
@@ -490,11 +503,11 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                       ...prev, 
                                       [productId]: { ...item, weight: e.target.value } 
                                     }))}
-                                    className="w-20 border border-gray-300 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500"
+                                    className="w-20 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                                     placeholder="kg"
                                   />
                                 </td>
-                                <td className="py-2 flex items-center pt-5 gap-2">
+                                <td className="py-3 px-2 flex items-center gap-2">
                                 
                                
                                   
@@ -526,11 +539,11 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
             </div>
               
           {/* Action Buttons */}
-          <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+          <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 dark:border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              className="px-6 py-2 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
             >
               Cancel
             </button>
@@ -660,17 +673,17 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
         {/* Enhanced Header */}
-        <div className="p-6 border-b bg-gradient-to-r from-green-50 to-emerald-50">
+        <div className="p-6 border-b border-gray-200 dark:border-slate-800 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-slate-800 dark:to-slate-800">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">Add New Product</h2>
-              <p className="text-sm text-gray-600 mt-1">Create a new product for your inventory</p>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Add New Product</h2>
+              <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">Create a new product for your inventory</p>
             </div>
             <button
               onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
             >
               <X className="w-6 h-6" />
             </button>
@@ -689,19 +702,19 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
             {/* Left Column - Basic Information */}
             <div className="space-y-6">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
                   <Package className="w-5 h-5 mr-2 text-green-600" />
                   Product Information
                 </h3>
                 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Product Name *</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Product Name *</label>
                     <input
                       type="text"
                       value={form.name}
                       onChange={(e) => setForm((prev: any) => ({ ...prev, name: e.target.value }))}
-                      className={`w-full border ${errors.name ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500`}
+                      className={`w-full border ${errors.name ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500 dark:bg-slate-800 dark:text-slate-100`}
                       required
                       placeholder="Enter product name"
                       maxLength={100}
@@ -710,11 +723,11 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Category *</label>
                     <select
                       value={form.category}
                       onChange={(e) => setForm((prev: any) => ({ ...prev, category: e.target.value }))}
-                      className={`w-full border ${errors.category ? 'border-red-500 ring-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500`}
+                      className={`w-full border ${errors.category ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500 dark:bg-slate-800 dark:text-slate-100`}
                     >
                       <option value="Fruits">Fruits</option>
                       <option value="Vegetables">Vegetables</option>
@@ -730,15 +743,15 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
             {/* Right Column - Product Image */}
             <div className="space-y-6">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
                   <Camera className="w-5 h-5 mr-2 text-purple-600" />
                   Product Image
                 </h3>
                 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Product Photo (optional)</label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-green-400 transition-colors">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Product Photo (optional)</label>
+                    <div className="border-2 border-dashed border-gray-300 dark:border-slate-700 rounded-lg p-6 text-center hover:border-green-400 transition-colors">
                       <input
                         type="file"
                         accept="image/*"
@@ -754,11 +767,7 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
                           <div className="w-8 h-8 border-2 border-green-500 border-t-transparent rounded-full animate-spin mb-2"></div>
                         ) : form.image ? (
                           <div className="relative">
-                            <img 
-                              src={form.image} 
-                              alt="Preview" 
-                              className="w-32 h-32 object-cover rounded-lg border border-gray-200 mb-2" 
-                            />
+                            <img src={form.image} alt="Preview" className="w-32 h-32 object-cover rounded-lg border border-gray-200 dark:border-slate-700 mb-2" />
                             <button
                               type="button"
                               onClick={(e) => {
@@ -772,9 +781,9 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
                           </div>
                         ) : (
                           <>
-                            <Upload className="w-8 h-8 text-gray-400 mb-2" />
-                            <span className="text-sm text-gray-600">Click to upload image</span>
-                            <span className="text-xs text-gray-500 mt-1">PNG, JPG up to 5MB</span>
+                            <Upload className="w-8 h-8 text-gray-400 dark:text-slate-500 mb-2" />
+                            <span className="text-sm text-gray-600 dark:text-slate-300">Click to upload image</span>
+                            <span className="text-xs text-gray-500 dark:text-slate-400 mt-1">PNG, JPG up to 5MB</span>
                           </>
                         )}
                       </label>
@@ -794,11 +803,11 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
           )}
 
           {/* Action Buttons */}
-          <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+          <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 dark:border-slate-800">
             <button 
               type="button" 
               onClick={onClose} 
-              className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              className="px-6 py-2 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
             >
               Cancel
             </button>
@@ -866,30 +875,30 @@ const EditProductModal = ({ open, onClose, onSuccess, product }: any) => {
   if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
         <div className="p-6 border-b">
-          <h2 className="text-xl font-semibold text-gray-900">Edit Product</h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-slate-100">Edit Product</h2>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <input ref={firstInputRef} style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }} tabIndex={-1} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Product Name *</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Product Name *</label>
               <input
                 type="text"
                 value={form.name}
                 onChange={(e) => setForm((prev: any) => ({ ...prev, name: e.target.value }))}
-                className={`w-full border ${errors.name ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2`}
+                className={`w-full border ${errors.name ? 'border-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 dark:bg-slate-800 dark:text-slate-100`}
                 required
               />
               {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Category *</label>
               <select
                 value={form.category}
                 onChange={(e) => setForm((prev: any) => ({ ...prev, category: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 dark:bg-slate-800 dark:text-slate-100"
               >
                 <option value="Fruits">Fruits</option>
                 <option value="Vegetables">Vegetables</option>
@@ -897,7 +906,7 @@ const EditProductModal = ({ open, onClose, onSuccess, product }: any) => {
               {errors.category && <p className="text-xs text-red-600 mt-1">{errors.category}</p>}
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Product Photo (optional)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Product Photo (optional)</label>
               <input
                 type="file"
                 accept="image/*"
@@ -909,7 +918,7 @@ const EditProductModal = ({ open, onClose, onSuccess, product }: any) => {
                     reader.readAsDataURL(file);
                   }
                 }}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 dark:bg-slate-800 dark:text-slate-100"
               />
               {form.image && (
                 <img src={form.image} alt="Preview" className="w-24 h-24 object-cover rounded mt-2" />
@@ -918,7 +927,7 @@ const EditProductModal = ({ open, onClose, onSuccess, product }: any) => {
           </div>
           {errors.form && <p className="text-xs text-red-600 mt-1">{errors.form}</p>}
           <div className="flex justify-end space-x-3 pt-4">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800">Cancel</button>
             <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
           </div>
         </form>
@@ -933,15 +942,15 @@ const DeleteProductConfirm = ({ open, onClose, onDelete, product }: any) => {
   if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-md w-full">
+      <div className="bg-white dark:bg-slate-900 rounded-lg max-w-md w-full shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
         <div className="p-6 border-b">
-          <h2 className="text-xl font-semibold text-gray-900">Delete Product</h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-slate-100">Delete Product</h2>
         </div>
         <div className="p-6">
-          <p>Are you sure you want to delete <b>{product?.name}</b>?</p>
+          <p className="text-gray-800 dark:text-slate-200">Are you sure you want to delete <b>{product?.name}</b>?</p>
           {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
           <div className="flex justify-end space-x-3 pt-4">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800">Cancel</button>
             <button
               type="button"
               className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
@@ -1588,9 +1597,9 @@ export default function Inventory() {
       return supplier;
     };
     return (
-      <div className="bg-white rounded-lg shadow-sm">
+      <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
         <div className="p-6 border-b flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Current Stock Levels</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Current Stock Levels</h2>
           <div className="flex items-center gap-2">
             <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 rounded bg-gray-100 text-gray-700 disabled:opacity-50">Prev</button>
             <span className="text-sm">Page {page} of {totalPages}</span>
@@ -1599,15 +1608,15 @@ export default function Inventory() {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50">
+            <thead className="bg-gray-50 dark:bg-slate-800">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Stock</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit Price</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total Value</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Suppliers</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Received</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Product</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Current Stock</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Unit Price</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Total Value</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Suppliers</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Last Received</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -1628,28 +1637,28 @@ export default function Inventory() {
                           onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
                         />
                         <div>
-                          <p className="font-medium text-gray-900">{item.product_name}</p>
-                          <p className="text-sm text-gray-500">{product?.category}</p>
+                          <p className="font-medium text-gray-900 dark:text-slate-100">{item.product_name}</p>
+                          <p className="text-sm text-gray-500 dark:text-slate-400">{product?.category}</p>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="font-medium text-gray-900">
+                      <span className="font-medium text-gray-900 dark:text-slate-100">
                         {item.current_stock} {item.unit}
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-gray-900">{unitPrice ? `$${unitPrice.toFixed(2)}` : '-'}</span>
+                      <span className="text-gray-900 dark:text-slate-100">{unitPrice ? `$${unitPrice.toFixed(2)}` : '-'}</span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-gray-900">{unitPrice ? `$${totalValue.toFixed(2)}` : '-'}</span>
+                      <span className="text-gray-900 dark:text-slate-100">{unitPrice ? `$${totalValue.toFixed(2)}` : '-'}</span>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex flex-wrap gap-1">
                         {(item.suppliers || []).map((supplier: any) => (
                           <span
                             key={supplier.supplier_id}
-                            className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded relative group"
+                            className="px-2 py-1 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 text-xs rounded relative group"
                           >
                             {supplier.supplier_name}: {supplier.quantity}
                             {/* Tooltip for contact info */}
@@ -1696,20 +1705,20 @@ export default function Inventory() {
     );
   };
   const RecentReceivesTable = ({ recentReceives, products, suppliers, onEdit, onDelete }: any) => (
-    <div className="bg-white rounded-lg shadow-sm">
+    <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
       <div className="p-6 border-b">
-        <h2 className="text-lg font-semibold text-gray-900">Recent Product Receives</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Recent Product Receives</h2>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-gray-50">
+          <thead className="bg-gray-50 dark:bg-slate-800">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Received</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Product</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Supplier</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Type</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Quantity</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Received</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -1727,12 +1736,12 @@ export default function Inventory() {
                         onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
                       />
                       <div>
-                        <p className="font-medium text-gray-900">{product?.name}</p>
-                        <p className="text-sm text-gray-500">{product?.category}</p>
+                        <p className="font-medium text-gray-900 dark:text-slate-100">{product?.name}</p>
+                        <p className="text-sm text-gray-500 dark:text-slate-400">{product?.category}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-gray-900">{supplier?.name}</td>
+                  <td className="px-6 py-4 text-gray-900 dark:text-slate-100">{supplier?.name}</td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 text-xs rounded-full ${
                       item.type === 'commission' 
@@ -1742,7 +1751,7 @@ export default function Inventory() {
                       {item.type}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-900">
+                  <td className="px-6 py-4 text-gray-900 dark:text-slate-100">
                     {item.quantity} {item.unit}
                   </td>
                   <td className="px-6 py-4 text-gray-500">
@@ -1763,13 +1772,13 @@ export default function Inventory() {
 
   // Add ProductTable subcomponent
   const ProductTable = ({ products, onEdit, onDelete }: any) => (
-    <div className="bg-white rounded-lg shadow-sm">
+    <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
       <div className="p-6 border-b">
-        <h2 className="text-lg font-semibold text-gray-900">Stock Products</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Stock Products</h2>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-gray-50">
+          <thead className="bg-gray-50 dark:bg-slate-800">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Image</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
@@ -1788,8 +1797,8 @@ export default function Inventory() {
                     onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
                   />
                 </td>
-                <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
-                <td className="px-6 py-4 text-gray-700">{product.category}</td>
+                <td className="px-6 py-4 font-medium text-gray-900 dark:text-slate-100">{product.name}</td>
+                <td className="px-6 py-4 text-gray-700 dark:text-slate-300">{product.category}</td>
                 <td className="px-6 py-4">
                   <button onClick={() => onEdit(product)} className="text-blue-600 hover:underline mr-2">Edit</button>
                   <button onClick={() => onDelete(product)} className="text-red-600 hover:underline">Delete</button>
@@ -1811,7 +1820,7 @@ export default function Inventory() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Inventory Management</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-slate-100">Inventory Management</h1>
         {activeTab === 'receive' && (
           <button
             onClick={() => setShowReceiveForm(true)}
@@ -1833,11 +1842,11 @@ export default function Inventory() {
       </div>
 
       {/* Tabs */}
-      <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
+      <div className="flex space-x-1 mb-6 bg-gray-100 dark:bg-slate-800 p-1 rounded-lg w-fit">
         <button
           onClick={() => setActiveTab('receive')}
           className={`px-4 py-2 rounded-md transition-colors ${
-            activeTab === 'receive' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600'
+            activeTab === 'receive' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' : 'text-gray-600 dark:text-slate-300'
           }`}
         >
           <Truck className="w-4 h-4 inline mr-2" />
@@ -1846,7 +1855,7 @@ export default function Inventory() {
         <button
           onClick={() => setActiveTab('stock')}
           className={`px-4 py-2 rounded-md transition-colors ${
-            activeTab === 'stock' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600'
+            activeTab === 'stock' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' : 'text-gray-600 dark:text-slate-300'
           }`}
         >
           <Package className="w-4 h-4 inline mr-2" />
@@ -1864,7 +1873,7 @@ export default function Inventory() {
       {activeTab === 'stock' && (
         <div className="space-y-6">
           {/* Search */}
-          <div className="bg-white p-4 rounded-lg shadow-sm">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-lg shadow-sm">
             <div className="relative">
               <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
@@ -1872,7 +1881,7 @@ export default function Inventory() {
                 placeholder="Search products..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
           </div>
@@ -2032,8 +2041,8 @@ export default function Inventory() {
 
       {/* Add spinner overlay for any loading */}
       {(loading.form || loading.product || loading.supplier || loading.initial) && (
-        <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="fixed inset-0 backdrop-blur-[2px] bg-black/20 flex items-center justify-center z-50">
+          <div className="w-16 h-16 border-4 border-blue-500/80 border-t-transparent rounded-full animate-spin"></div>
         </div>
       )}
 
