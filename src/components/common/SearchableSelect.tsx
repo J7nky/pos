@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, X, ChevronDown, Check, Loader2, Plus } from 'lucide-react';
 export interface Option {
   id: string;
@@ -30,6 +31,10 @@ export interface SearchableSelectProps {
   className?: string;
   maxHeight?: string;
   debounceMs?: number;
+  portal?: boolean;
+  clearable?: boolean;
+  size?: 'sm' | 'md' | 'lg';
+  onOpenChange?: (open: boolean) => void;
 }
 
 export default function SearchableSelect({
@@ -52,7 +57,11 @@ export default function SearchableSelect({
   onAddNew,
   className = "",
   maxHeight = "300px",
-  debounceMs = 300
+  debounceMs = 300,
+  portal = false,
+  clearable = false,
+  size = 'md',
+  onOpenChange
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -63,6 +72,8 @@ export default function SearchableSelect({
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const optionsRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [portalStyle, setPortalStyle] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 });
 
   // Debounce search term
   useEffect(() => {
@@ -78,12 +89,45 @@ export default function SearchableSelect({
     if (isOpen && searchInputRef.current) {
       searchInputRef.current.focus();
     }
+    if (isOpen) {
+      setFocusedIndex(-1);
+    }
   }, [isOpen]);
+
+  // Recompute dropdown position for portal rendering
+  useEffect(() => {
+    if (!portal) return;
+
+    function updatePosition() {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      setPortalStyle({ top: rect.bottom, left: rect.left, width: rect.width });
+    }
+
+    if (isOpen) {
+      updatePosition();
+      window.addEventListener('scroll', updatePosition, true);
+      window.addEventListener('resize', updatePosition);
+    }
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [isOpen, portal]);
+
+  // Notify parent about open state changes
+  useEffect(() => {
+    if (onOpenChange) onOpenChange(isOpen);
+  }, [isOpen, onOpenChange]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const clickedInsideTrigger = !!(containerRef.current && containerRef.current.contains(target));
+      const clickedInsideDropdown = !!(dropdownRef.current && dropdownRef.current.contains(target));
+      if (!clickedInsideTrigger && !clickedInsideDropdown) {
         setIsOpen(false);
       }
     };
@@ -202,11 +246,19 @@ export default function SearchableSelect({
         break;
       case 'ArrowDown':
         event.preventDefault();
-        setFocusedIndex(prev => Math.min(prev + 1, filteredOptions.length - 1));
+        if (filteredOptions.length === 0) return;
+        setFocusedIndex(prev => {
+          const next = prev + 1;
+          return next >= filteredOptions.length ? 0 : next;
+        });
         break;
       case 'ArrowUp':
         event.preventDefault();
-        setFocusedIndex(prev => Math.max(prev - 1, -1));
+        if (filteredOptions.length === 0) return;
+        setFocusedIndex(prev => {
+          if (prev <= 0) return filteredOptions.length - 1;
+          return prev - 1;
+        });
         break;
       case 'Enter':
         event.preventDefault();
@@ -216,6 +268,18 @@ export default function SearchableSelect({
         break;
     }
   };
+
+  // Ensure focused option is visible
+  useEffect(() => {
+    if (!isOpen || focusedIndex < 0) return;
+    const listEl = optionsRef.current;
+    if (!listEl) return;
+    const optionEls = listEl.querySelectorAll<HTMLButtonElement>('button[role="option"]');
+    const target = optionEls[focusedIndex];
+    if (target && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'nearest' });
+    }
+  }, [focusedIndex, isOpen]);
 
   // Get display text
   const getDisplayText = () => {
@@ -228,6 +292,36 @@ export default function SearchableSelect({
     .map(value => options.find(opt => opt.value === value))
     .filter(Boolean) as Option[];
 
+  // UI helpers
+  const sizeClasses = useMemo(() => {
+    switch (size) {
+      case 'sm':
+        return { trigger: 'px-2 py-1 text-sm rounded-md', input: 'py-1', option: 'px-3 py-1.5 text-sm', chip: 'px-2 py-0.5 text-xs', icon: 'w-4 h-4' };
+      case 'lg':
+        return { trigger: 'px-4 py-3 text-base rounded-lg', input: 'py-3', option: 'px-4 py-3', chip: 'px-3 py-1 text-sm', icon: 'w-5 h-5' };
+      default:
+        return { trigger: 'px-3 py-2 text-sm rounded-lg', input: 'py-2', option: 'px-3 py-2', chip: 'px-2.5 py-1 text-sm', icon: 'w-5 h-5' };
+    }
+  }, [size]);
+
+  const renderHighlightedLabel = (label: string) => {
+    if (!debouncedSearchTerm) return <div className="font-medium">{label}</div>;
+    const lowerLabel = label.toLowerCase();
+    const lowerSearch = debouncedSearchTerm.toLowerCase();
+    const idx = lowerLabel.indexOf(lowerSearch);
+    if (idx === -1) return <div className="font-medium">{label}</div>;
+    const before = label.slice(0, idx);
+    const match = label.slice(idx, idx + debouncedSearchTerm.length);
+    const after = label.slice(idx + debouncedSearchTerm.length);
+    return (
+      <div className="font-medium">
+        {before}
+        <span className="bg-yellow-100 text-yellow-800 dark:bg-yellow-800/40 dark:text-yellow-100 rounded-sm px-0.5">{match}</span>
+        {after}
+      </div>
+    );
+  };
+
   return (
     <div ref={containerRef} className={`relative ${className}`}>
       {/* Main Select Button */}
@@ -236,17 +330,29 @@ export default function SearchableSelect({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         onKeyDown={handleKeyDown}
         disabled={disabled}
-        className={`w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-lg bg-white text-left focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+        className={`w-full flex items-center justify-between ${sizeClasses.trigger} border border-gray-300 bg-white text-left focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-colors ${
           disabled ? 'bg-gray-100 cursor-not-allowed' : 'hover:border-gray-400'
-        }`}
+        } dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100`}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={placeholder}
       >
-        <span className={selectedOptions.length === 0 ? 'text-gray-500' : 'text-gray-900'}>
+        <span className={selectedOptions.length === 0 ? 'text-gray-500 dark:text-slate-400' : 'text-gray-900 dark:text-slate-100'}>
           {getDisplayText()}
         </span>
-        <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <span className="flex items-center gap-1">
+          {clearable && !multiple && value && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onChange(''); }}
+              className="text-gray-400 hover:text-gray-600 dark:text-slate-400 dark:hover:text-slate-200"
+              aria-label="Clear selection"
+            >
+              <X className={`${sizeClasses.icon}`} />
+            </button>
+          )}
+          <ChevronDown className={`${sizeClasses.icon} text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </span>
       </button>
 
       {/* Selected Items Display (for multiple) */}
@@ -255,13 +361,13 @@ export default function SearchableSelect({
           {selectedOptions.map(option => (
             <span
               key={option.value}
-              className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded-md"
+              className={`inline-flex items-center ${sizeClasses.chip} bg-blue-100 text-blue-800 rounded-md dark:bg-blue-900/40 dark:text-blue-200`}
             >
               {option.label}
               <button
                 type="button"
                 onClick={() => handleOptionSelect(option)}
-                className="ml-1 hover:text-blue-600"
+                className="ml-1 hover:text-blue-600 dark:hover:text-blue-300"
                 aria-label={`Remove ${option.label}`}
               >
                 <X className="w-3 h-3" />
@@ -272,8 +378,8 @@ export default function SearchableSelect({
       )}
 
       {/* Dropdown */}
-      {isOpen && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg">
+      {isOpen && !portal && (
+        <div ref={dropdownRef} className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg dark:bg-slate-900 dark:border-slate-700">
           {/* Search Input */}
           <div className="p-3 border-b border-gray-200">
             <div className="relative">
@@ -284,14 +390,14 @@ export default function SearchableSelect({
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder={searchPlaceholder}
-                className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full pl-9 pr-4 ${sizeClasses.input} border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100`}
                 aria-label="Search options"
               />
               {searchTerm && (
                 <button
                   type="button"
                   onClick={() => setSearchTerm('')}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-slate-400 dark:hover:text-slate-200"
                   aria-label="Clear search"
                 >
                   <X className="w-4 h-4" />
@@ -309,8 +415,8 @@ export default function SearchableSelect({
                   onClick={() => setSelectedCategory('all')}
                   className={`px-3 py-1 text-sm rounded-full transition-colors ${
                     selectedCategory === 'all'
-                      ? 'bg-blue-100 text-blue-800'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
                   All
@@ -322,8 +428,8 @@ export default function SearchableSelect({
                     onClick={() => setSelectedCategory(category)}
                     className={`px-3 py-1 text-sm rounded-full transition-colors ${
                       selectedCategory === category
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
                     {category}
@@ -339,14 +445,14 @@ export default function SearchableSelect({
               <button
                 type="button"
                 onClick={handleSelectAll}
-                className="text-sm text-blue-600 hover:text-blue-800"
+                className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
               >
                 Select All
               </button>
               <button
                 type="button"
                 onClick={handleClearAll}
-                className="text-sm text-gray-600 hover:text-gray-800"
+                className="text-sm text-gray-600 hover:text-gray-800 dark:text-slate-300 dark:hover:text-white"
               >
                 Clear All
               </button>
@@ -362,7 +468,7 @@ export default function SearchableSelect({
                   onAddNew();
                   setIsOpen(false);
                 }}
-                className="w-full flex items-center px-3 py-2 text-left text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                className="w-full flex items-center px-3 py-2 text-left text-blue-600 hover:bg-blue-50 rounded-md transition-colors dark:text-blue-400 dark:hover:bg-blue-900/20"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 {addOptionText}
@@ -372,14 +478,14 @@ export default function SearchableSelect({
           {/* Recent Selections */}
           {recentOptions.length > 0 && !searchTerm && (
             <div className="p-3 border-b border-gray-200">
-              <p className="text-xs text-gray-500 mb-2">Recent</p>
+              <p className="text-xs text-gray-500 mb-2 dark:text-slate-400">Recent</p>
               <div className="space-y-1">
                 {recentOptions.slice(0, 3).map(option => (
                   <button
                     key={`recent-${option.value}`}
                     type="button"
                     onClick={() => handleOptionSelect(option)}
-                    className="w-full text-left px-2 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded"
+                    className="w-full text-left px-2 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded dark:text-slate-200 dark:hover:bg-slate-800"
                   >
                     {option.label}
                   </button>
@@ -399,7 +505,7 @@ export default function SearchableSelect({
             {loading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-                <span className="ml-2 text-gray-500">Loading...</span>
+                <span className="ml-2 text-gray-500 dark:text-slate-400">Loading...</span>
               </div>
             ) : filteredOptions.length === 0 ? (
               <div className="py-8 text-center text-gray-500">
@@ -418,16 +524,16 @@ export default function SearchableSelect({
                       key={option.value}
                       type="button"
                       onClick={() => handleOptionSelect(option)}
-                      className={`w-full text-left px-3 py-2 flex items-center justify-between hover:bg-gray-100 ${
-                        isFocused ? 'bg-gray-100' : ''
-                      } ${isSelected ? 'bg-blue-50 text-blue-700' : 'text-gray-900'}`}
+                      className={`w-full text-left ${sizeClasses.option} flex items-center justify-between hover:bg-gray-100 ${
+                        isFocused ? 'bg-gray-100 dark:bg-slate-800' : ''
+                      } ${isSelected ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'text-gray-900 dark:text-slate-100'}`}
                       role="option"
                       aria-selected={isSelected}
                     >
                       <div className="flex-1">
-                        <div className="font-medium">{option.label}</div>
+                        {renderHighlightedLabel(option.label)}
                         {option.category && (
-                          <div className="text-xs text-gray-500">{option.category}</div>
+                          <div className="text-xs text-gray-500 dark:text-slate-400">{option.category}</div>
                         )}
                       </div>
                       {isSelected && <Check className="w-4 h-4 text-blue-600" />}
@@ -438,6 +544,180 @@ export default function SearchableSelect({
             )}
           </div>
         </div>
+      )}
+
+      {isOpen && portal && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-[1000] bg-white border border-gray-300 rounded-lg shadow-lg dark:bg-slate-900 dark:border-slate-700"
+          style={{ top: portalStyle.top, left: portalStyle.left, width: portalStyle.width }}
+        >
+          {/* Search Input */}
+          <div className="p-3 border-b border-gray-200">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={searchPlaceholder}
+                className={`w-full pl-9 pr-4 ${sizeClasses.input} border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100`}
+                aria-label="Search options"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-slate-400 dark:hover:text-slate-200"
+                  aria-label="Clear search"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Category Filter */}
+          {categories.length > 0 && (
+            <div className="p-3 border-b border-gray-200">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('all')}
+                  className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                    selectedCategory === 'all'
+                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  All
+                </button>
+                {categories.map(category => (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => setSelectedCategory(category)}
+                    className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                      selectedCategory === category
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          {multiple && showSelectAll && (
+            <div className="p-3 border-b border-gray-200 flex justify-between">
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Select All
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAll}
+                className="text-sm text-gray-600 hover:text-gray-800 dark:text-slate-300 dark:hover:text-white"
+              >
+                Clear All
+              </button>
+            </div>
+          )}
+
+          {/* Add New Option */}
+          {showAddOption && onAddNew && (
+            <div className="p-3 border-b border-gray-200">
+              <button
+                type="button"
+                onClick={() => {
+                  onAddNew();
+                  setIsOpen(false);
+                }}
+                className="w-full flex items-center px-3 py-2 text-left text-blue-600 hover:bg-blue-50 rounded-md transition-colors dark:text-blue-400 dark:hover:bg-blue-900/20"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {addOptionText}
+              </button>
+            </div>
+          )}
+
+          {/* Recent Selections */}
+          {recentOptions.length > 0 && !searchTerm && (
+            <div className="p-3 border-b border-gray-200">
+              <p className="text-xs text-gray-500 mb-2 dark:text-slate-400">Recent</p>
+              <div className="space-y-1">
+                {recentOptions.slice(0, 3).map(option => (
+                  <button
+                    key={`recent-${option.value}`}
+                    type="button"
+                    onClick={() => handleOptionSelect(option)}
+                    className="w-full text-left px-2 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Options List */}
+          <div
+            ref={optionsRef}
+            className="max-h-60 overflow-y-auto"
+            style={{ maxHeight }}
+            role="listbox"
+            aria-multiselectable={multiple}
+          >
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+                <span className="ml-2 text-gray-500 dark:text-slate-400">Loading...</span>
+              </div>
+            ) : filteredOptions.length === 0 ? (
+              <div className="py-8 text-center text-gray-500">
+                {noResultsText}
+              </div>
+            ) : (
+              <div className="py-1">
+                {filteredOptions.map((option, index) => {
+                  const isSelected = multiple
+                    ? Array.isArray(value) && value.includes(option.value)
+                    : value === option.value;
+                  const isFocused = index === focusedIndex;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => handleOptionSelect(option)}
+                      className={`w-full text-left ${sizeClasses.option} flex items-center justify-between hover:bg-gray-100 ${
+                        isFocused ? 'bg-gray-100 dark:bg-slate-800' : ''
+                      } ${isSelected ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'text-gray-900 dark:text-slate-100'}`}
+                      role="option"
+                      aria-selected={isSelected}
+                    >
+                      <div className="flex-1">
+                        {renderHighlightedLabel(option.label)}
+                        {option.category && (
+                          <div className="text-xs text-gray-500 dark:text-slate-400">{option.category}</div>
+                        )}
+                      </div>
+                      {isSelected && <Check className="w-4 h-4 text-blue-600" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
