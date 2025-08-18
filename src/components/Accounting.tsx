@@ -870,7 +870,7 @@ export default function Accounting() {
         item.unit_price || '',
         item.unit_price && (item.weight || item.quantity) ? (item.unit_price * (item.weight || item.quantity)).toFixed(2) : '',
         item.date ? new Date(item.date).toLocaleDateString() : '',
-        (item.notes || '').replace(/,/g, ';')
+        (item.status || '').replace(/,/g, ';')
       ].join(','))
     ].join('\n');
 
@@ -912,7 +912,7 @@ export default function Accounting() {
         item.customerName.toLowerCase().includes(q) ||
         item.productName.toLowerCase().includes(q) ||
         item.supplierName.toLowerCase().includes(q) ||
-        (item.notes || '').toLowerCase().includes(q)
+        (item.status || '').toLowerCase().includes(q)
       );
     })
     .sort((a, b) => {
@@ -957,21 +957,22 @@ export default function Accounting() {
         currency: 'USD',
         description: `Received ${item.quantity} ${item.unit}${item.weight ? ` (${item.weight} kg)` : ''} of ${product?.name || 'Unknown Product'} from ${supplier?.name || 'Unknown Supplier'}`,
         reference: `INV-${item.id.slice(-8)}`,
-        notes: item.notes,
+        status: item.status,
         transactionType: 'inventory'
       });
     });
     // Add sales transaction logs
+    console.log(sales, 'sale231');
     
     
       sales.forEach(sale => {
-        
         const product = products.find(p => p.id === sale.product_id);
         const supplier = suppliers.find(s => s.id === sale.supplier_id);
         const customer = customers.find(c => c.id === sale.customer_id);
         const inventoryItem=inventory.find(i=>i.id===sale.inventory_item_id);
+
         logs.push({
-          id: `sale-${sale.id}`,
+          id: sale.id,
           type: 'sale',
           date: sale.created_at||'',
           productId: product?.id,
@@ -1119,7 +1120,7 @@ export default function Accounting() {
         log.currency || '',
         (log.description || '').replace(/,/g, ';'),
         log.reference || '',
-        (log.notes || '').replace(/,/g, ';')
+        (log.status || '').replace(/,/g, ';')
       ].join(','))
     ].join('\n');
 
@@ -1385,7 +1386,7 @@ export default function Accounting() {
   const handleCloseReceivedBill = async (bill: any, fees: { commission: number; porterage: number; transfer: number; supplierAmount: number }) => {
     try {
       // Guard: do not allow closing an already closed bill
-      if (bill?.notes && typeof bill.notes === 'string' && bill.notes.includes('[CLOSED]')) {
+      if (bill?.status && typeof bill.status === 'string' && bill.status.includes('[CLOSED]')) {
         showToast('This bill is already closed.', 'error');
         return;
       }
@@ -1461,9 +1462,9 @@ export default function Accounting() {
         }
       }
 
-      // Persist closed flag onto the inventory item by appending a marker in notes
+      // Persist closed flag onto the inventory item by appending a marker in status
       try {
-        const existingNotes = bill.notes || '';
+        const existingNotes = bill.status || '';
         const closedNote = existingNotes.includes('[CLOSED]') ? existingNotes : `${existingNotes ? existingNotes + ' ' : ''}[CLOSED]`;
         await SupabaseService.updateInventoryItem(bill.id, { notes: closedNote });
       } catch (e) {
@@ -1841,11 +1842,10 @@ export default function Accounting() {
           avgUnitPrice,
           estimatedTotalValue,
           progress: validProgress,
-          status,
           saleCount,
           receivedAt: item.received_at || item.created_at,
           receivedBy: item.received_by,
-          notes: item.notes,
+          status: item.status || 'Created',
           unit: item.unit,
           weight: item.weight,
           porterage: item.porterage,
@@ -2024,7 +2024,7 @@ export default function Accounting() {
       weight: sale.weight || null,
       unitPrice: sale.unit_price || 0,
       paymentMethod: sale.payment_method || 'cash',
-      notes: sale.notes || ''
+      status: sale.status || ''
     });
     setShowEditSaleModal(true);
   };
@@ -2042,7 +2042,7 @@ export default function Accounting() {
         received_value: updatedSale.receivedValue,
         payment_method: updatedSale.paymentMethod,
         customer_id: updatedSale.customerId || null,
-        notes: updatedSale.notes
+        notes: updatedSale.notes || null
       });
       
       showToast('Sale updated successfully', 'success');
@@ -2806,7 +2806,7 @@ export default function Accounting() {
                 type="text"
                 value={nonPricedSearch}
                 onChange={e => setNonPricedSearch(e.target.value)}
-                placeholder="Search by customer, product, supplier, or notes..."
+                placeholder="Search by customer, product, supplier, or status..."
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -3142,11 +3142,11 @@ export default function Accounting() {
                <div className="mt-4">
                  <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
                  <textarea
-                   value={showEditNonPriced.notes || ''}
-                   onChange={e => setShowEditNonPriced((prev: any) => ({ ...prev, notes: e.target.value }))}
+                   value={showEditNonPriced.status || ''}
+                   onChange={e => setShowEditNonPriced((prev: any) => ({ ...prev, status: e.target.value }))}
                   rows={3}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Add any notes or comments..."
+                  placeholder="Add any status or comments..."
                 />
               </div>
               {showEditNonPriced.unitPrice > 0 && (showEditNonPriced.quantity > 0 || showEditNonPriced.weight > 0) && (
@@ -3729,10 +3729,10 @@ export default function Accounting() {
                 </div>
               )}
 
-              {selectedReceivedBill.notes && (
+              {selectedReceivedBill.status && (
                 <div className="mt-6">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Notes</h3>
-                  <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg">{selectedReceivedBill.notes}</p>
+                  <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg">{selectedReceivedBill.status}</p>
                 </div>
               )}
             </div>
@@ -3869,7 +3869,7 @@ export default function Accounting() {
       receivedValue: sale.received_value || sale.receivedValue || 0,
       paymentMethod: sale.paymentMethod || 'cash',
       customerId: sale.customer_id || '',
-      notes: sale.notes || ''
+      status: sale.status || ''
     });
 
     const [errors, setErrors] = useState<Record<string, string>>({});
@@ -4140,11 +4140,11 @@ export default function Accounting() {
                 Notes
               </label>
               <textarea
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 rows={3}
-                placeholder="Optional notes about this sale..."
+                placeholder="Optional status about this sale..."
               />
             </div>
           </div>

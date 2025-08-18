@@ -227,7 +227,7 @@ export default function POS() {
         unitPrice: inventoryItem.price || 0.00, // Use price from this specific inventory item
         totalPrice: Math.round((inventoryItem.price || 0.00) * 100) / 100,
         paymentMethod: activeTab.paymentMethod, // Set payment method from current tab
-        notes: '',
+        notes: inventoryItem.notes || null,
         inventoryType: inventoryItem.type || 'cash', // Track the inventory type
         inventoryItemId: inventoryItem.id // Use the specific inventory item ID
       };

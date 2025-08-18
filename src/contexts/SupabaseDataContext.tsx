@@ -64,13 +64,20 @@ interface SupabaseDataContextType {
   updateLowStockThreshold: (threshold: number) => void;
   updateDefaultCommissionRate: (rate: number) => void;
   updateCurrency: (currency: 'USD' | 'LBP') => void;
+  updateUserSettings: (userId: string, updates: {
+    preferred_currency?: 'USD' | 'LBP';
+    preferred_language?: 'en' | 'ar' | 'fr';
+    preferred_commission_rate?: number;
+  }) => Promise<void>;
 }
 
 const SupabaseDataContext = createContext<SupabaseDataContextType | undefined>(undefined);
 
 export function SupabaseDataProvider({ children }: { children: ReactNode }) {
+  console.log('SupabaseDataProvider: Rendering...');
   const { userProfile } = useSupabaseAuth();
   const storeId = userProfile?.store_id;
+  console.log('SupabaseDataProvider: userProfile:', userProfile, 'storeId:', storeId);
 
   // Data states
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
@@ -113,6 +120,21 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       refreshData();
     }
   }, [storeId]);
+
+  // Load user settings from database when userProfile changes
+  useEffect(() => {
+    if (userProfile) {
+      // Load user preferences from database
+      if (userProfile.preferred_currency) {
+        setCurrency(userProfile.preferred_currency);
+      }
+      if (userProfile.preferred_commission_rate !== undefined) {
+        setDefaultCommissionRate(userProfile.preferred_commission_rate);
+      }
+      // Note: lowStockAlertsEnabled and lowStockThreshold are not stored in database
+      // They remain as local preferences
+    }
+  }, [userProfile]);
 
   const refreshData = async () => {
     if (!storeId) return;
@@ -478,11 +500,56 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Add legacy/compatibility methods
-  const toggleLowStockAlerts = (enabled: boolean) => setLowStockAlertsEnabled(enabled);
-  const updateLowStockThreshold = (threshold: number) => setLowStockThreshold(threshold);
-  const updateDefaultCommissionRate = (rate: number) => setDefaultCommissionRate(rate);
-  const updateCurrency = (cur: 'USD' | 'LBP') => setCurrency(cur);
+  // Add legacy/compatibility methods with database integration
+  const toggleLowStockAlerts = async (enabled: boolean) => {
+    setLowStockAlertsEnabled(enabled);
+    // Note: This setting is not stored in the database users table
+    // It's a local preference that could be added to the database schema if needed
+  };
+
+  const updateLowStockThreshold = async (threshold: number) => {
+    setLowStockThreshold(threshold);
+    // Note: This setting is not stored in the database users table
+    // It's a local preference that could be added to the database schema if needed
+  };
+
+  const updateDefaultCommissionRate = async (rate: number) => {
+    console.log('SupabaseDataContext: updateDefaultCommissionRate called with rate:', rate);
+    setDefaultCommissionRate(rate);
+    if (userProfile?.id) {
+      try {
+        console.log('SupabaseDataContext: Saving commission rate to database for user:', userProfile.id);
+        await SupabaseService.updateUserSettings(userProfile.id, {
+          preferred_commission_rate: rate
+        });
+        console.log('SupabaseDataContext: Commission rate saved to database successfully');
+      } catch (error) {
+        console.error('SupabaseDataContext: Failed to save commission rate to database:', error);
+        // Fallback to local storage only
+      }
+    } else {
+      console.log('SupabaseDataContext: No userProfile.id available, skipping database save');
+    }
+  };
+
+  const updateCurrency = async (cur: 'USD' | 'LBP') => {
+    console.log('SupabaseDataContext: updateCurrency called with currency:', cur);
+    setCurrency(cur);
+    if (userProfile?.id) {
+      try {
+        console.log('SupabaseDataContext: Saving currency to database for user:', userProfile.id);
+        await SupabaseService.updateUserSettings(userProfile.id, {
+          preferred_currency: cur
+        });
+        console.log('SupabaseDataContext: Currency saved to database successfully');
+      } catch (error) {
+        console.error('SupabaseDataContext: Failed to save currency preference to database:', error);
+        // Fallback to local storage only
+      }
+    } else {
+      console.log('SupabaseDataContext: No userProfile.id available, skipping database save');
+    }
+  };
   const openCashDrawer = (amount: number, openedBy: string) => {
     const newDrawer = {
       openingAmount: amount,
@@ -546,6 +613,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     }
   }, [cashDrawer]);
 
+  console.log('SupabaseDataProvider: About to render provider with children:', children);
   return (
     <SupabaseDataContext.Provider value={{
       products,
@@ -584,6 +652,14 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       updateLowStockThreshold,
       updateDefaultCommissionRate,
       updateCurrency,
+      updateUserSettings: async (userId: string, updates: any) => {
+        try {
+          await SupabaseService.updateUserSettings(userId, updates);
+        } catch (error) {
+          console.error('Error updating user settings:', error);
+          throw error;
+        }
+      },
   
       deductInventoryQuantity,
       restoreInventoryQuantity
@@ -594,8 +670,11 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
 }
 
 export function useSupabaseData() {
+  console.log('useSupabaseData: Hook called');
   const context = useContext(SupabaseDataContext);
+  console.log('useSupabaseData: Context value:', context);
   if (context === undefined) {
+    console.error('useSupabaseData: Context is undefined!');
     throw new Error('useSupabaseData must be used within a SupabaseDataProvider');
   }
   return context;

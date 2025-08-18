@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthContext';
 import { OfflineDataProvider } from './contexts/OfflineDataContext';
+import { SupabaseDataProvider } from './contexts/SupabaseDataContext';
 import SupabaseLogin from './components/SupabaseLogin';
 import Layout from './components/Layout';
 import Home from './components/Home';
@@ -14,7 +15,9 @@ import Settings from './components/Settings';
 import { I18nProvider, useI18n } from './i18n';
 
 function AppContent() {
+  console.log('AppContent: Rendering AppContent component');
   const { userProfile, loading } = useSupabaseAuth();
+  console.log('AppContent: userProfile:', userProfile, 'loading:', loading);
   const [currentPage, setCurrentPage] = useState('home');
   const { t } = useI18n();
 
@@ -49,6 +52,7 @@ function AppContent() {
       case 'customers':
         return <Customers />;
       case 'settings':
+        console.log('AppContent: Rendering Settings page');
         return <Settings />;
      
       default:
@@ -64,12 +68,15 @@ function AppContent() {
 }
 
 function App() {
+  console.log('App: Rendering App component');
   return (
     <I18nProvider>
       <SupabaseAuthProvider>
-        <OfflineDataProvider>
-          <AppContent />
-        </OfflineDataProvider>
+        <SupabaseDataProvider>
+          <OfflineDataProvider>
+            <AppContent />
+          </OfflineDataProvider>
+        </SupabaseDataProvider>
       </SupabaseAuthProvider>
     </I18nProvider>
   );

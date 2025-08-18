@@ -10,8 +10,8 @@ type InventoryLogsProps = {
   formatCurrency: (amount: number) => string;
   formatCurrencyWithSymbol?: (amount: number, currency?: string) => string;
   showToast: (message: string, type?: 'success' | 'error') => void;
-  onEditSale?: (sale: any) => void;
-  onDeleteSale?: (sale: any) => void;
+  onEditSale: (sale: any) => void;
+  onDeleteSale: (sale: any) => void;
 };
 
 export default function InventoryLogs({
@@ -23,7 +23,8 @@ export default function InventoryLogs({
   formatCurrencyWithSymbol,
   showToast,
   sales = [],
-  
+  onEditSale,
+  onDeleteSale
 }: InventoryLogsProps) {
   const [inventoryLogsSearchTerm, setInventoryLogsSearchTerm] = useState('');
   const [inventoryLogsProductFilter, setInventoryLogsProductFilter] = useState('');
@@ -32,6 +33,10 @@ export default function InventoryLogs({
   const [inventoryLogsPage, setInventoryLogsPage] = useState(1);
   const [inventoryLogsSort, setInventoryLogsSort] = useState<'date' | 'product' | 'supplier' | 'amount'>('date');
   const [inventoryLogsSortDir, setInventoryLogsSortDir] = useState<'asc' | 'desc'>('desc');
+  const [showSalesLogs, setShowSalesLogs] = useState(false);
+  const [selectedInventoryLog, setSelectedInventoryLog] = useState<any | null>(null);
+  const [editingSale, setEditingSale] = useState<any | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   const filteredInventoryLogs = useMemo(() => {
     let filtered = Array.isArray(inventoryLogs) ? [...inventoryLogs] : [];
@@ -171,12 +176,133 @@ export default function InventoryLogs({
     setSelectedInventoryLog(log);
     setShowSalesLogs(true);
   };
+  const deleteInventoryLog = (log: any) => {
+    if (log?.type !== 'sale') return;
+    
+    console.log('Deleting inventory log:', log);
+    console.log('Available inventory logs:', inventoryLogs);
+    
+    // Since the sales array is empty, we work directly with the inventory log
+    // The inventory log contains the sale information
+    if (onDeleteSale) {
+      // Pass the inventory log data as the sale data
+      const saleData = {
+        id: log.id,
+        saleId: log.id,
+        quantity: log.quantity,
+        weight: log.weight,
+        unit_price: log.unitPrice || log.amount,
+        payment_method: log.paymentMethod || 'cash',
+        notes: log.notes,
+        customerName: log.customerName,
+        totalPrice: log.amount
+      };
+      
+      console.log('Sending sale data to parent:', saleData);
+      onDeleteSale(saleData);
+      showToast('Sale deleted successfully', 'success');
+      
+      // Force a re-render of the inventory logs
+      const currentSearch = inventoryLogsSearchTerm;
+      setInventoryLogsSearchTerm('');
+      setTimeout(() => setInventoryLogsSearchTerm(currentSearch), 100);
+    } else {
+      showToast('Delete functionality not available', 'error');
+    }
+  };
 
-  const [showSalesLogs, setShowSalesLogs] = useState(false);
-  const [selectedInventoryLog, setSelectedInventoryLog] = useState<any | null>(null);
+  const handleEditSale = (log: any) => {
+    console.log('Editing inventory log:', log);
+    console.log('Available inventory logs:', inventoryLogs);
+    
+    // Since the sales array is empty, we work directly with the inventory log
+    // Transform the inventory log data to match the expected sale structure
+    const saleData = {
+      ...log,
+      saleId: log.id,
+      quantity: log.quantity || 1,
+      weight: log.weight || '',
+      unitPrice: log.unitPrice || log.amount || 0,
+      paymentMethod: log.paymentMethod || 'cash',
+      notes: log.notes || '',
+      customerName: log.customerName || 'Walk-in Customer',
+      totalPrice: log.amount || 0
+    };
+    
+    console.log('Transformed sale data:', saleData);
+    setEditingSale(saleData);
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (editingSale && onEditSale) {
+      // Update the inventory log data directly
+      const updatedLog = {
+        ...editingSale,
+        quantity: editingSale.quantity,
+        weight: editingSale.weight,
+        amount: editingSale.quantity * editingSale.unitPrice,
+        unitPrice: editingSale.unitPrice,
+        paymentMethod: editingSale.paymentMethod,
+        notes: editingSale.notes
+      };
+      
+      // Call the parent's onEditSale function
+      onEditSale(updatedLog);
+      
+      // Update the local inventory logs data if it exists
+      const logIndex = inventoryLogs.findIndex((log: any) => log.id === editingSale.id);
+      if (logIndex !== -1) {
+        inventoryLogs[logIndex] = { ...inventoryLogs[logIndex], ...updatedLog };
+      }
+      
+      setShowEditModal(false);
+      setEditingSale(null);
+      showToast('Sale updated successfully', 'success');
+      
+      // Force a re-render of the inventory logs
+      const currentSearch = inventoryLogsSearchTerm;
+      setInventoryLogsSearchTerm('');
+      setTimeout(() => setInventoryLogsSearchTerm(currentSearch), 100);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setShowEditModal(false);
+    setEditingSale(null);
+  };
 
   const processedSalesData = useMemo(() => {
     if (!selectedInventoryLog) return [] as any[];
+    
+    // If the sales array is empty, try to extract sale data from inventory logs
+    if (!sales || sales.length === 0) {
+      // Look for sale-type inventory logs that might be related
+      const saleLogs = inventoryLogs.filter((log: any) => 
+        log.type === 'sale' && 
+        log.productId === selectedInventoryLog.productId &&
+        log.supplierId === selectedInventoryLog.supplierId
+      );
+      
+      return saleLogs.map((log: any) => ({
+        ...log,
+        saleId: log.id,
+        saleDate: log.date,
+        customerId: log.customerId,
+        customerName: log.customerName || 'Walk-in Customer',
+        quantity: log.quantity || 1,
+        weight: log.weight,
+        unitPrice: log.unitPrice || log.amount,
+        totalPrice: log.amount || 0,
+        paymentMethod: log.paymentMethod || 'cash',
+        notes: log.notes,
+        productName: selectedInventoryLog.productName,
+        supplierName: selectedInventoryLog.supplierName,
+        unit: selectedInventoryLog.unit
+      })).sort((a: any, b: any) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
+    }
+    
+    // Original logic for when sales array has data
     const invId = String(selectedInventoryLog.id || '').replace('inventory-', '');
     const matchingSales = (sales || []).filter((s: any) => s && s.inventory_item_id === invId);
     const details = matchingSales.map((sale: any) => ({
@@ -198,7 +324,7 @@ export default function InventoryLogs({
       unit: selectedInventoryLog.unit
     }));
     return details.sort((a: any, b: any) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
-  }, [selectedInventoryLog, sales, customers]);
+  }, [selectedInventoryLog, sales, customers, inventoryLogs]);
 
   return (
     <div className="space-y-0">
@@ -459,6 +585,24 @@ export default function InventoryLogs({
                           <Eye className="w-4 h-4" />
                         </button>
                       )}
+                      {log.type === 'sale' && (
+                        <>
+                          <button
+                            onClick={() => handleEditSale(log)}
+                            className="text-blue-600 hover:text-blue-900 text-sm font-medium"
+                            title="Edit Sale"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteInventoryLog(log)}
+                            className="text-red-600 hover:text-red-900 text-sm font-medium"
+                            title="Delete Sale"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -502,8 +646,18 @@ export default function InventoryLogs({
           setShowSalesLogs={setShowSalesLogs}
           processedSalesData={processedSalesData}
           formatCurrency={formatCurrency}
-          onEditSale={undefined}
-          onDeleteSale={undefined}
+          onEditSale={handleEditSale}
+          onDeleteSale={deleteInventoryLog}
+        />
+      )}
+
+      {/* Edit Sale Modal */}
+      {showEditModal && editingSale && (
+        <EditSaleModal
+          sale={editingSale}
+          onSave={handleSaveEdit}
+          onCancel={handleCancelEdit}
+          formatCurrency={formatCurrency}
         />
       )}
     </div>
@@ -614,12 +768,12 @@ function InventorySalesLogsModal({
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center space-x-2">
                           {!!onEditSale && (
-                            <button onClick={() => onEditSale({ ...item, id: item.id, quantity: item.quantity, weight: item.weight, unit_price: item.unitPrice, payment_method: item.paymentMethod, notes: item.notes })} className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 transition-colors" title="Edit Sale">
+                            <button onClick={() => onEditSale({ ...item, id: item.saleId, quantity: item.quantity, weight: item.weight, unit_price: item.unitPrice, payment_method: item.paymentMethod, notes: item.notes })} className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 transition-colors" title="Edit Sale">
                               <Edit className="w-4 h-4" />
                             </button>
                           )}
                           {!!onDeleteSale && (
-                            <button onClick={() => onDeleteSale({ ...item, id: item.id, saleId: item.saleId, customerName: item.customerName, totalPrice: (item.unitPrice || 0) * (item.quantity || 0) })} className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors" title="Delete Sale">
+                            <button onClick={() => onDeleteSale({ ...item, id: item.saleId, saleId: item.saleId, customerName: item.customerName, totalPrice: (item.unitPrice || 0) * (item.quantity || 0) })} className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors" title="Delete Sale">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           )}
@@ -642,6 +796,185 @@ function InventorySalesLogsModal({
           <div className="text-sm text-gray-500">Showing {processedSalesData.length} sale record{processedSalesData.length !== 1 ? 's' : ''}</div>
           <button onClick={() => setShowSalesLogs(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">Close</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function EditSaleModal({
+  sale,
+  onSave,
+  onCancel,
+  formatCurrency,
+}: {
+  sale: any;
+  onSave: () => void;
+  onCancel: () => void;
+  formatCurrency: (amount: number) => string;
+}) {
+  const [formData, setFormData] = useState({
+    quantity: sale.quantity || 1,
+    weight: sale.weight || '',
+    unitPrice: sale.unitPrice || sale.unit_price || 0,
+    paymentMethod: sale.paymentMethod || sale.payment_method || 'cash',
+    notes: sale.notes || ''
+  });
+
+  const handleInputChange = (field: string, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Update the sale object with new values
+    const updatedSale = {
+      ...sale,
+      quantity: formData.quantity,
+      weight: formData.weight,
+      unit_price: formData.unitPrice,
+      payment_method: formData.paymentMethod,
+      notes: formData.notes,
+      // Update the total price based on new quantity and unit price
+      received_value: formData.quantity * formData.unitPrice
+    };
+    
+    // Update the editingSale state
+    Object.assign(sale, updatedSale);
+    
+    // Also update the corresponding inventory log if it exists
+    // This part is no longer needed as we are working directly with the inventory log
+    // if (selectedInventoryLog && selectedInventoryLog.type === 'sale') {
+    //   Object.assign(selectedInventoryLog, {
+    //     quantity: formData.quantity,
+    //     weight: formData.weight,
+    //     amount: formData.quantity * formData.unitPrice
+    //   });
+    // }
+    
+    onSave();
+  };
+
+  const totalPrice = formData.quantity * formData.unitPrice;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-md w-full">
+        <div className="p-6 border-b">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900">Edit Sale</h2>
+            <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          <p className="text-sm text-gray-600 mt-1">
+            Sale ID: {String(sale.saleId || sale.id).slice(-8).toUpperCase()}
+          </p>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Quantity
+            </label>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={formData.quantity}
+              onChange={(e) => handleInputChange('quantity', parseFloat(e.target.value) || 0)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Weight (kg)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={formData.weight}
+              onChange={(e) => handleInputChange('weight', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Optional"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Unit Price
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={formData.unitPrice}
+              onChange={(e) => handleInputChange('unitPrice', parseFloat(e.target.value) || 0)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Payment Method
+            </label>
+            <select
+              value={formData.paymentMethod}
+              onChange={(e) => handleInputChange('paymentMethod', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="credit">Credit</option>
+              <option value="mobile">Mobile Payment</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Notes
+            </label>
+            <textarea
+              value={formData.notes}
+              onChange={(e) => handleInputChange('notes', e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Optional notes about this sale"
+            />
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-gray-700">Total Price:</span>
+              <span className="text-lg font-bold text-gray-900">
+                {formatCurrency(totalPrice)}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 text-gray-700 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Save Changes
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

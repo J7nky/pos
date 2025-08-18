@@ -1328,7 +1328,7 @@ function ReceivedBillSalesLogsModal({
                         <div className="text-sm text-gray-900">{formatCurrency(item.unitPrice || 0)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{formatCurrency(item.totalPrice || 0)}</div>
+                        <div className="text-sm font-medium text-gray-900">{formatCurrency(item.weight*item.unitPrice || 0)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.paymentMethod === 'cash' ? 'bg-green-100 text-green-800' : item.paymentMethod === 'card' ? 'bg-blue-100 text-blue-800' : item.paymentMethod === 'credit' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>

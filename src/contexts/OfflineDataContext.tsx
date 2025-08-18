@@ -65,7 +65,7 @@ interface OfflineDataContextType {
   addInventoryBatch: (args: {
     supplier_id: string;
     created_by: string;
-    notes?: string | null;
+    status?: string | null;
     porterage?: number | null;
     transfer_fee?: number | null;
     received_at?: string;
@@ -396,7 +396,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           receivedAt: item.received_at, // Legacy compatibility
           batch_porterage: batch ? batch.porterage : null,
           batch_transfer_fee: batch ? batch.transfer_fee : null,
-          batch_notes: batch ? batch.notes : null,
+          batch_status: batch ? batch.status : 'Created',
         };
       }));
 
@@ -605,8 +605,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       porterage: itemData.porterage ?? null,
       transfer_fee: itemData.transfer_fee ?? null,
       price: itemData.price ?? null,
-      commission_rate: itemData.commission_rate ?? null,
-      notes: itemData.notes ?? null,
+      commission_rate: itemData.commission_rate ?? 0,
+      status: itemData.status ?? 'Created',
       batch_id: itemData.batch_id ?? null
     };
 
@@ -621,7 +621,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addInventoryBatch: OfflineDataContextType['addInventoryBatch'] = async ({
     supplier_id,
     created_by,
-    notes = null, 
+    status = 'Created', 
     porterage = null,
     transfer_fee = null,
     received_at,
@@ -634,7 +634,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const batchRecord = {
       id: batchId,
       supplier_id,
-      notes,
+      status,
       porterage,
       transfer_fee,
       received_at: received_at || new Date().toISOString(),
@@ -666,8 +666,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         porterage: it.porterage ?? null,
         transfer_fee: it.transfer_fee ?? null,
         price: it.price ?? null,
-        commission_rate: it.commission_rate ?? null,
-        notes: it.notes ?? null,
+        commission_rate: it.commission_rate ?? 0,
+        status: it.status ?? 'Created',
         received_quantity: it.received_quantity ?? it.quantity,
         batch_id: batchId as string | null
       }));
@@ -701,7 +701,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Remove total_price - doesn't exist in Supabase schema, use received_value instead
       received_value: item.received_value || item.total_price || (item.unit_price * item.quantity),
       payment_method: item.payment_method || 'cash', // Add payment method field
-      notes: item.notes ?? null,
+        notes: item.notes ?? null,
       store_id: storeId,
       customer_id: item.customer_id ?? null,
       created_by: item.created_by || 'system'
@@ -1080,8 +1080,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           porterage: null,
           transfer_fee: null,
           price: null,
-          commission_rate: null,
-          notes: null,
+          commission_rate: 0,
+          status  : 'Created',
           received_quantity: quantity,
           created_at: new Date().toISOString(),
           batch_id: null

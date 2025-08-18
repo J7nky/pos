@@ -53,7 +53,7 @@ const saleItemsWithIds = items.map(item => ({
   _synced: false,
   ...item,
   weight: item.weight ?? null,
-  notes: item.notes ?? null,
+  notes : item.notes,
   received_quantity: item.quantity // ❌ INCORRECT FIELD
 }));
 ```
@@ -66,7 +66,7 @@ const saleItemsWithIds = items.map(item => ({
   _synced: false,
   ...item,
   weight: item.weight ?? null,
-  notes: item.notes ?? null
+  notes: item.notes
   // NOTE: received_quantity field belongs to inventory_items table, NOT sale_items
 }));
 ```
@@ -114,7 +114,7 @@ Created comprehensive cleanup and validation utilities:
   weight: number | null;
   unit_price: number;
   total_price: number;
-  notes: string | null;
+  notes: string;
   store_id: string;
   created_at: string;
   // Sync fields

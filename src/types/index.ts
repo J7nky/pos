@@ -49,7 +49,7 @@ export interface InventoryItem {
   transferFee?: number;
   price?: number;
   commissionRate?: number;
-  notes?: string;
+  status?: string;
   receivedAt: string;
   receivedBy: string;
   batchId?: string;
@@ -74,7 +74,7 @@ export interface inventory_batches { id: string;
   received_at: string; // ISO date string
   store_id: string;
   created_by: string;
-  notes?: string;}
+    status: string;}
 
 export interface SaleItem {
   id: string;
