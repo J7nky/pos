@@ -85,7 +85,6 @@ export class DataSyncService {
           email: s.email,
           address: s.address,
           type: s.type,
-          isActive: s.is_active,
           balance: s.balance,
           createdAt: s.created_at
         }));
@@ -217,7 +216,7 @@ export class DataSyncService {
       // Check suppliers
       const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
       const validSuppliers = suppliers.filter(s => 
-        s.name && s.phone && s.type && s.is_active !== undefined
+        s.name && s.phone && s.type
       );
       checks.push({
         table: 'suppliers',
