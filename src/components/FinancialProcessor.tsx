@@ -39,7 +39,7 @@ export default function FinancialProcessor() {
   const { currency, formatCurrency, formatCurrencyWithSymbol, getConvertedAmount } = useCurrency();
   
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
-  const suppliers = raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at, type: s.type || 'commission'})) as Array<any>;
+  const suppliers = raw.suppliers.map(s => ({...s,  createdAt: s.created_at, type: s.type || 'commission'})) as Array<any>;
   const sales = raw.sales;
   const inventory = raw.inventory;
   
