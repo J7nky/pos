@@ -72,7 +72,6 @@ export class SupabaseService {
         .from('suppliers')
         .select('*')
         .eq('store_id', storeId)
-        .eq('is_active', true)
         .order('name');
       
       if (error) throw error;
@@ -104,7 +103,6 @@ export class SupabaseService {
         .from('customers')
         .select('*')
         .eq('store_id', storeId)
-        .eq('is_active', true)
         .order('name');
       
       if (error) throw error;
@@ -215,7 +213,6 @@ export class SupabaseService {
         .from('sale_items')
         .select(`
           *,
-          customers(name),
           products(name, category),
           suppliers(name)
         `)
