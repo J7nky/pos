@@ -24,7 +24,6 @@ export interface Supplier extends BaseEntity {
   phone: string;
   email: string | null;
   address: string;
-  is_active: boolean;
   lb_balance: number | null; // Added balance field to match Supabase schema
   usd_balance: number | null; // Added balance field to match Supabase schema
 }
