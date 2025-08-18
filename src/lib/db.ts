@@ -24,7 +24,6 @@ export interface Supplier extends BaseEntity {
   phone: string;
   email: string | null;
   address: string;
-  type: 'commission' | 'cash'; // Added to match database schema
   is_active: boolean;
   lb_balance: number | null; // Added balance field to match Supabase schema
   usd_balance: number | null; // Added balance field to match Supabase schema
@@ -51,8 +50,8 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
   porterage: number | null;
   transfer_fee: number | null;
   price: number | null;
-  commission_rate: number | null;
-  notes: string | null;
+  commission_rate: number;
+  status: string;
   received_at: string;
   received_by: string;
   store_id: string;
@@ -130,7 +129,7 @@ export interface JournalEntry extends BaseEntity {
 export interface inventory_batches extends BaseEntity {
   id: string;
   supplier_id: string;
-  notes: string | null;
+  status: string;
   porterage: number | null;
   transfer_fee: number | null;
   received_at: string;

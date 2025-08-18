@@ -398,6 +398,39 @@ export class SupabaseService {
     }
   }
 
+  static async updateUserSettings(
+    userId: string, 
+    updates: {
+      preferred_currency?: 'USD' | 'LBP';
+      preferred_language?: 'en' | 'ar' | 'fr';
+      preferred_commission_rate?: number;
+    }
+  ) {
+    try {
+      console.log('SupabaseService: updateUserSettings called with userId:', userId, 'updates:', updates);
+      const { data, error } = await supabase
+        .from('users')
+        .update({ 
+          ...updates, 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', userId)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('SupabaseService: Database error:', error);
+        throw error;
+      }
+      
+      console.log('SupabaseService: updateUserSettings successful, returned data:', data);
+      return data;
+    } catch (error) {
+      console.error('SupabaseService: Exception in updateUserSettings:', error);
+      handleSupabaseError(error);
+    }
+  }
+
   // Stores
   static async getStores() {
     try {

@@ -32,6 +32,13 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     return stored || 'ar';
   });
 
+  // Load language preference from user profile if available
+  useEffect(() => {
+    // This will be called when the component mounts
+    // The actual user profile loading will be handled by the Settings component
+    // which will call setLanguage when the profile is loaded
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('app_language', language);
     const dir = language === 'ar' ? 'rtl' : 'ltr';

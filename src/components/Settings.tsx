@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
+import { useSupabaseData } from '../contexts/SupabaseDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { 
@@ -19,23 +20,57 @@ import {
 import { useLocalStorage } from '../hooks/useLocalStorage';
 
 export default function Settings() {
-  const { 
-    lowStockAlertsEnabled, 
-    lowStockThreshold, 
-    defaultCommissionRate,
-    currency,
-    toggleLowStockAlerts, 
-    updateLowStockThreshold,
-    updateDefaultCommissionRate,
-    updateCurrency
-  } = useOfflineData();
   const { userProfile } = useSupabaseAuth();
+  
+  // Use Supabase context for database-stored settings (currency, commission rate)
+  const supabaseData = useSupabaseData();
+  
+  // Use Offline context for local-only settings (low stock alerts, threshold)
+  console.log('Settings: About to call useOfflineData...');
+  const offlineData = useOfflineData();
+  console.log('Settings: offlineData received:', offlineData);
+  
+  // Prioritize Supabase context for database-stored settings, fallback to offline
+  const defaultCommissionRate = supabaseData?.defaultCommissionRate ?? offlineData?.defaultCommissionRate ?? 10;
+  const currency = supabaseData?.currency ?? offlineData?.currency ?? 'USD';
+  
+  // Use offline context for local-only settings
+  const lowStockAlertsEnabled = offlineData?.lowStockAlertsEnabled ?? true;
+  const lowStockThreshold = offlineData?.lowStockThreshold ?? 10;
+  
+  // Use appropriate update functions with fallbacks
+  const updateDefaultCommissionRate = supabaseData?.updateDefaultCommissionRate ?? offlineData?.updateDefaultCommissionRate ?? (() => {});
+  const updateCurrency = supabaseData?.updateCurrency ?? offlineData?.updateCurrency ?? (() => {});
+  const toggleLowStockAlerts = offlineData?.toggleLowStockAlerts ?? (() => {});
+  const updateLowStockThreshold = offlineData?.updateLowStockThreshold ?? (() => {});
+  
   const { t, language, setLanguage } = useI18n();
 
   const [tempThreshold, setTempThreshold] = useState(lowStockThreshold.toString());
   const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate.toString());
   const [tempCurrency, setTempCurrency] = useState<'USD' | 'LBP'>(currency);
   const [showSaveMessage, setShowSaveMessage] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Handle language change with database update
+  const handleLanguageChange = async (newLanguage: string) => {
+    setLanguage(newLanguage);
+    if (userProfile?.id) {
+      try {
+        await supabaseData?.updateUserSettings?.(userProfile.id, {
+          preferred_language: newLanguage as 'en' | 'ar' | 'fr'
+        });
+        setShowSaveMessage(true);
+        setSaveError(null);
+        setTimeout(() => setShowSaveMessage(false), 2000);
+      } catch (error) {
+        console.error('Failed to save language preference to database:', error);
+        setSaveError('Failed to save language preference to database');
+        setTimeout(() => setSaveError(null), 3000);
+        // Language change still works locally
+      }
+    }
+  };
 
   const handleThresholdSave = () => {
     const newThreshold = parseInt(tempThreshold);
@@ -46,19 +81,41 @@ export default function Settings() {
     }
   };
 
-  const handleCommissionRateSave = () => {
+  const handleCommissionRateSave = async () => {
     const newRate = parseFloat(tempCommissionRate);
     if (newRate >= 0 && newRate <= 100) {
-      updateDefaultCommissionRate(newRate);
-      setShowSaveMessage(true);
-      setTimeout(() => setShowSaveMessage(false), 2000);
+      try {
+        console.log('Settings: Saving commission rate:', newRate);
+        console.log('Settings: updateDefaultCommissionRate function:', updateDefaultCommissionRate);
+        await updateDefaultCommissionRate(newRate);
+        console.log('Settings: Commission rate saved successfully');
+        setShowSaveMessage(true);
+        setSaveError(null);
+        setTimeout(() => setShowSaveMessage(false), 2000);
+      } catch (error) {
+        console.error('Settings: Error saving commission rate:', error);
+        setSaveError('Failed to save commission rate to database');
+        setTimeout(() => setSaveError(null), 3000);
+      }
     }
   };
 
-  const handleCurrencySave = () => {
-    updateCurrency(tempCurrency);
-    setShowSaveMessage(true);
-    setTimeout(() => setShowSaveMessage(false), 2000);
+  const handleCurrencySave = async () => {
+    try {
+      console.log('Settings: Saving currency:', tempCurrency);
+      console.log('Settings: updateCurrency function:', updateCurrency);
+      await updateCurrency(tempCurrency);
+      console.log('Settings: Currency saved successfully');
+      setShowSaveMessage(true);
+      setSaveError(null);
+      setTimeout(() => setShowSaveMessage(false), 2000);
+    } catch (error) {
+      console.error('Settings: Error saving currency:', error);
+      setSaveError('Failed to save currency preference to database');
+      setTimeout(() => setSaveError(null), 3000);
+      // Fallback to local storage - update the temp state to reflect the change
+      setTempCurrency(tempCurrency);
+    }
   };
 
   const handleToggleAlerts = (enabled: boolean) => {
@@ -75,6 +132,12 @@ export default function Settings() {
           <div className="flex items-center px-4 py-2 bg-green-100 text-green-800 rounded-lg">
             <CheckCircle className="w-5 h-5 mr-2" />
             {t('settings.saved')}
+          </div>
+        )}
+        {saveError && (
+          <div className="flex items-center px-4 py-2 bg-red-100 text-red-800 rounded-lg">
+            <AlertTriangle className="w-5 h-5 mr-2" />
+            {saveError}
           </div>
         )}
       </div>
@@ -311,7 +374,7 @@ export default function Settings() {
           <div className="flex items-center space-x-3">
             <select
               value={language}
-              onChange={(e) => setLanguage(e.target.value)}
+              onChange={(e) => handleLanguageChange(e.target.value)}
               className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="ar">{t('settings.language_ar')}</option>

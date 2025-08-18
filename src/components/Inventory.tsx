@@ -106,14 +106,14 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
           weight: bi.weight ? parseFloat(bi.weight) : undefined,
           price: form.type === 'cash' && bi.price ? parseFloat(bi.price) : undefined,
           commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
-          notes: form.notes || undefined,
+          status: form.status || undefined,
         };
       });
       await onSuccess({
         mode: 'batch',
         batch: {
           supplier_id: form.supplier_id,
-          notes: form.notes || undefined,
+          status: form.status || undefined,
           porterage: form.porterage ? parseFloat(form.porterage) : undefined,
           transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
           items
@@ -127,7 +127,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
         porterage: '',
         transfer_fee: '',
         commission_rate: '',
-        notes: ''
+        status: ''
       });
       setBulkProducts([]);
       setBulkItems({});
@@ -188,13 +188,16 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                     <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
                     <div>
                       <p className="font-semibold text-gray-900 dark:text-slate-100">{selectedSupplier.name}</p>
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        selectedSupplier.type === 'commission' 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-blue-100 text-blue-800'
-                      }`}>
-                        {selectedSupplier.type}
+                      <span className={`px-2 py-1 text-xs rounded-full bg-green-100 text-green-800    `}>
+                       Commission Rate: {form.type === 'commission' ?  form.commission_rate : 'Cash'}                        
                       </span>
+                      <span className={`px-2 py-1 text-xs rounded-full bg-green-100 text-green-800    `}>
+                        Porterage: {form.porterage}
+                      </span>
+                      <span className={`px-2 py-1 text-xs rounded-full bg-green-100 text-green-800    `}>
+                        Transfer Fee: {form.transfer_fee}
+                      </span>
+                     
                     </div>
                   </div>
                 )}
@@ -331,11 +334,11 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Notes (optional)</label>
                     <textarea
-                      value={form.notes}
-                      onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                      value={form.status}
+                      onChange={(e) => setForm({ ...form, status: e.target.value })}
                       className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                       rows={4}
-                      placeholder="Add any additional notes or comments..."
+                      placeholder="Add any additional status or comments..."
                     />
                   </div>
                 </div>
@@ -356,24 +359,11 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                      <Truck className="w-5 h-5 mr-2 text-green-600" />
                      Products
                    </div>
-                   <button
-                     type="button"
-                     onClick={addProductRow}
-                     className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
-                   >
-                     <Plus className="w-4 h-4" />
-                     Add Row
-                   </button>
+                
                  </h3>
                 
                 <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-4 border border-gray-200 dark:border-slate-700">
-                  {bulkProducts.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500 dark:text-slate-400">
-                      <Package className="w-12 h-12 mx-auto mb-2 text-gray-300 dark:text-slate-600" />
-                      <p>No products added yet</p>
-                      <p className="text-sm">Click "Add Row" to start adding products</p>
-                    </div>
-                  ) : (
+                     
                     <div className=" border border-gray-200 dark:border-slate-700 rounded-lg scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 dark:scrollbar-thumb-slate-700 dark:scrollbar-track-slate-800">
                       <table className="w-full">
                         <thead className="sticky top-0 bg-gray-50 dark:bg-slate-800 z-10 shadow-sm">
@@ -508,9 +498,20 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                   />
                                 </td>
                                 <td className="py-3 px-2 flex items-center gap-2">
-                                
-                               
-                                  
+                                {(bulkProducts.length > 1 || !bulkProducts[0])?(
+                                <button
+                                    type="button"
+                                    onClick={() => removeProductRow(productId)}
+                                    className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
+                                    title="Remove product"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>):(
+<div>
+  
+</div>
+                                  )
+                                  }
                                   <button
                                     type="button"
                                     onClick={addProductRow}
@@ -518,14 +519,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                   >
                                     <Plus className="w-4 h-4" /> 
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => removeProductRow(productId)}
-                                    className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
-                                    title="Remove product"
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </button>
+                             
                                 </td>
                               </tr>
                             );
@@ -533,7 +527,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                         </tbody>
                       </table>
                     </div>
-                  )}
+                  
                 </div>
               </div>
             </div>
@@ -1146,7 +1140,7 @@ export default function Inventory() {
     porterage: '',
     transfer_fee: '',
     commission_rate: '',
-    notes: ''
+    status: ''
   });
 
   // Update commission rate when form opens or supplier changes
@@ -1293,7 +1287,7 @@ export default function Inventory() {
     await SupabaseService.updateInventoryItem(item.id, {
       quantity: Number(item.quantity),
       price: item.price ? Number(item.price) : null,
-      notes: item.notes || null,
+      status: item.status || null,
     });
   };
   const deleteInventoryItem = async (item: any) => {
@@ -1492,11 +1486,11 @@ export default function Inventory() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Notes (optional)</label>
                       <textarea
-                        value={form.notes || ''}
-                        onChange={e => setForm((f: any) => ({ ...f, notes: e.target.value }))}
+                        value={form.status || ''}
+                        onChange={e => setForm((f: any) => ({ ...f, status: e.target.value }))}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                         rows={4}
-                        placeholder="Add any additional notes or comments..."
+                        placeholder="Add any additional status or comments..."
                       />
                     </div>
                   </div>
@@ -1905,7 +1899,7 @@ export default function Inventory() {
             await raw.addInventoryBatch({
               supplier_id: batch.supplier_id,
               created_by: userProfile?.id || '',
-              notes: batch.notes,
+              status: 'Created',
               porterage: batch.porterage,
               transfer_fee: batch.transfer_fee,
               items: batch.items

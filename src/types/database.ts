@@ -4,6 +4,9 @@ export interface Database {
       users: {
         Row: {
           id: string;
+          preferred_currency: 'USD' | 'LBP';
+          preferred_language: 'en' | 'ar'|'fr';
+          preferred_commission_rate: number;
           email: string;
           name: string;
           role: 'admin' | 'manager' | 'cashier';
@@ -12,6 +15,9 @@ export interface Database {
           updated_at: string;
         };
         Insert: {
+          preferred_currency: 'USD' | 'LBP';
+          preferred_language: 'en' | 'ar'|'fr';
+          preferred_commission_rate: number;
           id: string;
           email: string;
           name: string;
@@ -22,6 +28,9 @@ export interface Database {
         };
         Update: {
           id?: string;
+          preferred_currency?: 'USD' | 'LBP';
+          preferred_language?: 'en' | 'ar'|'fr';
+          preferred_commission_rate?: number;
           email?: string;
           name?: string;
           role?: 'admin' | 'manager' | 'cashier';
@@ -172,7 +181,7 @@ export interface Database {
           transfer_fee: number | null;
           price: number | null;
           commission_rate: number | null;
-          notes: string | null;
+          notes: string;
           received_at: string;
           received_by: string;
           store_id: string;
@@ -192,7 +201,7 @@ export interface Database {
           transfer_fee?: number | null;
           price?: number | null;
           commission_rate?: number | null;
-          notes?: string | null;
+          notes?: string;
           received_at?: string;
           received_by: string;
           store_id: string;
@@ -208,7 +217,7 @@ export interface Database {
           transfer_fee?: number | null;
           price?: number | null;
           commission_rate?: number | null;
-          notes?: string | null;
+          notes?: string;
           received_quantity?: number;
           batch_id?: string | null;
         };
@@ -222,7 +231,7 @@ export interface Database {
           received_at: string;
           store_id: string;
           created_by: string;
-          notes?: string | null;
+          status?: string;
         };
         Insert: {
           id?: string;
@@ -232,12 +241,12 @@ export interface Database {
           received_at?: string;
           store_id?: string;
           created_by?: string;
-          notes?: string | null;
+          status?: string;
         };
         Update: {
           id?: string;
           supplier_id?: string;
-          notes?: string | null;
+          status?: string;
           porterage?: number | null;
           transfer_fee?: number | null;
           received_at?: string;
@@ -288,7 +297,7 @@ export interface Database {
           unit_price?: number;
           received_value?: number;
           payment_method?: 'cash' | 'card' | 'credit';
-          notes?: string | null;
+              notes?: string | null;
           customer_id?: string | null;
         };
       };

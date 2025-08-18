@@ -127,7 +127,7 @@ export class DataSyncService {
           transferFee: item.transfer_fee,
           price: item.price,
           commissionRate: item.commission_rate,
-          notes: item.notes,
+          status: item.status,
           receivedAt: item.received_at,
           receivedBy: item.received_by,
           createdAt: item.created_at

@@ -146,7 +146,7 @@ When sales logs are empty, users now see:
     unitPrice: number;        // or unit_price
     totalPrice: number;       // or total_price
     weight?: number;
-    notes?: string;
+    status: string;
   }>;
 }
 ```
