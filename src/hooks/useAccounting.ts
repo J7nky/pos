@@ -105,7 +105,7 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
   );
   
   const suppliers = useMemo(() => 
-    raw.suppliers.map(s => ({...s, isActive: s.is_active, createdAt: s.created_at})) as Supplier[], 
+    raw.suppliers.map(s => ({...s, createdAt: s.created_at})) as Supplier[], 
     [raw.suppliers]
   );
 
