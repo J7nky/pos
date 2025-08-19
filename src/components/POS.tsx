@@ -366,6 +366,53 @@ export default function POS() {
           await raw.openCashDrawer(openingAmount, userProfile.id);
         }
       }
+
+      // Create bill record for accounting integration
+      const billData = {
+        store_id: raw.storeId,
+        bill_number: `BILL-${Date.now()}`,
+        customer_id: activeTab.selectedCustomer || null,
+        customer_name: activeTab.selectedCustomer ? 
+          customers.find(c => c.id === activeTab.selectedCustomer)?.name || null : null,
+        subtotal: total,
+        tax_amount: 0,
+        discount_amount: 0,
+        total_amount: total,
+        payment_method: activeTab.paymentMethod,
+        payment_status: activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived || '0') < total ? 'partial' : 'paid',
+        amount_paid: parseFloat(activeTab.amountReceived || '0'),
+        amount_due: Math.max(0, total - parseFloat(activeTab.amountReceived || '0')),
+        bill_date: new Date().toISOString(),
+        due_date: activeTab.paymentMethod === 'credit' ? 
+          new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null,
+        notes: activeTab.notes || null,
+        status: 'active',
+        created_by: userProfile?.id || ''
+      };
+
+      // Convert cart items to sale items format
+      const saleItemsData = activeTab.cart.map(item => ({
+        id: uuidv4(),
+        inventory_item_id: item.inventoryItemId || '',
+        product_id: item.productId,
+        supplier_id: item.supplierId,
+        quantity: item.quantity,
+        weight: item.weight || null,
+        unit_price: item.unitPrice || 0,
+        received_value: item.totalPrice || 0,
+        payment_method: item.paymentMethod || activeTab.paymentMethod,
+        notes: item.notes || null,
+        store_id: raw.storeId,
+        customer_id: activeTab.selectedCustomer || null,
+        created_at: new Date().toISOString(),
+        created_by: userProfile?.id || '',
+        _synced: false
+      }));
+
+      // Create bill in database for accounting integration
+      const { db } = await import('../lib/db');
+      await db.createBillFromSaleItems(saleItemsData, billData);
+
       await addSale(
         activeTab.cart.map(item => ({
           id: uuidv4(),
