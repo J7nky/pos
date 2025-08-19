@@ -49,15 +49,12 @@ CREATE TABLE IF NOT EXISTS bills (
   customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
   customer_name text,
   subtotal numeric(10,2) NOT NULL DEFAULT 0,
-  tax_amount numeric(10,2) NOT NULL DEFAULT 0,
-  discount_amount numeric(10,2) NOT NULL DEFAULT 0,
   total_amount numeric(10,2) NOT NULL DEFAULT 0,
   payment_method text NOT NULL CHECK (payment_method IN ('cash', 'card', 'credit')),
   payment_status text NOT NULL CHECK (payment_status IN ('paid', 'partial', 'pending')),
   amount_paid numeric(10,2) NOT NULL DEFAULT 0,
   amount_due numeric(10,2) NOT NULL DEFAULT 0,
   bill_date timestamptz NOT NULL DEFAULT now(),
-  due_date timestamptz,
   notes text,
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'refunded')),
   created_by uuid NOT NULL REFERENCES users(id),
@@ -70,8 +67,6 @@ CREATE TABLE IF NOT EXISTS bills (
   CONSTRAINT bills_store_bill_number_unique UNIQUE (store_id, bill_number),
   CONSTRAINT bills_amounts_valid CHECK (
     subtotal >= 0 AND 
-    tax_amount >= 0 AND 
-    discount_amount >= 0 AND 
     total_amount >= 0 AND
     amount_paid >= 0 AND
     amount_due >= 0
@@ -125,7 +120,6 @@ CREATE INDEX IF NOT EXISTS idx_bills_status ON bills(status);
 CREATE INDEX IF NOT EXISTS idx_bills_composite_search ON bills(store_id, bill_date DESC, payment_status);
 CREATE INDEX IF NOT EXISTS idx_bills_customer_bills ON bills(customer_id, bill_date DESC) WHERE customer_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bills_active ON bills(store_id, bill_date DESC) WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS idx_bills_pending_payment ON bills(store_id, due_date) WHERE payment_status IN ('pending', 'partial');
 
 CREATE INDEX IF NOT EXISTS idx_bill_line_items_bill_id ON bill_line_items(bill_id);
 CREATE INDEX IF NOT EXISTS idx_bill_line_items_product_id ON bill_line_items(product_id);
@@ -259,8 +253,6 @@ BEGIN
   -- Update bill totals
   UPDATE bills SET
     subtotal = new_subtotal,
-    total_amount = new_subtotal + tax_amount - discount_amount,
-    amount_due = new_subtotal + tax_amount - discount_amount - amount_paid,
     updated_at = now()
   WHERE id = bill_record.id;
   

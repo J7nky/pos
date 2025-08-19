@@ -367,22 +367,18 @@ export default function POS() {
         customer_name: activeTab.selectedCustomer ? 
           customers.find(c => c.id === activeTab.selectedCustomer)?.name || null : null,
         subtotal: total,
-        tax_amount: 0,
-        discount_amount: 0,
         total_amount: total,
         payment_method: activeTab.paymentMethod,
         payment_status: activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived || '0') < total ? 'partial' : 'paid',
         amount_paid: parseFloat(activeTab.amountReceived || '0'),
         amount_due: Math.max(0, total - parseFloat(activeTab.amountReceived || '0')),
         bill_date: new Date().toISOString(),
-        due_date: activeTab.paymentMethod === 'credit' ? 
-          new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null,
         notes: activeTab.notes || null,
         created_by: userProfile?.id || ''
       };
 
       // Create bill in Supabase for comprehensive bill management
-      const createdBill = await SupabaseService.createBill(billData);
+      const createdBill = await SupabaseService.createBill(billData as any);
       
       if (createdBill) {
         // Create bill line items

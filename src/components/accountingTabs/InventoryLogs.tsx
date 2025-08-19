@@ -33,14 +33,11 @@ interface Bill {
   customer_id: string | null;
   customer_name: string | null;
   subtotal: number;
-  tax_amount: number;
-  discount_amount: number;
   total_amount: number;
   payment_method: 'cash' | 'card' | 'credit';
   payment_status: 'paid' | 'partial' | 'pending';
   amount_paid: number;
   bill_date: string;
-  due_date: string | null;
   notes: string | null;
   status: 'active' | 'cancelled' | 'refunded';
   created_by: string;
@@ -175,9 +172,6 @@ export default function InventoryLogs() {
       const updates = {
         customer_id: editForm.customer_id,
         customer_name: editForm.customer_name,
-        tax_amount: editForm.tax_amount || 0,
-        discount_amount: editForm.discount_amount || 0,
-        total_amount: (editForm.subtotal || 0) + (editForm.tax_amount || 0) - (editForm.discount_amount || 0),
         payment_method: editForm.payment_method,
         payment_status: editForm.payment_status,
         amount_paid: editForm.amount_paid || 0,
@@ -587,14 +581,7 @@ export default function InventoryLogs() {
                       <span className="text-gray-600">Subtotal:</span>
                       <span className="font-medium">{formatCurrency(selectedBill.subtotal)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Tax:</span>
-                      <span className="font-medium">{formatCurrency(selectedBill.tax_amount)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Discount:</span>
-                      <span className="font-medium">{formatCurrency(selectedBill.discount_amount)}</span>
-                    </div>
+                   
                     <div className="flex justify-between border-t pt-2">
                       <span className="text-gray-900 font-semibold">Total:</span>
                       <span className="font-bold text-lg">{formatCurrency(selectedBill.total_amount)}</span>
@@ -699,53 +686,10 @@ export default function InventoryLogs() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Tax Amount</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={editForm.tax_amount || 0}
-                    onChange={(e) => {
-                      const taxAmount = parseFloat(e.target.value) || 0;
-                      const subtotal = editForm.subtotal || 0;
-                      const discountAmount = editForm.discount_amount || 0;
-                      const totalAmount = subtotal + taxAmount - discountAmount;
-                      const amountPaid = editForm.amount_paid || 0;
-                      setEditForm(prev => ({ 
-                        ...prev, 
-                        tax_amount: taxAmount,
-                        total_amount: totalAmount,
-                      }));
-                    }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
+              
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Discount Amount</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={editForm.discount_amount || 0}
-                    onChange={(e) => {
-                      const discountAmount = parseFloat(e.target.value) || 0;
-                      const subtotal = editForm.subtotal || 0;
-                      const taxAmount = editForm.tax_amount || 0;
-                      const totalAmount = subtotal + taxAmount - discountAmount;
-                      const amountPaid = editForm.amount_paid || 0;
-                      setEditForm(prev => ({ 
-                        ...prev, 
-                        discount_amount: discountAmount,
-                        total_amount: totalAmount,
-                        amount_due: totalAmount - amountPaid
-                      }));
-                    }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
+               
+               
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Amount Paid</label>
                   <input
@@ -783,17 +727,7 @@ export default function InventoryLogs() {
                 </div>
               </div>
 
-              {editForm.payment_method === 'credit' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Due Date</label>
-                  <input
-                    type="date"
-                    value={editForm.due_date?.split('T')[0] || ''}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, due_date: e.target.value ? `${e.target.value}T23:59:59.999Z` : null }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              )}
+             
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
@@ -814,14 +748,8 @@ export default function InventoryLogs() {
                     <span>Subtotal:</span>
                     <span>{formatCurrency(editForm.subtotal || 0)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Tax:</span>
-                    <span>{formatCurrency(editForm.tax_amount || 0)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Discount:</span>
-                    <span>{formatCurrency(editForm.discount_amount || 0)}</span>
-                  </div>
+                 
+                 
                   <div className="flex justify-between font-semibold">
                     <span>Total:</span>
                     <span>{formatCurrency(editForm.total_amount || 0)}</span>
