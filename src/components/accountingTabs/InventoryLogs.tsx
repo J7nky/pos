@@ -39,7 +39,6 @@ interface Bill {
   payment_method: 'cash' | 'card' | 'credit';
   payment_status: 'paid' | 'partial' | 'pending';
   amount_paid: number;
-  amount_due: number;
   bill_date: string;
   due_date: string | null;
   notes: string | null;
@@ -182,8 +181,6 @@ export default function InventoryLogs() {
         payment_method: editForm.payment_method,
         payment_status: editForm.payment_status,
         amount_paid: editForm.amount_paid || 0,
-        amount_due: editForm.amount_due || 0,
-        due_date: editForm.due_date,
         notes: editForm.notes,
         last_modified_by: userProfile.id
       };
@@ -836,9 +833,9 @@ export default function InventoryLogs() {
                   </div>
                   <div className="flex justify-between">
                     <span>Amount Due:</span>
-                    <span className={editForm.amount_due && editForm.amount_due > 0 ? 'text-red-600' : 'text-green-600'}>
+                    {/* <span className={editForm.amount_due && editForm.amount_due > 0 ? 'text-red-600' : 'text-green-600'}>
                       {formatCurrency(editForm.amount_due || 0)}
-                    </span>
+                    </span> */}
                   </div>
                 </div>
               </div>
