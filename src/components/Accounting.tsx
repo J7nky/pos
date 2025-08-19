@@ -3041,10 +3041,14 @@ export default function Accounting() {
         products={products}
         suppliers={suppliers}
         customers={customers}
+        sales={sales}
         formatCurrency={formatCurrency}
+        formatCurrencyWithSymbol={formatCurrencyWithSymbol}
         showToast={showToast}
         onEditSale={handleEditSale}
         onDeleteSale={handleDeleteSale}
+        userProfile={userProfile}
+        storeId={userProfile?.store_id}
       />
       )}
 
