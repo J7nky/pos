@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
+import { SupabaseService } from '../services/supabaseService';
 import SearchableSelect from './common/SearchableSelect';
 import MoneyInput from './common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -347,15 +348,6 @@ export default function POS() {
     setCustomerError(null);
     setIsProcessing(true);
     try {
-      // if credit, or the received value is less than the total, add the amount received to the customer's balance
-      if (activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived) < total) {
-        const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
-        if (customer) {
-          await raw.updateCustomer(customer.id, {
-            lb_balance: customer.lb_balance + parseFloat(activeTab.amountReceived || '0'),
-          });
-        }
-      }
       // Auto open cash drawer if not open
       if (!raw.cashDrawer || raw.cashDrawer.status !== 'open') {
         let openingAmount = 0;
@@ -367,7 +359,7 @@ export default function POS() {
         }
       }
 
-      // Create bill record for accounting integration
+      // Create comprehensive bill record for accounting integration
       const billData = {
         store_id: raw.storeId,
         bill_number: `BILL-${Date.now()}`,
@@ -386,9 +378,60 @@ export default function POS() {
         due_date: activeTab.paymentMethod === 'credit' ? 
           new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null,
         notes: activeTab.notes || null,
-        status: 'active',
         created_by: userProfile?.id || ''
       };
+
+      // Create bill in Supabase for comprehensive bill management
+      const createdBill = await SupabaseService.createBill(billData);
+      
+      if (createdBill) {
+        // Create bill line items
+        for (let i = 0; i < activeTab.cart.length; i++) {
+          const item = activeTab.cart[i];
+          const supplier = suppliers.find(s => s.id === item.supplierId);
+          const product = products.find(p => p.id === item.productId);
+          
+          await SupabaseService.createBillLineItem({
+            store_id: raw.storeId,
+            bill_id: createdBill.id,
+            product_id: item.productId,
+            product_name: product?.name || item.productName,
+            supplier_id: item.supplierId,
+            supplier_name: supplier?.name || item.supplierName,
+            inventory_item_id: item.inventoryItemId || null,
+            quantity: item.quantity,
+            unit_price: item.unitPrice || 0,
+            line_total: item.totalPrice || 0,
+            weight: item.weight || null,
+            notes: item.notes || null,
+            line_order: i + 1
+          });
+        }
+
+        // Create audit log for bill creation
+        await SupabaseService.createBillAuditLog({
+          store_id: raw.storeId,
+          bill_id: createdBill.id,
+          action: 'created',
+          field_changed: null,
+          old_value: null,
+          new_value: JSON.stringify(createdBill),
+          change_reason: 'Bill created from POS transaction',
+          changed_by: userProfile?.id || '',
+          user_agent: navigator.userAgent
+        });
+      }
+
+      // Update customer balance if credit sale or partial payment
+      if (activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived) < total) {
+        const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
+        if (customer) {
+          const amountDue = Math.max(0, total - parseFloat(activeTab.amountReceived || '0'));
+          await raw.updateCustomer(customer.id, {
+            usd_balance: (customer.usd_balance || 0) + amountDue,
+          });
+        }
+      }
 
       // Convert cart items to sale items format
       const saleItemsData = activeTab.cart.map(item => ({
@@ -408,10 +451,6 @@ export default function POS() {
         created_by: userProfile?.id || '',
         _synced: false
       }));
-
-      // Create bill in database for accounting integration
-      const { db } = await import('../lib/db');
-      await db.createBillFromSaleItems(saleItemsData, billData);
 
       await addSale(
         activeTab.cart.map(item => ({
@@ -457,8 +496,9 @@ export default function POS() {
           paymentMethod: 'cash'
         });
       }
-      showToast('success', 'Sale completed successfully!');
+      showToast('success', `Sale completed successfully! Bill ${billData.bill_number} created.`);
     } catch (error) {
+      console.error('Sale processing error:', error);
       showToast('error', 'Sale failed!');
     }
     setIsProcessing(false);

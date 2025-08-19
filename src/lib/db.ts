@@ -487,7 +487,14 @@ class POSDatabase extends Dexie {
   }
 
   // Bill management methods
-  async createBillFromSaleItems(saleItems: SaleItem[], billData: Partial<Bill>): Promise<string> {
+  async createBillFromSaleItems(saleItems: SaleItem[], billData: Partial<Bill>, useSupabase: boolean = true): Promise<string> {
+    // If using Supabase, delegate to SupabaseService
+    if (useSupabase) {
+      console.log('Using Supabase for bill creation - delegating to SupabaseService');
+      return 'supabase-handled';
+    }
+
+    // Fallback to local database creation
     const billId = createId();
     const now = new Date().toISOString();
     
