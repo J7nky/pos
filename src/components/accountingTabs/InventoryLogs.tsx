@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { FileSpreadsheet, Search, Activity, Package, ShoppingCart, DollarSign, Eye, X, Edit, Trash2, FileText } from 'lucide-react';
+import { useMemo, useState, useEffect } from 'react';
+import { FileSpreadsheet, Search, Activity, Package, ShoppingCart, DollarSign, Eye, X, Edit, Trash2, FileText, Receipt, Plus, Save, AlertTriangle, CheckCircle, History, Filter } from 'lucide-react';
+import { db } from '../../lib/db';
 
 type InventoryLogsProps = {
   inventoryLogs: any[];
@@ -12,6 +13,8 @@ type InventoryLogsProps = {
   showToast: (message: string, type?: 'success' | 'error') => void;
   onEditSale: (sale: any) => void;
   onDeleteSale: (sale: any) => void;
+  userProfile?: any;
+  storeId?: string;
 };
 
 export default function InventoryLogs({
@@ -24,7 +27,9 @@ export default function InventoryLogs({
   showToast,
   sales = [],
   onEditSale,
-  onDeleteSale
+  onDeleteSale,
+  userProfile,
+  storeId
 }: InventoryLogsProps) {
   const [inventoryLogsSearchTerm, setInventoryLogsSearchTerm] = useState('');
   const [inventoryLogsProductFilter, setInventoryLogsProductFilter] = useState('');
@@ -37,6 +42,142 @@ export default function InventoryLogs({
   const [selectedInventoryLog, setSelectedInventoryLog] = useState<any | null>(null);
   const [editingSale, setEditingSale] = useState<any | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+
+  // Bill management states
+  const [bills, setBills] = useState<any[]>([]);
+  const [showBillManager, setShowBillManager] = useState(false);
+  const [selectedBill, setSelectedBill] = useState<any | null>(null);
+  const [showBillDetails, setShowBillDetails] = useState(false);
+  const [showEditBill, setShowEditBill] = useState(false);
+  const [billSearchTerm, setBillSearchTerm] = useState('');
+  const [billFilters, setBillFilters] = useState({
+    dateFrom: '',
+    dateTo: '',
+    paymentStatus: '',
+    customerId: '',
+    status: ''
+  });
+  const [showAuditTrail, setShowAuditTrail] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [loadingBills, setLoadingBills] = useState(false);
+
+  // Load bills when component mounts
+  useEffect(() => {
+    if (storeId) {
+      loadBills();
+    }
+  }, [storeId]);
+
+  const loadBills = async () => {
+    if (!storeId) return;
+    
+    setLoadingBills(true);
+    try {
+      const billsData = await db.getBillsWithDetails(storeId);
+      setBills(billsData);
+    } catch (error) {
+      console.error('Error loading bills:', error);
+      showToast('Failed to load bills', 'error');
+    } finally {
+      setLoadingBills(false);
+    }
+  };
+
+  const handleViewBillDetails = async (bill: any) => {
+    setSelectedBill(bill);
+    setShowBillDetails(true);
+    
+    // Load audit trail
+    try {
+      const auditTrail = await db.getBillAuditTrail(bill.id);
+      setAuditLogs(auditTrail);
+    } catch (error) {
+      console.error('Error loading audit trail:', error);
+    }
+  };
+
+  const handleEditBill = (bill: any) => {
+    setSelectedBill(bill);
+    setShowEditBill(true);
+  };
+
+  const handleDeleteBill = async (bill: any) => {
+    if (!userProfile?.id) {
+      showToast('User authentication required', 'error');
+      return;
+    }
+
+    const confirmMessage = `Are you sure you want to delete bill ${bill.bill_number}? This will restore inventory quantities and cannot be undone.`;
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      await db.deleteBill(bill.id, userProfile.id, 'Bill deleted by user', true);
+      await loadBills();
+      showToast('Bill deleted successfully', 'success');
+    } catch (error) {
+      console.error('Error deleting bill:', error);
+      showToast('Failed to delete bill', 'error');
+    }
+  };
+
+  const handleSaveBillChanges = async (updatedBill: any) => {
+    if (!userProfile?.id) {
+      showToast('User authentication required', 'error');
+      return;
+    }
+
+    try {
+      await db.updateBill(updatedBill.id, {
+        customer_id: updatedBill.customer_id,
+        customer_name: updatedBill.customer_name,
+        payment_method: updatedBill.payment_method,
+        payment_status: updatedBill.payment_status,
+        amount_paid: updatedBill.amount_paid,
+        amount_due: updatedBill.amount_due,
+        notes: updatedBill.notes,
+        discount_amount: updatedBill.discount_amount || 0,
+        tax_amount: updatedBill.tax_amount || 0
+      }, userProfile.id, 'Bill updated by user');
+      
+      await loadBills();
+      setShowEditBill(false);
+      showToast('Bill updated successfully', 'success');
+    } catch (error) {
+      console.error('Error updating bill:', error);
+      showToast('Failed to update bill', 'error');
+    }
+  };
+
+  const filteredBills = useMemo(() => {
+    let filtered = [...bills];
+
+    if (billSearchTerm) {
+      const search = billSearchTerm.toLowerCase();
+      filtered = filtered.filter((bill: any) =>
+        bill.bill_number.toLowerCase().includes(search) ||
+        (bill.customer_name && bill.customer_name.toLowerCase().includes(search)) ||
+        (bill.notes && bill.notes.toLowerCase().includes(search))
+      );
+    }
+
+    if (billFilters.dateFrom) {
+      filtered = filtered.filter((bill: any) => bill.bill_date >= billFilters.dateFrom);
+    }
+    if (billFilters.dateTo) {
+      filtered = filtered.filter((bill: any) => bill.bill_date <= billFilters.dateTo);
+    }
+    if (billFilters.paymentStatus) {
+      filtered = filtered.filter((bill: any) => bill.payment_status === billFilters.paymentStatus);
+    }
+    if (billFilters.customerId) {
+      filtered = filtered.filter((bill: any) => bill.customer_id === billFilters.customerId);
+    }
+    if (billFilters.status) {
+      filtered = filtered.filter((bill: any) => bill.status === billFilters.status);
+    }
+
+    return filtered;
+  }, [bills, billSearchTerm, billFilters]);
 
   const filteredInventoryLogs = useMemo(() => {
     let filtered = Array.isArray(inventoryLogs) ? [...inventoryLogs] : [];
@@ -331,10 +472,21 @@ export default function InventoryLogs({
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Inventory Transaction Logs</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Inventory & Bill Management</h2>
         
         </div>
         <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setShowBillManager(!showBillManager)}
+            className={`px-4 py-2 rounded-lg transition-colors flex items-center ${
+              showBillManager 
+                ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <Receipt className="w-4 h-4 mr-2" />
+            {showBillManager ? 'Hide Bills' : 'Manage Bills'}
+          </button>
           <button
             onClick={exportInventoryLogs}
             className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
@@ -344,6 +496,207 @@ export default function InventoryLogs({
           </button>
         </div>
       </div>
+
+      {/* Bill Management Section */}
+      {showBillManager && (
+        <div className="bg-white rounded-lg shadow-sm border mb-6">
+          <div className="p-6 border-b">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                <Receipt className="w-5 h-5 mr-2 text-blue-600" />
+                Bill Management
+              </h3>
+              <button
+                onClick={loadBills}
+                disabled={loadingBills}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center disabled:opacity-50"
+              >
+                <Activity className={`w-4 h-4 mr-2 ${loadingBills ? 'animate-spin' : ''}`} />
+                Refresh Bills
+              </button>
+            </div>
+          </div>
+
+          {/* Bill Search and Filters */}
+          <div className="p-4 border-b bg-gray-50">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Search Bills</label>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by bill number, customer..."
+                    value={billSearchTerm}
+                    onChange={(e) => setBillSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Payment Status</label>
+                <select
+                  value={billFilters.paymentStatus}
+                  onChange={(e) => setBillFilters(prev => ({ ...prev, paymentStatus: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Statuses</option>
+                  <option value="paid">Paid</option>
+                  <option value="partial">Partial</option>
+                  <option value="pending">Pending</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Date From</label>
+                <input
+                  type="date"
+                  value={billFilters.dateFrom}
+                  onChange={(e) => setBillFilters(prev => ({ ...prev, dateFrom: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Date To</label>
+                <input
+                  type="date"
+                  value={billFilters.dateTo}
+                  onChange={(e) => setBillFilters(prev => ({ ...prev, dateTo: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Bills Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bill #</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payment</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {filteredBills.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                      {loadingBills ? (
+                        <div className="flex items-center justify-center">
+                          <Activity className="w-5 h-5 animate-spin mr-2" />
+                          Loading bills...
+                        </div>
+                      ) : (
+                        <div>
+                          <Receipt className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                          <p>No bills found</p>
+                          <p className="text-sm">Bills will appear here when sales are made in the POS</p>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredBills.map((bill: any) => (
+                    <tr key={bill.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{bill.bill_number}</div>
+                        <div className="text-xs text-gray-500">
+                          {new Date(bill.created_at).toLocaleTimeString()}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {new Date(bill.bill_date).toLocaleDateString()}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {bill.customer_name || 'Walk-in Customer'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {bill.lineItems?.length || 0} items
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">
+                          {formatCurrency(bill.total_amount)}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          bill.payment_status === 'paid' 
+                            ? 'bg-green-100 text-green-800'
+                            : bill.payment_status === 'partial'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {bill.payment_method} - {bill.payment_status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          bill.status === 'active' 
+                            ? 'bg-blue-100 text-blue-800'
+                            : bill.status === 'cancelled'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {bill.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleViewBillDetails(bill)}
+                            className="text-blue-600 hover:text-blue-900 text-sm font-medium"
+                            title="View Details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleEditBill(bill)}
+                            className="text-green-600 hover:text-green-900 text-sm font-medium"
+                            title="Edit Bill"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteBill(bill)}
+                            className="text-red-600 hover:text-red-900 text-sm font-medium"
+                            title="Delete Bill"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedBill(bill);
+                              setShowAuditTrail(true);
+                            }}
+                            className="text-purple-600 hover:text-purple-900 text-sm font-medium"
+                            title="View Audit Trail"
+                          >
+                            <History className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white p-4 rounded-lg shadow-sm border">
@@ -658,6 +1011,38 @@ export default function InventoryLogs({
           onSave={handleSaveEdit}
           onCancel={handleCancelEdit}
           formatCurrency={formatCurrency}
+        />
+      )}
+
+      {/* Bill Details Modal */}
+      {showBillDetails && selectedBill && (
+        <BillDetailsModal
+          bill={selectedBill}
+          onClose={() => setShowBillDetails(false)}
+          formatCurrency={formatCurrency}
+          products={products}
+          suppliers={suppliers}
+          customers={customers}
+        />
+      )}
+
+      {/* Edit Bill Modal */}
+      {showEditBill && selectedBill && (
+        <EditBillModal
+          bill={selectedBill}
+          onSave={handleSaveBillChanges}
+          onCancel={() => setShowEditBill(false)}
+          formatCurrency={formatCurrency}
+          customers={customers}
+        />
+      )}
+
+      {/* Audit Trail Modal */}
+      {showAuditTrail && selectedBill && (
+        <AuditTrailModal
+          bill={selectedBill}
+          auditLogs={auditLogs}
+          onClose={() => setShowAuditTrail(false)}
         />
       )}
     </div>
@@ -975,6 +1360,496 @@ function EditSaleModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// Bill Details Modal Component
+function BillDetailsModal({
+  bill,
+  onClose,
+  formatCurrency,
+  products,
+  suppliers,
+  customers
+}: {
+  bill: any;
+  onClose: () => void;
+  formatCurrency: (amount: number) => string;
+  products: any[];
+  suppliers: any[];
+  customers: any[];
+}) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col">
+        <div className="p-6 border-b flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Bill Details</h2>
+              <p className="text-md text-gray-600 mt-1">{bill.bill_number}</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 overflow-y-auto flex-1">
+          {/* Bill Header Info */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-3">Bill Information</h3>
+              <div className="space-y-2 text-sm">
+                <div><span className="font-medium">Bill Number:</span> {bill.bill_number}</div>
+                <div><span className="font-medium">Date:</span> {new Date(bill.bill_date).toLocaleDateString()}</div>
+                <div><span className="font-medium">Customer:</span> {bill.customer_name || 'Walk-in Customer'}</div>
+                <div><span className="font-medium">Payment Method:</span> {bill.payment_method}</div>
+                <div><span className="font-medium">Status:</span> 
+                  <span className={`ml-2 px-2 py-1 rounded-full text-xs ${
+                    bill.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                    {bill.status}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-3">Payment Summary</h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span>Subtotal:</span>
+                  <span>{formatCurrency(bill.subtotal)}</span>
+                </div>
+                {bill.discount_amount > 0 && (
+                  <div className="flex justify-between text-red-600">
+                    <span>Discount:</span>
+                    <span>-{formatCurrency(bill.discount_amount)}</span>
+                  </div>
+                )}
+                {bill.tax_amount > 0 && (
+                  <div className="flex justify-between">
+                    <span>Tax:</span>
+                    <span>{formatCurrency(bill.tax_amount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-semibold border-t pt-2">
+                  <span>Total:</span>
+                  <span>{formatCurrency(bill.total_amount)}</span>
+                </div>
+                <div className="flex justify-between text-green-600">
+                  <span>Amount Paid:</span>
+                  <span>{formatCurrency(bill.amount_paid)}</span>
+                </div>
+                {bill.amount_due > 0 && (
+                  <div className="flex justify-between text-red-600 font-medium">
+                    <span>Amount Due:</span>
+                    <span>{formatCurrency(bill.amount_due)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Line Items */}
+          <div className="mb-6">
+            <h3 className="font-semibold text-gray-900 mb-3">Line Items</h3>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Weight</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit Price</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {(bill.lineItems || []).map((item: any) => {
+                    const product = products.find(p => p.id === item.product_id);
+                    const supplier = suppliers.find(s => s.id === item.supplier_id);
+                    return (
+                      <tr key={item.id}>
+                        <td className="px-4 py-4 text-sm text-gray-900">
+                          {product?.name || item.product_name || 'Unknown Product'}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-900">
+                          {supplier?.name || item.supplier_name || 'Unknown Supplier'}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-900">{item.quantity}</td>
+                        <td className="px-4 py-4 text-sm text-gray-900">
+                          {item.weight ? `${item.weight} kg` : '-'}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-900">
+                          {formatCurrency(item.unit_price)}
+                        </td>
+                        <td className="px-4 py-4 text-sm font-medium text-gray-900">
+                          {formatCurrency(item.line_total)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Notes */}
+          {bill.notes && (
+            <div className="bg-yellow-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-2">Notes</h3>
+              <p className="text-sm text-gray-700">{bill.notes}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end flex-shrink-0">
+          <button 
+            onClick={onClose} 
+            className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Edit Bill Modal Component
+function EditBillModal({
+  bill,
+  onSave,
+  onCancel,
+  formatCurrency,
+  customers
+}: {
+  bill: any;
+  onSave: (updatedBill: any) => void;
+  onCancel: () => void;
+  formatCurrency: (amount: number) => string;
+  customers: any[];
+}) {
+  const [formData, setFormData] = useState({
+    customer_id: bill.customer_id || '',
+    customer_name: bill.customer_name || '',
+    payment_method: bill.payment_method || 'cash',
+    payment_status: bill.payment_status || 'paid',
+    amount_paid: bill.amount_paid || 0,
+    discount_amount: bill.discount_amount || 0,
+    tax_amount: bill.tax_amount || 0,
+    notes: bill.notes || ''
+  });
+
+  const handleInputChange = (field: string, value: any) => {
+    setFormData(prev => {
+      const updated = { ...prev, [field]: value };
+      
+      // Update customer name when customer changes
+      if (field === 'customer_id') {
+        const customer = customers.find(c => c.id === value);
+        updated.customer_name = customer?.name || '';
+      }
+      
+      // Recalculate amount due when payment changes
+      if (field === 'amount_paid' || field === 'discount_amount' || field === 'tax_amount') {
+        const subtotal = bill.subtotal || 0;
+        const tax = field === 'tax_amount' ? parseFloat(value) || 0 : updated.tax_amount;
+        const discount = field === 'discount_amount' ? parseFloat(value) || 0 : updated.discount_amount;
+        const paid = field === 'amount_paid' ? parseFloat(value) || 0 : updated.amount_paid;
+        const total = subtotal + tax - discount;
+        
+        updated.amount_due = Math.max(0, total - paid);
+        updated.payment_status = updated.amount_due > 0 ? 'partial' : 'paid';
+      }
+      
+      return updated;
+    });
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const subtotal = bill.subtotal || 0;
+    const total = subtotal + formData.tax_amount - formData.discount_amount;
+    
+    onSave({
+      ...bill,
+      ...formData,
+      total_amount: total,
+      amount_due: Math.max(0, total - formData.amount_paid)
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900">Edit Bill</h2>
+            <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          <p className="text-sm text-gray-600 mt-1">{bill.bill_number}</p>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Customer</label>
+              <select
+                value={formData.customer_id}
+                onChange={(e) => handleInputChange('customer_id', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Walk-in Customer</option>
+                {customers.map(customer => (
+                  <option key={customer.id} value={customer.id}>{customer.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
+              <select
+                value={formData.payment_method}
+                onChange={(e) => handleInputChange('payment_method', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="credit">Credit</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Amount Paid</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.amount_paid}
+                onChange={(e) => handleInputChange('amount_paid', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Discount Amount</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.discount_amount}
+                onChange={(e) => handleInputChange('discount_amount', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Tax Amount</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.tax_amount}
+                onChange={(e) => handleInputChange('tax_amount', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Payment Status</label>
+              <select
+                value={formData.payment_status}
+                onChange={(e) => handleInputChange('payment_status', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="paid">Paid</option>
+                <option value="partial">Partial</option>
+                <option value="pending">Pending</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+            <textarea
+              value={formData.notes}
+              onChange={(e) => handleInputChange('notes', e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Add notes about this bill..."
+            />
+          </div>
+
+          {/* Calculated Totals Display */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h4 className="font-medium text-gray-900 mb-2">Calculated Totals</h4>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-gray-600">Subtotal:</span>
+                <span className="float-right font-medium">{formatCurrency(bill.subtotal)}</span>
+              </div>
+              <div>
+                <span className="text-gray-600">After Adjustments:</span>
+                <span className="float-right font-medium">
+                  {formatCurrency(bill.subtotal + formData.tax_amount - formData.discount_amount)}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-600">Amount Due:</span>
+                <span className="float-right font-medium text-red-600">
+                  {formatCurrency(formData.amount_due || 0)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 text-gray-700 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Audit Trail Modal Component
+function AuditTrailModal({
+  bill,
+  auditLogs,
+  onClose
+}: {
+  bill: any;
+  auditLogs: any[];
+  onClose: () => void;
+}) {
+  const getActionIcon = (action: string) => {
+    switch (action) {
+      case 'created': return <Plus className="w-4 h-4 text-green-600" />;
+      case 'updated': return <Edit className="w-4 h-4 text-blue-600" />;
+      case 'deleted': return <Trash2 className="w-4 h-4 text-red-600" />;
+      case 'item_added': return <Plus className="w-4 h-4 text-green-600" />;
+      case 'item_removed': return <Trash2 className="w-4 h-4 text-red-600" />;
+      case 'item_modified': return <Edit className="w-4 h-4 text-blue-600" />;
+      default: return <Activity className="w-4 h-4 text-gray-600" />;
+    }
+  };
+
+  const getActionColor = (action: string) => {
+    switch (action) {
+      case 'created': return 'bg-green-100 text-green-800';
+      case 'updated': return 'bg-blue-100 text-blue-800';
+      case 'deleted': return 'bg-red-100 text-red-800';
+      case 'item_added': return 'bg-green-100 text-green-800';
+      case 'item_removed': return 'bg-red-100 text-red-800';
+      case 'item_modified': return 'bg-blue-100 text-blue-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col">
+        <div className="p-6 border-b flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Audit Trail</h2>
+              <p className="text-md text-gray-600 mt-1">{bill.bill_number}</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 overflow-y-auto flex-1">
+          {auditLogs.length === 0 ? (
+            <div className="text-center py-8">
+              <History className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No Audit Trail</h3>
+              <p className="text-gray-500">No changes have been recorded for this bill.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {auditLogs.map((log: any) => (
+                <div key={log.id} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-start space-x-3">
+                    <div className="flex-shrink-0 mt-1">
+                      {getActionIcon(log.action)}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${getActionColor(log.action)}`}>
+                          {log.action.replace(/_/g, ' ').toUpperCase()}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {new Date(log.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      
+                      <div className="mt-2">
+                        <p className="text-sm text-gray-900 font-medium">
+                          {log.change_reason || 'No reason provided'}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          Changed by: {log.changed_by}
+                        </p>
+                        
+                        {log.field_changed && (
+                          <div className="mt-2 text-xs">
+                            <span className="text-gray-600">Field: </span>
+                            <span className="font-mono bg-gray-100 px-1 rounded">{log.field_changed}</span>
+                            {log.old_value && (
+                              <div className="mt-1">
+                                <span className="text-red-600">Old: </span>
+                                <span className="font-mono text-xs">{log.old_value}</span>
+                              </div>
+                            )}
+                            {log.new_value && (
+                              <div className="mt-1">
+                                <span className="text-green-600">New: </span>
+                                <span className="font-mono text-xs">{log.new_value}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end flex-shrink-0">
+          <button 
+            onClick={onClose} 
+            className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );
