@@ -463,7 +463,7 @@ export default function InventoryLogs() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div>
+                      {/* <div>
                         <div className="text-sm font-medium text-gray-900">
                           {formatCurrency(bill.total_amount)}
                         </div>
@@ -472,7 +472,7 @@ export default function InventoryLogs() {
                             Due: {formatCurrency(bill.amount_due)}
                           </div>
                         )}
-                      </div>
+                      </div> */}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-2">
@@ -603,12 +603,12 @@ export default function InventoryLogs() {
                       <span className="text-gray-600">Amount Paid:</span>
                       <span className="font-medium text-green-600">{formatCurrency(selectedBill.amount_paid)}</span>
                     </div>
-                    {selectedBill.amount_due > 0 && (
+                    {/* {selectedBill.amount_due > 0 && (
                       <div className="flex justify-between">
                         <span className="text-gray-600">Amount Due:</span>
                         <span className="font-medium text-red-600">{formatCurrency(selectedBill.amount_due)}</span>
                       </div>
-                    )}
+                    )} */}
                   </div>
                 </div>
               </div>
@@ -716,7 +716,6 @@ export default function InventoryLogs() {
                         ...prev, 
                         tax_amount: taxAmount,
                         total_amount: totalAmount,
-                        amount_due: totalAmount - amountPaid
                       }));
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
