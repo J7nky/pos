@@ -14,11 +14,43 @@ import Accounting from './components/Accounting';
 import Settings from './components/Settings';
 import { I18nProvider, useI18n } from './i18n';
 
+function AuthenticatedApp() {
+  const { userProfile } = useSupabaseAuth();
+  const [currentPage, setCurrentPage] = useState('home');
+
+  const renderPage = () => {
+    switch (currentPage) {
+      case 'home':
+        return <Home />;
+      case 'inventory':
+        return <Inventory />;
+      case 'pos':
+        return <POS />;
+      case 'reports':
+        return <Reports />;
+      case 'accounting':
+        return <Accounting />;
+      case 'customers':
+        return <Customers />;
+      case 'settings':
+        console.log('AuthenticatedApp: Rendering Settings page');
+        return <Settings />;
+      default:
+        return <Home />;
+    }
+  };
+
+  return (
+    <Layout currentPage={currentPage} onPageChange={setCurrentPage}>
+      {renderPage()}
+    </Layout>
+  );
+}
+
 function AppContent() {
   console.log('AppContent: Rendering AppContent component');
   const { userProfile, loading } = useSupabaseAuth();
   console.log('AppContent: userProfile:', userProfile, 'loading:', loading);
-  const [currentPage, setCurrentPage] = useState('home');
   const { t } = useI18n();
 
   if (loading) {
@@ -36,35 +68,7 @@ function AppContent() {
     return <SupabaseLogin />;
   }
 
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'home':
-        return <Home />;
-      case 'inventory':
-        return <Inventory />;
-
-      case 'pos':
-        return <POS />;
-      case 'reports':
-        return <Reports />;
-      case 'accounting':
-        return <Accounting />;
-      case 'customers':
-        return <Customers />;
-      case 'settings':
-        console.log('AppContent: Rendering Settings page');
-        return <Settings />;
-     
-      default:
-        return <Home />;
-    }
-  };
-
-  return (
-    <Layout currentPage={currentPage} onPageChange={setCurrentPage}>
-      {renderPage()}
-    </Layout>
-  );
+  return <AuthenticatedApp />;
 }
 
 function App() {

@@ -452,15 +452,12 @@ export class SupabaseService {
     customer_id?: string | null;
     customer_name?: string | null;
     subtotal: number;
-    tax_amount?: number;
-    discount_amount?: number;
     total_amount: number;
     payment_method: 'cash' | 'card' | 'credit';
     payment_status: 'paid' | 'partial' | 'pending';
     amount_paid: number;
     amount_due: number;
     bill_date?: string;
-    due_date?: string | null;
     notes?: string | null;
     created_by: string;
   }) {
@@ -482,14 +479,11 @@ export class SupabaseService {
     customer_id?: string | null;
     customer_name?: string | null;
     subtotal?: number;
-    tax_amount?: number;
-    discount_amount?: number;
     total_amount?: number;
     payment_method?: 'cash' | 'card' | 'credit';
     payment_status?: 'paid' | 'partial' | 'pending';
     amount_paid?: number;
     amount_due?: number;
-    due_date?: string | null;
     notes?: string | null;
     last_modified_by: string;
   }) {

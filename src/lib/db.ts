@@ -81,15 +81,12 @@ export interface Bill extends BaseEntity {
   customer_id: string | null;
   customer_name: string | null;
   subtotal: number;
-  tax_amount: number;
-  discount_amount: number;
   total_amount: number;
   payment_method: 'cash' | 'card' | 'credit';
   payment_status: 'paid' | 'partial' | 'pending';
   amount_paid: number;
   amount_due: number;
   bill_date: string;
-  due_date: string | null;
   notes: string | null;
   status: 'active' | 'cancelled' | 'refunded';
   created_by: string;
@@ -510,15 +507,12 @@ class POSDatabase extends Dexie {
         customer_id: billData.customer_id || null,
         customer_name: billData.customer_name || null,
         subtotal: billData.subtotal || 0,
-        tax_amount: billData.tax_amount || 0,
-        discount_amount: billData.discount_amount || 0,
         total_amount: billData.total_amount || 0,
         payment_method: billData.payment_method || 'cash',
         payment_status: billData.payment_status || 'paid',
         amount_paid: billData.amount_paid || 0,
         amount_due: billData.amount_due || 0,
         bill_date: billData.bill_date || now,
-        due_date: billData.due_date || null,
         notes: billData.notes || null,
         status: billData.status || 'active',
         created_by: billData.created_by!,
@@ -711,7 +705,7 @@ class POSDatabase extends Dexie {
         updated_at: now,
         _synced: false,
         bill_id: billId,
-        line_order: nextOrder,
+        line_order: nextOrder ,
         ...lineItem
       };
       
@@ -833,9 +827,7 @@ class POSDatabase extends Dexie {
     
     const bill = await this.bills.get(billId);
     if (bill) {
-      const taxAmount = bill.tax_amount || 0;
-      const discountAmount = bill.discount_amount || 0;
-      const totalAmount = subtotal + taxAmount - discountAmount;
+      const totalAmount = subtotal;
       
       await this.bills.update(billId, {
         subtotal,
