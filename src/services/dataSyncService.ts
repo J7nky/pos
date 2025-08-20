@@ -158,6 +158,26 @@ export class DataSyncService {
         return mappedSaleItems.length;
       });
 
+      // Sync bills
+      await this.syncTable('bills', storeId, async () => {
+        const bills = await db.bills.where('store_id').equals(storeId).toArray();
+        localStorage.setItem('erp_bills', JSON.stringify(bills));
+        return bills.length;
+      });
+
+      // Sync bill line items
+      await this.syncTable('bill_line_items', storeId, async () => {
+        const billLineItems = await db.bill_line_items.where('store_id').equals(storeId).toArray();
+        localStorage.setItem('erp_bill_line_items', JSON.stringify(billLineItems));
+        return billLineItems.length;
+      });
+
+      // Sync bill audit logs
+      await this.syncTable('bill_audit_logs', storeId, async () => {
+        const billAuditLogs = await db.bill_audit_logs.where('store_id').equals(storeId).toArray();
+        localStorage.setItem('erp_bill_audit_logs', JSON.stringify(billAuditLogs));
+        return billAuditLogs.length;
+      });
       console.log('✅ Data synchronization completed successfully');
 
     } catch (error) {

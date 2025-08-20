@@ -1139,6 +1139,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       sales,
       inventory,
       transactions,
+      bills,
+      billLineItems,
+      billAuditLogs,
   
 
       // Computed/legacy compatibility - exact match
@@ -1170,6 +1173,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addExpenseCategory,
       updateInventoryBatch,
       applyCommissionRateToBatch,
+      
+      // Bill management operations
+      createBill,
+      updateBill,
+      deleteBill,
+      getBills,
+      getBillDetails,
+      createBillAuditLog,
   
       deductInventoryQuantity,
       restoreInventoryQuantity,

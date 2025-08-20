@@ -494,7 +494,7 @@ export default function POS() {
       showToast('success', `Sale completed successfully! Bill ${billData.bill_number} created.`);
     } catch (error) {
       console.error('Sale processing error:', error);
-      showToast('error', 'Sale failed!');
+      showToast('error', `Sale failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
     setIsProcessing(false);
   };

@@ -317,6 +317,11 @@ class POSDatabase extends Dexie {
     this.bill_line_items.hook('creating', this.addCreateFields);
     this.bill_audit_logs.hook('creating', this.addCreateFields);
     this.bills.hook('updating', this.addUpdateFields);
+
+    // Migration for version 9 - ensure bill management tables are properly initialized
+    this.version(9).upgrade(trans => {
+      console.log('Initializing bill management tables for offline support');
+    });
   }
 
   private addCreateFields = (primKey: any, obj: any, trans: any) => {
