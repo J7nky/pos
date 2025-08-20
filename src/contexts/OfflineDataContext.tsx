@@ -196,11 +196,11 @@ class POSDatabase extends Dexie {
   pending_syncs!: Table<PendingSync, string>;
 
   // Bill management tables
-      updateBillLineItem,
-      deleteBillLineItem,
-      addBillLineItem,
-      getBillsByCustomer,
-      getBillsByDateRange,
+      // updateBillLineItem,
+      // deleteBillLineItem,
+      // addBillLineItem,
+      // getBillsByCustomer,
+      // getBillsByDateRange,
   bills!: Table<Bill, string>;
   bill_line_items!: Table<BillLineItem, string>;
   bill_audit_logs!: Table<BillAuditLog, string>;
