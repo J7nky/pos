@@ -1073,6 +1073,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }));
       for (const saleItem of items) {
       await db.inventory_items.bulkAdd(mappedItems);
+    }
     });
 
     await refreshData();
