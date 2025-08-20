@@ -134,6 +134,7 @@ export function useKeyboardShortcuts(shortcuts: Record<string, () => void>) {
 
       if (shortcuts[shortcutKey]) {
         e.preventDefault();
+        e.preventDefault();
         shortcuts[shortcutKey]();
       }
     };
