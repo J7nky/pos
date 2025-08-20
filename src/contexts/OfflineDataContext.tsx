@@ -1071,9 +1071,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         received_quantity: it.received_quantity ?? it.quantity,
         batch_id: batchId as string | null
       }));
-      for (const saleItem of items) {
+      
       await db.inventory_items.bulkAdd(mappedItems);
-    }
     });
 
     await refreshData();
@@ -1083,10 +1082,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return { batchId };
   };
 
-  const addSale = async (
-   
-    items: any[]
-  ): Promise<void> => {
+  const addSale = async (items: any[]): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
     const saleItemsWithIds = items.map(item => ({
       id: createId(),
@@ -1126,7 +1122,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Add the value of the credit to the customer's balance
   
       // Deduct from specific inventory items
-  for (const item of items) {
+      for (const item of items) {
         if (item.inventory_item_id) {
           // Use the specific inventory item ID if provided
           const inventoryItem = await db.inventory_items.get(item.inventory_item_id);
@@ -1170,13 +1166,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                 _synced: false
               });
             } else {
-        if (saleItem.quantity && saleItem.quantity > 0) {
-          if (saleItem.inventoryItemId) {
+              // Update with new quantity
+              await db.inventory_items.update(inv.id, { 
                 quantity: newQuantity,
-            await deductSpecificInventoryQuantity(saleItem.inventoryItemId, saleItem.quantity);
+                _synced: false
               });
             }
-            await deductInventoryQuantity(saleItem.productId, saleItem.supplierId, saleItem.quantity);
+            qtyToDeduct -= deduct;
           }
         }
       }
