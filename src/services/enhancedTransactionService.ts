@@ -72,7 +72,8 @@ export class EnhancedTransactionService {
 
       const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
       const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
-      const balanceAfter = balanceBefore - amountInUSD; // Allow negative debt (customer credit)
+      // RULE 5 FIX: When receiving payment FROM customer, DECREASE their balance (reduce their debt to us)
+      const balanceAfter = Math.max(0, balanceBefore - amountInUSD); // Prevent negative debt
 
       // Create correlation ID for this transaction group
       const correlationId = context.correlationId || this.generateCorrelationId();
@@ -216,6 +217,7 @@ export class EnhancedTransactionService {
       );
 
       const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
+      // RULE 5 FIX: When making payment TO supplier, DECREASE their balance (reduce what we owe them)
       const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
 
       const correlationId = context.correlationId || this.generateCorrelationId();
