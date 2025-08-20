@@ -633,6 +633,10 @@ export class SyncService {
       delete cleanRecord.tax_amount;
       delete cleanRecord.discount_amount;
       delete cleanRecord.inventory_item_id;
+      delete cleanRecord.due_date;
+      delete cleanRecord.status;
+      delete cleanRecord.last_modified_by;
+      delete cleanRecord.last_modified_at;
       
       if (!cleanRecord.created_by) {
         cleanRecord.created_by = '';
@@ -661,6 +665,7 @@ export class SyncService {
       // Remove fields that don't exist in Supabase schema
       delete cleanRecord.ip_address;
       delete cleanRecord.user_agent;
+      delete cleanRecord.updated_at;
       
       if (!cleanRecord.changed_by) {
         cleanRecord.changed_by = '';
