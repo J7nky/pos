@@ -211,6 +211,7 @@ export class ERPFinancialService {
     }
 
     const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
+    // RULE 3 FIX: For credit sales, INCREASE customer balance (debt they owe us)
     const balanceAfter = balanceBefore + sale.amountDue;
 
     // Update customer balance
@@ -283,6 +284,7 @@ export class ERPFinancialService {
 
     const amountInUSD = this.convertCurrency(amount, currency, 'USD');
     const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
+    // RULE 5 FIX: When receiving payment FROM customer, DECREASE their balance (reduce their debt to us)
     const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
 
     // Update customer balance
@@ -294,7 +296,7 @@ export class ERPFinancialService {
       this.customers[customerIndex].balance = balanceAfter; // Updated to use balance field
     }
 
-    // Update cash drawer if cash payment
+    // RULE 2 FIX: For cash payments, INCREASE cash drawer by payment amount
     if (currency === 'USD') {
       this.updateCashDrawer(amountInUSD, true);
     }
@@ -364,8 +366,14 @@ export class ERPFinancialService {
       return sum + itemValue;
     }, 0);
 
+    // RULE 4 FIX: Calculate fees from inventory items
+    const totalPorterage = items.reduce((sum, item) => sum + (item.porterage || 0), 0);
+    const totalTransferFee = items.reduce((sum, item) => sum + (item.transferFee || 0), 0);
+    const totalFees = totalPorterage + totalTransferFee;
+
     const commissionAmount = totalValue * (commissionRate / 100);
-    const netAmount = totalValue - commissionAmount;
+    // RULE 4 FIX: Deduct commission AND fees from total bill amount
+    const netAmount = totalValue - commissionAmount - totalFees;
 
     const balanceBefore = this.accountBalances.get(supplierId)?.currentBalance || 0;
     const balanceAfter = balanceBefore + netAmount;
@@ -384,11 +392,41 @@ export class ERPFinancialService {
       amountDue: netAmount,
       dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 7 days
       status: 'pending',
-      description: `Commission payment for sold items`,
+      description: `Commission payment for sold items (Commission: ${commissionAmount.toFixed(2)}, Fees: ${totalFees.toFixed(2)})`,
       createdAt: new Date().toISOString()
     };
     this.accountsPayable.push(payable);
 
+    // RULE 4 FIX: Record porterage and transfer fees as separate expenses
+    if (totalPorterage > 0) {
+      const porterageTransaction: Transaction = {
+        id: (Date.now() + 1).toString(),
+        type: 'expense',
+        category: 'Porterage Fee',
+        amount: totalPorterage,
+        currency: 'USD',
+        description: `Porterage fees for commission bill closure - ${supplier.name}`,
+        reference: `PORTERAGE-${payable.invoiceNumber}`,
+        createdAt: new Date().toISOString(),
+        createdBy
+      };
+      this.transactions.push(porterageTransaction);
+    }
+
+    if (totalTransferFee > 0) {
+      const transferTransaction: Transaction = {
+        id: (Date.now() + 2).toString(),
+        type: 'expense',
+        category: 'Transfer Fee',
+        amount: totalTransferFee,
+        currency: 'USD',
+        description: `Transfer fees for commission bill closure - ${supplier.name}`,
+        reference: `TRANSFER-${payable.invoiceNumber}`,
+        createdAt: new Date().toISOString(),
+        createdBy
+      };
+      this.transactions.push(transferTransaction);
+    }
     // Log financial transaction
     const financialTransaction = this.logFinancialTransaction({
       type: 'supplier_commission',
@@ -396,7 +434,7 @@ export class ERPFinancialService {
       entityName: supplier.name,
       amount: netAmount,
       currency: 'USD',
-      description: `Commission payment for sold items`,
+      description: `Commission payment for sold items (Net after commission: ${commissionAmount.toFixed(2)} and fees: ${totalFees.toFixed(2)})`,
       reference: payable.invoiceNumber,
       relatedItems: items.map(item => ({
         itemId: item.id,
@@ -425,7 +463,7 @@ export class ERPFinancialService {
       itemsAffected: items.map(() => `Product from ${supplier.name}`),
       timestamp: financialTransaction.timestamp,
       status: 'completed',
-      notes: `Commission: ${commissionRate}% (${commissionAmount.toFixed(2)}), Net: ${netAmount.toFixed(2)}`
+      notes: `Commission: ${commissionRate}% (${commissionAmount.toFixed(2)}), Fees: ${totalFees.toFixed(2)}, Net: ${netAmount.toFixed(2)}`
     };
   }
 
@@ -438,12 +476,13 @@ export class ERPFinancialService {
 
     const amountInUSD = this.convertCurrency(amount, currency, 'USD');
     const balanceBefore = this.accountBalances.get(supplierId)?.currentBalance || 0;
+    // RULE 5 FIX: When making payment TO supplier, DECREASE their balance (reduce what we owe them)
     const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
 
     // Update supplier balance
     this.updateAccountBalance(supplierId, amountInUSD, true);
 
-    // Update cash drawer if cash payment
+    // RULE 2 FIX: For cash payments, DECREASE cash drawer by payment amount (money going out)
     if (currency === 'USD') {
       this.updateCashDrawer(amountInUSD, false);
     }
@@ -606,7 +645,7 @@ export class ERPFinancialService {
 
   // Process cash sale
   processCashSale(sale: SaleData, items: SaleItem[]): TransactionSummary {
-    // Update cash drawer
+    // RULE 2 FIX: For cash sales, INCREASE cash drawer by sale amount
     this.updateCashDrawer(sale.amountPaid, true);
 
     // Log financial transaction

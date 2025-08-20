@@ -239,6 +239,20 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      // RULE 2 FIX: For cash sales, update cash drawer
+      const isCashSale = items.some(item => item.payment_method === 'cash');
+      if (isCashSale && cashDrawer) {
+        const totalCashAmount = items
+          .filter(item => item.payment_method === 'cash')
+          .reduce((sum, item) => sum + (item.received_value || 0), 0);
+        
+        const updatedDrawer = {
+          ...cashDrawer,
+          currentAmount: cashDrawer.currentAmount + totalCashAmount,
+          totalCashSales: cashDrawer.totalCashSales + totalCashAmount
+        };
+        setCashDrawer(updatedDrawer);
+      }
     } catch (error) {
       console.error('❌ Data initialization failed:', error);
       // Still try to load what we can from local storage

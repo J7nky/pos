@@ -103,6 +103,7 @@ export default function Customers() {
       const currentLbBalance = customer.lb_balance || 0;
       const currentUsdBalance = customer.usd_balance || 0;
       
+      // RULE 5 FIX: When receiving payment FROM customer, DECREASE their balance (reduce debt)
       if (paymentForm.currency === 'LBP') {
         await updateCustomer(paymentForm.customerId, { 
           lb_balance: Math.max(0, currentLbBalance - paymentAmount)
@@ -187,6 +188,7 @@ export default function Customers() {
       const currentLbBalance = supplier.lb_balance || 0;
       const currentUsdBalance = supplier.usd_balance || 0;
       
+      // RULE 5 FIX: When making payment TO supplier, DECREASE their balance (reduce what we owe them)
       if (paymentForm.currency === 'LBP') {
         await updateSupplier(paymentForm.supplierId, { 
           lb_balance: Math.max(0, currentLbBalance - paymentAmount)
