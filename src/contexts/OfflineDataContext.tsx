@@ -1128,6 +1128,208 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Bill Management Functions
+  const createBill = async (billData: any, lineItems: any[]): Promise<string> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    const billId = createId();
+    const now = new Date().toISOString();
+
+    // Create bill record
+    const bill = {
+      id: billId,
+      store_id: storeId,
+      created_at: now,
+      _synced: false,
+      ...billData
+    };
+
+    // Create line items with bill reference
+    const billLineItems = lineItems.map((item, index) => ({
+      id: createId(),
+      store_id: storeId,
+      bill_id: billId,
+      created_at: now,
+      line_order: index + 1,
+      _synced: false,
+      ...item
+    }));
+
+    // Create audit log for bill creation
+    const auditLog = {
+      id: createId(),
+      store_id: storeId,
+      bill_id: billId,
+      action: 'created',
+      field_changed: null,
+      old_value: null,
+      new_value: JSON.stringify(bill),
+      change_reason: 'Bill created',
+      changed_by: userProfile?.id || '',
+      created_at: now,
+      _synced: false
+    };
+
+    // Use transaction to ensure atomicity
+    await db.transaction('rw', [db.bills, db.bill_line_items, db.bill_audit_logs], async () => {
+      await db.bills.add(bill);
+      await db.bill_line_items.bulkAdd(billLineItems);
+      await db.bill_audit_logs.add(auditLog);
+    });
+
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+
+    return billId;
+  };
+
+  const updateBill = async (billId: string, updates: any, changedBy: string, changeReason?: string): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    // Get original bill for audit trail
+    const originalBill = await db.bills.get(billId);
+    if (!originalBill) throw new Error('Bill not found');
+
+    const now = new Date().toISOString();
+    const updatedBill = { ...updates, _synced: false };
+
+    // Create audit log for each changed field
+    const auditLogs = Object.keys(updates).map(field => ({
+      id: createId(),
+      store_id: storeId,
+      bill_id: billId,
+      action: 'updated',
+      field_changed: field,
+      old_value: JSON.stringify((originalBill as any)[field]),
+      new_value: JSON.stringify(updates[field]),
+      change_reason: changeReason || 'Bill updated',
+      changed_by: changedBy,
+      created_at: now,
+      _synced: false
+    }));
+
+    // Use transaction to ensure atomicity
+    await db.transaction('rw', [db.bills, db.bill_audit_logs], async () => {
+      await db.bills.update(billId, updatedBill);
+      await db.bill_audit_logs.bulkAdd(auditLogs);
+    });
+
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+  };
+
+  const deleteBill = async (billId: string, deletedBy: string, deleteReason?: string, softDelete?: boolean): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    const now = new Date().toISOString();
+
+    if (softDelete) {
+      // Soft delete - mark as deleted
+      await db.transaction('rw', [db.bills, db.bill_line_items, db.bill_audit_logs], async () => {
+        await db.bills.update(billId, { _deleted: true, _synced: false });
+        
+        // Mark line items as deleted
+        const lineItems = await db.bill_line_items.where('bill_id').equals(billId).toArray();
+        for (const item of lineItems) {
+          await db.bill_line_items.update(item.id, { _deleted: true, _synced: false });
+        }
+
+        // Create audit log
+        await db.bill_audit_logs.add({
+          id: createId(),
+          store_id: storeId,
+          bill_id: billId,
+          action: 'deleted',
+          field_changed: null,
+          old_value: null,
+          new_value: null,
+          change_reason: deleteReason || 'Bill deleted',
+          changed_by: deletedBy,
+          created_at: now,
+          _synced: false
+        });
+      });
+    } else {
+      // Hard delete - remove from database
+      await db.transaction('rw', [db.bills, db.bill_line_items, db.bill_audit_logs], async () => {
+        await db.bills.delete(billId);
+        await db.bill_line_items.where('bill_id').equals(billId).delete();
+        await db.bill_audit_logs.where('bill_id').equals(billId).delete();
+      });
+    }
+
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+  };
+
+  const getBills = async (filters?: any): Promise<any[]> => {
+    if (!storeId) return [];
+
+    let query = db.bills.where('store_id').equals(storeId).filter(bill => !bill._deleted);
+
+    // Apply filters if provided
+    if (filters) {
+      if (filters.customer_id) {
+        query = query.and(bill => bill.customer_id === filters.customer_id);
+      }
+      if (filters.payment_status) {
+        query = query.and(bill => bill.payment_status === filters.payment_status);
+      }
+      if (filters.date_from) {
+        query = query.and(bill => bill.bill_date >= filters.date_from);
+      }
+      if (filters.date_to) {
+        query = query.and(bill => bill.bill_date <= filters.date_to);
+      }
+    }
+
+    return await query.toArray();
+  };
+
+  const getBillDetails = async (billId: string): Promise<any | null> => {
+    if (!storeId) return null;
+
+    const bill = await db.bills.get(billId);
+    if (!bill || bill._deleted) return null;
+
+    const lineItems = await db.bill_line_items
+      .where('bill_id')
+      .equals(billId)
+      .filter(item => !item._deleted)
+      .toArray();
+
+    const auditLogs = await db.bill_audit_logs
+      .where('bill_id')
+      .equals(billId)
+      .filter(log => !log._deleted)
+      .toArray();
+
+    return {
+      ...bill,
+      line_items: lineItems,
+      audit_logs: auditLogs
+    };
+  };
+
+  const createBillAuditLog = async (auditData: any): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    const auditLog = {
+      id: createId(),
+      store_id: storeId,
+      created_at: new Date().toISOString(),
+      _synced: false,
+      ...auditData
+    };
+
+    await db.bill_audit_logs.add(auditLog);
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+  };
   return (
     <OfflineDataContext.Provider value={{
       // Data - exact match
