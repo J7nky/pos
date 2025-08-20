@@ -30,6 +30,9 @@ interface OfflineDataContextType {
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
   transactions: Tables['transactions']['Row'][];
   expenseCategories: any[]; // Not in current schema
+  bills: any[]; // Bill management data
+  billLineItems: any[]; // Bill line items data
+  billAuditLogs: any[]; // Bill audit logs data
  
 
   // Computed/legacy compatibility - exact match
@@ -53,6 +56,7 @@ interface OfflineDataContextType {
     inventory: boolean;
     transactions: boolean;
     expenseCategories: boolean;
+    bills: boolean;
   };
 
   // CRUD operations - exact function signatures
@@ -78,6 +82,14 @@ interface OfflineDataContextType {
   addExpenseCategory: (category: any) => Promise<void>;
   updateInventoryBatch: (id: string, updates: Tables['inventory_batches']['Update']) => Promise<void>;
   applyCommissionRateToBatch: (batchId: string, commissionRate: number) => Promise<void>;
+  
+  // Bill management operations
+  createBill: (billData: any, lineItems: any[]) => Promise<string>;
+  updateBill: (billId: string, updates: any, changedBy: string, changeReason?: string) => Promise<void>;
+  deleteBill: (billId: string, deletedBy: string, deleteReason?: string, softDelete?: boolean) => Promise<void>;
+  getBills: (filters?: any) => Promise<any[]>;
+  getBillDetails: (billId: string) => Promise<any | null>;
+  createBillAuditLog: (auditData: any) => Promise<void>;
   
 
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
@@ -124,6 +136,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // Raw internal data
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
+  const [bills, setBills] = useState<any[]>([]);
+  const [billLineItems, setBillLineItems] = useState<any[]>([]);
+  const [billAuditLogs, setBillAuditLogs] = useState<any[]>([]);
 
   // Loading states - exact match
   const [loading, setLoading] = useState({
@@ -134,7 +149,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     sales: false,
     inventory: false,
     transactions: false,
-    expenseCategories: false
+    expenseCategories: false,
+    bills: false
   });
 
   // Sync state
@@ -361,6 +377,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         saleItemsData,
         transactionsData,
         batchesData,
+        billsData,
+        billLineItemsData,
+        billAuditLogsData,
       ] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
@@ -370,6 +389,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         db.sale_items.filter(item => !item._deleted).toArray(),
         db.transactions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.inventory_batches.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.bills.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.bill_line_items.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.bill_audit_logs.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
 
       ]);
 
@@ -382,6 +404,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Store raw data
       setInventoryItems(inventoryData);
       setSaleItems(saleItemsData);
+      setBills(billsData);
+      setBillLineItems(billLineItemsData);
+      setBillAuditLogs(billAuditLogsData);
 
       // Transform inventory to match expected structure and attach batch info for grouping/export
       const batchById = (batchesData || []).reduce((acc: any, b: any) => {
@@ -1114,6 +1139,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       sales,
       inventory,
       transactions,
+      bills,
+      billLineItems,
+      billAuditLogs,
   
 
       // Computed/legacy compatibility - exact match
@@ -1145,6 +1173,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addExpenseCategory,
       updateInventoryBatch,
       applyCommissionRateToBatch,
+      
+      // Bill management operations
+      createBill,
+      updateBill,
+      deleteBill,
+      getBills,
+      getBillDetails,
+      createBillAuditLog,
   
       deductInventoryQuantity,
       restoreInventoryQuantity,

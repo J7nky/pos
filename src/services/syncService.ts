@@ -487,6 +487,37 @@ export class SyncService {
       // Keep store_id as it's now part of the database schema
     }
     
+    // Handle bill-related tables
+    if (tableName === 'bills') {
+      // Ensure required fields for bills
+      if (!cleanRecord.created_by) {
+        cleanRecord.created_by = '';
+      }
+      if (!cleanRecord.bill_number) {
+        cleanRecord.bill_number = `BILL-${Date.now()}`;
+      }
+    }
+    
+    if (tableName === 'bill_line_items') {
+      // Ensure required fields for bill line items
+      if (!cleanRecord.product_name) {
+        cleanRecord.product_name = 'Unknown Product';
+      }
+      if (!cleanRecord.supplier_name) {
+        cleanRecord.supplier_name = 'Unknown Supplier';
+      }
+    }
+    
+    if (tableName === 'bill_audit_logs') {
+      // Ensure required fields for bill audit logs
+      if (!cleanRecord.changed_by) {
+        cleanRecord.changed_by = '';
+      }
+      if (!cleanRecord.action) {
+        cleanRecord.action = 'updated';
+      }
+    }
+    
     // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow
     // Supabase numeric field has precision 10, scale 2 (max: 99,999,999.99)
     // Only convert LBP amounts that exceed the database precision limit

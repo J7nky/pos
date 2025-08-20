@@ -359,7 +359,293 @@ export class SupabaseService {
     }
   }
 
+  // Bills Management
+  static async getBills(storeId: string, filters?: {
+    searchTerm?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    paymentStatus?: string;
+    customerId?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    try {
+      let query = supabase
+        .from('bills')
+        .select(`
+          *,
+          customers(name),
+          users!bills_created_by_fkey(name)
+        `)
+        .eq('store_id', storeId);
 
+      // Apply filters
+      if (filters?.searchTerm) {
+        query = query.or(`bill_number.ilike.%${filters.searchTerm}%,customer_name.ilike.%${filters.searchTerm}%,notes.ilike.%${filters.searchTerm}%`);
+      }
+      if (filters?.dateFrom) {
+        query = query.gte('bill_date', filters.dateFrom);
+      }
+      if (filters?.dateTo) {
+        query = query.lte('bill_date', filters.dateTo);
+      }
+      if (filters?.paymentStatus) {
+        query = query.eq('payment_status', filters.paymentStatus);
+      }
+      if (filters?.customerId) {
+        query = query.eq('customer_id', filters.customerId);
+      }
+      if (filters?.status) {
+        query = query.eq('status', filters.status);
+      }
+
+      query = query.order('bill_date', { ascending: false });
+
+      if (filters?.limit) {
+        query = query.limit(filters.limit);
+      }
+      if (filters?.offset) {
+        query = query.range(filters.offset, (filters.offset || 0) + (filters.limit || 50) - 1);
+      }
+
+      const { data, error } = await query;
+      
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async getBillDetails(billId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('bills')
+        .select(`
+          *,
+          customers(name, phone, email),
+          users!bills_created_by_fkey(name),
+          bill_line_items(
+            *,
+            products(name, category),
+            suppliers(name)
+          ),
+          bill_audit_logs(
+            *,
+            users!bill_audit_logs_changed_by_fkey(name)
+          )
+        `)
+        .eq('id', billId)
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async createBill(bill: {
+    store_id: string;
+    bill_number: string;
+    customer_id?: string | null;
+    customer_name?: string | null;
+    subtotal: number;
+    total_amount: number;
+    payment_method: 'cash' | 'card' | 'credit';
+    payment_status: 'paid' | 'partial' | 'pending';
+    amount_paid: number;
+    amount_due: number;
+    bill_date?: string;
+    notes?: string | null;
+    created_by: string;
+  }) {
+    try {
+      const { data, error } = await supabase
+        .from('bills')
+        .insert(bill)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async updateBill(billId: string, updates: {
+    customer_id?: string | null;
+    customer_name?: string | null;
+    subtotal?: number;
+    total_amount?: number;
+    payment_method?: 'cash' | 'card' | 'credit';
+    payment_status?: 'paid' | 'partial' | 'pending';
+    amount_paid?: number;
+    amount_due?: number;
+    notes?: string | null;
+    last_modified_by: string;
+  }) {
+    try {
+      const { data, error } = await supabase
+        .from('bills')
+        .update({
+          ...updates,
+          last_modified_at: new Date().toISOString()
+        })
+        .eq('id', billId)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async deleteBill(billId: string, softDelete: boolean = true) {
+    try {
+      if (softDelete) {
+        const { data, error } = await supabase
+          .from('bills')
+          .update({ 
+            status: 'cancelled',
+            last_modified_at: new Date().toISOString()
+          })
+          .eq('id', billId)
+          .select()
+          .single();
+        
+        if (error) throw error;
+        return data;
+      } else {
+        const { error } = await supabase
+          .from('bills')
+          .delete()
+          .eq('id', billId);
+        
+        if (error) throw error;
+        return true;
+      }
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  // Bill Line Items
+  static async createBillLineItem(lineItem: {
+    store_id: string;
+    bill_id: string;
+    product_id: string;
+    product_name: string;
+    supplier_id: string;
+    supplier_name: string;
+    inventory_item_id?: string | null;
+    quantity: number;
+    unit_price: number;
+    line_total: number;
+    weight?: number | null;
+    notes?: string | null;
+    line_order: number;
+  }) {
+    try {
+      const { data, error } = await supabase
+        .from('bill_line_items')
+        .insert(lineItem)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async updateBillLineItem(lineItemId: string, updates: {
+    quantity?: number;
+    unit_price?: number;
+    line_total?: number;
+    weight?: number | null;
+    notes?: string | null;
+  }) {
+    try {
+      const { data, error } = await supabase
+        .from('bill_line_items')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', lineItemId)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async deleteBillLineItem(lineItemId: string) {
+    try {
+      const { error } = await supabase
+        .from('bill_line_items')
+        .delete()
+        .eq('id', lineItemId);
+      
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  // Bill Audit Logs
+  static async getBillAuditLogs(billId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('bill_audit_logs')
+        .select(`
+          *,
+          users!bill_audit_logs_changed_by_fkey(name, email)
+        `)
+        .eq('bill_id', billId)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async createBillAuditLog(auditLog: {
+    store_id: string;
+    bill_id: string;
+    action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
+    field_changed?: string | null;
+    old_value?: string | null;
+    new_value?: string | null;
+    change_reason?: string | null;
+    changed_by: string;
+    ip_address?: string | null;
+  }) {
+    try {
+      const { data, error } = await supabase
+        .from('bill_audit_logs')
+        .insert(auditLog)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
 
   // User Profile
   static async getUserProfile(userId: string) {
