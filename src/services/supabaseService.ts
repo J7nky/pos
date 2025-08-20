@@ -1,5 +1,6 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
+import { handleSupabaseError, supabase } from '../lib/supabase';
 
 // Base interface for all entities with sync support
 interface BaseEntity {
@@ -248,55 +249,6 @@ class POSDatabase extends Dexie {
         }
         if (customer.usd_balance === undefined || customer.usd_balance === null) {
 
-  // Bill Line Items by Bill
-  static async getBillLineItems(billId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('bill_line_items')
-        .select(`
-          *,
-          products(name, category),
-          suppliers(name),
-          inventory_items(quantity, received_at)
-        `)
-        .eq('bill_id', billId)
-        .order('line_order');
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  // Bulk operations for bill line items
-  static async createBillLineItems(lineItems: Array<{
-    store_id: string;
-    bill_id: string;
-    product_id: string;
-    product_name: string;
-    supplier_id: string;
-    supplier_name: string;
-    inventory_item_id?: string | null;
-    quantity: number;
-    unit_price: number;
-    line_total: number;
-    weight?: number | null;
-    notes?: string | null;
-    line_order: number;
-  }>) {
-    try {
-      const { data, error } = await supabase
-        .from('bill_line_items')
-        .insert(lineItems)
-        .select();
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
           customer.usd_balance = 0; // Default balance for existing customers
         }
       });
@@ -366,6 +318,55 @@ class POSDatabase extends Dexie {
     this.customers.hook('updating', this.addUpdateFields);
     this.bills.hook('updating', this.addUpdateFields);
     this.bill_line_items.hook('updating', this.addUpdateFields);
+  }
+   // Bill Line Items by Bill
+   static async getBillLineItems(billId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('bill_line_items')
+        .select(`
+          *,
+          products(name, category),
+          suppliers(name),
+          inventory_items(quantity, received_at)
+        `)
+        .eq('bill_id', billId)
+        .order('line_order');
+      
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  // Bulk operations for bill line items
+  static async createBillLineItems(lineItems: Array<{
+    store_id: string;
+    bill_id: string;
+    product_id: string;
+    product_name: string;
+    supplier_id: string;
+    supplier_name: string;
+    inventory_item_id?: string | null;
+    quantity: number;
+    unit_price: number;
+    line_total: number;
+    weight?: number | null;
+    notes?: string | null;
+    line_order: number;
+  }>) {
+    try {
+      const { data, error } = await supabase
+        .from('bill_line_items')
+        .insert(lineItems)
+        .select();
+      
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      handleSupabaseError(error);
+    }
   }
 
   private addCreateFields = (primKey: any, obj: any, trans: any) => {
