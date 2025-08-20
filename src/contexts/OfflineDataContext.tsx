@@ -149,7 +149,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     sales: false,
     inventory: false,
     transactions: false,
-    expenseCategories: false
+    expenseCategories: false,
     bills: false
   });
 
