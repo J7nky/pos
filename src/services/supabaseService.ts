@@ -632,7 +632,6 @@ export class SupabaseService {
     change_reason?: string | null;
     changed_by: string;
     ip_address?: string | null;
-    user_agent?: string | null;
   }) {
     try {
       const { data, error } = await supabase

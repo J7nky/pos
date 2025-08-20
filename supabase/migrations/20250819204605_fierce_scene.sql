@@ -105,7 +105,6 @@ CREATE TABLE IF NOT EXISTS bill_audit_logs (
   change_reason text,
   changed_by uuid NOT NULL REFERENCES users(id),
   ip_address inet,
-  user_agent text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -212,7 +211,6 @@ BEGIN
     new_value,
     change_reason,
     changed_by,
-    user_agent
   ) VALUES (
     COALESCE(NEW.store_id, OLD.store_id),
     COALESCE(NEW.id, OLD.id),

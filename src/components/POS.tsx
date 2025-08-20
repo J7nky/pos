@@ -414,7 +414,6 @@ export default function POS() {
           new_value: JSON.stringify(createdBill),
           change_reason: 'Bill created from POS transaction',
           changed_by: userProfile?.id || '',
-          user_agent: navigator.userAgent
         });
       }
 
