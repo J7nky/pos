@@ -27,7 +27,7 @@ export default function MoneyInput({
   disabled = false,
   label,
   required = false,
-  autoCompleteValue
+  autoCompleteValue,
   tabIndex,
   autoFocus = false,
   ariaLabel,
