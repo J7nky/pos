@@ -82,6 +82,23 @@ export default function POS() {
     setTimeout(() => setToast(null), 3000);
   };
   
+  // Define createNewTab function before it's used
+  const createNewTab = () => {
+    const newTab: BillTab = {
+      id: uuidv4(),
+      name: `Bill ${activeTabs.length + 1}`,
+      cart: [],
+      selectedCustomer: '',
+      paymentMethod: 'cash',
+      amountReceived: '',
+      notes: '',
+      createdAt: new Date().toISOString()
+    };
+    const updatedTabs = [...activeTabs, newTab];
+    setActiveTabs(updatedTabs);
+    setActiveTabId(newTab.id);
+  };
+
   // Keyboard shortcuts for POS
   usePOSKeyboard({
     onNewBill: createNewTab,
