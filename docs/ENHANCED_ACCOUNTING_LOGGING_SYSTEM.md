@@ -118,7 +118,6 @@ interface AuditLogEntry {
   changedFields?: string[];
   metadata: {
     ipAddress?: string;
-    userAgent?: string;
     sessionId?: string;
     correlationId?: string;
     source: 'web' | 'mobile' | 'api' | 'system';

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
+import { SupabaseService } from '../services/supabaseService';
 import SearchableSelect from './common/SearchableSelect';
 import MoneyInput from './common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -347,15 +348,6 @@ export default function POS() {
     setCustomerError(null);
     setIsProcessing(true);
     try {
-      // if credit, or the received value is less than the total, add the amount received to the customer's balance
-      if (activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived) < total) {
-        const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
-        if (customer) {
-          await raw.updateCustomer(customer.id, {
-            lb_balance: customer.lb_balance + parseFloat(activeTab.amountReceived || '0'),
-          });
-        }
-      }
       // Auto open cash drawer if not open
       if (!raw.cashDrawer || raw.cashDrawer.status !== 'open') {
         let openingAmount = 0;
@@ -366,6 +358,95 @@ export default function POS() {
           await raw.openCashDrawer(openingAmount, userProfile.id);
         }
       }
+
+      // Create comprehensive bill record for accounting integration
+      const billData = {
+        store_id: raw.storeId,
+        bill_number: `BILL-${Date.now()}`,
+        customer_id: activeTab.selectedCustomer || null,
+        customer_name: activeTab.selectedCustomer ? 
+          customers.find(c => c.id === activeTab.selectedCustomer)?.name || null : null,
+        subtotal: total,
+        total_amount: total,
+        payment_method: activeTab.paymentMethod,
+        payment_status: activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived || '0') < total ? 'partial' : 'paid',
+        amount_paid: parseFloat(activeTab.amountReceived || '0'),
+        amount_due: Math.max(0, total - parseFloat(activeTab.amountReceived || '0')),
+        bill_date: new Date().toISOString(),
+        notes: activeTab.notes || null,
+        created_by: userProfile?.id || ''
+      };
+
+      // Create bill in Supabase for comprehensive bill management
+      const createdBill = await SupabaseService.createBill(billData as any);
+      
+      if (createdBill) {
+        // Create bill line items
+        for (let i = 0; i < activeTab.cart.length; i++) {
+          const item = activeTab.cart[i];
+          const supplier = suppliers.find(s => s.id === item.supplierId);
+          const product = products.find(p => p.id === item.productId);
+          
+          await SupabaseService.createBillLineItem({
+            store_id: raw.storeId,
+            bill_id: createdBill.id,
+            product_id: item.productId,
+            product_name: product?.name || item.productName,
+            supplier_id: item.supplierId,
+            supplier_name: supplier?.name || item.supplierName,
+            inventory_item_id: item.inventoryItemId || null,
+            quantity: item.quantity,
+            unit_price: item.unitPrice || 0,
+            line_total: item.totalPrice || 0,
+            weight: item.weight || null,
+            notes: item.notes || null,
+            line_order: i + 1
+          });
+        }
+
+        // Create audit log for bill creation
+        await SupabaseService.createBillAuditLog({
+          store_id: raw.storeId,
+          bill_id: createdBill.id,
+          action: 'created',
+          field_changed: null,
+          old_value: null,
+          new_value: JSON.stringify(createdBill),
+          change_reason: 'Bill created from POS transaction',
+          changed_by: userProfile?.id || '',
+        });
+      }
+
+      // Update customer balance if credit sale or partial payment
+      if (activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived) < total) {
+        const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
+        if (customer) {
+          const amountDue = Math.max(0, total - parseFloat(activeTab.amountReceived || '0'));
+          await raw.updateCustomer(customer.id, {
+            usd_balance: (customer.usd_balance || 0) + amountDue,
+          });
+        }
+      }
+
+      // Convert cart items to sale items format
+      const saleItemsData = activeTab.cart.map(item => ({
+        id: uuidv4(),
+        inventory_item_id: item.inventoryItemId || '',
+        product_id: item.productId,
+        supplier_id: item.supplierId,
+        quantity: item.quantity,
+        weight: item.weight || null,
+        unit_price: item.unitPrice || 0,
+        received_value: item.totalPrice || 0,
+        payment_method: item.paymentMethod || activeTab.paymentMethod,
+        notes: item.notes || null,
+        store_id: raw.storeId,
+        customer_id: activeTab.selectedCustomer || null,
+        created_at: new Date().toISOString(),
+        created_by: userProfile?.id || '',
+        _synced: false
+      }));
+
       await addSale(
         activeTab.cart.map(item => ({
           id: uuidv4(),
@@ -410,9 +491,10 @@ export default function POS() {
           paymentMethod: 'cash'
         });
       }
-      showToast('success', 'Sale completed successfully!');
+      showToast('success', `Sale completed successfully! Bill ${billData.bill_number} created.`);
     } catch (error) {
-      showToast('error', 'Sale failed!');
+      console.error('Sale processing error:', error);
+      showToast('error', `Sale failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
     setIsProcessing(false);
   };
