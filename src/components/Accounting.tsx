@@ -2786,6 +2786,31 @@ export default function Accounting() {
                           delete newChanges[id];
                         });
                         return newChanges;
+                        // RULE 4 FIX: Record porterage and transfer fees as expenses
+                        if (totalPorterage > 0) {
+                          await addTransaction({
+                            type: 'expense',
+                            category: 'Porterage Fee',
+                            amount: totalPorterage,
+                            currency: 'USD',
+                            description: `Porterage fees for commission bill closure - ${supplier.name}`,
+                            reference: `PORTERAGE-BILL-${Date.now()}`,
+                            created_by: userProfile?.id || ''
+                          });
+                        }
+                        
+                        if (totalTransferFees > 0) {
+                          await addTransaction({
+                            type: 'expense',
+                            category: 'Transfer Fee',
+                            amount: totalTransferFees,
+                            currency: 'USD',
+                            description: `Transfer fees for commission bill closure - ${supplier.name}`,
+                            reference: `TRANSFER-BILL-${Date.now()}`,
+                            created_by: userProfile?.id || ''
+                          });
+                        }
+                        
                       });
                       showToast('Staged changes cleared', 'success');
                     }}
