@@ -191,36 +191,6 @@ class POSDatabase extends Dexie {
   transactions!: Table<Transaction, string>;
   inventory_batches!: Table<inventory_batches, string>;
 
-      let createdBill;
-      
-      if (raw.isOnline) {
-        // Create in Supabase when online
-        createdBill = await SupabaseService.createBill(billData as any);
-        
-        if (createdBill) {
-          // Create bill line items
-          for (let i = 0; i < activeTab.cart.length; i++) {
-            const item = activeTab.cart[i];
-            const supplier = suppliers.find(s => s.id === item.supplierId);
-            const product = products.find(p => p.id === item.productId);
-            
-            await SupabaseService.createBillLineItem({
-              store_id: raw.storeId,
-              bill_id: createdBill.id,
-              product_id: item.productId,
-              product_name: product?.name || item.productName,
-              supplier_id: item.supplierId,
-              supplier_name: supplier?.name || item.supplierName,
-              inventory_item_id: item.inventoryItemId || null,
-              quantity: item.quantity,
-              unit_price: item.unitPrice || 0,
-              line_total: item.totalPrice || 0,
-              weight: item.weight || null,
-              notes: item.notes || null,
-              line_order: i + 1
-            });
-          }
-
   sync_metadata!: Table<SyncMetadata, string>;
   pending_syncs!: Table<PendingSync, string>;
 
