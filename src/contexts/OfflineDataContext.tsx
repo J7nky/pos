@@ -1082,7 +1082,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return { batchId };
   };
 
-  const addSale = async (items: any[]): Promise<void> => {
+  const addSale = async (
+   
+    items: any[]
+  ): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
     const saleItemsWithIds = items.map(item => ({
       id: createId(),
