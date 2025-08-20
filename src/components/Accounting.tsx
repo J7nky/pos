@@ -1358,12 +1358,8 @@ export default function Accounting() {
           case 'progress':
             cmp = a.progress - b.progress;
             break;
-          case 'revenue':
-            cmp = a.totalRevenue - b.totalRevenue;
-            break;
-          case 'status':
-            cmp = a.status.localeCompare(b.status);
-            break;
+          default:
+            cmp = 0;
         }
         return pendingBillsSortDir === 'asc' ? cmp : -cmp;
       });
@@ -1379,6 +1375,7 @@ export default function Accounting() {
   return (
     <div className="p-6">
       {/* Component content would go here */}
+      <div>Accounting Component</div>
     </div>
   );
 }
