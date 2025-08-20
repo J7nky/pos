@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
-import { SupabaseService } from '../services/supabaseService';
 import SearchableSelect from './common/SearchableSelect';
 import MoneyInput from './common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -377,46 +376,30 @@ export default function POS() {
         created_by: userProfile?.id || ''
       };
 
-      // Create bill in Supabase for comprehensive bill management
-      const createdBill = await SupabaseService.createBill(billData as any);
-      
-      if (createdBill) {
-        // Create bill line items
-        for (let i = 0; i < activeTab.cart.length; i++) {
-          const item = activeTab.cart[i];
-          const supplier = suppliers.find(s => s.id === item.supplierId);
-          const product = products.find(p => p.id === item.productId);
-          
-          await SupabaseService.createBillLineItem({
-            store_id: raw.storeId,
-            bill_id: createdBill.id,
-            product_id: item.productId,
-            product_name: product?.name || item.productName,
-            supplier_id: item.supplierId,
-            supplier_name: supplier?.name || item.supplierName,
-            inventory_item_id: item.inventoryItemId || null,
-            quantity: item.quantity,
-            unit_price: item.unitPrice || 0,
-            line_total: item.totalPrice || 0,
-            weight: item.weight || null,
-            notes: item.notes || null,
-            line_order: i + 1
-          });
-        }
-
-        // Create audit log for bill creation
-        await SupabaseService.createBillAuditLog({
+      // Create bill line items data
+      const lineItemsData = activeTab.cart.map((item, i) => {
+        const supplier = suppliers.find(s => s.id === item.supplierId);
+        const product = products.find(p => p.id === item.productId);
+        
+        return {
           store_id: raw.storeId,
-          bill_id: createdBill.id,
-          action: 'created',
-          field_changed: null,
-          old_value: null,
-          new_value: JSON.stringify(createdBill),
-          change_reason: 'Bill created from POS transaction',
-          changed_by: userProfile?.id || '',
-        });
-      }
+          product_id: item.productId,
+          product_name: product?.name || item.productName,
+          supplier_id: item.supplierId,
+          supplier_name: supplier?.name || item.supplierName,
+          inventory_item_id: item.inventoryItemId || null,
+          quantity: item.quantity,
+          unit_price: item.unitPrice || 0,
+          line_total: item.totalPrice || 0,
+          weight: item.weight || null,
+          notes: item.notes || null,
+          line_order: i + 1
+        };
+      });
 
+      // Use offline-first bill creation from OfflineDataContext
+      const createdBillId = await raw.createBill(billData, lineItemsData);
+    
       // Update customer balance if credit sale or partial payment
       if (activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived) < total) {
         const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
@@ -491,7 +474,7 @@ export default function POS() {
           paymentMethod: 'cash'
         });
       }
-      showToast('success', `Sale completed successfully! Bill ${billData.bill_number} created.`);
+      showToast('success', `Sale completed successfully! Bill created.`);
     } catch (error) {
       console.error('Sale processing error:', error);
       showToast('error', `Sale failed: ${error instanceof Error ? error.message : 'Unknown error'}`);

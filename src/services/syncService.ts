@@ -21,7 +21,9 @@ const SYNC_TABLES = [
   'sale_items',
   'transactions',
   'inventory_batches',
-
+  'bills',
+  'bill_line_items',
+  'bill_audit_logs'
 ] as const;
 
 type SyncTable = typeof SYNC_TABLES[number];
@@ -198,6 +200,143 @@ export class SyncService {
            
            if (invalidRecords.length > 0) {
              console.log(`🧹 Cleaned ${invalidRecords.length} invalid inventory items (quantity/FK violations)`);
+           }
+         }
+
+         // Additional validation for bills
+         if (tableName === 'bills') {
+           const validRecords = [];
+           const invalidRecords = [];
+           
+           // Use cached validation data to avoid repeated queries
+           await this.refreshValidationCache(storeId);
+           const validCustomerIds = new Set();
+           const validUserIds = this.validationCache.users;
+           
+           // Get valid customer IDs
+           try {
+             const { data: customers } = await supabase
+               .from('customers')
+               .select('id')
+               .eq('store_id', storeId);
+             customers?.forEach(c => validCustomerIds.add(c.id));
+           } catch (error) {
+             console.warn('Failed to get customer IDs for validation:', error);
+           }
+           
+           for (const record of activeRecords) {
+             // Check required fields
+             if (!record.bill_number || !record.total_amount || !record.payment_method) {
+               invalidRecords.push({ record, reason: 'missing required fields' });
+               continue;
+             }
+             
+             // Check foreign key constraints
+             if (record.customer_id && !validCustomerIds.has(record.customer_id)) {
+               invalidRecords.push({ record, reason: `invalid customer_id: ${record.customer_id}` });
+               continue;
+             }
+             
+             if (!validUserIds.has(record.created_by)) {
+               invalidRecords.push({ record, reason: `invalid created_by: ${record.created_by}` });
+               continue;
+             }
+             
+             validRecords.push(record);
+           }
+           
+           // Remove invalid bills from sync queue
+           for (const invalid of invalidRecords) {
+             console.warn(`🚫 Removing invalid bill from sync: ${invalid.reason}`, invalid.record);
+             await db.markAsSynced(tableName, invalid.record.id);
+           }
+           
+           activeRecords = validRecords;
+           
+           if (invalidRecords.length > 0) {
+             console.log(`🧹 Cleaned ${invalidRecords.length} invalid bills (validation violations)`);
+           }
+         }
+
+         // Additional validation for bill_line_items
+         if (tableName === 'bill_line_items') {
+           const validRecords = [];
+           const invalidRecords = [];
+           
+           // Use cached validation data to avoid repeated queries
+           await this.refreshValidationCache(storeId);
+           const validProductIds = this.validationCache.products;
+           const validSupplierIds = this.validationCache.suppliers;
+           
+           for (const record of activeRecords) {
+             // Check required fields
+             if (!record.bill_id || !record.product_id || !record.supplier_id || !record.quantity) {
+               invalidRecords.push({ record, reason: 'missing required fields' });
+               continue;
+             }
+             
+             // Check foreign key constraints
+             if (!validProductIds.has(record.product_id)) {
+               invalidRecords.push({ record, reason: `invalid product_id: ${record.product_id}` });
+               continue;
+             }
+             
+             if (!validSupplierIds.has(record.supplier_id)) {
+               invalidRecords.push({ record, reason: `invalid supplier_id: ${record.supplier_id}` });
+               continue;
+             }
+             
+             validRecords.push(record);
+           }
+           
+           // Remove invalid bill line items from sync queue
+           for (const invalid of invalidRecords) {
+             console.warn(`🚫 Removing invalid bill line item from sync: ${invalid.reason}`, invalid.record);
+             await db.markAsSynced(tableName, invalid.record.id);
+           }
+           
+           activeRecords = validRecords;
+           
+           if (invalidRecords.length > 0) {
+             console.log(`🧹 Cleaned ${invalidRecords.length} invalid bill line items (validation violations)`);
+           }
+         }
+
+         // Additional validation for bill_audit_logs
+         if (tableName === 'bill_audit_logs') {
+           const validRecords = [];
+           const invalidRecords = [];
+           
+           // Use cached validation data to avoid repeated queries
+           await this.refreshValidationCache(storeId);
+           const validUserIds = this.validationCache.users;
+           
+           for (const record of activeRecords) {
+             // Check required fields
+             if (!record.bill_id || !record.action || !record.changed_by) {
+               invalidRecords.push({ record, reason: 'missing required fields' });
+               continue;
+             }
+             
+             // Check foreign key constraints
+             if (!validUserIds.has(record.changed_by)) {
+               invalidRecords.push({ record, reason: `invalid changed_by: ${record.changed_by}` });
+               continue;
+             }
+             
+             validRecords.push(record);
+           }
+           
+           // Remove invalid bill audit logs from sync queue
+           for (const invalid of invalidRecords) {
+             console.warn(`🚫 Removing invalid bill audit log from sync: ${invalid.reason}`, invalid.record);
+             await db.markAsSynced(tableName, invalid.record.id);
+           }
+           
+           activeRecords = validRecords;
+           
+           if (invalidRecords.length > 0) {
+             console.log(`🧹 Cleaned ${invalidRecords.length} invalid bill audit logs (validation violations)`);
            }
          }
 
