@@ -191,7 +191,6 @@ export default function InventoryLogs() {
         new_value: JSON.stringify({ ...selectedBill, ...updates }),
         change_reason: 'Bill updated via Inventory Logs',
         changed_by: userProfile.id,
-        user_agent: navigator.userAgent
       });
 
       showToast('Bill updated successfully');
@@ -227,7 +226,6 @@ export default function InventoryLogs() {
         new_value: softDelete ? 'cancelled' : 'deleted',
         change_reason: softDelete ? 'Bill cancelled' : 'Bill permanently deleted',
         changed_by: userProfile.id,
-        user_agent: navigator.userAgent
       });
 
       showToast(`Bill ${softDelete ? 'cancelled' : 'deleted'} successfully`);

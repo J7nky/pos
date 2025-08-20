@@ -120,7 +120,6 @@ export interface BillAuditLog extends BaseEntity {
   change_reason: string | null;
   changed_by: string;
   ip_address: string | null;
-  user_agent: string | null;
 }
 export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
   type: 'income' | 'expense';
@@ -560,7 +559,6 @@ class POSDatabase extends Dexie {
         change_reason: 'Bill created from POS sale',
         changed_by: billData.created_by!,
         ip_address: null,
-        user_agent: navigator.userAgent
       });
       
       return billId;
@@ -601,7 +599,6 @@ class POSDatabase extends Dexie {
               change_reason: changeReason || 'Bill updated',
               changed_by: changedBy,
               ip_address: null,
-              user_agent: navigator.userAgent
             });
           }
         }
@@ -660,7 +657,6 @@ class POSDatabase extends Dexie {
         change_reason: deleteReason || 'Bill deleted',
         changed_by: deletedBy,
         ip_address: null,
-        user_agent: navigator.userAgent
       });
     });
   }
@@ -729,7 +725,6 @@ class POSDatabase extends Dexie {
         change_reason: 'Line item added to bill',
         changed_by: addedBy,
         ip_address: null,
-        user_agent: navigator.userAgent
       });
     });
   }
@@ -769,7 +764,6 @@ class POSDatabase extends Dexie {
               change_reason: 'Line item updated',
               changed_by: updatedBy,
               ip_address: null,
-              user_agent: navigator.userAgent
             });
           }
         }
@@ -816,7 +810,6 @@ class POSDatabase extends Dexie {
         change_reason: 'Line item removed from bill',
         changed_by: removedBy,
         ip_address: null,
-        user_agent: navigator.userAgent
       });
     });
   }
