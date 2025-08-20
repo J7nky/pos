@@ -1,3 +1,119 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Component-specific accessibility styles */
+@layer components {
+  .accessible-button {
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-200;
+    min-height: 44px;
+  }
+  
+  .accessible-input {
+    @apply focus:outline-none focus:ring-2 focus:border-transparent transition-colors;
+    min-height: 44px;
+  }
+  
+  .accessible-select {
+    @apply focus:outline-none focus:ring-2 focus:border-transparent transition-colors;
+    min-height: 44px;
+  }
+  
+  /* Modal accessibility */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4;
+    z-index: 1000;
+  }
+  
+  .modal-content {
+    @apply bg-white rounded-lg shadow-xl max-h-[90vh] overflow-hidden;
+    max-width: min(90vw, 42rem);
+  }
+  
+  /* Loading states */
+  .loading-spinner {
+    @apply animate-spin rounded-full border-2 border-current border-t-transparent;
+  }
+  
+  /* Error states */
+  .error-input {
+    @apply border-red-500 focus:ring-red-500 focus:border-red-500;
+  }
+  
+  .error-text {
+    @apply text-red-600 text-sm mt-1;
+  }
+}
+/* Enhanced focus styles for better accessibility */
+@layer base {
+  /* High contrast focus indicators */
+  *:focus {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+  }
+  
+  /* Custom focus ring for interactive elements */
+  button:focus,
+  input:focus,
+  select:focus,
+  textarea:focus,
+  [role="button"]:focus,
+  [tabindex]:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #3b82f6, 0 0 0 4px rgba(59, 130, 246, 0.1);
+  }
+  
+  /* Touch-optimized minimum sizes */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Skip link for screen readers */
+  .skip-link {
+    position: absolute;
+    top: -40px;
+    left: 6px;
+    background: #000;
+    color: #fff;
+    padding: 8px;
+    text-decoration: none;
+    border-radius: 4px;
+    z-index: 1000;
+  }
+  
+  .skip-link:focus {
+    top: 6px;
+  }
+  
+  /* High contrast mode support */
+  @media (prefers-contrast: high) {
+    button, input, select, textarea {
+      border-width: 2px;
+    }
+    
+    *:focus {
+      outline-width: 3px;
+    }
+  }
+  
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+  
+  /* Large text support */
+  @media (min-resolution: 2dppx) {
+    .text-sm {
+      font-size: 0.9rem;
+    }
+    
+    .text-xs {
+      font-size: 0.8rem;
+    }
+  }
+}

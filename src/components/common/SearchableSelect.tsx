@@ -330,12 +330,13 @@ export default function SearchableSelect({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         onKeyDown={handleKeyDown}
         disabled={disabled}
-        className={`w-full flex items-center justify-between ${sizeClasses.trigger} border border-gray-300 bg-white text-left focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-colors ${
+        className={`w-full flex items-center justify-between ${sizeClasses.trigger} border border-gray-300 bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors min-h-[44px] ${
           disabled ? 'bg-gray-100 cursor-not-allowed' : 'hover:border-gray-400'
         } dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100`}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={placeholder}
+        tabIndex={0}
       >
         <span className={selectedOptions.length === 0 ? 'text-gray-500 dark:text-slate-400' : 'text-gray-900 dark:text-slate-100'}>
           {getDisplayText()}
@@ -390,8 +391,9 @@ export default function SearchableSelect({
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder={searchPlaceholder}
-                className={`w-full pl-9 pr-4 ${sizeClasses.input} border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100`}
+                className={`w-full pl-9 pr-4 ${sizeClasses.input} border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100`}
                 aria-label="Search options"
+                tabIndex={0}
               />
               {searchTerm && (
                 <button
@@ -413,11 +415,12 @@ export default function SearchableSelect({
                 <button
                   type="button"
                   onClick={() => setSelectedCategory('all')}
-                  className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                  className={`px-3 py-1 text-sm rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] ${
                     selectedCategory === 'all'
                       ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                   }`}
+                  tabIndex={0}
                 >
                   All
                 </button>
@@ -426,11 +429,12 @@ export default function SearchableSelect({
                     key={category}
                     type="button"
                     onClick={() => setSelectedCategory(category)}
-                    className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                    className={`px-3 py-1 text-sm rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] ${
                       selectedCategory === category
                         ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                     }`}
+                    tabIndex={0}
                   >
                     {category}
                   </button>
@@ -445,14 +449,16 @@ export default function SearchableSelect({
               <button
                 type="button"
                 onClick={handleSelectAll}
-                className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 min-h-[44px]"
+                tabIndex={0}
               >
                 Select All
               </button>
               <button
                 type="button"
                 onClick={handleClearAll}
-                className="text-sm text-gray-600 hover:text-gray-800 dark:text-slate-300 dark:hover:text-white"
+                className="text-sm text-gray-600 hover:text-gray-800 dark:text-slate-300 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-gray-500 rounded px-2 py-1 min-h-[44px]"
+                tabIndex={0}
               >
                 Clear All
               </button>
@@ -468,7 +474,8 @@ export default function SearchableSelect({
                   onAddNew();
                   setIsOpen(false);
                 }}
-                className="w-full flex items-center px-3 py-2 text-left text-blue-600 hover:bg-blue-50 rounded-md transition-colors dark:text-blue-400 dark:hover:bg-blue-900/20"
+                className="w-full flex items-center px-3 py-2 text-left text-blue-600 hover:bg-blue-50 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] dark:text-blue-400 dark:hover:bg-blue-900/20"
+                tabIndex={0}
               >
                 <Plus className="w-4 h-4 mr-2" />
                 {addOptionText}
@@ -485,7 +492,8 @@ export default function SearchableSelect({
                     key={`recent-${option.value}`}
                     type="button"
                     onClick={() => handleOptionSelect(option)}
-                    className="w-full text-left px-2 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded dark:text-slate-200 dark:hover:bg-slate-800"
+                    className="w-full text-left px-2 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] dark:text-slate-200 dark:hover:bg-slate-800"
+                    tabIndex={0}
                   >
                     {option.label}
                   </button>
@@ -524,11 +532,12 @@ export default function SearchableSelect({
                       key={option.value}
                       type="button"
                       onClick={() => handleOptionSelect(option)}
-                      className={`w-full text-left ${sizeClasses.option} flex items-center justify-between hover:bg-gray-100 ${
+                      className={`w-full text-left ${sizeClasses.option} flex items-center justify-between hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] ${
                         isFocused ? 'bg-gray-100 dark:bg-slate-800' : ''
                       } ${isSelected ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'text-gray-900 dark:text-slate-100'}`}
                       role="option"
                       aria-selected={isSelected}
+                      tabIndex={0}
                     >
                       <div className="flex-1">
                         {renderHighlightedLabel(option.label)}
@@ -562,8 +571,9 @@ export default function SearchableSelect({
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder={searchPlaceholder}
-                className={`w-full pl-9 pr-4 ${sizeClasses.input} border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100`}
+                className={`w-full pl-9 pr-4 ${sizeClasses.input} border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100`}
                 aria-label="Search options"
+                tabIndex={0}
               />
               {searchTerm && (
                 <button
@@ -585,11 +595,12 @@ export default function SearchableSelect({
                 <button
                   type="button"
                   onClick={() => setSelectedCategory('all')}
-                  className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                  className={`px-3 py-1 text-sm rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] ${
                     selectedCategory === 'all'
                       ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                   }`}
+                  tabIndex={0}
                 >
                   All
                 </button>
@@ -598,11 +609,12 @@ export default function SearchableSelect({
                     key={category}
                     type="button"
                     onClick={() => setSelectedCategory(category)}
-                    className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                    className={`px-3 py-1 text-sm rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] ${
                       selectedCategory === category
                         ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                     }`}
+                    tabIndex={0}
                   >
                     {category}
                   </button>
@@ -617,14 +629,16 @@ export default function SearchableSelect({
               <button
                 type="button"
                 onClick={handleSelectAll}
-                className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 min-h-[44px]"
+                tabIndex={0}
               >
                 Select All
               </button>
               <button
                 type="button"
                 onClick={handleClearAll}
-                className="text-sm text-gray-600 hover:text-gray-800 dark:text-slate-300 dark:hover:text-white"
+                className="text-sm text-gray-600 hover:text-gray-800 dark:text-slate-300 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-gray-500 rounded px-2 py-1 min-h-[44px]"
+                tabIndex={0}
               >
                 Clear All
               </button>
@@ -640,7 +654,8 @@ export default function SearchableSelect({
                   onAddNew();
                   setIsOpen(false);
                 }}
-                className="w-full flex items-center px-3 py-2 text-left text-blue-600 hover:bg-blue-50 rounded-md transition-colors dark:text-blue-400 dark:hover:bg-blue-900/20"
+                className="w-full flex items-center px-3 py-2 text-left text-blue-600 hover:bg-blue-50 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] dark:text-blue-400 dark:hover:bg-blue-900/20"
+                tabIndex={0}
               >
                 <Plus className="w-4 h-4 mr-2" />
                 {addOptionText}
@@ -658,7 +673,8 @@ export default function SearchableSelect({
                     key={`recent-${option.value}`}
                     type="button"
                     onClick={() => handleOptionSelect(option)}
-                    className="w-full text-left px-2 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded dark:text-slate-200 dark:hover:bg-slate-800"
+                    className="w-full text-left px-2 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] dark:text-slate-200 dark:hover:bg-slate-800"
+                    tabIndex={0}
                   >
                     {option.label}
                   </button>
@@ -697,11 +713,12 @@ export default function SearchableSelect({
                       key={option.value}
                       type="button"
                       onClick={() => handleOptionSelect(option)}
-                      className={`w-full text-left ${sizeClasses.option} flex items-center justify-between hover:bg-gray-100 ${
+                      className={`w-full text-left ${sizeClasses.option} flex items-center justify-between hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] ${
                         isFocused ? 'bg-gray-100 dark:bg-slate-800' : ''
                       } ${isSelected ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'text-gray-900 dark:text-slate-100'}`}
                       role="option"
                       aria-selected={isSelected}
+                      tabIndex={0}
                     >
                       <div className="flex-1">
                         {renderHighlightedLabel(option.label)}

@@ -11,6 +11,10 @@ interface MoneyInputProps {
   label?: string;
   required?: boolean;
   autoCompleteValue?: string | number; // New prop for auto-complete value
+  tabIndex?: number;
+  autoFocus?: boolean;
+  ariaLabel?: string;
+  id?: string;
 }
 
 export default function MoneyInput({
@@ -24,6 +28,10 @@ export default function MoneyInput({
   label,
   required = false,
   autoCompleteValue
+  tabIndex,
+  autoFocus = false,
+  ariaLabel,
+  id
 }: MoneyInputProps) {
   const [showRecommendation, setShowRecommendation] = useState(false);
   const [recommendedValue, setRecommendedValue] = useState("");
@@ -125,6 +133,7 @@ export default function MoneyInput({
       
       <input
         ref={inputRef}
+        id={id}
         type="text"
         inputMode="decimal"
         pattern="[0-9]*[.,]?[0-9]*"
@@ -134,10 +143,13 @@ export default function MoneyInput({
         onChange={handleInputChange}
         onFocus={handleInputFocus}
         onBlur={handleInputBlur}
-        className={`w-full border border-gray-300 rounded px-3 py-1.5 mb-2 pr-16 text-sm ${className}`}
+        className={`w-full border border-gray-300 rounded px-3 py-1.5 mb-2 pr-16 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${className}`}
         placeholder={placeholder}
         disabled={disabled}
         required={required}
+        tabIndex={tabIndex}
+        autoFocus={autoFocus}
+        aria-label={ariaLabel || label}
       />
 
       {/* Inline recommendation pill */}
