@@ -219,7 +219,7 @@ class POSDatabase extends Dexie {
       // Bill management tables
       bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at',
       bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, line_order, created_at',
-      bill_audit_logs: 'id, bill_id, action, changed_by, created_at',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at',
 
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
