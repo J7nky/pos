@@ -1,34 +1,132 @@
-import React, { useState, useEffect } from 'react';
-import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
-import { SupabaseService } from '../../services/supabaseService';
-import { useCurrency } from '../../hooks/useCurrency';
-import SearchableSelect from '../common/SearchableSelect';
-import { 
-  FileText, 
-  Search, 
-  Filter, 
-  Eye, 
-  Edit, 
-  Trash2, 
-  Plus, 
-  Calendar, 
-  User, 
-  DollarSign,
-  Clock,
-  AlertTriangle,
-  CheckCircle,
-  X,
-  Save,
-  Download,
-  RefreshCw,
-  History,
-  CreditCard,
-  Receipt,
-  Package
-} from 'lucide-react';
+import Dexie, { Table } from 'dexie';
+import { v4 as uuidv4 } from 'uuid';
 
-interface Bill {
+// Base interface for all entities with sync support
+interface BaseEntity {
   id: string;
+  store_id: string;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
+// Entity interfaces matching Supabase schema exactly
+export interface Product extends BaseEntity {
+  name: string;
+  category: string;
+  image: string;
+}
+
+export interface Supplier extends BaseEntity {
+  name: string;
+  phone: string;
+  email: string | null;
+  address: string;
+  lb_balance: number | null; // Added balance field to match Supabase schema
+  usd_balance: number | null; // Added balance field to match Supabase schema
+}
+
+export interface  Customer extends BaseEntity {
+  name: string;
+  phone: string;
+  email: string | null;
+  address: string | null;
+  lb_balance: number; // Changed from current_debt to balance to match Supabase schema
+  usd_balance: number; // Changed from current_debt to balance to match Supabase schema
+  is_active: boolean;
+}
+
+export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
+  id: string;
+  product_id: string;
+  supplier_id: string;
+  type: string;
+  quantity: number;
+  unit: string;
+  weight: number | null;
+  porterage: number | null;
+  transfer_fee: number | null;
+  price: number | null;
+  commission_rate: number;
+  status: string;
+  received_at: string;
+  received_by: string;
+  store_id: string;
+  created_at: string;
+  received_quantity: number;
+  batch_id: string | null;
+}
+
+
+
+export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
+  inventory_item_id: string; // Added to match Supabase schema
+  product_id: string;
+  supplier_id: string;
+  quantity: number;
+  weight: number | null;
+  unit_price: number;
+  received_value: number; // Added to match Supabase schema
+  payment_method: string; // Added payment method field
+  notes: string | null;
+  customer_id: string | null; // Added to match Supabase schema
+  created_by: string; // Added to match Supabase schema
+}
+
+export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
+  type: 'income' | 'expense';
+  category: string;
+  amount: number;
+  currency: 'USD' | 'LBP';
+  description: string;
+  reference: string | null;
+  store_id: string;
+  created_by: string;
+}
+
+export interface ExpenseCategory extends BaseEntity {
+  name: string;
+  description: string | null;
+  is_active: boolean;
+}
+
+// Sync metadata interface
+export interface SyncMetadata {
+  id: string;
+  table_name: string;
+  last_synced_at: string;
+  sync_token?: string;
+}
+
+// Pending sync operation
+export interface PendingSync {
+  id: string;
+  table_name: string;
+  record_id: string;
+  operation: 'create' | 'update' | 'delete';
+  payload: any;
+  created_at: string;
+  retry_count: number;
+  last_error?: string;
+}
+
+export interface JournalEntry extends BaseEntity {
+  date: string;
+  reference: string;
+  description: string;
+  entries: Array<{
+    account: string;
+    debit: number;
+    credit: number;
+  }>;
+  total_debit: number;
+  total_credit: number;
+  created_by: string;
+}
+
+export interface Bill extends BaseEntity {
   bill_number: string;
   customer_id: string | null;
   customer_name: string | null;
@@ -37,18 +135,17 @@ interface Bill {
   payment_method: 'cash' | 'card' | 'credit';
   payment_status: 'paid' | 'partial' | 'pending';
   amount_paid: number;
+  amount_due: number;
   bill_date: string;
   notes: string | null;
   status: 'active' | 'cancelled' | 'refunded';
   created_by: string;
-  created_at: string;
-  updated_at: string;
-  customers?: { name: string };
-  users?: { name: string };
+  last_modified_by: string | null;
+  last_modified_at: string | null;
 }
 
-interface BillLineItem {
-  id: string;
+export interface BillLineItem extends BaseEntity {
+  bill_id: string;
   product_id: string;
   product_name: string;
   supplier_id: string;
@@ -62,821 +159,342 @@ interface BillLineItem {
   line_order: number;
 }
 
-interface BillAuditLog {
-  id: string;
-  action: string;
+export interface BillAuditLog extends Omit<BaseEntity, 'updated_at'> {
+  bill_id: string;
+  action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
   field_changed: string | null;
   old_value: string | null;
   new_value: string | null;
   change_reason: string | null;
   changed_by: string;
-  created_at: string;
-  users?: { name: string; email: string };
+  ip_address: string | null;
 }
 
-interface BillDetails extends Bill {
-  bill_line_items: BillLineItem[];
-  bill_audit_logs: BillAuditLog[];
+export interface inventory_batches extends BaseEntity {
+  id: string;
+  supplier_id: string;
+  status: string;
+  porterage: number | null;
+  transfer_fee: number | null;
+  received_at: string;
+  store_id: string;
+  created_by: string;
 }
 
-export default function InventoryLogs() {
-  const { userProfile } = useSupabaseAuth();
-  const { formatCurrency } = useCurrency();
-  const storeId = userProfile?.store_id;
+class POSDatabase extends Dexie {
+  // Core tables
+  products!: Table<Product, string>;
+  suppliers!: Table<Supplier, string>;
+  customers!: Table<Customer, string>;
+  inventory_items!: Table<InventoryItem, string>;
+  sale_items!: Table<SaleItem, string>;
+  transactions!: Table<Transaction, string>;
+  inventory_batches!: Table<inventory_batches, string>;
 
-  // State
-  const [bills, setBills] = useState<Bill[]>([]);
-  const [selectedBill, setSelectedBill] = useState<BillDetails | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [showBillDetails, setShowBillDetails] = useState(false);
-  const [showEditBill, setShowEditBill] = useState(false);
-  const [showAuditTrail, setShowAuditTrail] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
+  // Sync management tables
+  sync_metadata!: Table<SyncMetadata, string>;
+  pending_syncs!: Table<PendingSync, string>;
 
-  // Filters
-  const [searchTerm, setSearchTerm] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
+  // Bill management tables
+  bills!: Table<Bill, string>;
+  bill_line_items!: Table<BillLineItem, string>;
+  bill_audit_logs!: Table<BillAuditLog, string>;
 
-  // Edit form state
-  const [editForm, setEditForm] = useState<Partial<Bill>>({});
+  constructor() {
+    super('POSDatabase');
+    
+    this.version(8).stores({
+      // Core tables with enhanced indexing to match database schema
+      // Tables WITH updated_at: products, suppliers, customers
+      products: 'id, store_id, name, category, updated_at',
+      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
+      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
 
-  // Toast state
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+      // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
+      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
+      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id and created_by indexes
+      transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
+      inventory_batches: 'id, store_id, supplier_id, received_at, created_by',
+  
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
+      // Bill management
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_at',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, line_order, created_at',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at'
+    });
 
-  // Load bills
-  useEffect(() => {
-    if (storeId) {
-      loadBills();
-    }
-  }, [storeId, searchTerm, dateFrom, dateTo, paymentStatusFilter, statusFilter]);
-
-  const loadBills = async () => {
-    if (!storeId) return;
-
-    setLoading(true);
-    try {
-      const filters = {
-        searchTerm: searchTerm || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        paymentStatus: paymentStatusFilter || undefined,
-        status: statusFilter || undefined,
-        limit: 100
-      };
-
-      const data = await SupabaseService.getBills(storeId, filters);
-      setBills(data || []);
-    } catch (error) {
-      console.error('Error loading bills:', error);
-      showToast('Failed to load bills', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadBillDetails = async (billId: string) => {
-    try {
-      const data = await SupabaseService.getBillDetails(billId);
-      setSelectedBill(data);
-      setEditForm(data);
-    } catch (error) {
-      console.error('Error loading bill details:', error);
-      showToast('Failed to load bill details', 'error');
-    }
-  };
-
-  const handleViewBill = async (bill: Bill) => {
-    await loadBillDetails(bill.id);
-    setShowBillDetails(true);
-  };
-
-  const handleEditBill = async (bill: Bill) => {
-    await loadBillDetails(bill.id);
-    setShowEditBill(true);
-  };
-
-  const handleSaveBill = async () => {
-    if (!selectedBill || !userProfile?.id) return;
-
-    setIsEditing(true);
-    try {
-      const updates = {
-        customer_id: editForm.customer_id,
-        customer_name: editForm.customer_name,
-        payment_method: editForm.payment_method,
-        payment_status: editForm.payment_status,
-        amount_paid: editForm.amount_paid || 0,
-        notes: editForm.notes,
-        last_modified_by: userProfile.id
-      };
-
-      await SupabaseService.updateBill(selectedBill.id, updates);
-      
-      // Create audit log
-      await SupabaseService.createBillAuditLog({
-        store_id: storeId!,
-        bill_id: selectedBill.id,
-        action: 'updated',
-        field_changed: 'bill_details',
-        old_value: JSON.stringify(selectedBill),
-        new_value: JSON.stringify({ ...selectedBill, ...updates }),
-        change_reason: 'Bill updated via Inventory Logs',
-        changed_by: userProfile.id,
+    // Migration for version 5 - update existing records to match new schema
+    this.version(5).upgrade(trans => {
+      // Update suppliers to ensure type field exists
+      trans.table('suppliers').toCollection().modify(supplier => {
+        if (!supplier.type) {
+          supplier.type = 'commission'; // Default to commission for existing suppliers
+        }
+        if (supplier.lb_balance === undefined || supplier.lb_balance === null) {
+          supplier.lb_balance = 0; // Default balance for existing suppliers
+        }
+        if (supplier.usd_balance === undefined || supplier.usd_balance === null) {
+          supplier.usd_balance = 0; // Default balance for existing suppliers
+        }
       });
 
-      showToast('Bill updated successfully');
-      setShowEditBill(false);
-      loadBills();
-    } catch (error) {
-      console.error('Error updating bill:', error);
-      showToast('Failed to update bill', 'error');
-    } finally {
-      setIsEditing(false);
-    }
-  };
-
-  const handleDeleteBill = async (bill: Bill, softDelete: boolean = true) => {
-    if (!userProfile?.id) return;
-
-    const confirmMessage = softDelete 
-      ? `Are you sure you want to cancel bill ${bill.bill_number}? This will mark it as cancelled but keep it in the system.`
-      : `Are you sure you want to permanently delete bill ${bill.bill_number}? This action cannot be undone.`;
-
-    if (!confirm(confirmMessage)) return;
-
-    try {
-      await SupabaseService.deleteBill(bill.id, softDelete);
-      
-      // Create audit log
-      await SupabaseService.createBillAuditLog({
-        store_id: storeId!,
-        bill_id: bill.id,
-        action: 'deleted',
-        field_changed: 'status',
-        old_value: bill.status,
-        new_value: softDelete ? 'cancelled' : 'deleted',
-        change_reason: softDelete ? 'Bill cancelled' : 'Bill permanently deleted',
-        changed_by: userProfile.id,
+      // Update customers to ensure balance field exists  
+      trans.table('customers').toCollection().modify(customer => {
+        if (customer.lb_balance === undefined || customer.lb_balance === null) {
+          customer.lb_balance = 0; // Default balance for existing customers
+        }
+        if (customer.usd_balance === undefined || customer.usd_balance === null) {
+          customer.usd_balance = 0; // Default balance for existing customers
+        }
       });
 
-      showToast(`Bill ${softDelete ? 'cancelled' : 'deleted'} successfully`);
-      loadBills();
-    } catch (error) {
-      console.error('Error deleting bill:', error);
-      showToast('Failed to delete bill', 'error');
-    }
-  };
+      // Update sale_items to ensure all required fields exist
+      trans.table('sale_items').toCollection().modify(saleItem => {
+        if (!saleItem.inventory_item_id) {
+          saleItem.inventory_item_id = ''; // Default empty string for missing inventory_item_id
+        }
+        if (saleItem.received_value === undefined || saleItem.received_value === null) {
+          saleItem.received_value = saleItem.total_price || 0; // Migrate from total_price to received_value
+        }
+        if (!saleItem.customer_id) {
+          saleItem.customer_id = null; // Default null for customer_id
+        }
+        if (!saleItem.created_by) {
+          saleItem.created_by = ''; // Default empty string for created_by
+        }
+        if (!saleItem.payment_method) {
+          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
+        }
+      });
 
-  const exportBills = () => {
-    const csvContent = [
-      ['Bill Number', 'Date', 'Customer', 'Total', 'Payment Status', 'Status'].join(','),
-      ...bills.map(bill => [
-        bill.bill_number,
-        new Date(bill.bill_date).toLocaleDateString(),
-        bill.customer_name || 'Walk-in Customer',
-        bill.total_amount.toFixed(2),
-        bill.payment_status,
-        bill.status
-      ].join(','))
-    ].join('\n');
+      // Update inventory_items to ensure received_quantity exists
+      trans.table('inventory_items').toCollection().modify(inventoryItem => {
+        if (inventoryItem.received_quantity === undefined || inventoryItem.received_quantity === null) {
+          inventoryItem.received_quantity = inventoryItem.quantity || 0; // Default to quantity value
+        }
+      });
+    });
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bills-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
+    // Migration for version 6 - add payment_method to sale_items
+    this.version(6).upgrade(trans => {
+      // Update sale_items to ensure payment_method field exists
+      trans.table('sale_items').toCollection().modify(saleItem => {
+        if (!saleItem.payment_method) {
+          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
+        }
+      });
+    });
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'bg-green-100 text-green-800';
-      case 'cancelled': return 'bg-red-100 text-red-800';
-      case 'refunded': return 'bg-yellow-100 text-yellow-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
+    // Migration for version 7 - remove sales table (no longer needed)
+    this.version(7).upgrade(trans => {
+      // The sales table will be automatically removed from the schema
+      // Any existing sales data will be lost, but this matches the backend schema
+      console.log('Removing sales table to match backend schema');
+    });
 
-  const getPaymentStatusColor = (status: string) => {
-    switch (status) {
-      case 'paid': return 'bg-green-100 text-green-800';
-      case 'partial': return 'bg-yellow-100 text-yellow-800';
-      case 'pending': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
+    // Add hooks for automatic timestamping and ID generation
+    // Tables WITH updated_at: products, suppliers, customers
+    this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.bills.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.bill_line_items.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.bill_audit_logs.hook('creating', this.addCreateFields);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <RefreshCw className="w-6 h-6 animate-spin text-gray-400 mr-2" />
-        <span className="text-gray-500">Loading bills...</span>
-      </div>
-    );
+    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_batches
+    this.inventory_items.hook('creating', this.addCreateFields);
+    this.sale_items.hook('creating', this.addCreateFields);
+    this.transactions.hook('creating', this.addCreateFields);
+    this.inventory_batches.hook('creating', this.addCreateFields);
+
+    // Only add update hooks for tables that have updated_at
+    this.products.hook('updating', this.addUpdateFields);
+    this.suppliers.hook('updating', this.addUpdateFields);
+    this.customers.hook('updating', this.addUpdateFields);
+    this.bills.hook('updating', this.addUpdateFields);
+    this.bill_line_items.hook('updating', this.addUpdateFields);
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed top-4 right-4 px-4 py-2 rounded shadow-lg z-50 text-white ${
-          toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
-        }`}>
-          {toast.message}
-        </div>
-      )}
+  private addCreateFields = (primKey: any, obj: any, trans: any) => {
+    const now = new Date().toISOString();
+    if (!obj.id) obj.id = uuidv4();
+    if (!obj.created_at) obj.created_at = now;
+    if (obj._synced === undefined) obj._synced = false;
+  };
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center">
-          <FileText className="w-6 h-6 text-blue-600 mr-3" />
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">Bill Management</h2>
-            <p className="text-gray-600">Review, edit, and manage all bills from POS transactions</p>
-          </div>
-        </div>
-        
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={`p-2 rounded-lg transition-colors ${
-              showFilters ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            <Filter className="w-4 h-4" />
-          </button>
-          <button
-            onClick={exportBills}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Export
-          </button>
-          <button
-            onClick={loadBills}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </button>
-        </div>
-      </div>
+  private addCreateFieldsWithUpdatedAt = (primKey: any, obj: any, trans: any) => {
+    const now = new Date().toISOString();
+    if (!obj.id) obj.id = uuidv4();
+    if (!obj.created_at) obj.created_at = now;
+    if (obj.updated_at === undefined) obj.updated_at = now;
+    if (obj._synced === undefined) obj._synced = false;
+  };
 
-      {/* Search and Filters */}
-      <div className="bg-white rounded-lg shadow-sm p-4">
-        <div className="flex items-center space-x-4 mb-4">
-          <div className="flex-1 relative">
-            <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search bills by number, customer, or notes..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
+  private addUpdateFields = (modifications: any, primKey: any, obj: any, trans: any) => {
+    modifications.updated_at = new Date().toISOString();
+    if (modifications._synced === undefined) modifications._synced = false;
+  };
 
-        {showFilters && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-gray-200">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Date From</label>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Date To</label>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Status</label>
-              <select
-                value={paymentStatusFilter}
-                onChange={(e) => setPaymentStatusFilter(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="">All Payment Status</option>
-                <option value="paid">Paid</option>
-                <option value="partial">Partial</option>
-                <option value="pending">Pending</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Bill Status</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="cancelled">Cancelled</option>
-                <option value="refunded">Refunded</option>
-              </select>
-            </div>
-          </div>
-        )}
-      </div>
+  // Utility methods for sync management
+  async markAsSynced(tableName: string, recordId: string) {
+    const table = (this as any)[tableName];
+    if (table) {
+      await table.update(recordId, { 
+        _synced: true, 
+        _lastSyncedAt: new Date().toISOString() 
+      });
+    }
+  }
 
-      {/* Bills Table */}
-      <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Bill Details
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Customer
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Payment
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {bills.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                    <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p className="text-lg font-medium">No bills found</p>
-                    <p className="text-sm">Bills created from POS will appear here</p>
-                  </td>
-                </tr>
-              ) : (
-                bills.map((bill) => (
-                  <tr key={bill.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">{bill.bill_number}</div>
-                        <div className="text-sm text-gray-500">
-                          {new Date(bill.bill_date).toLocaleDateString()} at {new Date(bill.bill_date).toLocaleTimeString()}
-                        </div>
-                        <div className="text-xs text-gray-400">
-                          Created by {bill.users?.name || 'Unknown'}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <User className="w-4 h-4 text-gray-400 mr-2" />
-                        <span className="text-sm text-gray-900">
-                          {bill.customer_name || 'Walk-in Customer'}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {/* <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          {formatCurrency(bill.total_amount)}
-                        </div>
-                        {bill.amount_due > 0 && (
-                          <div className="text-xs text-red-600">
-                            Due: {formatCurrency(bill.amount_due)}
-                          </div>
-                        )}
-                      </div> */}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
-                        <span className={`px-2 py-1 text-xs rounded-full ${getPaymentStatusColor(bill.payment_status)}`}>
-                          {bill.payment_status}
-                        </span>
-                        <div className="flex items-center text-xs text-gray-500">
-                          {bill.payment_method === 'cash' && <DollarSign className="w-3 h-3" />}
-                          {bill.payment_method === 'card' && <CreditCard className="w-3 h-3" />}
-                          {bill.payment_method === 'credit' && <Clock className="w-3 h-3" />}
-                          <span className="ml-1 capitalize">{bill.payment_method}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(bill.status)}`}>
-                        {bill.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => handleViewBill(bill)}
-                          className="text-blue-600 hover:text-blue-900"
-                          title="View Details"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        {(userProfile?.role === 'admin' || userProfile?.role === 'manager') && (
-                          <button
-                            onClick={() => handleEditBill(bill)}
-                            className="text-green-600 hover:text-green-900"
-                            title="Edit Bill"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                        )}
-                        {userProfile?.role === 'admin' && (
-                          <button
-                            onClick={() => handleDeleteBill(bill)}
-                            className="text-red-600 hover:text-red-900"
-                            title="Cancel Bill"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                        <button
-                          onClick={async () => {
-                            await loadBillDetails(bill.id);
-                            setShowAuditTrail(true);
-                          }}
-                          className="text-purple-600 hover:text-purple-900"
-                          title="View Audit Trail"
-                        >
-                          <History className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+  async getUnsyncedRecords(tableName: string) {
+    const table = (this as any)[tableName];
+    if (table) {
+      return await table.filter((record: any) => record._synced === false).toArray();
+    }
+    return [];
+  }
 
-      {/* Bill Details Modal */}
-      {showBillDetails && selectedBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Bill Details - {selectedBill.bill_number}
-              </h2>
-              <button
-                onClick={() => setShowBillDetails(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
+  async softDelete(tableName: string, recordId: string) {
+    const table = (this as any)[tableName];
+    if (table) {
+      await table.update(recordId, { 
+        _deleted: true, 
+        _synced: false,
+        updated_at: new Date().toISOString()
+      });
+    }
+  }
 
-            <div className="p-6 space-y-6">
-              {/* Bill Header */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Bill Information</h3>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Bill Number:</span>
-                      <span className="font-medium">{selectedBill.bill_number}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Date:</span>
-                      <span className="font-medium">{new Date(selectedBill.bill_date).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Customer:</span>
-                      <span className="font-medium">{selectedBill.customer_name || 'Walk-in Customer'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Payment Method:</span>
-                      <span className="font-medium capitalize">{selectedBill.payment_method}</span>
-                    </div>
-                  </div>
-                </div>
+  async addPendingSync(tableName: string, recordId: string, operation: 'create' | 'update' | 'delete', payload: any) {
+    await this.pending_syncs.add({
+      id: uuidv4(),
+      table_name: tableName,
+      record_id: recordId,
+      operation,
+      payload,
+      created_at: new Date().toISOString(),
+      retry_count: 0
+    });
+  }
 
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Payment Information</h3>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Subtotal:</span>
-                      <span className="font-medium">{formatCurrency(selectedBill.subtotal)}</span>
-                    </div>
-                   
-                    <div className="flex justify-between border-t pt-2">
-                      <span className="text-gray-900 font-semibold">Total:</span>
-                      <span className="font-bold text-lg">{formatCurrency(selectedBill.total_amount)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Amount Paid:</span>
-                      <span className="font-medium text-green-600">{formatCurrency(selectedBill.amount_paid)}</span>
-                    </div>
-                    {/* {selectedBill.amount_due > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Amount Due:</span>
-                        <span className="font-medium text-red-600">{formatCurrency(selectedBill.amount_due)}</span>
-                      </div>
-                    )} */}
-                  </div>
-                </div>
-              </div>
+  async getPendingSyncs() {
+    return await this.pending_syncs.orderBy('created_at').toArray();
+  }
 
-              {/* Line Items */}
-              <div>
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Line Items</h3>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {selectedBill.bill_line_items?.map((item) => (
-                        <tr key={item.id}>
-                          <td className="px-4 py-3 text-sm text-gray-900">{item.product_name}</td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{item.supplier_name}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900">
-                            {item.quantity}
-                            {item.weight && <div className="text-xs text-gray-500">{item.weight}kg</div>}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-900">{formatCurrency(item.unit_price)}</td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{formatCurrency(item.line_total)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+  async removePendingSync(id: string) {
+    await this.pending_syncs.delete(id);
+  }
 
-              {/* Notes */}
-              {selectedBill.notes && (
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">Notes</h3>
-                  <p className="text-gray-600 bg-gray-50 p-3 rounded-lg">{selectedBill.notes}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+  async updateSyncMetadata(tableName: string, lastSyncedAt: string, syncToken?: string) {
+    await this.sync_metadata.put({
+      id: tableName,
+      table_name: tableName,
+      last_synced_at: lastSyncedAt,
+      sync_token: syncToken
+    });
+  }
 
-      {/* Edit Bill Modal */}
-      {showEditBill && selectedBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Edit Bill - {selectedBill.bill_number}
-              </h2>
-              <button
-                onClick={() => setShowEditBill(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
+  async getSyncMetadata(tableName: string) {
+    return await this.sync_metadata.get(tableName);
+  }
 
-            <div className="p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Customer Name</label>
-                  <input
-                    type="text"
-                    value={editForm.customer_name || ''}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, customer_name: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Walk-in Customer"
-                  />
-                </div>
+  async cleanupInvalidInventoryItems(): Promise<number> {
+    // Keep inventory items with quantity = 0 for Received Bills history.
+    // Only remove truly invalid rows (negative quantities).
+    const invalidItems = await this.inventory_items.filter(item => item.quantity < 0).toArray();
+    
+    if (invalidItems.length > 0) {
+      await this.inventory_items.bulkDelete(invalidItems.map(item => item.id));
+      console.log(`🧹 Cleaned up ${invalidItems.length} invalid inventory items (negative quantity)`);
+    }
+    
+    return invalidItems.length;
+  }
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
-                  <select
-                    value={editForm.payment_method || 'cash'}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, payment_method: e.target.value as any }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="cash">Cash</option>
-                    <option value="card">Card</option>
-                    <option value="credit">Credit</option>
-                  </select>
-                </div>
+  async validateDataIntegrity(storeId: string): Promise<{
+    orphanedInventory: any[];
+    orphanedSaleItems: any[];
+    orphanedTransactions: any[];
+  }> {
+    console.log('🔍 Validating data integrity...');
+    
+    // Get all data
+    const products = await this.products.where('store_id').equals(storeId).toArray();
+    const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
+    const customers = await this.customers.where('store_id').equals(storeId).toArray();
+    const inventory = await this.inventory_items.where('store_id').equals(storeId).toArray();
+    const saleItems = await this.sale_items.toArray();
+    const transactions = await this.transactions.where('store_id').equals(storeId).toArray();
+    
+    const productIds = new Set(products.map(p => p.id));
+    const supplierIds = new Set(suppliers.map(s => s.id));
+    const customerIds = new Set(customers.map(c => c.id));
+    
+    // Find orphaned records
+    const orphanedInventory = inventory.filter(item => 
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
+    );
+    
+    const orphanedSaleItems = saleItems.filter(item => 
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
+    );
+    
+    const orphanedTransactions = transactions.filter(transaction => 
+      // Add any transaction-specific validations here
+      false
+    );
+    
+    console.log('📊 Data integrity report:', {
+      orphanedInventory: orphanedInventory.length,
+      orphanedSaleItems: orphanedSaleItems.length,
+      orphanedTransactions: orphanedTransactions.length
+    });
+    
+    return {
+      orphanedInventory,
+      orphanedSaleItems,
+      orphanedTransactions
+    };
+  }
 
-              
-
-               
-               
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount Paid</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={editForm.amount_paid || 0}
-                    onChange={(e) => {
-                      const amountPaid = parseFloat(e.target.value) || 0;
-                      const totalAmount = editForm.total_amount || 0;
-                      const amountDue = Math.max(0, totalAmount - amountPaid);
-                      const paymentStatus = amountDue === 0 ? 'paid' : amountPaid > 0 ? 'partial' : 'pending';
-                      setEditForm(prev => ({ 
-                        ...prev, 
-                        amount_paid: amountPaid,
-                        amount_due: amountDue,
-                        payment_status: paymentStatus as any
-                      }));
-                    }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Payment Status</label>
-                  <select
-                    value={editForm.payment_status || 'pending'}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, payment_status: e.target.value as any }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="paid">Paid</option>
-                    <option value="partial">Partial</option>
-                    <option value="pending">Pending</option>
-                  </select>
-                </div>
-              </div>
-
-             
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
-                <textarea
-                  value={editForm.notes || ''}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
-                  rows={3}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Add notes about this bill..."
-                />
-              </div>
-
-              {/* Calculated Totals Display */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-gray-900 mb-2">Calculated Totals</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="flex justify-between">
-                    <span>Subtotal:</span>
-                    <span>{formatCurrency(editForm.subtotal || 0)}</span>
-                  </div>
-                 
-                 
-                  <div className="flex justify-between font-semibold">
-                    <span>Total:</span>
-                    <span>{formatCurrency(editForm.total_amount || 0)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Amount Paid:</span>
-                    <span className="text-green-600">{formatCurrency(editForm.amount_paid || 0)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Amount Due:</span>
-                    {/* <span className={editForm.amount_due && editForm.amount_due > 0 ? 'text-red-600' : 'text-green-600'}>
-                      {formatCurrency(editForm.amount_due || 0)}
-                    </span> */}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-                <button
-                  onClick={() => setShowEditBill(false)}
-                  className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                  disabled={isEditing}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveBill}
-                  disabled={isEditing}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center"
-                >
-                  {isEditing ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-4 h-4 mr-2" />
-                      Save Changes
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Audit Trail Modal */}
-      {showAuditTrail && selectedBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Audit Trail - {selectedBill.bill_number}
-              </h2>
-              <button
-                onClick={() => setShowAuditTrail(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <div className="p-6">
-              {selectedBill.bill_audit_logs && selectedBill.bill_audit_logs.length > 0 ? (
-                <div className="space-y-4">
-                  {selectedBill.bill_audit_logs.map((log) => (
-                    <div key={log.id} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center">
-                          <div className={`w-3 h-3 rounded-full mr-3 ${
-                            log.action === 'created' ? 'bg-green-500' :
-                            log.action === 'updated' ? 'bg-blue-500' :
-                            log.action === 'deleted' ? 'bg-red-500' :
-                            'bg-gray-500'
-                          }`} />
-                          <span className="font-medium text-gray-900 capitalize">
-                            {log.action.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <span className="text-sm text-gray-500">
-                          {new Date(log.created_at).toLocaleString()}
-                        </span>
-                      </div>
-                      
-                      <div className="text-sm text-gray-600 mb-2">
-                        Changed by: {log.users?.name || 'Unknown User'}
-                      </div>
-                      
-                      {log.field_changed && (
-                        <div className="text-sm text-gray-600 mb-2">
-                          Field: <span className="font-mono bg-gray-100 px-1 rounded">{log.field_changed}</span>
-                        </div>
-                      )}
-                      
-                      {log.change_reason && (
-                        <div className="text-sm text-gray-600 mb-2">
-                          Reason: {log.change_reason}
-                        </div>
-                      )}
-                      
-                      {(log.old_value || log.new_value) && (
-                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                          {log.old_value && (
-                            <div className="mb-1">
-                              <span className="font-medium">Old:</span> {log.old_value.length > 100 ? `${log.old_value.substring(0, 100)}...` : log.old_value}
-                            </div>
-                          )}
-                          {log.new_value && (
-                            <div>
-                              <span className="font-medium">New:</span> {log.new_value.length > 100 ? `${log.new_value.substring(0, 100)}...` : log.new_value}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <History className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                  <p>No audit trail available for this bill</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  async cleanupOrphanedRecords(storeId: string): Promise<number> {
+    const integrity = await this.validateDataIntegrity(storeId);
+    let cleaned = 0;
+    
+    // Clean up orphaned inventory items
+    if (integrity.orphanedInventory.length > 0) {
+      await this.inventory_items.bulkDelete(integrity.orphanedInventory.map(item => item.id));
+      cleaned += integrity.orphanedInventory.length;
+      console.log(`🗑️ Removed ${integrity.orphanedInventory.length} orphaned inventory items`);
+    }
+    
+    // Clean up orphaned sale items
+    if (integrity.orphanedSaleItems.length > 0) {
+      await this.sale_items.bulkDelete(integrity.orphanedSaleItems.map(item => item.id));
+      cleaned += integrity.orphanedSaleItems.length;
+      console.log(`🗑️ Removed ${integrity.orphanedSaleItems.length} orphaned sale items`);
+    }
+    
+    return cleaned;
+  }
 }
+
+export const db = new POSDatabase();
+
+// Export utility functions
+export const createId = () => uuidv4();
+
+export const createBaseEntity = (storeId: string, data: Partial<BaseEntity> = {}): Partial<BaseEntity> => {
+  const now = new Date().toISOString();
+  return {
+    id: createId(),
+    store_id: storeId,
+    created_at: now,
+    updated_at: now,
+    _synced: false,
+    ...data
+  };
+};
