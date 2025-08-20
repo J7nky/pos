@@ -1,4 +1,8 @@
 import React, { useState } from 'react';
+import { usePOSKeyboard } from '../hooks/usePOSKeyboard';
+import { useFocusManagement } from '../hooks/useFocusManagement';
+import AccessibleModal from './common/AccessibleModal';
+import AccessibleButton from './common/AccessibleButton';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
@@ -34,6 +38,13 @@ interface BillTab {
 
 export default function POS() {
   const raw = useOfflineData();
+  
+  // Refs for keyboard navigation
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const customerSelectRef = React.useRef<HTMLDivElement>(null);
+  const amountInputRef = React.useRef<HTMLInputElement>(null);
+  const completeSaleRef = React.useRef<HTMLButtonElement>(null);
+  
   const products = (raw.products || []).map(p => ({...p, createdAt: p.created_at})) as Array<any>;
   const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
@@ -70,10 +81,35 @@ export default function POS() {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
   };
-  // Ref for search input
-  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  
+  // Keyboard shortcuts for POS
+  usePOSKeyboard({
+    onNewBill: createNewTab,
+    onCompleteSale: () => {
+      if (!isProcessing && activeTab.cart.length > 0) {
+        handleCheckout();
+      }
+    },
+    onClearCart: () => {
+      if (activeTab.cart.length > 0) {
+        updateActiveTab({ cart: [] });
+      }
+    },
+    onFocusSearch: () => searchInputRef.current?.focus(),
+    onFocusCustomer: () => customerSelectRef.current?.focus(),
+    onFocusAmount: () => amountInputRef.current?.focus(),
+    onQuickCash: () => updateActiveTab({ paymentMethod: 'cash' }),
+    onQuickCredit: () => updateActiveTab({ paymentMethod: 'credit' })
+  });
+
+  // Auto-focus search input on component mount
   React.useEffect(() => {
-    if (searchInputRef.current) searchInputRef.current.focus();
+    const timer = setTimeout(() => {
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+      }
+    }, 100);
+    return () => clearTimeout(timer);
   }, []);
 
   // Initialize with first tab if no tabs exist
@@ -591,94 +627,115 @@ export default function POS() {
       )}
 
       {/* Add Customer Modal */}
-      {showAddCustomerForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">Add New Customer</h2>
+      <AccessibleModal
+        isOpen={showAddCustomerForm}
+        onClose={() => setShowAddCustomerForm(false)}
+        title="Add New Customer"
+        size="md"
+      >
+        <form onSubmit={handleCustomerFormSubmit} className="p-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="customer-name" className="block text-sm font-medium text-gray-700">
+                Name *
+              </label>
+              <input
+                type="text"
+                id="customer-name"
+                name="name"
+                value={customerForm.name}
+                onChange={handleCustomerFormChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+                tabIndex={1}
+                autoFocus
+              />
             </div>
-            <form onSubmit={handleCustomerFormSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="name" className="block text-sm font-medium text-gray-700">Name *</label>
-                  <input
-                    type="text"
-                    id="name"
-                    name="name"
-                    value={customerForm.name}
-                    onChange={handleCustomerFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="phone" className="block text-sm font-medium text-gray-700">Phone *</label>
-                  <input
-                    type="text"
-                    id="phone"
-                    name="phone"
-                    value={customerForm.phone}
-                    onChange={handleCustomerFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
-                  <input
-                    type="email"
-                    id="email"
-                    name="email"
-                    value={customerForm.email  ||''}
-                    onChange={handleCustomerFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="address" className="block text-sm font-medium text-gray-700">Address</label>
-                  <input
-                    type="text"
-                    id="address"
-                    name="address"
-                    value={customerForm.address || ''}
-                    onChange={handleCustomerFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="isActive"
-                    name="isActive"
-                    checked={customerForm.isActive}
-                    onChange={handleCustomerCheckboxChange}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">Is Active</label>
-                </div>
-              </div>
-              {customerFormError && <div className="text-red-600 text-sm font-medium pt-2">{customerFormError}</div>}
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowAddCustomerForm(false)}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
-                  disabled={isAddingCustomer}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  disabled={isAddingCustomer}
-                >
-                  {isAddingCustomer ? 'Adding...' : 'Add Customer'}
-                </button>
-              </div>
-            </form>
+            <div>
+              <label htmlFor="customer-phone" className="block text-sm font-medium text-gray-700">
+                Phone *
+              </label>
+              <input
+                type="text"
+                id="customer-phone"
+                name="phone"
+                value={customerForm.phone}
+                onChange={handleCustomerFormChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+                tabIndex={2}
+              />
+            </div>
+            <div>
+              <label htmlFor="customer-email" className="block text-sm font-medium text-gray-700">
+                Email
+              </label>
+              <input
+                type="email"
+                id="customer-email"
+                name="email"
+                value={customerForm.email || ''}
+                onChange={handleCustomerFormChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                tabIndex={3}
+              />
+            </div>
+            <div>
+              <label htmlFor="customer-address" className="block text-sm font-medium text-gray-700">
+                Address
+              </label>
+              <input
+                type="text"
+                id="customer-address"
+                name="address"
+                value={customerForm.address || ''}
+                onChange={handleCustomerFormChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                tabIndex={4}
+              />
+            </div>
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="customer-active"
+                name="isActive"
+                checked={customerForm.isActive}
+                onChange={handleCustomerCheckboxChange}
+                className="h-4 w-4 text-blue-600 focus:ring-2 focus:ring-blue-500 border-gray-300 rounded"
+                tabIndex={5}
+              />
+              <label htmlFor="customer-active" className="ml-2 block text-sm text-gray-900">
+                Is Active
+              </label>
+            </div>
           </div>
-        </div>
-      )}
+          {customerFormError && (
+            <div className="text-red-600 text-sm font-medium pt-2" role="alert">
+              {customerFormError}
+            </div>
+          )}
+          <div className="flex justify-end space-x-3 pt-4">
+            <AccessibleButton
+              type="button"
+              variant="secondary"
+              onClick={() => setShowAddCustomerForm(false)}
+              disabled={isAddingCustomer}
+              tabIndex={7}
+            >
+              Cancel
+            </AccessibleButton>
+            <AccessibleButton
+              type="submit"
+              variant="primary"
+              loading={isAddingCustomer}
+              tabIndex={6}
+              touchOptimized
+            >
+              {isAddingCustomer ? 'Adding...' : 'Add Customer'}
+            </AccessibleButton>
+          </div>
+        </form>
+      </AccessibleModal>
 
       {/* Add toast display at top right */}
       {toast && (
@@ -697,8 +754,11 @@ export default function POS() {
                 placeholder={t('pos.searchProducts')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 ref={searchInputRef}
+                tabIndex={1}
+                accessKey="f"
+                aria-label="Search products (Ctrl+F)"
               />
             </div>
           </div>
@@ -742,7 +802,8 @@ export default function POS() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Customer Name {(activeTab.paymentMethod === 'credit' || ((activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && parseFloat(activeTab.amountReceived || '0') < total)) ? <span className="text-red-500">*</span> : null}
                 </label>
-                <SearchableSelect
+                <div ref={customerSelectRef}>
+                  <SearchableSelect
                   options={
                     activeTab.paymentMethod === 'credit'
                       ? customers.filter(c => c.isActive).map(customer => ({
@@ -775,9 +836,10 @@ export default function POS() {
                   addOptionText="Add New Customer"
                   onAddNew={() => setShowAddCustomerForm(true)}
                   className={`w-full ${customerError ? 'border border-red-500' : ''}`}
-                />
+                  />
+                </div>
                 {customerError && (
-                  <p className="text-xs text-red-600 mt-1">{customerError}</p>
+                  <p className="text-xs text-red-600 mt-1" role="alert">{customerError}</p>
                 )}
               </div>
 
@@ -787,36 +849,45 @@ export default function POS() {
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
+                    type="button"
                     onClick={() => updateActiveTab({ paymentMethod: 'cash' })}
-                    className={`p-2 text-xs rounded-lg border ${
+                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${
                       activeTab.paymentMethod === 'cash' 
                         ? 'bg-blue-50 border-blue-500 text-blue-700' 
                         : 'bg-gray-50 border-gray-300'
                     }`}
+                    tabIndex={3}
+                    accessKey="1"
+                    aria-label="Cash payment (Ctrl+1)"
                   >
                     <DollarSign className="w-4 h-4 mx-auto mb-1" />
                     Cash
                   </button>
-                  {/*
                   <button
+                    type="button"
                     onClick={() => updateActiveTab({ paymentMethod: 'card' })}
-                    className={`p-2 text-xs rounded-lg border ${
+                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${
                       activeTab.paymentMethod === 'card' 
                         ? 'bg-blue-50 border-blue-500 text-blue-700' 
                         : 'bg-gray-50 border-gray-300'
                     }`}
+                    tabIndex={4}
+                    aria-label="Card payment"
                   >
                     <CreditCard className="w-4 h-4 mx-auto mb-1" />
                     Card
                   </button>
-                  */}
                   <button
+                    type="button"
                     onClick={() => updateActiveTab({ paymentMethod: 'credit' })}
-                    className={`p-2 text-xs rounded-lg border ${
+                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${
                       activeTab.paymentMethod === 'credit' 
                         ? 'bg-blue-50 border-blue-500 text-blue-700' 
                         : 'bg-gray-50 border-gray-300'
                     }`}
+                    tabIndex={5}
+                    accessKey="2"
+                    aria-label="Credit payment (Ctrl+2)"
                   >
                     <User className="w-4 h-4 mx-auto mb-1" />
                     Credit
@@ -836,6 +907,17 @@ export default function POS() {
                       step="0.01"
                       min="0"
                       autoCompleteValue={total}
+                      className="focus:ring-2 focus:ring-blue-500"
+                    />
+                    <input
+                      ref={amountInputRef}
+                      type="hidden"
+                      tabIndex={6}
+                      onFocus={() => {
+                        // Focus the actual MoneyInput when this hidden input is focused
+                        const moneyInput = amountInputRef.current?.parentElement?.querySelector('input[type="text"]') as HTMLInputElement;
+                        moneyInput?.focus();
+                      }}
                     />
                     {change > 0 && (
                       <p className="text-sm text-green-600 mt-1">
@@ -853,13 +935,15 @@ export default function POS() {
                 <textarea
                   value={activeTab.notes}
                   onChange={(e) => updateActiveTab({ notes: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   rows={2}
                   placeholder="Add notes..."
+                  tabIndex={7}
                 />
               </div>
 
-              <button
+              <AccessibleButton
+                ref={completeSaleRef}
                 onClick={handleCheckout}
                 disabled={  
                   isProcessing ||
@@ -870,10 +954,17 @@ export default function POS() {
                   ((activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
                   (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived || '0') < total && !activeTab.selectedCustomer))
                 }
-                className="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+                variant="success"
+                size="lg"
+                touchOptimized
+                loading={isProcessing}
+                shortcut="Ctrl+Enter"
+                ariaLabel="Complete sale"
+                tabIndex={8}
+                className="w-full"
               >
-                {isProcessing ? 'Processing...' : 'Complete Sale'}
-              </button>
+                Complete Sale
+              </AccessibleButton>
             </div>
           )}
         </div>
@@ -884,6 +975,7 @@ export default function POS() {
 
 const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryItems, addToCart }: any) => {
   const { t } = useI18n();
+  
   return (
     <div className="bg-white rounded-lg shadow-sm p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('pos.products')}</h2>
@@ -898,12 +990,17 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
             <p className={`text-xs mb-2 ${stock < 5 ? 'text-red-600 font-bold' : 'text-gray-500'}`}>Stock: {stock}</p>
             {productInventoryItems.length > 0 ? (
               <div className="space-y-1">
-                {productInventoryItems.map((inventoryItem: any) => (
-                  <button
+                {productInventoryItems.map((inventoryItem: any, index: number) => (
+                  <AccessibleButton
                     key={inventoryItem.inventoryItemId}
                     onClick={() => addToCart(product.id, inventoryItem.inventoryItemId)}
-                    className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs py-1 px-2 rounded transition-colors"
+                    variant="ghost"
+                    size="sm"
+                    touchOptimized
                     disabled={inventoryItem.quantity === 0}
+                    className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs"
+                    ariaLabel={`Add ${product.name} from ${inventoryItem.supplierName}`}
+                    tabIndex={100 + index}
                   >
                     <div className="text-left">
                       <div>{inventoryItem.supplierName} ({inventoryItem.quantity})</div>
@@ -914,11 +1011,19 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                         {"Recieved Quantity: " + inventoryItem.receivedQuantity}
                       </div>
                     </div>
-                  </button>
+                  </AccessibleButton>
                 ))}
               </div>
             ) : (
-              <button disabled className="w-full bg-gray-100 text-gray-400 text-xs py-1 px-2 rounded">Out of Stock</button>
+              <AccessibleButton 
+                disabled 
+                variant="ghost"
+                size="sm"
+                className="w-full bg-gray-100 text-gray-400 text-xs"
+                ariaLabel={`${product.name} - Out of stock`}
+              >
+                Out of Stock
+              </AccessibleButton>
             )}
           </div>
         );
@@ -937,7 +1042,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
     <div className="max-h-64 overflow-y-auto">
       {(activeTab?.cart || []).length > 0 ? (
         <div className="divide-y divide-gray-200">
-          {(activeTab?.cart || []).map((item: any) => {
+          {(activeTab?.cart || []).map((item: any, index: number) => {
             // Get the specific inventory item for this cart item
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
@@ -949,9 +1054,16 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     <h4 className="font-medium text-gray-900 text-sm">{item.productName}</h4>
                     <p className="text-xs text-gray-500">{item.supplierName}</p>
                   </div>
-                  <button onClick={() => removeFromCart(item.id)} className="text-red-500 hover:text-red-700 p-1">
+                  <AccessibleButton
+                    onClick={() => removeFromCart(item.id)}
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-500 hover:text-red-700 p-1 min-h-[44px]"
+                    ariaLabel={`Remove ${item.productName} from cart`}
+                    tabIndex={200 + index * 4 + 4}
+                  >
                     <Trash2 className="w-4 h-4" />
-                  </button>
+                  </AccessibleButton>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div>
@@ -973,7 +1085,9 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                           }
                         }
                       }}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                      tabIndex={200 + index * 4 + 1}
+                      aria-label={`Quantity for ${item.productName}`}
                     />
                   </div>
                   <div>
@@ -983,8 +1097,10 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       step="0.01"
                       value={item.weight ?? ''}
                       onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                       placeholder="kg"
+                      tabIndex={200 + index * 4 + 2}
+                      aria-label={`Weight for ${item.productName}`}
                     />
                   </div>
                   <div>
@@ -994,8 +1110,18 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       min="0"
                       value={item.unitPrice ?? ''}
                       onChange={(value) => updateCartItem(item.id, 'unitPrice', value ? parseFloat(value) : undefined)}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                       placeholder="0.00"
+                    />
+                    <input
+                      type="hidden"
+                      tabIndex={200 + index * 4 + 3}
+                      onFocus={() => {
+                        // Focus the actual MoneyInput when this hidden input is focused
+                        const moneyInput = document.querySelector(`input[placeholder="0.00"]`) as HTMLInputElement;
+                        moneyInput?.focus();
+                      }}
+                      aria-label={`Price for ${item.productName}`}
                     />
                   </div>
                 </div>
