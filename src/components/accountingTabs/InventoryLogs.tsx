@@ -1,500 +1,981 @@
-import Dexie, { Table } from 'dexie';
-import { v4 as uuidv4 } from 'uuid';
+import { useMemo, useState } from 'react';
+import { FileSpreadsheet, Search, Activity, Package, ShoppingCart, DollarSign, Eye, X, Edit, Trash2, FileText } from 'lucide-react';
 
-// Base interface for all entities with sync support
-interface BaseEntity {
-  id: string;
-  store_id: string;
-  created_at: string;
-  updated_at: string;
-  _synced: boolean;
-  _lastSyncedAt?: string;
-  _deleted?: boolean;
-}
-
-// Entity interfaces matching Supabase schema exactly
-export interface Product extends BaseEntity {
-  name: string;
-  category: string;
-  image: string;
-}
-
-export interface Supplier extends BaseEntity {
-  name: string;
-  phone: string;
-  email: string | null;
-  address: string;
-  lb_balance: number | null; // Added balance field to match Supabase schema
-  usd_balance: number | null; // Added balance field to match Supabase schema
-}
-
-export interface  Customer extends BaseEntity {
-  name: string;
-  phone: string;
-  email: string | null;
-  address: string | null;
-  lb_balance: number; // Changed from current_debt to balance to match Supabase schema
-  usd_balance: number; // Changed from current_debt to balance to match Supabase schema
-  is_active: boolean;
-}
-
-export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
-  id: string;
-  product_id: string;
-  supplier_id: string;
-  type: string;
-  quantity: number;
-  unit: string;
-  weight: number | null;
-  porterage: number | null;
-  transfer_fee: number | null;
-  price: number | null;
-  commission_rate: number;
-  status: string;
-  received_at: string;
-  received_by: string;
-  store_id: string;
-  created_at: string;
-  received_quantity: number;
-  batch_id: string | null;
-}
-
-
-
-export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
-  inventory_item_id: string; // Added to match Supabase schema
-  product_id: string;
-  supplier_id: string;
-  quantity: number;
-  weight: number | null;
-  unit_price: number;
-  received_value: number; // Added to match Supabase schema
-  payment_method: string; // Added payment method field
-  notes: string | null;
-  customer_id: string | null; // Added to match Supabase schema
-  created_by: string; // Added to match Supabase schema
-}
-
-export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
-  type: 'income' | 'expense';
-  category: string;
-  amount: number;
-  currency: 'USD' | 'LBP';
-  description: string;
-  reference: string | null;
-  store_id: string;
-  created_by: string;
-}
-
-export interface ExpenseCategory extends BaseEntity {
-  name: string;
-  description: string | null;
-  is_active: boolean;
-}
-
-// Sync metadata interface
-export interface SyncMetadata {
-  id: string;
-  table_name: string;
-  last_synced_at: string;
-  sync_token?: string;
-}
-
-// Pending sync operation
-export interface PendingSync {
-  id: string;
-  table_name: string;
-  record_id: string;
-  operation: 'create' | 'update' | 'delete';
-  payload: any;
-  created_at: string;
-  retry_count: number;
-  last_error?: string;
-}
-
-export interface JournalEntry extends BaseEntity {
-  date: string;
-  reference: string;
-  description: string;
-  entries: Array<{
-    account: string;
-    debit: number;
-    credit: number;
-  }>;
-  total_debit: number;
-  total_credit: number;
-  created_by: string;
-}
-
-export interface Bill extends BaseEntity {
-  bill_number: string;
-  customer_id: string | null;
-  customer_name: string | null;
-  subtotal: number;
-  total_amount: number;
-  payment_method: 'cash' | 'card' | 'credit';
-  payment_status: 'paid' | 'partial' | 'pending';
-  amount_paid: number;
-  amount_due: number;
-  bill_date: string;
-  notes: string | null;
-  status: 'active' | 'cancelled' | 'refunded';
-  created_by: string;
-  last_modified_by: string | null;
-  last_modified_at: string | null;
-}
-
-export interface BillLineItem extends BaseEntity {
-  bill_id: string;
-  product_id: string;
-  product_name: string;
-  supplier_id: string;
-  supplier_name: string;
-  inventory_item_id: string | null;
-  quantity: number;
-  unit_price: number;
-  line_total: number;
-  weight: number | null;
-  notes: string | null;
-  line_order: number;
-}
-
-export interface BillAuditLog extends Omit<BaseEntity, 'updated_at'> {
-  bill_id: string;
-  action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
-  field_changed: string | null;
-  old_value: string | null;
-  new_value: string | null;
-  change_reason: string | null;
-  changed_by: string;
-  ip_address: string | null;
-}
-
-export interface inventory_batches extends BaseEntity {
-  id: string;
-  supplier_id: string;
-  status: string;
-  porterage: number | null;
-  transfer_fee: number | null;
-  received_at: string;
-  store_id: string;
-  created_by: string;
-}
-
-class POSDatabase extends Dexie {
-  // Core tables
-  products!: Table<Product, string>;
-  suppliers!: Table<Supplier, string>;
-  customers!: Table<Customer, string>;
-  inventory_items!: Table<InventoryItem, string>;
-  sale_items!: Table<SaleItem, string>;
-  transactions!: Table<Transaction, string>;
-  inventory_batches!: Table<inventory_batches, string>;
-
-  // Sync management tables
-  sync_metadata!: Table<SyncMetadata, string>;
-  pending_syncs!: Table<PendingSync, string>;
-
-  // Bill management tables
-  bills!: Table<Bill, string>;
-  bill_line_items!: Table<BillLineItem, string>;
-  bill_audit_logs!: Table<BillAuditLog, string>;
-
-  constructor() {
-    super('POSDatabase');
-    
-    this.version(8).stores({
-      // Core tables with enhanced indexing to match database schema
-      // Tables WITH updated_at: products, suppliers, customers
-      products: 'id, store_id, name, category, updated_at',
-      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
-      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
-
-      // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
-      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
-      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id and created_by indexes
-      transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
-      inventory_batches: 'id, store_id, supplier_id, received_at, created_by',
-  
-      // Sync management
-      sync_metadata: 'id, table_name, last_synced_at',
-      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
-
-      // Bill management
-      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_at',
-      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, line_order, created_at',
-      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at'
-    });
-
-    // Migration for version 5 - update existing records to match new schema
-    this.version(5).upgrade(trans => {
-      // Update suppliers to ensure type field exists
-      trans.table('suppliers').toCollection().modify(supplier => {
-        if (!supplier.type) {
-          supplier.type = 'commission'; // Default to commission for existing suppliers
-        }
-        if (supplier.lb_balance === undefined || supplier.lb_balance === null) {
-          supplier.lb_balance = 0; // Default balance for existing suppliers
-        }
-        if (supplier.usd_balance === undefined || supplier.usd_balance === null) {
-          supplier.usd_balance = 0; // Default balance for existing suppliers
-        }
-      });
-
-      // Update customers to ensure balance field exists  
-      trans.table('customers').toCollection().modify(customer => {
-        if (customer.lb_balance === undefined || customer.lb_balance === null) {
-          customer.lb_balance = 0; // Default balance for existing customers
-        }
-        if (customer.usd_balance === undefined || customer.usd_balance === null) {
-          customer.usd_balance = 0; // Default balance for existing customers
-        }
-      });
-
-      // Update sale_items to ensure all required fields exist
-      trans.table('sale_items').toCollection().modify(saleItem => {
-        if (!saleItem.inventory_item_id) {
-          saleItem.inventory_item_id = ''; // Default empty string for missing inventory_item_id
-        }
-        if (saleItem.received_value === undefined || saleItem.received_value === null) {
-          saleItem.received_value = saleItem.total_price || 0; // Migrate from total_price to received_value
-        }
-        if (!saleItem.customer_id) {
-          saleItem.customer_id = null; // Default null for customer_id
-        }
-        if (!saleItem.created_by) {
-          saleItem.created_by = ''; // Default empty string for created_by
-        }
-        if (!saleItem.payment_method) {
-          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
-        }
-      });
-
-      // Update inventory_items to ensure received_quantity exists
-      trans.table('inventory_items').toCollection().modify(inventoryItem => {
-        if (inventoryItem.received_quantity === undefined || inventoryItem.received_quantity === null) {
-          inventoryItem.received_quantity = inventoryItem.quantity || 0; // Default to quantity value
-        }
-      });
-    });
-
-    // Migration for version 6 - add payment_method to sale_items
-    this.version(6).upgrade(trans => {
-      // Update sale_items to ensure payment_method field exists
-      trans.table('sale_items').toCollection().modify(saleItem => {
-        if (!saleItem.payment_method) {
-          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
-        }
-      });
-    });
-
-    // Migration for version 7 - remove sales table (no longer needed)
-    this.version(7).upgrade(trans => {
-      // The sales table will be automatically removed from the schema
-      // Any existing sales data will be lost, but this matches the backend schema
-      console.log('Removing sales table to match backend schema');
-    });
-
-    // Add hooks for automatic timestamping and ID generation
-    // Tables WITH updated_at: products, suppliers, customers
-    this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.bills.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.bill_line_items.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.bill_audit_logs.hook('creating', this.addCreateFields);
-
-    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_batches
-    this.inventory_items.hook('creating', this.addCreateFields);
-    this.sale_items.hook('creating', this.addCreateFields);
-    this.transactions.hook('creating', this.addCreateFields);
-    this.inventory_batches.hook('creating', this.addCreateFields);
-
-    // Only add update hooks for tables that have updated_at
-    this.products.hook('updating', this.addUpdateFields);
-    this.suppliers.hook('updating', this.addUpdateFields);
-    this.customers.hook('updating', this.addUpdateFields);
-    this.bills.hook('updating', this.addUpdateFields);
-    this.bill_line_items.hook('updating', this.addUpdateFields);
-  }
-
-  private addCreateFields = (primKey: any, obj: any, trans: any) => {
-    const now = new Date().toISOString();
-    if (!obj.id) obj.id = uuidv4();
-    if (!obj.created_at) obj.created_at = now;
-    if (obj._synced === undefined) obj._synced = false;
-  };
-
-  private addCreateFieldsWithUpdatedAt = (primKey: any, obj: any, trans: any) => {
-    const now = new Date().toISOString();
-    if (!obj.id) obj.id = uuidv4();
-    if (!obj.created_at) obj.created_at = now;
-    if (obj.updated_at === undefined) obj.updated_at = now;
-    if (obj._synced === undefined) obj._synced = false;
-  };
-
-  private addUpdateFields = (modifications: any, primKey: any, obj: any, trans: any) => {
-    modifications.updated_at = new Date().toISOString();
-    if (modifications._synced === undefined) modifications._synced = false;
-  };
-
-  // Utility methods for sync management
-  async markAsSynced(tableName: string, recordId: string) {
-    const table = (this as any)[tableName];
-    if (table) {
-      await table.update(recordId, { 
-        _synced: true, 
-        _lastSyncedAt: new Date().toISOString() 
-      });
-    }
-  }
-
-  async getUnsyncedRecords(tableName: string) {
-    const table = (this as any)[tableName];
-    if (table) {
-      return await table.filter((record: any) => record._synced === false).toArray();
-    }
-    return [];
-  }
-
-  async softDelete(tableName: string, recordId: string) {
-    const table = (this as any)[tableName];
-    if (table) {
-      await table.update(recordId, { 
-        _deleted: true, 
-        _synced: false,
-        updated_at: new Date().toISOString()
-      });
-    }
-  }
-
-  async addPendingSync(tableName: string, recordId: string, operation: 'create' | 'update' | 'delete', payload: any) {
-    await this.pending_syncs.add({
-      id: uuidv4(),
-      table_name: tableName,
-      record_id: recordId,
-      operation,
-      payload,
-      created_at: new Date().toISOString(),
-      retry_count: 0
-    });
-  }
-
-  async getPendingSyncs() {
-    return await this.pending_syncs.orderBy('created_at').toArray();
-  }
-
-  async removePendingSync(id: string) {
-    await this.pending_syncs.delete(id);
-  }
-
-  async updateSyncMetadata(tableName: string, lastSyncedAt: string, syncToken?: string) {
-    await this.sync_metadata.put({
-      id: tableName,
-      table_name: tableName,
-      last_synced_at: lastSyncedAt,
-      sync_token: syncToken
-    });
-  }
-
-  async getSyncMetadata(tableName: string) {
-    return await this.sync_metadata.get(tableName);
-  }
-
-  async cleanupInvalidInventoryItems(): Promise<number> {
-    // Keep inventory items with quantity = 0 for Received Bills history.
-    // Only remove truly invalid rows (negative quantities).
-    const invalidItems = await this.inventory_items.filter(item => item.quantity < 0).toArray();
-    
-    if (invalidItems.length > 0) {
-      await this.inventory_items.bulkDelete(invalidItems.map(item => item.id));
-      console.log(`🧹 Cleaned up ${invalidItems.length} invalid inventory items (negative quantity)`);
-    }
-    
-    return invalidItems.length;
-  }
-
-  async validateDataIntegrity(storeId: string): Promise<{
-    orphanedInventory: any[];
-    orphanedSaleItems: any[];
-    orphanedTransactions: any[];
-  }> {
-    console.log('🔍 Validating data integrity...');
-    
-    // Get all data
-    const products = await this.products.where('store_id').equals(storeId).toArray();
-    const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
-    const customers = await this.customers.where('store_id').equals(storeId).toArray();
-    const inventory = await this.inventory_items.where('store_id').equals(storeId).toArray();
-    const saleItems = await this.sale_items.toArray();
-    const transactions = await this.transactions.where('store_id').equals(storeId).toArray();
-    
-    const productIds = new Set(products.map(p => p.id));
-    const supplierIds = new Set(suppliers.map(s => s.id));
-    const customerIds = new Set(customers.map(c => c.id));
-    
-    // Find orphaned records
-    const orphanedInventory = inventory.filter(item => 
-      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
-    );
-    
-    const orphanedSaleItems = saleItems.filter(item => 
-      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
-    );
-    
-    const orphanedTransactions = transactions.filter(transaction => 
-      // Add any transaction-specific validations here
-      false
-    );
-    
-    console.log('📊 Data integrity report:', {
-      orphanedInventory: orphanedInventory.length,
-      orphanedSaleItems: orphanedSaleItems.length,
-      orphanedTransactions: orphanedTransactions.length
-    });
-    
-    return {
-      orphanedInventory,
-      orphanedSaleItems,
-      orphanedTransactions
-    };
-  }
-
-  async cleanupOrphanedRecords(storeId: string): Promise<number> {
-    const integrity = await this.validateDataIntegrity(storeId);
-    let cleaned = 0;
-    
-    // Clean up orphaned inventory items
-    if (integrity.orphanedInventory.length > 0) {
-      await this.inventory_items.bulkDelete(integrity.orphanedInventory.map(item => item.id));
-      cleaned += integrity.orphanedInventory.length;
-      console.log(`🗑️ Removed ${integrity.orphanedInventory.length} orphaned inventory items`);
-    }
-    
-    // Clean up orphaned sale items
-    if (integrity.orphanedSaleItems.length > 0) {
-      await this.sale_items.bulkDelete(integrity.orphanedSaleItems.map(item => item.id));
-      cleaned += integrity.orphanedSaleItems.length;
-      console.log(`🗑️ Removed ${integrity.orphanedSaleItems.length} orphaned sale items`);
-    }
-    
-    return cleaned;
-  }
-}
-
-export const db = new POSDatabase();
-
-// Export utility functions
-export const createId = () => uuidv4();
-
-export const createBaseEntity = (storeId: string, data: Partial<BaseEntity> = {}): Partial<BaseEntity> => {
-  const now = new Date().toISOString();
-  return {
-    id: createId(),
-    store_id: storeId,
-    created_at: now,
-    updated_at: now,
-    _synced: false,
-    ...data
-  };
+type InventoryLogsProps = {
+  inventoryLogs: any[];
+  products: any[];
+  suppliers: any[];
+  customers?: any[];
+  sales?: any[];
+  formatCurrency: (amount: number) => string;
+  formatCurrencyWithSymbol?: (amount: number, currency?: string) => string;
+  showToast: (message: string, type?: 'success' | 'error') => void;
+  onEditSale: (sale: any) => void;
+  onDeleteSale: (sale: any) => void;
 };
+
+export default function InventoryLogs({
+  inventoryLogs,
+  products,
+  suppliers,
+  customers = [],
+  formatCurrency,
+  formatCurrencyWithSymbol,
+  showToast,
+  sales = [],
+  onEditSale,
+  onDeleteSale
+}: InventoryLogsProps) {
+  const [inventoryLogsSearchTerm, setInventoryLogsSearchTerm] = useState('');
+  const [inventoryLogsProductFilter, setInventoryLogsProductFilter] = useState('');
+  const [inventoryLogsSupplierFilter, setInventoryLogsSupplierFilter] = useState('');
+  const [inventoryLogsDateFilter, setInventoryLogsDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [inventoryLogsPage, setInventoryLogsPage] = useState(1);
+  const [inventoryLogsSort, setInventoryLogsSort] = useState<'date' | 'product' | 'supplier' | 'amount'>('date');
+  const [inventoryLogsSortDir, setInventoryLogsSortDir] = useState<'asc' | 'desc'>('desc');
+  const [showSalesLogs, setShowSalesLogs] = useState(false);
+  const [selectedInventoryLog, setSelectedInventoryLog] = useState<any | null>(null);
+  const [editingSale, setEditingSale] = useState<any | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  const filteredInventoryLogs = useMemo(() => {
+    let filtered = Array.isArray(inventoryLogs) ? [...inventoryLogs] : [];
+
+    if (inventoryLogsSearchTerm) {
+      const search = inventoryLogsSearchTerm.toLowerCase();
+      filtered = filtered.filter((log: any) =>
+        (log.productName || '').toLowerCase().includes(search) ||
+        (log.supplierName || '').toLowerCase().includes(search) ||
+        (log.customerName || '').toLowerCase().includes(search) ||
+        (log.description || '').toLowerCase().includes(search) ||
+        (log.reference || '').toLowerCase().includes(search)
+      );
+    }
+
+    if (inventoryLogsProductFilter) {
+      filtered = filtered.filter((log: any) => log.productId === inventoryLogsProductFilter);
+    }
+
+    if (inventoryLogsSupplierFilter) {
+      filtered = filtered.filter((log: any) => log.supplierId === inventoryLogsSupplierFilter);
+    }
+
+    if (inventoryLogsDateFilter !== 'all') {
+      const now = new Date();
+      let startDate: Date;
+      switch (inventoryLogsDateFilter) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'week':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'month':
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        default:
+          startDate = new Date(0);
+      }
+      filtered = filtered.filter((log: any) => new Date(log.date) >= startDate);
+    }
+
+    filtered.sort((a: any, b: any) => {
+      let cmp = 0;
+      switch (inventoryLogsSort) {
+        case 'date':
+          cmp = new Date(a.date).getTime() - new Date(b.date).getTime();
+          break;
+        case 'product':
+          cmp = (a.productName || '').localeCompare(b.productName || '');
+          break;
+        case 'supplier':
+          cmp = (a.supplierName || '').localeCompare(b.supplierName || '');
+          break;
+        case 'amount':
+          cmp = (a.amount || 0) - (b.amount || 0);
+          break;
+      }
+      return inventoryLogsSortDir === 'asc' ? cmp : -cmp;
+    });
+
+    return filtered;
+  }, [
+    inventoryLogs,
+    inventoryLogsSearchTerm,
+    inventoryLogsProductFilter,
+    inventoryLogsSupplierFilter,
+    inventoryLogsDateFilter,
+    inventoryLogsSort,
+    inventoryLogsSortDir
+  ]);
+
+  const inventoryLogsPerPage = 20;
+  const inventoryLogsTotalPages = Math.ceil(filteredInventoryLogs.length / inventoryLogsPerPage) || 1;
+  const pagedInventoryLogs = filteredInventoryLogs.slice(
+    (inventoryLogsPage - 1) * inventoryLogsPerPage,
+    inventoryLogsPage * inventoryLogsPerPage
+  );
+
+  const handleInventoryLogsSort = (sort: 'date' | 'product' | 'supplier' | 'amount') => {
+    if (inventoryLogsSort === sort) {
+      setInventoryLogsSortDir(inventoryLogsSortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setInventoryLogsSort(sort);
+      setInventoryLogsSortDir('desc');
+    }
+  };
+
+  const exportInventoryLogs = () => {
+    const csvContent = [
+      [
+        'Date',
+        'Type',
+        'Product',
+        'Supplier',
+        'Customer',
+        'Quantity',
+        'Weight',
+        'Unit Price',
+        'Total Amount',
+        'Currency',
+        'Description',
+        'Reference',
+        'Notes'
+      ].join(','),
+      ...filteredInventoryLogs.map((log: any) =>
+        [
+          new Date(log.date).toLocaleDateString(),
+          log.type,
+          log.productName || '',
+          log.supplierName || '',
+          log.customerName || '',
+          log.quantity || '',
+          log.weight || '',
+          log.unitPrice || '',
+          log.amount || '',
+          log.currency || '',
+          (log.description || '').replace(/,/g, ';'),
+          log.reference || '',
+          (log.notes || '').replace(/,/g, ';')
+        ].join(',')
+      )
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `inventory-transaction-logs-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    showToast('Inventory transaction logs exported successfully', 'success');
+  };
+
+  const handleViewInventoryItemDetails = (log: any) => {
+    if (log?.type !== 'inventory_received') return;
+    setSelectedInventoryLog(log);
+    setShowSalesLogs(true);
+  };
+  const deleteInventoryLog = (log: any) => {
+    if (log?.type !== 'sale') return;
+    
+    console.log('Deleting inventory log:', log);
+    console.log('Available inventory logs:', inventoryLogs);
+    
+    // Since the sales array is empty, we work directly with the inventory log
+    // The inventory log contains the sale information
+    if (onDeleteSale) {
+      // Pass the inventory log data as the sale data
+      const saleData = {
+        id: log.id,
+        saleId: log.id,
+        quantity: log.quantity,
+        weight: log.weight,
+        unit_price: log.unitPrice || log.amount,
+        payment_method: log.paymentMethod || 'cash',
+        notes: log.notes,
+        customerName: log.customerName,
+        totalPrice: log.amount
+      };
+      
+      console.log('Sending sale data to parent:', saleData);
+      onDeleteSale(saleData);
+      showToast('Sale deleted successfully', 'success');
+      
+      // Force a re-render of the inventory logs
+      const currentSearch = inventoryLogsSearchTerm;
+      setInventoryLogsSearchTerm('');
+      setTimeout(() => setInventoryLogsSearchTerm(currentSearch), 100);
+    } else {
+      showToast('Delete functionality not available', 'error');
+    }
+  };
+
+  const handleEditSale = (log: any) => {
+    console.log('Editing inventory log:', log);
+    console.log('Available inventory logs:', inventoryLogs);
+    
+    // Since the sales array is empty, we work directly with the inventory log
+    // Transform the inventory log data to match the expected sale structure
+    const saleData = {
+      ...log,
+      saleId: log.id,
+      quantity: log.quantity || 1,
+      weight: log.weight || '',
+      unitPrice: log.unitPrice || log.amount || 0,
+      paymentMethod: log.paymentMethod || 'cash',
+      notes: log.notes || '',
+      customerName: log.customerName || 'Walk-in Customer',
+      totalPrice: log.amount || 0
+    };
+    
+    console.log('Transformed sale data:', saleData);
+    setEditingSale(saleData);
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (editingSale && onEditSale) {
+      // Update the inventory log data directly
+      const updatedLog = {
+        ...editingSale,
+        quantity: editingSale.quantity,
+        weight: editingSale.weight,
+        amount: editingSale.quantity * editingSale.unitPrice,
+        unitPrice: editingSale.unitPrice,
+        paymentMethod: editingSale.paymentMethod,
+        notes: editingSale.notes
+      };
+      
+      // Call the parent's onEditSale function
+      onEditSale(updatedLog);
+      
+      // Update the local inventory logs data if it exists
+      const logIndex = inventoryLogs.findIndex((log: any) => log.id === editingSale.id);
+      if (logIndex !== -1) {
+        inventoryLogs[logIndex] = { ...inventoryLogs[logIndex], ...updatedLog };
+      }
+      
+      setShowEditModal(false);
+      setEditingSale(null);
+      showToast('Sale updated successfully', 'success');
+      
+      // Force a re-render of the inventory logs
+      const currentSearch = inventoryLogsSearchTerm;
+      setInventoryLogsSearchTerm('');
+      setTimeout(() => setInventoryLogsSearchTerm(currentSearch), 100);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setShowEditModal(false);
+    setEditingSale(null);
+  };
+
+  const processedSalesData = useMemo(() => {
+    if (!selectedInventoryLog) return [] as any[];
+    
+    // If the sales array is empty, try to extract sale data from inventory logs
+    if (!sales || sales.length === 0) {
+      // Look for sale-type inventory logs that might be related
+      const saleLogs = inventoryLogs.filter((log: any) => 
+        log.type === 'sale' && 
+        log.productId === selectedInventoryLog.productId &&
+        log.supplierId === selectedInventoryLog.supplierId
+      );
+      
+      return saleLogs.map((log: any) => ({
+        ...log,
+        saleId: log.id,
+        saleDate: log.date,
+        customerId: log.customerId,
+        customerName: log.customerName || 'Walk-in Customer',
+        quantity: log.quantity || 1,
+        weight: log.weight,
+        unitPrice: log.unitPrice || log.amount,
+        totalPrice: log.amount || 0,
+        paymentMethod: log.paymentMethod || 'cash',
+        notes: log.notes,
+        productName: selectedInventoryLog.productName,
+        supplierName: selectedInventoryLog.supplierName,
+        unit: selectedInventoryLog.unit
+      })).sort((a: any, b: any) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
+    }
+    
+    // Original logic for when sales array has data
+    const invId = String(selectedInventoryLog.id || '').replace('inventory-', '');
+    const matchingSales = (sales || []).filter((s: any) => s && s.inventory_item_id === invId);
+    const details = matchingSales.map((sale: any) => ({
+      ...sale,
+      saleId: sale.id,
+      saleDate: sale.created_at,
+      customerId: sale.customer_id,
+      customerName: (customers as any[]).find((c: any) => c.id === sale.customer_id)?.name || 'Walk-in Customer',
+      quantity: sale.quantity || 1,
+      weight: sale.weight,
+      unitPrice: sale.unit_price,
+      totalPrice: typeof sale.unit_price === 'number' && typeof sale.quantity === 'number'
+        ? sale.unit_price * sale.quantity
+        : (sale.received_value || 0),
+      paymentMethod: sale.payment_method || 'cash',
+      notes: sale.notes,
+      productName: selectedInventoryLog.productName,
+      supplierName: selectedInventoryLog.supplierName,
+      unit: selectedInventoryLog.unit
+    }));
+    return details.sort((a: any, b: any) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
+  }, [selectedInventoryLog, sales, customers, inventoryLogs]);
+
+  return (
+    <div className="space-y-0">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">Inventory Transaction Logs</h2>
+        
+        </div>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={exportInventoryLogs}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
+          >
+            <FileSpreadsheet className="w-4 h-4 mr-2" />
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white p-4 rounded-lg shadow-sm border">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Search */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search products, suppliers, customers..."
+                value={inventoryLogsSearchTerm}
+                onChange={(e) => setInventoryLogsSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Product Filter */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Product</label>
+            <select
+              value={inventoryLogsProductFilter}
+              onChange={(e) => setInventoryLogsProductFilter(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">All Products</option>
+              {products.filter((p: any) => p).map((product: any) => (
+                <option key={product.id} value={product.id}>{product.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Supplier Filter */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Supplier</label>
+            <select
+              value={inventoryLogsSupplierFilter}
+              onChange={(e) => setInventoryLogsSupplierFilter(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">All Suppliers</option>
+              {suppliers.map((supplier: any) => (
+                <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Date Filter */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Date Range</label>
+            <select
+              value={inventoryLogsDateFilter}
+              onChange={(e) => setInventoryLogsDateFilter(e.target.value as any)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Transactions</p>
+              <p className="text-2xl font-bold text-gray-900">{filteredInventoryLogs.length}</p>
+            </div>
+            <div className="p-2 bg-blue-100 rounded-full">
+              <Activity className="w-5 h-5 text-blue-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Inventory Received</p>
+              <p className="text-2xl font-bold text-green-600">
+                {filteredInventoryLogs.filter((log: any) => log.type === 'inventory_received').length}
+              </p>
+            </div>
+            <div className="p-2 bg-green-100 rounded-full">
+              <Package className="w-5 h-5 text-green-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Sales Transactions</p>
+              <p className="text-2xl font-bold text-blue-600">
+                {filteredInventoryLogs.filter((log: any) => log.type === 'sale').length}
+              </p>
+            </div>
+            <div className="p-2 bg-blue-100 rounded-full">
+              <ShoppingCart className="w-5 h-5 text-blue-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Value</p>
+              <p className="text-2xl font-bold text-purple-600">
+                {formatCurrency(filteredInventoryLogs.reduce((sum: number, log: any) => sum + (log.amount || 0), 0))}
+              </p>
+            </div>
+            <div className="p-2 bg-purple-100 rounded-full">
+              <DollarSign className="w-5 h-5 text-purple-600" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Transaction Logs Table */}
+      <div className="bg-white rounded-lg shadow-sm border">
+        <div className="p-6 border-b">
+          <h3 className="text-lg font-semibold text-gray-900">Transaction Logs</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleInventoryLogsSort('date')}>
+                  <div className="flex items-center">
+                    Date
+                    {inventoryLogsSort === 'date' && (
+                      <span className="ml-1">{inventoryLogsSortDir === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleInventoryLogsSort('product')}>
+                  <div className="flex items-center">
+                    Product
+                    {inventoryLogsSort === 'product' && (
+                      <span className="ml-1">{inventoryLogsSortDir === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleInventoryLogsSort('supplier')}>
+                  <div className="flex items-center">
+                    Supplier
+                    {inventoryLogsSort === 'supplier' && (
+                      <span className="ml-1">{inventoryLogsSortDir === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity/Weight</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleInventoryLogsSort('amount')}>
+                  <div className="flex items-center">
+                    Amount
+                    {inventoryLogsSort === 'amount' && (
+                      <span className="ml-1">{inventoryLogsSortDir === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {pagedInventoryLogs.map((log: any) => (
+                <tr key={log.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {new Date(log.date).toLocaleDateString()}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {new Date(log.date).toLocaleTimeString()}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span
+                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        log.type === 'inventory_received'
+                          ? 'bg-green-100 text-green-800'
+                          : log.type === 'sale'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-gray-100 text-gray-800'
+                      }`}
+                    >
+                      {log.type === 'inventory_received'
+                        ? 'Received'
+                        : log.type === 'sale'
+                        ? 'Sale'
+                        : log.type === 'financial'
+                        ? 'Financial'
+                        : log.type}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm font-medium text-gray-900">
+                      {log.productName || 'N/A'}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{log.supplierName || 'N/A'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{log.customerName || 'N/A'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {log.quantity && `${log.quantity} ${log.unit || 'units'}`}
+                      {log.weight && `${log.weight} kg`}
+                      {!log.quantity && !log.weight && 'N/A'}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm font-medium text-gray-900">
+                      {log.amount
+                        ? (formatCurrencyWithSymbol
+                            ? formatCurrencyWithSymbol(log.amount, log.currency)
+                            : formatCurrency(log.amount))
+                        : 'N/A'}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{log.reference || 'N/A'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center space-x-2">
+                      {log.type === 'inventory_received' && (
+                        <button
+                          onClick={() => handleViewInventoryItemDetails(log)}
+                          className="text-blue-600 hover:text-blue-900 text-sm font-medium"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      )}
+                      {log.type === 'sale' && (
+                        <>
+                          <button
+                            onClick={() => handleEditSale(log)}
+                            className="text-blue-600 hover:text-blue-900 text-sm font-medium"
+                            title="Edit Sale"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteInventoryLog(log)}
+                            className="text-red-600 hover:text-red-900 text-sm font-medium"
+                            title="Delete Sale"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        {inventoryLogsTotalPages > 1 && (
+          <div className="px-6 py-4 border-t border-gray-200">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-700">
+                Showing {((inventoryLogsPage - 1) * inventoryLogsPerPage) + 1} to {Math.min(inventoryLogsPage * inventoryLogsPerPage, filteredInventoryLogs.length)} of {filteredInventoryLogs.length} results
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setInventoryLogsPage(Math.max(1, inventoryLogsPage - 1))}
+                  disabled={inventoryLogsPage === 1}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span className="text-sm text-gray-700">Page {inventoryLogsPage} of {inventoryLogsTotalPages}</span>
+                <button
+                  onClick={() => setInventoryLogsPage(Math.min(inventoryLogsTotalPages, inventoryLogsPage + 1))}
+                  disabled={inventoryLogsPage === inventoryLogsTotalPages}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {showSalesLogs && selectedInventoryLog && (
+        <InventorySalesLogsModal
+          selectedInventoryLog={selectedInventoryLog}
+          setShowSalesLogs={setShowSalesLogs}
+          processedSalesData={processedSalesData}
+          formatCurrency={formatCurrency}
+          onEditSale={handleEditSale}
+          onDeleteSale={deleteInventoryLog}
+        />
+      )}
+
+      {/* Edit Sale Modal */}
+      {showEditModal && editingSale && (
+        <EditSaleModal
+          sale={editingSale}
+          onSave={handleSaveEdit}
+          onCancel={handleCancelEdit}
+          formatCurrency={formatCurrency}
+        />
+      )}
+    </div>
+  );
+}
+
+function InventorySalesLogsModal({
+  selectedInventoryLog,
+  setShowSalesLogs,
+  processedSalesData,
+  formatCurrency,
+  onEditSale,
+  onDeleteSale
+}: {
+  selectedInventoryLog: any;
+  setShowSalesLogs: (show: boolean) => void;
+  processedSalesData: any[];
+  formatCurrency: (amount: number) => string;
+  onEditSale?: (sale: any) => void;
+  onDeleteSale?: (sale: any) => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] flex flex-col">
+        <div className="p-6 border-b flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Sales Logs</h2>
+              <p className="text-md text-gray-600 mt-1">{selectedInventoryLog.productName} - {selectedInventoryLog.supplierName}</p>
+            </div>
+            <button onClick={() => setShowSalesLogs(false)} className="text-gray-400 hover:text-gray-600">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+        </div>
+        <div className="p-6 overflow-y-auto flex-1">
+          <div className="mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-blue-50 p-3 rounded-lg">
+                <p className="text-sm text-blue-700">Total Sales</p>
+                <p className="text-lg font-bold text-blue-900">{processedSalesData.length}</p>
+              </div>
+              <div className="bg-green-50 p-3 rounded-lg">
+                <p className="text-sm text-green-700">Total Revenue</p>
+                <p className="text-lg font-bold text-green-900">{formatCurrency(processedSalesData.reduce((sum, item) => sum + (item.totalPrice || 0), 0))}</p>
+              </div>
+              <div className="bg-purple-50 p-3 rounded-lg">
+                <p className="text-sm text-purple-700">Sold Quantity</p>
+                <p className="text-lg font-bold text-purple-900">{processedSalesData.reduce((sum, item) => sum + (item.quantity || 0), 0)} {selectedInventoryLog.unit}</p>
+              </div>
+              <div className="bg-orange-50 p-3 rounded-lg">
+                <p className="text-sm text-orange-700">Avg Price</p>
+                <p className="text-lg font-bold text-orange-900">{formatCurrency(processedSalesData.length > 0 ? processedSalesData.reduce((sum, item) => sum + (item.unitPrice || 0), 0) / processedSalesData.length : 0)}</p>
+              </div>
+            </div>
+          </div>
+
+          {processedSalesData.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sale ID</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weight</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Price</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Method</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {processedSalesData.map((item: any, index: number) => (
+                    <tr key={`${item.saleId}-${index}`} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{new Date(item.saleDate).toLocaleDateString()}</div>
+                        <div className="text-xs text-gray-500">{new Date(item.saleDate).toLocaleTimeString()}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900 font-mono">{String(item.saleId).slice(-8).toUpperCase()}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{item.customerName}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{item.quantity} {selectedInventoryLog.unit}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{item.weight ? `${item.weight} kg` : '-'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{formatCurrency(item.unitPrice || 0)}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{formatCurrency(item.totalPrice || 0)}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          item.paymentMethod === 'cash' ? 'bg-green-100 text-green-800' :
+                          item.paymentMethod === 'card' ? 'bg-blue-100 text-blue-800' :
+                          item.paymentMethod === 'credit' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {item.paymentMethod}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          {!!onEditSale && (
+                            <button onClick={() => onEditSale({ ...item, id: item.saleId, quantity: item.quantity, weight: item.weight, unit_price: item.unitPrice, payment_method: item.paymentMethod, notes: item.notes })} className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 transition-colors" title="Edit Sale">
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          )}
+                          {!!onDeleteSale && (
+                            <button onClick={() => onDeleteSale({ ...item, id: item.saleId, saleId: item.saleId, customerName: item.customerName, totalPrice: (item.unitPrice || 0) * (item.quantity || 0) })} className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors" title="Delete Sale">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No Sales Recorded</h3>
+              <p className="text-gray-500 mb-4">No sales have been recorded for this inventory item yet.</p>
+            </div>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-between flex-shrink-0">
+          <div className="text-sm text-gray-500">Showing {processedSalesData.length} sale record{processedSalesData.length !== 1 ? 's' : ''}</div>
+          <button onClick={() => setShowSalesLogs(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditSaleModal({
+  sale,
+  onSave,
+  onCancel,
+  formatCurrency,
+}: {
+  sale: any;
+  onSave: () => void;
+  onCancel: () => void;
+  formatCurrency: (amount: number) => string;
+}) {
+  const [formData, setFormData] = useState({
+    quantity: sale.quantity || 1,
+    weight: sale.weight || '',
+    unitPrice: sale.unitPrice || sale.unit_price || 0,
+    paymentMethod: sale.paymentMethod || sale.payment_method || 'cash',
+    notes: sale.notes || ''
+  });
+
+  const handleInputChange = (field: string, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Update the sale object with new values
+    const updatedSale = {
+      ...sale,
+      quantity: formData.quantity,
+      weight: formData.weight,
+      unit_price: formData.unitPrice,
+      payment_method: formData.paymentMethod,
+      notes: formData.notes,
+      // Update the total price based on new quantity and unit price
+      received_value: formData.quantity * formData.unitPrice
+    };
+    
+    // Update the editingSale state
+    Object.assign(sale, updatedSale);
+    
+    // Also update the corresponding inventory log if it exists
+    // This part is no longer needed as we are working directly with the inventory log
+    // if (selectedInventoryLog && selectedInventoryLog.type === 'sale') {
+    //   Object.assign(selectedInventoryLog, {
+    //     quantity: formData.quantity,
+    //     weight: formData.weight,
+    //     amount: formData.quantity * formData.unitPrice
+    //   });
+    // }
+    
+    onSave();
+  };
+
+  const totalPrice = formData.quantity * formData.unitPrice;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-md w-full">
+        <div className="p-6 border-b">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900">Edit Sale</h2>
+            <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          <p className="text-sm text-gray-600 mt-1">
+            Sale ID: {String(sale.saleId || sale.id).slice(-8).toUpperCase()}
+          </p>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Quantity
+            </label>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={formData.quantity}
+              onChange={(e) => handleInputChange('quantity', parseFloat(e.target.value) || 0)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Weight (kg)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={formData.weight}
+              onChange={(e) => handleInputChange('weight', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Optional"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Unit Price
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={formData.unitPrice}
+              onChange={(e) => handleInputChange('unitPrice', parseFloat(e.target.value) || 0)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Payment Method
+            </label>
+            <select
+              value={formData.paymentMethod}
+              onChange={(e) => handleInputChange('paymentMethod', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="credit">Credit</option>
+              <option value="mobile">Mobile Payment</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Notes
+            </label>
+            <textarea
+              value={formData.notes}
+              onChange={(e) => handleInputChange('notes', e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Optional notes about this sale"
+            />
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-gray-700">Total Price:</span>
+              <span className="text-lg font-bold text-gray-900">
+                {formatCurrency(totalPrice)}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 text-gray-700 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

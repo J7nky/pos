@@ -1,140 +1,16 @@
-import Dexie, { Table } from 'dexie';
-import { v4 as uuidv4 } from 'uuid';
+import { db } from '../lib/db';
+import { supabase } from '../lib/supabase';
+import { Database } from '../types/database';
 
-// Base interface for all entities with sync support
-interface BaseEntity {
-  id: string;
-  store_id: string;
-  created_at: string;
-  updated_at: string;
-  _synced: boolean;
-  _lastSyncedAt?: string;
-  _deleted?: boolean;
-}
+type Tables = Database['public']['Tables'];
 
-// Entity interfaces matching Supabase schema exactly
-export interface Product extends BaseEntity {
-  name: string;
-  category: string;
-  image: string;
-}
-
-export interface Supplier extends BaseEntity {
-  name: string;
-  phone: string;
-  email: string | null;
-  address: string;
-  lb_balance: number | null; // Added balance field to match Supabase schema
-  usd_balance: number | null; // Added balance field to match Supabase schema
-}
-
-export interface  Customer extends BaseEntity {
-  name: string;
-  phone: string;
-  email: string | null;
-  address: string | null;
-  lb_balance: number; // Changed from current_debt to balance to match Supabase schema
-  usd_balance: number; // Changed from current_debt to balance to match Supabase schema
-  is_active: boolean;
-}
-
-export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
-  id: string;
-  product_id: string;
-  supplier_id: string;
-  type: string;
-  quantity: number;
-  unit: string;
-  weight: number | null;
-  porterage: number | null;
-  transfer_fee: number | null;
-  price: number | null;
-  commission_rate: number;
-  status: string;
-  received_at: string;
-  received_by: string;
-  store_id: string;
-  created_at: string;
-  received_quantity: number;
-  batch_id: string | null;
-}
-
-
-
-export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
-  inventory_item_id: string; // Added to match Supabase schema
-  product_id: string;
-  supplier_id: string;
-  quantity: number;
-  weight: number | null;
-  unit_price: number;
-  received_value: number; // Added to match Supabase schema
-  payment_method: string; // Added payment method field
-  notes: string | null;
-  customer_id: string | null; // Added to match Supabase schema
-  created_by: string; // Added to match Supabase schema
-}
-
-export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
-  type: 'income' | 'expense';
-  category: string;
-  amount: number;
-  currency: 'USD' | 'LBP';
-  description: string;
-  reference: string | null;
-  store_id: string;
-  created_by: string;
-}
-
-export interface ExpenseCategory extends BaseEntity {
-  name: string;
-  description: string | null;
-  is_active: boolean;
-}
-
-// Sync metadata interface
-export interface SyncMetadata {
-  id: string;
-  table_name: string;
-  last_synced_at: string;
-  sync_token?: string;
-}
-
-// Pending sync operation
-export interface PendingSync {
-  id: string;
-  table_name: string;
-  record_id: string;
-  operation: 'create' | 'update' | 'delete';
-  payload: any;
-  created_at: string;
-  retry_count: number;
-  last_error?: string;
-}
-
-export interface JournalEntry extends BaseEntity {
-  date: string;
-  reference: string;
-  description: string;
-  entries: Array<{
-    account: string;
-    debit: number;
-    credit: number;
-  }>;
-  total_debit: number;
-  total_credit: number;
-  created_by: string;
-}
-export interface inventory_batches extends BaseEntity {
-  id: string;
-  supplier_id: string;
-  status: string;
-  porterage: number | null;
-  transfer_fee: number | null;
-  received_at: string;
-  store_id: string;
-  created_by: string;
-}
+// Sync configuration
+const SYNC_CONFIG = {
+  batchSize: 100, // Increased from 50 for fewer round trips
+  maxRetries: 3,
+  retryDelay: 1000, // ms
+  syncInterval: 30000, // 30 seconds
+};
 
 // Table mapping for sync operations
 const SYNC_TABLES = [
@@ -145,278 +21,501 @@ const SYNC_TABLES = [
   'sale_items',
   'transactions',
   'inventory_batches',
-  'bills',
-  'bill_line_items',
-  'bill_audit_logs'
+
 ] as const;
 
-class POSDatabase extends Dexie {
-  // Core tables
-  products!: Table<Product, string>;
-  suppliers!: Table<Supplier, string>;
-  customers!: Table<Customer, string>;
-  inventory_items!: Table<InventoryItem, string>;
-  sale_items!: Table<SaleItem, string>;
-  transactions!: Table<Transaction, string>;
-  inventory_batches!: Table<inventory_batches, string>;
+type SyncTable = typeof SYNC_TABLES[number];
 
-  // Sync management tables
-  sync_metadata!: Table<SyncMetadata, string>;
-  pending_syncs!: Table<PendingSync, string>;
+export interface SyncResult {
+  success: boolean;
+  errors: string[];
+  synced: {
+    uploaded: number;
+    downloaded: number;
+  };
+  conflicts: number;
+}
 
-  constructor() {
-    super('POSDatabase');
+export class SyncService {
+  private isRunning = false;
+  private lastSyncAttempt: Date | null = null;
+  private validationCache: {
+    products: Set<string>;
+    suppliers: Set<string>;
+    users: Set<string>;
+    lastUpdated: Date | null;
+    storeId: string | null;
+  } = {
+    products: new Set(),
+    suppliers: new Set(), 
+    users: new Set(),
+    lastUpdated: null,
+    storeId: null
+  };
+
+  /**
+   * Refresh validation cache for foreign key validation
+   */
+  private async refreshValidationCache(storeId: string) {
+    const cacheAge = this.validationCache.lastUpdated 
+      ? Date.now() - this.validationCache.lastUpdated.getTime() 
+      : Infinity;
     
-    this.version(8).stores({
-      // Core tables with enhanced indexing to match database schema
-      // Tables WITH updated_at: products, suppliers, customers
-      products: 'id, store_id, name, category, updated_at',
-      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
-      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
+    // Cache is valid for 5 minutes and same store
+    if (cacheAge < 300000 && this.validationCache.storeId === storeId) {
+      return;
+    }
 
-      // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
-      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
-      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id and created_by indexes
-      transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
-      inventory_batches: 'id, store_id, supplier_id, received_at, created_by',
-  
-      // Sync management
-      sync_metadata: 'id, table_name, last_synced_at',
-      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count'
-    });
+    try {
+      const [productsResult, suppliersResult, usersResult] = await Promise.all([
+        supabase.from('products').select('id').eq('store_id', storeId),
+        supabase.from('suppliers').select('id').eq('store_id', storeId),
+        supabase.from('users').select('id').eq('store_id', storeId)
+      ]);
 
-    // Migration for version 5 - update existing records to match new schema
-    this.version(5).upgrade(trans => {
-      // Update suppliers to ensure type field exists
-      trans.table('suppliers').toCollection().modify(supplier => {
-        if (!supplier.type) {
-          supplier.type = 'commission'; // Default to commission for existing suppliers
-        }
-        if (supplier.lb_balance === undefined || supplier.lb_balance === null) {
-          supplier.lb_balance = 0; // Default balance for existing suppliers
-        }
-        if (supplier.usd_balance === undefined || supplier.usd_balance === null) {
-          supplier.usd_balance = 0; // Default balance for existing suppliers
-        }
-      });
-
-      // Update customers to ensure balance field exists  
-      trans.table('customers').toCollection().modify(customer => {
-        if (customer.lb_balance === undefined || customer.lb_balance === null) {
-          customer.lb_balance = 0; // Default balance for existing customers
-        }
-        if (customer.usd_balance === undefined || customer.usd_balance === null) {
-          customer.usd_balance = 0; // Default balance for existing customers
-        }
-      });
-
-      // Update sale_items to ensure all required fields exist
-      trans.table('sale_items').toCollection().modify(saleItem => {
-        if (!saleItem.inventory_item_id) {
-          saleItem.inventory_item_id = ''; // Default empty string for missing inventory_item_id
-        }
-        if (saleItem.received_value === undefined || saleItem.received_value === null) {
-          saleItem.received_value = saleItem.total_price || 0; // Migrate from total_price to received_value
-        }
-        if (!saleItem.customer_id) {
-          saleItem.customer_id = null; // Default null for customer_id
-        }
-        if (!saleItem.created_by) {
-          saleItem.created_by = ''; // Default empty string for created_by
-        }
-        if (!saleItem.payment_method) {
-          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
-        }
-      });
-
-      // Update inventory_items to ensure received_quantity exists
-      trans.table('inventory_items').toCollection().modify(inventoryItem => {
-        if (inventoryItem.received_quantity === undefined || inventoryItem.received_quantity === null) {
-          inventoryItem.received_quantity = inventoryItem.quantity || 0; // Default to quantity value
-        }
-      });
-    });
-
-    // Migration for version 6 - add payment_method to sale_items
-    this.version(6).upgrade(trans => {
-      // Update sale_items to ensure payment_method field exists
-      trans.table('sale_items').toCollection().modify(saleItem => {
-        if (!saleItem.payment_method) {
-          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
-        }
-      });
-    });
-
-    // Migration for version 7 - remove sales table (no longer needed)
-    this.version(7).upgrade(trans => {
-      // The sales table will be automatically removed from the schema
-      // Any existing sales data will be lost, but this matches the backend schema
-      console.log('Removing sales table to match backend schema');
-    });
-
-    // Add hooks for automatic timestamping and ID generation
-    // Tables WITH updated_at: products, suppliers, customers
-    this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
-
-    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_batches
-    this.inventory_items.hook('creating', this.addCreateFields);
-    this.sale_items.hook('creating', this.addCreateFields);
-    this.transactions.hook('creating', this.addCreateFields);
-    this.inventory_batches.hook('creating', this.addCreateFields);
-
-    // Only add update hooks for tables that have updated_at
-    this.products.hook('updating', this.addUpdateFields);
-    this.suppliers.hook('updating', this.addUpdateFields);
-    this.customers.hook('updating', this.addUpdateFields);
-  }
-
-  private addCreateFields = (primKey: any, obj: any, trans: any) => {
-    const now = new Date().toISOString();
-    if (!obj.id) obj.id = uuidv4();
-    if (!obj.created_at) obj.created_at = now;
-    if (obj._synced === undefined) obj._synced = false;
-  };
-
-  private addCreateFieldsWithUpdatedAt = (primKey: any, obj: any, trans: any) => {
-    const now = new Date().toISOString();
-    if (!obj.id) obj.id = uuidv4();
-    if (!obj.created_at) obj.created_at = now;
-    if (obj.updated_at === undefined) obj.updated_at = now;
-    if (obj._synced === undefined) obj._synced = false;
-  };
-
-  private addUpdateFields = (modifications: any, primKey: any, obj: any, trans: any) => {
-    modifications.updated_at = new Date().toISOString();
-    if (modifications._synced === undefined) modifications._synced = false;
-  };
-
-  // Utility methods for sync management
-  async markAsSynced(tableName: string, recordId: string) {
-    const table = (this as any)[tableName];
-    if (table) {
-      await table.update(recordId, { 
-        _synced: true, 
-        _lastSyncedAt: new Date().toISOString() 
-      });
+      this.validationCache.products = new Set(productsResult.data?.map(p => p.id) || []);
+      this.validationCache.suppliers = new Set(suppliersResult.data?.map(s => s.id) || []);
+      this.validationCache.users = new Set(usersResult.data?.map(u => u.id) || []);
+      this.validationCache.lastUpdated = new Date();
+      this.validationCache.storeId = storeId;
+    } catch (error) {
+      console.warn('Failed to refresh validation cache:', error);
     }
   }
 
-  async getUnsyncedRecords(tableName: string) {
-    const table = (this as any)[tableName];
-    if (table) {
-      return await table.filter((record: any) => record._synced === false).toArray();
+  /**
+   * Main sync function - performs bi-directional sync
+   */
+  async sync(storeId: string): Promise<SyncResult> {
+    if (this.isRunning) {
+      throw new Error('Sync already in progress');
     }
-    return [];
+
+    this.isRunning = true;
+    this.lastSyncAttempt = new Date();
+
+    const result: SyncResult = {
+      success: true,
+      errors: [],
+      synced: { uploaded: 0, downloaded: 0 },
+      conflicts: 0
+    };
+
+    try {
+      // Check connectivity
+      const { error: connectionError } = await supabase.from('products').select('id').limit(1);
+      if (connectionError) {
+        throw new Error(`Connection failed: ${connectionError.message}`);
+      }
+
+      // 1. Upload local changes to Supabase
+      const uploadResult = await this.uploadLocalChanges(storeId);
+      result.synced.uploaded = uploadResult.uploaded;
+      result.errors.push(...uploadResult.errors);
+
+      // 2. Download remote changes from Supabase  
+      const downloadResult = await this.downloadRemoteChanges(storeId);
+      result.synced.downloaded = downloadResult.downloaded;
+      result.conflicts += downloadResult.conflicts;
+      result.errors.push(...downloadResult.errors);
+
+      // 3. Process pending sync operations
+      await this.processPendingSyncs();
+
+      result.success = result.errors.length === 0;
+
+    } catch (error) {
+      result.success = false;
+      result.errors.push(error instanceof Error ? error.message : 'Unknown sync error');
+    } finally {
+      this.isRunning = false;
+    }
+
+    return result;
   }
 
-  async softDelete(tableName: string, recordId: string) {
-    const table = (this as any)[tableName];
-    if (table) {
-      await table.update(recordId, { 
-        _deleted: true, 
-        _synced: false,
-        updated_at: new Date().toISOString()
+  /**
+   * Upload local unsynced changes to Supabase
+   */
+  private async uploadLocalChanges(storeId: string) {
+    const result = { uploaded: 0, errors: [] as string[] };
+
+    for (const tableName of SYNC_TABLES) {
+      try {
+        const unsyncedRecords = await db.getUnsyncedRecords(tableName);
+        
+        if (unsyncedRecords.length === 0) continue;
+
+                 // Filter out deleted records for separate handling
+         let activeRecords = unsyncedRecords.filter((r: any) => !r._deleted);
+         const deletedRecords = unsyncedRecords.filter((r: any) => r._deleted);
+
+         // Additional validation for inventory_items
+         if (tableName === 'inventory_items') {
+           const validRecords = [];
+           const invalidRecords = [];
+           
+           // Use cached validation data to avoid repeated queries
+           await this.refreshValidationCache(storeId);
+           const validProductIds = this.validationCache.products;
+           const validSupplierIds = this.validationCache.suppliers;
+           const validUserIds = this.validationCache.users;
+           
+           for (const record of activeRecords) {
+             // Check quantity constraint
+             if (record.quantity < 0) {
+               // Allow quantity = 0 to preserve historical inventory entries
+               invalidRecords.push({ record, reason: 'quantity < 0' });
+               continue;
+             }
+             
+             // Check foreign key constraints
+             if (!validProductIds.has(record.product_id)) {
+               invalidRecords.push({ record, reason: `invalid product_id: ${record.product_id}` });
+               continue;
+             }
+             
+             if (!validSupplierIds.has(record.supplier_id)) {
+               invalidRecords.push({ record, reason: `invalid supplier_id: ${record.supplier_id}` });
+               continue;
+             }
+             
+             if (!validUserIds.has(record.received_by)) {
+               invalidRecords.push({ record, reason: `invalid received_by: ${record.received_by}` });
+               continue;
+             }
+             
+             validRecords.push(record);
+           }
+           
+           // Delete invalid inventory items locally and remove from sync queue
+           for (const invalid of invalidRecords) {
+             console.warn(`🚫 Removing invalid inventory item: ${invalid.reason}`, invalid.record);
+             await db.inventory_items.delete(invalid.record.id);
+           }
+           
+           activeRecords = validRecords;
+           
+           if (invalidRecords.length > 0) {
+             console.log(`🧹 Cleaned ${invalidRecords.length} invalid inventory items (quantity/FK violations)`);
+           }
+         }
+
+         // Upload active records in batches
+         for (let i = 0; i < activeRecords.length; i += SYNC_CONFIG.batchSize) {
+           const batch = activeRecords.slice(i, i + SYNC_CONFIG.batchSize);
+           const cleanedBatch = batch.map((record: any) => this.cleanRecordForUpload(record));
+
+          const { error, data } = await supabase
+            .from(tableName as any)
+            .upsert(cleanedBatch, { onConflict: 'id' });
+
+          if (error) {
+            console.error(`❌ Upload failed for ${tableName}:`, error);
+            console.error('📋 Failed batch data:', cleanedBatch); 
+            console.error('🔍 First record fields:', Object.keys(cleanedBatch[0] || {}));
+            result.errors.push(`Upload failed for ${tableName}: ${error.message}`);
+            
+            // For 409 conflicts, try individual uploads to identify problematic records
+            if (error.code === '23503' || error.message.includes('foreign key') || error.message.includes('violates')) {
+              console.log(`🔍 Attempting individual uploads to identify problem records...`);
+              for (const record of cleanedBatch) {
+                try {
+                  const { error: individualError } = await supabase
+                    .from(tableName as any)
+                    .upsert([record], { onConflict: 'id' });
+                  
+                                     if (individualError) {
+                     console.error(`❌ Individual record failed:`, record, individualError);
+                     // Mark this record as problematic
+                     await db.addPendingSync(tableName, record.id, 'update', record);
+                   } else {
+                    // Mark successful individual record as synced
+                    await db.markAsSynced(tableName, record.id);
+                  }
+                } catch (e) {
+                  console.error(`❌ Critical error with record:`, record, e);
+                }
+              }
+            }
+          } else {
+                         // Mark records as synced
+             for (const record of batch as any[]) {
+               await db.markAsSynced(tableName, record.id);
+             }
+            result.uploaded += batch.length;
+          }
+        }
+
+                 // Handle deleted records
+         for (const record of deletedRecords as any[]) {
+          try {
+            const { error } = await supabase
+              .from(tableName as any)
+              .delete()
+              .eq('id', record.id);
+
+            if (error) {
+              result.errors.push(`Delete failed for ${tableName}/${record.id}: ${error.message}`);
+            } else {
+              // Actually delete from local DB
+              const table = (db as any)[tableName];
+              await table.delete(record.id);
+              result.uploaded++;
+            }
+          } catch (error) {
+            result.errors.push(`Delete error for ${tableName}/${record.id}: ${error}`);
+          }
+        }
+
+      } catch (error) {
+        result.errors.push(`Table ${tableName} upload error: ${error}`);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Download remote changes from Supabase
+   */
+  private async downloadRemoteChanges(storeId: string) {
+    const result = { downloaded: 0, conflicts: 0, errors: [] as string[] };
+
+    for (const tableName of SYNC_TABLES) {
+      try {
+        const syncMetadata = await db.getSyncMetadata(tableName);
+        let lastSyncAt = syncMetadata?.last_synced_at || '1970-01-01T00:00:00.000Z';
+        
+        // Validate the timestamp format
+        if (lastSyncAt && isNaN(Date.parse(lastSyncAt))) {
+          console.warn(`Invalid lastSyncAt for ${tableName}: ${lastSyncAt}, using default`);
+          lastSyncAt = '1970-01-01T00:00:00.000Z';
+        }
+
+        // Determine the timestamp field for each table
+            // Only these tables have updated_at: products, suppliers, customers
+    const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
+        const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
+
+        // Get remote changes since last sync
+        let query = supabase.from(tableName as any).select('*');
+        
+        // Add store_id filter for tables that have it (all except sale_items)
+        if (tableName !== 'sale_items') {
+          query = query.eq('store_id', storeId);
+        }
+        
+        const { data: remoteRecords, error } = await query
+          .gt(timestampField, lastSyncAt)
+          .order(timestampField, { ascending: true });
+
+        if (error) {
+          result.errors.push(`Download failed for ${tableName}: ${error.message}`);
+          continue;
+        }
+
+        if (!remoteRecords || remoteRecords.length === 0) continue;
+
+        // Process each remote record
+        for (const remoteRecord of remoteRecords) {
+          try {
+            const localRecord = await (db as any)[tableName].get(remoteRecord.id);
+            
+            if (!localRecord) {
+              // New record - just insert
+              await (db as any)[tableName].put({
+                ...remoteRecord,
+                _synced: true,
+                _lastSyncedAt: new Date().toISOString()
+              });
+              result.downloaded++;
+            } else {
+              // Existing record - check for conflicts
+              const conflict = await this.resolveConflict(tableName, localRecord, remoteRecord);
+              if (conflict) {
+                result.conflicts++;
+              } else {
+                result.downloaded++;
+              }
+            }
+          } catch (error) {
+            result.errors.push(`Record process error ${tableName}/${remoteRecord.id}: ${error}`);
+          }
+        }
+
+        // Update sync metadata
+        const latestRecord = remoteRecords[remoteRecords.length - 1];
+        const latestTimestamp = latestRecord?.[timestampField] || new Date().toISOString();
+        await db.updateSyncMetadata(tableName, latestTimestamp);
+
+      } catch (error) {
+        result.errors.push(`Table ${tableName} download error: ${error}`);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Resolve conflicts between local and remote records
+   */
+  private async resolveConflict(tableName: string, localRecord: any, remoteRecord: any): Promise<boolean> {
+    // If local record is not modified (synced), use remote version
+    if (localRecord._synced) {
+      await (db as any)[tableName].put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+      return false; // No conflict
+    }
+
+    // Determine the timestamp field for this table
+    // Only these tables have updated_at: products, suppliers, customers
+    const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
+    const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
+
+    // If local record is modified, apply conflict resolution strategy
+    const localModifiedAt = new Date(localRecord[timestampField] || localRecord.created_at);
+    const remoteModifiedAt = new Date(remoteRecord[timestampField] || remoteRecord.created_at);
+
+    // Strategy: Last write wins (server preference)
+    if (remoteModifiedAt >= localModifiedAt) {
+      // Keep remote version, mark local changes as pending sync
+      await db.addPendingSync(tableName, localRecord.id, 'update', localRecord);
+      
+      await (db as any)[tableName].put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    } else {
+      // Keep local version, it will be uploaded in next sync
+      // Just update the sync metadata
+      await (db as any)[tableName].update(localRecord.id, {
+        _lastSyncedAt: new Date().toISOString()
       });
     }
+
+    return true; // Conflict occurred
   }
 
-  async addPendingSync(tableName: string, recordId: string, operation: 'create' | 'update' | 'delete', payload: any) {
-    await this.pending_syncs.add({
-      id: uuidv4(),
-      table_name: tableName,
-      record_id: recordId,
-      operation,
-      payload,
-      created_at: new Date().toISOString(),
-      retry_count: 0
-    });
+  /**
+   * Process any pending sync operations
+   */
+  private async processPendingSyncs() {
+    const pendingSyncs = await db.getPendingSyncs();
+    
+    for (const pendingSync of pendingSyncs) {
+      try {
+        if (pendingSync.retry_count >= SYNC_CONFIG.maxRetries) {
+          // Max retries reached - log and remove
+          console.error(`Max retries reached for pending sync: ${pendingSync.id}`);
+          await db.removePendingSync(pendingSync.id);
+          continue;
+        }
+
+        // Attempt to process the pending sync
+        let success = false;
+        
+        switch (pendingSync.operation) {
+          case 'create':
+          case 'update':
+            const { error: upsertError } = await supabase
+              .from(pendingSync.table_name as any)
+              .upsert(this.cleanRecordForUpload(pendingSync.payload));
+            success = !upsertError;
+            break;
+            
+          case 'delete':
+            const { error: deleteError } = await supabase
+              .from(pendingSync.table_name as any)
+              .delete()
+              .eq('id', pendingSync.record_id);
+            success = !deleteError;
+            break;
+        }
+
+        if (success) {
+          await db.removePendingSync(pendingSync.id);
+        } else {
+          // Increment retry count
+          await db.pending_syncs.update(pendingSync.id, {
+            retry_count: pendingSync.retry_count + 1,
+            last_error: 'Retry failed'
+          });
+        }
+
+      } catch (error) {
+        // Update error info
+        await db.pending_syncs.update(pendingSync.id, {
+          retry_count: pendingSync.retry_count + 1,
+          last_error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
   }
 
-  async getPendingSyncs() {
-    return await this.pending_syncs.orderBy('created_at').toArray();
-  }
-
-  async removePendingSync(id: string) {
-    await this.pending_syncs.delete(id);
-  }
-
-  async updateSyncMetadata(tableName: string, lastSyncedAt: string, syncToken?: string) {
-    await this.sync_metadata.put({
-      id: tableName,
-      table_name: tableName,
-      last_synced_at: lastSyncedAt,
-      sync_token: syncToken
-    });
-  }
-
-  async getSyncMetadata(tableName: string) {
-    return await this.sync_metadata.get(tableName);
-  }
-
-    // Handle bill-related tables
-    if (tableName === 'bills') {
-      // Ensure required fields for bills
+  /**
+   * Clean record for upload by removing sync-specific fields
+   */
+  private cleanRecordForUpload(record: any) {
+    const { _synced, _lastSyncedAt, _deleted, ...cleanRecord } = record;
+    
+    // Remove updated_at for tables that don't have it in Supabase
+    // Only these tables have updated_at: products, suppliers, customers
+    const tableName = this.getTableFromRecord(record);
+    const tablesWithoutUpdatedAt = ['inventory_items', 'sale_items', 'transactions', 'inventory_batches'];
+    
+    if (tablesWithoutUpdatedAt.includes(tableName)) {
+      delete cleanRecord.updated_at;
+    }
+    
+    // Handle sale_items specific field cleanup (now keeping created_by and store_id as they're in database schema)
+    if (tableName === 'sale_items') {
+      // Ensure required fields are present and valid
+      if (!cleanRecord.inventory_item_id) {
+        cleanRecord.inventory_item_id = '';
+      }
       if (!cleanRecord.created_by) {
         cleanRecord.created_by = '';
       }
-      if (!cleanRecord.bill_number) {
-        cleanRecord.bill_number = `BILL-${Date.now()}`;
+      if (!cleanRecord.customer_id) {
+        cleanRecord.customer_id = null;
       }
-      if (!cleanRecord.payment_method) {
-        cleanRecord.payment_method = 'cash';
-      }
-      if (!cleanRecord.payment_status) {
-        cleanRecord.payment_status = 'pending';
-      }
-      if (cleanRecord.amount_paid === undefined) {
-        cleanRecord.amount_paid = 0;
-      }
-      if (cleanRecord.amount_due === undefined) {
-        cleanRecord.amount_due = cleanRecord.total_amount || 0;
+      // Keep store_id as it's now part of the database schema
+    }
+    
+    // CRITICAL: Convert LBP transaction amounts to USD before upload to avoid precision overflow
+    // Supabase numeric field has precision 10, scale 2 (max: 99,999,999.99)
+    // Only convert LBP amounts that exceed the database precision limit
+    if (tableName === 'transactions' && cleanRecord.currency === 'LBP' && cleanRecord.amount) {
+      const USD_TO_LBP_RATE = 89500;
+      const originalAmount = cleanRecord.amount;
+      
+      // Only convert if amount exceeds database precision limit
+      if (originalAmount > 99999999) {
+        cleanRecord.amount = originalAmount / USD_TO_LBP_RATE;
+        // Change currency to USD for the converted amount
+        cleanRecord.currency = 'USD';
+        // Add a note in the description about the conversion
+        cleanRecord.description = `${cleanRecord.description} (Originally ${originalAmount.toLocaleString()} LBP)`;
+        console.log(`💱 Converting large LBP transaction for upload: ${originalAmount.toLocaleString()} LBP → $${cleanRecord.amount.toFixed(2)} USD`);
       }
     }
     
-    if (tableName === 'bill_line_items') {
-      // Ensure required fields for bill line items
-      if (!cleanRecord.product_name) {
-        cleanRecord.product_name = 'Unknown Product';
-      }
-      if (!cleanRecord.supplier_name) {
-        cleanRecord.supplier_name = 'Unknown Supplier';
-      }
-      if (cleanRecord.quantity === undefined || cleanRecord.quantity <= 0) {
-        cleanRecord.quantity = 1;
-      }
-      if (cleanRecord.unit_price === undefined) {
-        cleanRecord.unit_price = 0;
-      }
-      if (cleanRecord.line_total === undefined) {
-        cleanRecord.line_total = cleanRecord.quantity * cleanRecord.unit_price;
-      }
-      if (cleanRecord.line_order === undefined) {
-        cleanRecord.line_order = 1;
-      }
-    }
-    
-    if (tableName === 'bill_audit_logs') {
-      // Ensure required fields for bill audit logs
-      if (!cleanRecord.changed_by) {
-        cleanRecord.changed_by = '';
-      }
-      if (!cleanRecord.action) {
-        cleanRecord.action = 'updated';
-      }
-    }
+    return cleanRecord;
+  }
 
+  /**
+   * Helper to determine table name from record structure
+   */
   private getTableFromRecord(record: any): string {
     // Simple heuristic based on record properties
     if (record.product_id && record.supplier_id && record.received_at) return 'inventory_items';
     if (record.inventory_item_id && record.product_id && record.supplier_id) return 'sale_items';
-    if (record.bill_number && record.total_amount !== undefined) return 'bills';
-    if (record.bill_id && record.product_id && record.line_total !== undefined) return 'bill_line_items';
-    if (record.bill_id && record.action && record.changed_by) return 'bill_audit_logs';
+    if (record.customer_id !== undefined && record.subtotal !== undefined) return 'sale_items'; // Assuming 'sale_items' for sales
     if (record.type && record.amount && record.currency) return 'transactions';
     if (record.category && !record.amount) return 'products';
     // Updated supplier detection to handle new type field and distinguish from transactions
@@ -427,100 +526,144 @@ class POSDatabase extends Dexie {
     return 'unknown';
   }
 
-  async cleanupInvalidInventoryItems(): Promise<number> {
-    // Keep inventory items with quantity = 0 for Received Bills history.
-    // Only remove truly invalid rows (negative quantities).
-    const invalidItems = await this.inventory_items.filter(item => item.quantity < 0).toArray();
-    
-    if (invalidItems.length > 0) {
-      await this.inventory_items.bulkDelete(invalidItems.map(item => item.id));
-      console.log(`🧹 Cleaned up ${invalidItems.length} invalid inventory items (negative quantity)`);
-    }
-    
-    return invalidItems.length;
+  /**
+   * Check if sync is currently running
+   */
+  isCurrentlyRunning(): boolean {
+    return this.isRunning;
   }
 
-  async validateDataIntegrity(storeId: string): Promise<{
-    orphanedInventory: any[];
-    orphanedSaleItems: any[];
-    orphanedTransactions: any[];
-  }> {
-    console.log('🔍 Validating data integrity...');
-    
-    // Get all data
-    const products = await this.products.where('store_id').equals(storeId).toArray();
-    const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
-    const customers = await this.customers.where('store_id').equals(storeId).toArray();
-    const inventory = await this.inventory_items.where('store_id').equals(storeId).toArray();
-    const saleItems = await this.sale_items.toArray();
-    const transactions = await this.transactions.where('store_id').equals(storeId).toArray();
-    
-    const productIds = new Set(products.map(p => p.id));
-    const supplierIds = new Set(suppliers.map(s => s.id));
-    const customerIds = new Set(customers.map(c => c.id));
-    
-    // Find orphaned records
-    const orphanedInventory = inventory.filter(item => 
-      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
-    );
-    
-    const orphanedSaleItems = saleItems.filter(item => 
-      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
-    );
-    
-    const orphanedTransactions = transactions.filter(transaction => 
-      // Add any transaction-specific validations here
-      false
-    );
-    
-    console.log('📊 Data integrity report:', {
-      orphanedInventory: orphanedInventory.length,
-      orphanedSaleItems: orphanedSaleItems.length,
-      orphanedTransactions: orphanedTransactions.length
-    });
-    
-    return {
-      orphanedInventory,
-      orphanedSaleItems,
-      orphanedTransactions
+  /**
+   * Get last sync attempt timestamp
+   */
+  getLastSyncAttempt(): Date | null {
+    return this.lastSyncAttempt;
+  }
+
+  /**
+   * Force sync specific table
+   */
+  async syncTable(storeId: string, tableName: SyncTable): Promise<SyncResult> {
+    const result: SyncResult = {
+      success: true,
+      errors: [],
+      synced: { uploaded: 0, downloaded: 0 },
+      conflicts: 0
     };
+
+    try {
+      // Upload unsynced records
+      const unsyncedRecords = await db.getUnsyncedRecords(tableName);
+      if (unsyncedRecords.length > 0) {
+        const cleanedRecords = (unsyncedRecords as any[]).map((record: any) => this.cleanRecordForUpload(record));
+        const { error } = await supabase
+          .from(tableName as any)
+          .upsert(cleanedRecords, { onConflict: 'id' });
+
+        if (error) {
+          result.errors.push(`Upload failed: ${error.message}`);
+        } else {
+          for (const record of unsyncedRecords as any[]) {
+            await db.markAsSynced(tableName, record.id);
+          }
+          result.synced.uploaded = unsyncedRecords.length;
+        }
+      }
+
+      // Download latest data
+      const { data: remoteRecords, error } = await supabase
+        .from(tableName as any)
+        .select('*')
+        .eq('store_id', storeId);
+
+      if (error) {
+        result.errors.push(`Download failed: ${error.message}`);
+      } else if (remoteRecords) {
+        for (const record of remoteRecords as any[]) {
+          await (db as any)[tableName].put({
+            ...record,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        }
+        result.synced.downloaded = remoteRecords.length;
+      }
+
+      result.success = result.errors.length === 0;
+
+    } catch (error) {
+      result.success = false;
+      result.errors.push(error instanceof Error ? error.message : 'Unknown error');
+    }
+
+    return result;
   }
 
-  async cleanupOrphanedRecords(storeId: string): Promise<number> {
-    const integrity = await this.validateDataIntegrity(storeId);
-    let cleaned = 0;
-    
-    // Clean up orphaned inventory items
-    if (integrity.orphanedInventory.length > 0) {
-      await this.inventory_items.bulkDelete(integrity.orphanedInventory.map(item => item.id));
-      cleaned += integrity.orphanedInventory.length;
-      console.log(`🗑️ Removed ${integrity.orphanedInventory.length} orphaned inventory items`);
+  /**
+   * Clear all local data and re-sync from server
+   */
+  async fullResync(storeId: string): Promise<SyncResult> {
+    const result: SyncResult = {
+      success: true,
+      errors: [],
+      synced: { uploaded: 0, downloaded: 0 },
+      conflicts: 0
+    };
+
+    try {
+      // Clear all local data
+      await db.transaction('rw', db.tables, async () => {
+        for (const tableName of SYNC_TABLES) {
+          await (db as any)[tableName].clear();
+        }
+        await db.sync_metadata.clear();
+        await db.pending_syncs.clear();
+      });
+
+      // Download all data from server
+      for (const tableName of SYNC_TABLES) {
+        const { data: remoteRecords, error } = await supabase
+          .from(tableName as any)
+          .select('*')
+          .eq('store_id', storeId);
+
+        if (error) {
+          result.errors.push(`Download failed for ${tableName}: ${error.message}`);
+        } else if (remoteRecords) {
+          const recordsWithSync = remoteRecords.map(record => ({
+            ...record,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          }));
+          
+          await (db as any)[tableName].bulkPut(recordsWithSync);
+          result.synced.downloaded += remoteRecords.length;
+        }
+      }
+
+      result.success = result.errors.length === 0;
+
+    } catch (error) {
+      result.success = false;
+      result.errors.push(error instanceof Error ? error.message : 'Full resync failed');
     }
-    
-    // Clean up orphaned sale items
-    if (integrity.orphanedSaleItems.length > 0) {
-      await this.sale_items.bulkDelete(integrity.orphanedSaleItems.map(item => item.id));
-      cleaned += integrity.orphanedSaleItems.length;
-      console.log(`🗑️ Removed ${integrity.orphanedSaleItems.length} orphaned sale items`);
-    }
-    
-    return cleaned;
+
+    return result;
   }
 }
 
-export const db = new POSDatabase();
+// Export singleton instance
+export const syncService = new SyncService();
 
-// Export utility functions
-export const createId = () => uuidv4();
+// Legacy functions for backward compatibility
+export async function syncWithSupabase(storeId: string): Promise<SyncResult> {
+  return syncService.sync(storeId);
+}
 
-export const createBaseEntity = (storeId: string, data: Partial<BaseEntity> = {}): Partial<BaseEntity> => {
-  const now = new Date().toISOString();
-  return {
-    id: createId(),
-    store_id: storeId,
-    created_at: now,
-    updated_at: now,
-    _synced: false,
-    ...data
-  };
-};
+export function getLastSyncedAt(): string | null {
+  return localStorage.getItem('last_synced_at');
+}
+
+export function setLastSyncedAt(ts: string) {
+  localStorage.setItem('last_synced_at', ts);
+} 

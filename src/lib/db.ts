@@ -125,51 +125,6 @@ export interface JournalEntry extends BaseEntity {
   total_credit: number;
   created_by: string;
 }
-
-export interface Bill extends BaseEntity {
-  bill_number: string;
-  customer_id: string | null;
-  customer_name: string | null;
-  subtotal: number;
-  total_amount: number;
-  payment_method: 'cash' | 'card' | 'credit';
-  payment_status: 'paid' | 'partial' | 'pending';
-  amount_paid: number;
-  amount_due: number;
-  bill_date: string;
-  notes: string | null;
-  status: 'active' | 'cancelled' | 'refunded';
-  created_by: string;
-  last_modified_by: string | null;
-  last_modified_at: string | null;
-}
-
-export interface BillLineItem extends BaseEntity {
-  bill_id: string;
-  product_id: string;
-  product_name: string;
-  supplier_id: string;
-  supplier_name: string;
-  inventory_item_id: string | null;
-  quantity: number;
-  unit_price: number;
-  line_total: number;
-  weight: number | null;
-  notes: string | null;
-  line_order: number;
-}
-
-export interface BillAuditLog extends Omit<BaseEntity, 'updated_at'> {
-  bill_id: string;
-  action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
-  field_changed: string | null;
-  old_value: string | null;
-  new_value: string | null;
-  change_reason: string | null;
-  changed_by: string;
-  ip_address: string | null;
-}
-
 export interface inventory_batches extends BaseEntity {
   id: string;
   supplier_id: string;
@@ -195,11 +150,6 @@ class POSDatabase extends Dexie {
   sync_metadata!: Table<SyncMetadata, string>;
   pending_syncs!: Table<PendingSync, string>;
 
-  // Bill management tables
-  bills!: Table<Bill, string>;
-  bill_line_items!: Table<BillLineItem, string>;
-  bill_audit_logs!: Table<BillAuditLog, string>;
-
   constructor() {
     super('POSDatabase');
     
@@ -218,12 +168,7 @@ class POSDatabase extends Dexie {
   
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
-      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
-
-      // Bill management
-      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_at',
-      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, line_order, created_at',
-      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at'
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count'
     });
 
     // Migration for version 5 - update existing records to match new schema
@@ -300,9 +245,6 @@ class POSDatabase extends Dexie {
     this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.bills.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.bill_line_items.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.bill_audit_logs.hook('creating', this.addCreateFields);
 
     // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_batches
     this.inventory_items.hook('creating', this.addCreateFields);
@@ -314,8 +256,6 @@ class POSDatabase extends Dexie {
     this.products.hook('updating', this.addUpdateFields);
     this.suppliers.hook('updating', this.addUpdateFields);
     this.customers.hook('updating', this.addUpdateFields);
-    this.bills.hook('updating', this.addUpdateFields);
-    this.bill_line_items.hook('updating', this.addUpdateFields);
   }
 
   private addCreateFields = (primKey: any, obj: any, trans: any) => {
