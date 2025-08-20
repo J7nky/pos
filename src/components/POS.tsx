@@ -114,26 +114,26 @@ export default function POS() {
 
   // Initialize with first tab if no tabs exist
   React.useEffect(() => {
+    const createNewTab = () => {
+      const newTab: BillTab = {
+        id: uuidv4(),
+        name: `Bill ${activeTabs.length + 1}`,
+        cart: [],
+        selectedCustomer: '',
+        paymentMethod: 'cash',
+        amountReceived: '',
+        notes: '',
+        createdAt: new Date().toISOString()
+      };
+      const updatedTabs = [...activeTabs, newTab];
+      setActiveTabs(updatedTabs);
+      setActiveTabId(newTab.id);
+    };
+
     if (activeTabs.length === 0) {
       createNewTab();
     }
   }, []);
-
-  const createNewTab = () => {
-    const newTab: BillTab = {
-      id: uuidv4(),
-      name: `Bill ${activeTabs.length + 1}`,
-      cart: [],
-      selectedCustomer: '',
-      paymentMethod: 'cash',
-      amountReceived: '',
-      notes: '',
-      createdAt: new Date().toISOString()
-    };
-    const updatedTabs = [...activeTabs, newTab];
-    setActiveTabs(updatedTabs);
-    setActiveTabId(newTab.id);
-  };
 
   const closeTab = (tabId: string) => {
     const updatedTabs = activeTabs.filter(tab => tab.id !== tabId);

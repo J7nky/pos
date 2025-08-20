@@ -1071,7 +1071,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         received_quantity: it.received_quantity ?? it.quantity,
         batch_id: batchId as string | null
       }));
-
+      for (const saleItem of items) {
       await db.inventory_items.bulkAdd(mappedItems);
     });
 
@@ -1169,13 +1169,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                 _synced: false
               });
             } else {
-              // Update with new quantity
-              await db.inventory_items.update(inv.id, { 
+        if (saleItem.quantity && saleItem.quantity > 0) {
+          if (saleItem.inventoryItemId) {
                 quantity: newQuantity,
-                _synced: false
+            await deductSpecificInventoryQuantity(saleItem.inventoryItemId, saleItem.quantity);
               });
             }
-            qtyToDeduct -= deduct;
+            await deductInventoryQuantity(saleItem.productId, saleItem.supplierId, saleItem.quantity);
           }
         }
       }

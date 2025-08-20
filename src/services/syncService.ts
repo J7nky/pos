@@ -629,6 +629,11 @@ export class SyncService {
     // Handle bill-related tables
     if (tableName === 'bills') {
       // Ensure required fields for bills
+      // Remove fields that don't exist in Supabase schema
+      delete cleanRecord.tax_amount;
+      delete cleanRecord.discount_amount;
+      delete cleanRecord.inventory_item_id;
+      
       if (!cleanRecord.created_by) {
         cleanRecord.created_by = '';
       }
@@ -639,6 +644,10 @@ export class SyncService {
     
     if (tableName === 'bill_line_items') {
       // Ensure required fields for bill line items
+      // Remove fields that don't exist in Supabase schema
+      delete cleanRecord.created_by;
+      delete cleanRecord.customer_id;
+      
       if (!cleanRecord.product_name) {
         cleanRecord.product_name = 'Unknown Product';
       }
@@ -649,6 +658,10 @@ export class SyncService {
     
     if (tableName === 'bill_audit_logs') {
       // Ensure required fields for bill audit logs
+      // Remove fields that don't exist in Supabase schema
+      delete cleanRecord.ip_address;
+      delete cleanRecord.user_agent;
+      
       if (!cleanRecord.changed_by) {
         cleanRecord.changed_by = '';
       }
