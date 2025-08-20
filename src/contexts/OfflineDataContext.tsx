@@ -563,6 +563,24 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       ...item
     }));
 
+    // Try to create in Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        const supabaseBill = await SupabaseService.createBill(bill, mappedLineItems);
+        if (supabaseBill) {
+          // Update local bill with Supabase ID and mark as synced
+          bill.id = supabaseBill.id;
+          bill._synced = true;
+          mappedLineItems.forEach(item => {
+            item._synced = true;
+          });
+        }
+      } catch (error) {
+        console.warn('Failed to create bill in Supabase, falling back to local only:', error);
+      }
+    }
+
     await db.transaction('rw', [db.bills, db.bill_line_items], async () => {
       await db.bills.add(bill);
       if (mappedLineItems.length > 0) {
@@ -582,11 +600,36 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const now = new Date().toISOString();
     
+    // Try to update in Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        await SupabaseService.updateBill(billId, updates);
+        
+        // Create audit log in Supabase
+        const auditLog = {
+          bill_id: billId,
+          store_id: storeId,
+          action: 'update',
+          changed_by: changedBy,
+          change_reason: changeReason || null,
+          field_changed: Object.keys(updates).join(', '),
+          old_value: null,
+          new_value: JSON.stringify(updates),
+          created_at: now
+        };
+        
+        await SupabaseService.createBillAuditLog(auditLog);
+      } catch (error) {
+        console.warn('Failed to update bill in Supabase, falling back to local only:', error);
+      }
+    }
+    
     await db.transaction('rw', [db.bills, db.bill_audit_logs], async () => {
       await db.bills.update(billId, {
         ...updates,
         updated_at: now,
-        _synced: false
+        _synced: isOnline // Mark as synced if we successfully updated in Supabase
       });
 
       // Create audit log
@@ -594,12 +637,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         id: createId(),
         bill_id: billId,
         store_id: storeId,
-        action: 'update',
+        action: 'update' as const,
         changed_by: changedBy,
         change_reason: changeReason || null,
-        changes: JSON.stringify(updates),
+        field_changed: 'multiple_fields',
+        old_value: null,
+        new_value: JSON.stringify(updates),
+        ip_address: null,
         created_at: now,
-        _synced: false
+        updated_at: now,
+        _synced: isOnline // Mark as synced if we successfully updated in Supabase
       };
       
       await db.bill_audit_logs.add(auditLog);
@@ -615,13 +662,38 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const now = new Date().toISOString();
 
+    // Try to delete in Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        await SupabaseService.deleteBill(billId, softDelete);
+        
+        // Create audit log in Supabase
+        const auditLog = {
+          bill_id: billId,
+          store_id: storeId,
+          action: 'delete',
+          changed_by: deletedBy,
+          change_reason: deleteReason || null,
+          field_changed: 'status',
+          old_value: 'active',
+          new_value: softDelete ? 'cancelled' : 'deleted',
+          created_at: now
+        };
+        
+        await SupabaseService.createBillAuditLog(auditLog);
+      } catch (error) {
+        console.warn('Failed to delete bill in Supabase, falling back to local only:', error);
+      }
+    }
+
     await db.transaction('rw', [db.bills, db.bill_line_items, db.bill_audit_logs], async () => {
       if (softDelete) {
         // Soft delete - mark as deleted
         await db.bills.update(billId, {
           _deleted: true,
           updated_at: now,
-          _synced: false
+          _synced: isOnline // Mark as synced if we successfully deleted in Supabase
         });
         
         // Also soft delete line items
@@ -629,7 +701,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         for (const item of lineItems) {
           await db.bill_line_items.update(item.id, {
             _deleted: true,
-            _synced: false
+            _synced: isOnline // Mark as synced if we successfully deleted in Supabase
           });
         }
       } else {
@@ -648,7 +720,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         change_reason: deleteReason || null,
         changes: JSON.stringify({ deleted: true, soft_delete: softDelete }),
         created_at: now,
-        _synced: false
+        _synced: isOnline // Mark as synced if we successfully deleted in Supabase
       };
       
       await db.bill_audit_logs.add(auditLog);
@@ -661,6 +733,36 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const getBills = async (filters?: any): Promise<any[]> => {
     if (!storeId) return [];
+
+    // Try to get bills from Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        const supabaseBills = await SupabaseService.getBills(storeId, filters);
+        
+        if (supabaseBills && supabaseBills.length > 0) {
+          // Store Supabase bills in local database for offline access
+          for (const supabaseBill of supabaseBills) {
+            const existingBill = await db.bills.get(supabaseBill.id);
+            if (!existingBill) {
+              // Add new bill from Supabase
+              await db.bills.add({
+                ...supabaseBill,
+                _synced: true
+              });
+            } else if (existingBill.updated_at !== supabaseBill.updated_at) {
+              // Update existing bill with Supabase data
+              await db.bills.update(supabaseBill.id, {
+                ...supabaseBill,
+                _synced: true
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to get bills from Supabase, using local data:', error);
+      }
+    }
 
     let query = db.bills.where('store_id').equals(storeId).filter(bill => !bill._deleted);
     
@@ -703,6 +805,60 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const getBillDetails = async (billId: string): Promise<any | null> => {
     if (!storeId) return null;
+
+    // Try to get bill details from Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        const supabaseBillDetails = await SupabaseService.getBillDetails(billId);
+        
+        if (supabaseBillDetails) {
+          // Update local bill with Supabase data
+          await db.bills.update(billId, {
+            ...supabaseBillDetails,
+            _synced: true
+          });
+          
+          // Update line items
+          if (supabaseBillDetails.bill_line_items) {
+            for (const lineItem of supabaseBillDetails.bill_line_items) {
+              const existingItem = await db.bill_line_items.get(lineItem.id);
+              if (!existingItem) {
+                await db.bill_line_items.add({
+                  ...lineItem,
+                  _synced: true
+                });
+              } else {
+                await db.bill_line_items.update(lineItem.id, {
+                  ...lineItem,
+                  _synced: true
+                });
+              }
+            }
+          }
+          
+          // Update audit logs
+          if (supabaseBillDetails.bill_audit_logs) {
+            for (const auditLog of supabaseBillDetails.bill_audit_logs) {
+              const existingLog = await db.bill_audit_logs.get(auditLog.id);
+              if (!existingLog) {
+                await db.bill_audit_logs.add({
+                  ...auditLog,
+                  _synced: true
+                });
+              } else {
+                await db.bill_audit_logs.update(auditLog.id, {
+                  ...auditLog,
+                  _synced: true
+                });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to get bill details from Supabase, using local data:', error);
+      }
+    }
 
     const bill = await db.bills.get(billId);
     if (!bill || bill._deleted) return null;

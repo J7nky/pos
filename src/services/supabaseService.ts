@@ -418,6 +418,8 @@ export class SupabaseService {
     }
   }
 
+
+
   static async getBillDetails(billId: string) {
     try {
       const { data, error } = await supabase
@@ -446,58 +448,46 @@ export class SupabaseService {
     }
   }
 
-  static async createBill(bill: {
-    store_id: string;
-    bill_number: string;
-    customer_id?: string | null;
-    customer_name?: string | null;
-    subtotal: number;
-    total_amount: number;
-    payment_method: 'cash' | 'card' | 'credit';
-    payment_status: 'paid' | 'partial' | 'pending';
-    amount_paid: number;
-    amount_due: number;
-    bill_date?: string;
-    notes?: string | null;
-    created_by: string;
-  }) {
+  static async createBill(billData: any, lineItems: any[]) {
     try {
-      const { data, error } = await supabase
+      // Start a transaction
+      const { data: bill, error: billError } = await supabase
         .from('bills')
-        .insert(bill)
+        .insert(billData)
         .select()
         .single();
-      
-      if (error) throw error;
-      return data;
+
+      if (billError) throw billError;
+
+      if (lineItems.length > 0) {
+        // Add line items with the bill ID
+        const lineItemsWithBillId = lineItems.map(item => ({
+          ...item,
+          bill_id: bill.id
+        }));
+
+        const { error: lineItemsError } = await supabase
+          .from('bill_line_items')
+          .insert(lineItemsWithBillId);
+
+        if (lineItemsError) throw lineItemsError;
+      }
+
+      return bill;
     } catch (error) {
       handleSupabaseError(error);
     }
   }
 
-  static async updateBill(billId: string, updates: {
-    customer_id?: string | null;
-    customer_name?: string | null;
-    subtotal?: number;
-    total_amount?: number;
-    payment_method?: 'cash' | 'card' | 'credit';
-    payment_status?: 'paid' | 'partial' | 'pending';
-    amount_paid?: number;
-    amount_due?: number;
-    notes?: string | null;
-    last_modified_by: string;
-  }) {
+  static async updateBill(billId: string, updates: any) {
     try {
       const { data, error } = await supabase
         .from('bills')
-        .update({
-          ...updates,
-          last_modified_at: new Date().toISOString()
-        })
+        .update(updates)
         .eq('id', billId)
         .select()
         .single();
-      
+
       if (error) throw error;
       return data;
     } catch (error) {
@@ -508,27 +498,42 @@ export class SupabaseService {
   static async deleteBill(billId: string, softDelete: boolean = true) {
     try {
       if (softDelete) {
-        const { data, error } = await supabase
+        // Soft delete - mark as cancelled
+        const { error } = await supabase
           .from('bills')
           .update({ 
             status: 'cancelled',
-            last_modified_at: new Date().toISOString()
+            updated_at: new Date().toISOString()
           })
-          .eq('id', billId)
-          .select()
-          .single();
-        
+          .eq('id', billId);
+
         if (error) throw error;
-        return data;
       } else {
+        // Hard delete - remove from database
         const { error } = await supabase
           .from('bills')
           .delete()
           .eq('id', billId);
-        
+
         if (error) throw error;
-        return true;
       }
+
+      return true;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async createBillAuditLog(auditData: any) {
+    try {
+      const { data, error } = await supabase
+        .from('bill_audit_logs')
+        .insert(auditData)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
     } catch (error) {
       handleSupabaseError(error);
     }
@@ -617,31 +622,6 @@ export class SupabaseService {
       
       if (error) throw error;
       return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async createBillAuditLog(auditLog: {
-    store_id: string;
-    bill_id: string;
-    action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
-    field_changed?: string | null;
-    old_value?: string | null;
-    new_value?: string | null;
-    change_reason?: string | null;
-    changed_by: string;
-    ip_address?: string | null;
-  }) {
-    try {
-      const { data, error } = await supabase
-        .from('bill_audit_logs')
-        .insert(auditLog)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
     } catch (error) {
       handleSupabaseError(error);
     }

@@ -59,6 +59,7 @@ interface Bill {
   updated_at: string;
   customers?: { name: string };
   users?: { name: string };
+  _synced?: boolean;
 }
 
 interface BillLineItem {
@@ -91,6 +92,7 @@ interface BillAuditLog {
 interface BillDetails extends Bill {
   bill_line_items: BillLineItem[];
   bill_audit_logs: BillAuditLog[];
+  _synced?: boolean;
 }
 
 export default function InventoryLogs() {
@@ -117,6 +119,7 @@ export default function InventoryLogs() {
   const [showPaymentForm, setShowPaymentForm] = useState<'customer' | 'supplier' | null>(null);
   const [showReceiveForm, setShowReceiveForm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -171,6 +174,8 @@ export default function InventoryLogs() {
     if (!storeId) return;
 
     setLoading(true);
+    setSyncStatus('syncing');
+    
     try {
       const filters = {
         searchTerm: searchTerm || undefined,
@@ -183,9 +188,17 @@ export default function InventoryLogs() {
 
       const data = await raw.getBills(filters);
       setBills(data || []);
+      setSyncStatus('synced');
+      
+      // Reset sync status after 3 seconds
+      setTimeout(() => setSyncStatus('idle'), 3000);
     } catch (error) {
       console.error('Error loading bills:', error);
       showToast('Failed to load bills', 'error');
+      setSyncStatus('error');
+      
+      // Reset sync status after 5 seconds
+      setTimeout(() => setSyncStatus('idle'), 5000);
     } finally {
       setLoading(false);
     }
@@ -311,7 +324,7 @@ export default function InventoryLogs() {
         }
         
         // Update supplier balance
-        const currentBalance = paymentForm.currency === 'LBP' ? supplier.lb_balance : supplier.usd_balance;
+        const currentBalance = paymentForm.currency === 'LBP' ? (supplier.lb_balance || 0) : (supplier.usd_balance || 0);
         const newBalance = Math.max(0, currentBalance - amount);
         
         await raw.updateSupplier(paymentForm.entityId, {
@@ -369,7 +382,7 @@ export default function InventoryLogs() {
         commission_rate: parseFloat(receiveForm.commissionRate),
         received_by: userProfile?.id || '',
         received_quantity: parseInt(receiveForm.quantity),
-        notes: receiveForm.notes || null
+        notes: receiveForm.notes || undefined
       });
       
       const product = products.find(p => p.id === receiveForm.productId);
@@ -446,7 +459,9 @@ export default function InventoryLogs() {
     recentInventory: inventory.slice(0, 5),
     lowStockItems: raw.stockLevels.filter(item => item.currentStock < raw.lowStockThreshold),
     customerDebt: customers.reduce((sum, c) => sum + (c.lb_balance + c.usd_balance), 0),
-    supplierDebt: suppliers.reduce((sum, s) => sum + ((s.lb_balance || 0) + (s.usd_balance || 0)), 0)
+    supplierDebt: suppliers.reduce((sum, s) => sum + ((s.lb_balance || 0) + (s.usd_balance || 0)), 0),
+    syncedBills: bills.filter(b => b._synced).length,
+    pendingSyncBills: bills.filter(b => !b._synced).length
   };
 
   if (loading) {
@@ -480,6 +495,22 @@ export default function InventoryLogs() {
         </div>
         
         <div className="flex items-center space-x-2">
+          {/* Sync Status Indicator */}
+          <div className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-gray-100">
+            <div className={`w-2 h-2 rounded-full ${
+              syncStatus === 'syncing' ? 'bg-yellow-500 animate-pulse' :
+              syncStatus === 'synced' ? 'bg-green-500' :
+              syncStatus === 'error' ? 'bg-red-500' :
+              'bg-gray-400'
+            }`} />
+            <span className="text-sm text-gray-600">
+              {syncStatus === 'syncing' ? 'Syncing...' :
+               syncStatus === 'synced' ? 'Synced' :
+               syncStatus === 'error' ? 'Sync Error' :
+               'Offline'}
+            </span>
+          </div>
+          
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`p-2 rounded-lg transition-colors ${
@@ -501,6 +532,27 @@ export default function InventoryLogs() {
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
+          </button>
+          <button
+            onClick={async () => {
+              setSyncStatus('syncing');
+              try {
+                await raw.sync();
+                setSyncStatus('synced');
+                setTimeout(() => setSyncStatus('idle'), 3000);
+                showToast('Sync completed successfully', 'success');
+              } catch (error) {
+                console.error('Sync failed:', error);
+                setSyncStatus('error');
+                setTimeout(() => setSyncStatus('idle'), 5000);
+                showToast('Sync failed', 'error');
+              }
+            }}
+            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center"
+            disabled={syncStatus === 'syncing'}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+            {syncStatus === 'syncing' ? 'Syncing...' : 'Sync'}
           </button>
         </div>
       </div>
@@ -677,9 +729,18 @@ export default function InventoryLogs() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(bill.status)}`}>
-                          {bill.status}
-                        </span>
+                        <div className="flex items-center space-x-2">
+                          <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(bill.status)}`}>
+                            {bill.status}
+                          </span>
+                          <div className="flex items-center space-x-1">
+                            {bill._synced ? (
+                              <CheckCircle className="w-3 h-3 text-green-500" />
+                            ) : (
+                              <Clock className="w-3 h-3 text-yellow-500" />
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <div className="flex items-center space-x-2">
@@ -806,6 +867,28 @@ export default function InventoryLogs() {
       {/* Analytics Tab */}
       {activeTab === 'analytics' && (
         <div className="space-y-6">
+          {/* Sync Status Overview */}
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <RefreshCw className="w-5 h-5 text-blue-500 mr-2" />
+              Sync Status
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="text-center p-4 bg-green-50 rounded-lg">
+                <div className="text-2xl font-bold text-green-600">{analytics.syncedBills}</div>
+                <div className="text-sm text-green-700">Synced Bills</div>
+              </div>
+              <div className="text-center p-4 bg-yellow-50 rounded-lg">
+                <div className="text-2xl font-bold text-yellow-600">{analytics.pendingSyncBills}</div>
+                <div className="text-sm text-yellow-700">Pending Sync</div>
+              </div>
+              <div className="text-center p-4 bg-blue-50 rounded-lg">
+                <div className="text-2xl font-bold text-blue-600">{analytics.totalBills}</div>
+                <div className="text-sm text-blue-700">Total Bills</div>
+              </div>
+            </div>
+          </div>
+
           {/* Financial Overview */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white rounded-lg shadow-sm p-6">
@@ -1107,9 +1190,18 @@ export default function InventoryLogs() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Bill Details - {selectedBill.bill_number}
-              </h2>
+              <div className="flex items-center space-x-3">
+                <h2 className="text-xl font-semibold text-gray-900">
+                  Bill Details - {selectedBill.bill_number}
+                </h2>
+                <div className="flex items-center space-x-1">
+                  {selectedBill._synced ? (
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                  ) : (
+                    <Clock className="w-5 h-5 text-yellow-500" />
+                  )}
+                </div>
+              </div>
               <button
                 onClick={() => setShowBillDetails(false)}
                 className="text-gray-400 hover:text-gray-600"
