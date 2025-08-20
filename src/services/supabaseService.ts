@@ -1,415 +1,266 @@
-import { supabase, handleSupabaseError } from '../lib/supabase';
-import { Database } from '../types/database';
+import Dexie, { Table } from 'dexie';
+import { v4 as uuidv4 } from 'uuid';
 
-type Tables = Database['public']['Tables'];
+// Base interface for all entities with sync support
+interface BaseEntity {
+  id: string;
+  store_id: string;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
 
-// Generic CRUD operations
-export class SupabaseService {
-  // Products
-  static async getProducts(storeId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('store_id', storeId)
-        .order('name');
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+// Entity interfaces matching Supabase schema exactly
+export interface Product extends BaseEntity {
+  name: string;
+  category: string;
+  image: string;
+}
 
-  static async createProduct(product: Tables['products']['Insert']) {
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .insert(product)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+export interface Supplier extends BaseEntity {
+  name: string;
+  phone: string;
+  email: string | null;
+  address: string;
+  lb_balance: number | null; // Added balance field to match Supabase schema
+  usd_balance: number | null; // Added balance field to match Supabase schema
+}
 
-  static async updateProduct(id: string, updates: Tables['products']['Update']) {
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .update({ ...updates, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+export interface  Customer extends BaseEntity {
+  name: string;
+  phone: string;
+  email: string | null;
+  address: string | null;
+  lb_balance: number; // Changed from current_debt to balance to match Supabase schema
+  usd_balance: number; // Changed from current_debt to balance to match Supabase schema
+  is_active: boolean;
+}
 
-  static async deleteProduct(id: string) {
-    try {
-      const { error } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
-      return true; // Return success indicator instead of deleted data
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
+  id: string;
+  product_id: string;
+  supplier_id: string;
+  type: string;
+  quantity: number;
+  unit: string;
+  weight: number | null;
+  porterage: number | null;
+  transfer_fee: number | null;
+  price: number | null;
+  commission_rate: number;
+  status: string;
+  received_at: string;
+  received_by: string;
+  store_id: string;
+  created_at: string;
+  received_quantity: number;
+  batch_id: string | null;
+}
 
-  // Suppliers
-  static async getSuppliers(storeId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('suppliers')
-        .select('*')
-        .eq('store_id', storeId)
-        .order('name');
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
 
-  static async createSupplier(supplier: Tables['suppliers']['Insert']) {
-    try {
-      const { data, error } = await supabase
-        .from('suppliers')
-        .insert(supplier)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
 
-  // Customers
-  static async getCustomers(storeId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('store_id', storeId)
-        .order('name');
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
+  inventory_item_id: string; // Added to match Supabase schema
+  product_id: string;
+  supplier_id: string;
+  quantity: number;
+  weight: number | null;
+  unit_price: number;
+  received_value: number; // Added to match Supabase schema
+  payment_method: string; // Added payment method field
+  notes: string | null;
+  customer_id: string | null; // Added to match Supabase schema
+  created_by: string; // Added to match Supabase schema
+}
 
-  static async createCustomer(customer: Tables['customers']['Insert']) {
-    try {
-      const { data, error } = await supabase
-        .from('customers')
-        .insert(customer)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
+  type: 'income' | 'expense';
+  category: string;
+  amount: number;
+  currency: 'USD' | 'LBP';
+  description: string;
+  reference: string | null;
+  store_id: string;
+  created_by: string;
+}
 
-  static async updateCustomer(id: string, updates: Tables['customers']['Update']) {
-    try {
-      const { data, error } = await supabase
-        .from('customers')
-        .update({ ...updates, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+export interface ExpenseCategory extends BaseEntity {
+  name: string;
+  description: string | null;
+  is_active: boolean;
+}
 
-  // Inventory
-  static async getInventoryItems(storeId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('inventory_items')
-        .select(`
-          *,
-          products(name, category),
-          suppliers(name)
-        `)
-        .eq('store_id', storeId)
-        .order('received_at', { ascending: false });
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+// Sync metadata interface
+export interface SyncMetadata {
+  id: string;
+  table_name: string;
+  last_synced_at: string;
+  sync_token?: string;
+}
 
-  static async createInventoryItem(item: Tables['inventory_items']['Insert']) {
-    try {
-      const { data, error } = await supabase
-        .from('inventory_items')
-        .insert(item)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+// Pending sync operation
+export interface PendingSync {
+  id: string;
+  table_name: string;
+  record_id: string;
+  operation: 'create' | 'update' | 'delete';
+  payload: any;
+  created_at: string;
+  retry_count: number;
+  last_error?: string;
+}
 
-  static async updateInventoryItem(id: string, updates: Tables['inventory_items']['Update']) {
-    try {
-      const { data, error } = await supabase
-        .from('inventory_items')
-        .update({ ...updates })
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+export interface JournalEntry extends BaseEntity {
+  date: string;
+  reference: string;
+  description: string;
+  entries: Array<{
+    account: string;
+    debit: number;
+    credit: number;
+  }>;
+  total_debit: number;
+  total_credit: number;
+  created_by: string;
+}
 
-  static async deleteInventoryItem(id: string) {
-    try {
-      const { error } = await supabase
-        .from('inventory_items')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
-      return true; // Return success indicator instead of deleted data
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+export interface Bill extends BaseEntity {
+  bill_number: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  subtotal: number;
+  total_amount: number;
+  payment_method: 'cash' | 'card' | 'credit';
+  payment_status: 'paid' | 'partial' | 'pending';
+  amount_paid: number;
+  amount_due: number;
+  bill_date: string;
+  notes: string | null;
+  status: 'active' | 'cancelled' | 'refunded';
+  created_by: string;
+  last_modified_by: string | null;
+  last_modified_at: string | null;
+}
 
-  // Sale Items (since there's no sales table, we work directly with sale_items)
-  static async getSaleItems(storeId: string, limit?: number) {
-    try {
-      let query = supabase
-        .from('sale_items')
-        .select(`
-          *,
-          products(name, category),
-          suppliers(name)
-        `)
-        .eq('store_id', storeId)
-        .order('created_at', { ascending: false });
+export interface BillLineItem extends BaseEntity {
+  bill_id: string;
+  product_id: string;
+  product_name: string;
+  supplier_id: string;
+  supplier_name: string;
+  inventory_item_id: string | null;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  weight: number | null;
+  notes: string | null;
+  line_order: number;
+}
 
-      if (limit) {
-        query = query.limit(limit);
-      }
+export interface BillAuditLog extends Omit<BaseEntity, 'updated_at'> {
+  bill_id: string;
+  action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
+  field_changed: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  change_reason: string | null;
+  changed_by: string;
+  ip_address: string | null;
+}
 
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+export interface inventory_batches extends BaseEntity {
+  id: string;
+  supplier_id: string;
+  status: string;
+  porterage: number | null;
+  transfer_fee: number | null;
+  received_at: string;
+  store_id: string;
+  created_by: string;
+}
 
-  static async createSaleItem(item: Tables['sale_items']['Insert']) {
-    try {
-      const { data, error } = await supabase
-        .from('sale_items')
-        .insert(item)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+class POSDatabase extends Dexie {
+  // Core tables
+  products!: Table<Product, string>;
+  suppliers!: Table<Supplier, string>;
+  customers!: Table<Customer, string>;
+  inventory_items!: Table<InventoryItem, string>;
+  sale_items!: Table<SaleItem, string>;
+  transactions!: Table<Transaction, string>;
+  inventory_batches!: Table<inventory_batches, string>;
 
-  static async deleteSaleItem(id: string) {
-    try {
-      const { error } = await supabase
-        .from('sale_items')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
-      return true; // Return success indicator instead of deleted data
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+  // Sync management tables
+  sync_metadata!: Table<SyncMetadata, string>;
+  pending_syncs!: Table<PendingSync, string>;
 
-  static async deleteSaleItemsByInventoryItem(inventoryItemId: string) {
-    try {
-      const { error } = await supabase
-        .from('sale_items')
-        .delete()
-        .eq('inventory_item_id', inventoryItemId);
-      if (error) throw error;
-      return true;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+  // Bill management tables
+  bills!: Table<Bill, string>;
+  bill_line_items!: Table<BillLineItem, string>;
+  bill_audit_logs!: Table<BillAuditLog, string>;
 
-  static async updateSaleItem(id: string, updates: Tables['sale_items']['Update']) {
-    try {
-      const { data, error } = await supabase
-        .from('sale_items')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+  constructor() {
+    super('POSDatabase');
+    
+    this.version(8).stores({
+      // Core tables with enhanced indexing to match database schema
+      // Tables WITH updated_at: products, suppliers, customers
+      products: 'id, store_id, name, category, updated_at',
+      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
+      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
 
-  // Transactions
-  static async getTransactions(storeId: string, type?: 'income' | 'expense') {
-    try {
-      let query = supabase
-        .from('transactions')
-        .select('*')
-        .eq('store_id', storeId)
-        .order('created_at', { ascending: false });
+      // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
+      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
+      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id and created_by indexes
+      transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
+      inventory_batches: 'id, store_id, supplier_id, received_at, created_by',
+  
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
 
-      if (type) {
-        query = query.eq('type', type);
-      }
+      // Bill management
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_at',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, line_order, created_at',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at'
+    });
 
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async createTransaction(transaction: Tables['transactions']['Insert']) {
-    try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .insert(transaction)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async createTransactionWithInventoryLog(
-    transaction: Tables['transactions']['Insert'],
-    inventoryLogId?: string
-  ) {
-    try {
-      // Create the transaction
-      const { data: transactionData, error: transactionError } = await supabase
-        .from('transactions')
-        .insert(transaction)
-        .select()
-        .single();
-      
-      if (transactionError) throw transactionError;
-
-      // If inventory log ID is provided, link it to the transaction
-      if (inventoryLogId && transactionData) {
-        const { error: linkError } = await supabase
-          .rpc('link_transaction_to_inventory_log', {
-            p_transaction_id: transactionData.id,
-            p_inventory_log_id: inventoryLogId
-          });
-
-        if (linkError) {
-          console.warn('Failed to link transaction to inventory log:', linkError);
+    // Migration for version 5 - update existing records to match new schema
+    this.version(5).upgrade(trans => {
+      // Update suppliers to ensure type field exists
+      trans.table('suppliers').toCollection().modify(supplier => {
+        if (!supplier.type) {
+          supplier.type = 'commission'; // Default to commission for existing suppliers
         }
-      }
+        if (supplier.lb_balance === undefined || supplier.lb_balance === null) {
+          supplier.lb_balance = 0; // Default balance for existing suppliers
+        }
+        if (supplier.usd_balance === undefined || supplier.usd_balance === null) {
+          supplier.usd_balance = 0; // Default balance for existing suppliers
+        }
+      });
 
-      return transactionData;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
+      // Update customers to ensure balance field exists  
+      trans.table('customers').toCollection().modify(customer => {
+        if (customer.lb_balance === undefined || customer.lb_balance === null) {
+          customer.lb_balance = 0; // Default balance for existing customers
+        }
+        if (customer.usd_balance === undefined || customer.usd_balance === null) {
 
-  // Bills Management
-  static async getBills(storeId: string, filters?: {
-    searchTerm?: string;
-    dateFrom?: string;
-    dateTo?: string;
-    paymentStatus?: string;
-    customerId?: string;
-    status?: string;
-    limit?: number;
-    offset?: number;
-  }) {
+  // Bill Line Items by Bill
+  static async getBillLineItems(billId: string) {
     try {
-      let query = supabase
-        .from('bills')
+      const { data, error } = await supabase
+        .from('bill_line_items')
         .select(`
           *,
-          customers(name),
-          users!bills_created_by_fkey(name)
+          products(name, category),
+          suppliers(name),
+          inventory_items(quantity, received_at)
         `)
-        .eq('store_id', storeId);
-
-      // Apply filters
-      if (filters?.searchTerm) {
-        query = query.or(`bill_number.ilike.%${filters.searchTerm}%,customer_name.ilike.%${filters.searchTerm}%,notes.ilike.%${filters.searchTerm}%`);
-      }
-      if (filters?.dateFrom) {
-        query = query.gte('bill_date', filters.dateFrom);
-      }
-      if (filters?.dateTo) {
-        query = query.lte('bill_date', filters.dateTo);
-      }
-      if (filters?.paymentStatus) {
-        query = query.eq('payment_status', filters.paymentStatus);
-      }
-      if (filters?.customerId) {
-        query = query.eq('customer_id', filters.customerId);
-      }
-      if (filters?.status) {
-        query = query.eq('status', filters.status);
-      }
-
-      query = query.order('bill_date', { ascending: false });
-
-      if (filters?.limit) {
-        query = query.limit(filters.limit);
-      }
-      if (filters?.offset) {
-        query = query.range(filters.offset, (filters.offset || 0) + (filters.limit || 50) - 1);
-      }
-
-      const { data, error } = await query;
+        .eq('bill_id', billId)
+        .order('line_order');
       
       if (error) throw error;
       return data || [];
@@ -418,124 +269,8 @@ export class SupabaseService {
     }
   }
 
-  static async getBillDetails(billId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('bills')
-        .select(`
-          *,
-          customers(name, phone, email),
-          users!bills_created_by_fkey(name),
-          bill_line_items(
-            *,
-            products(name, category),
-            suppliers(name)
-          ),
-          bill_audit_logs(
-            *,
-            users!bill_audit_logs_changed_by_fkey(name)
-          )
-        `)
-        .eq('id', billId)
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async createBill(bill: {
-    store_id: string;
-    bill_number: string;
-    customer_id?: string | null;
-    customer_name?: string | null;
-    subtotal: number;
-    total_amount: number;
-    payment_method: 'cash' | 'card' | 'credit';
-    payment_status: 'paid' | 'partial' | 'pending';
-    amount_paid: number;
-    amount_due: number;
-    bill_date?: string;
-    notes?: string | null;
-    created_by: string;
-  }) {
-    try {
-      const { data, error } = await supabase
-        .from('bills')
-        .insert(bill)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async updateBill(billId: string, updates: {
-    customer_id?: string | null;
-    customer_name?: string | null;
-    subtotal?: number;
-    total_amount?: number;
-    payment_method?: 'cash' | 'card' | 'credit';
-    payment_status?: 'paid' | 'partial' | 'pending';
-    amount_paid?: number;
-    amount_due?: number;
-    notes?: string | null;
-    last_modified_by: string;
-  }) {
-    try {
-      const { data, error } = await supabase
-        .from('bills')
-        .update({
-          ...updates,
-          last_modified_at: new Date().toISOString()
-        })
-        .eq('id', billId)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async deleteBill(billId: string, softDelete: boolean = true) {
-    try {
-      if (softDelete) {
-        const { data, error } = await supabase
-          .from('bills')
-          .update({ 
-            status: 'cancelled',
-            last_modified_at: new Date().toISOString()
-          })
-          .eq('id', billId)
-          .select()
-          .single();
-        
-        if (error) throw error;
-        return data;
-      } else {
-        const { error } = await supabase
-          .from('bills')
-          .delete()
-          .eq('id', billId);
-        
-        if (error) throw error;
-        return true;
-      }
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  // Bill Line Items
-  static async createBillLineItem(lineItem: {
+  // Bulk operations for bill line items
+  static async createBillLineItems(lineItems: Array<{
     store_id: string;
     bill_id: string;
     product_id: string;
@@ -549,71 +284,12 @@ export class SupabaseService {
     weight?: number | null;
     notes?: string | null;
     line_order: number;
-  }) {
+  }>) {
     try {
       const { data, error } = await supabase
         .from('bill_line_items')
-        .insert(lineItem)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async updateBillLineItem(lineItemId: string, updates: {
-    quantity?: number;
-    unit_price?: number;
-    line_total?: number;
-    weight?: number | null;
-    notes?: string | null;
-  }) {
-    try {
-      const { data, error } = await supabase
-        .from('bill_line_items')
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', lineItemId)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async deleteBillLineItem(lineItemId: string) {
-    try {
-      const { error } = await supabase
-        .from('bill_line_items')
-        .delete()
-        .eq('id', lineItemId);
-      
-      if (error) throw error;
-      return true;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  // Bill Audit Logs
-  static async getBillAuditLogs(billId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('bill_audit_logs')
-        .select(`
-          *,
-          users!bill_audit_logs_changed_by_fkey(name, email)
-        `)
-        .eq('bill_id', billId)
-        .order('created_at', { ascending: false });
+        .insert(lineItems)
+        .select();
       
       if (error) throw error;
       return data || [];
@@ -621,127 +297,254 @@ export class SupabaseService {
       handleSupabaseError(error);
     }
   }
+          customer.usd_balance = 0; // Default balance for existing customers
+        }
+      });
 
-  static async createBillAuditLog(auditLog: {
-    store_id: string;
-    bill_id: string;
-    action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
-    field_changed?: string | null;
-    old_value?: string | null;
-    new_value?: string | null;
-    change_reason?: string | null;
-    changed_by: string;
-    ip_address?: string | null;
-  }) {
-    try {
-      const { data, error } = await supabase
-        .from('bill_audit_logs')
-        .insert(auditLog)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
+      // Update sale_items to ensure all required fields exist
+      trans.table('sale_items').toCollection().modify(saleItem => {
+        if (!saleItem.inventory_item_id) {
+          saleItem.inventory_item_id = ''; // Default empty string for missing inventory_item_id
+        }
+        if (saleItem.received_value === undefined || saleItem.received_value === null) {
+          saleItem.received_value = saleItem.total_price || 0; // Migrate from total_price to received_value
+        }
+        if (!saleItem.customer_id) {
+          saleItem.customer_id = null; // Default null for customer_id
+        }
+        if (!saleItem.created_by) {
+          saleItem.created_by = ''; // Default empty string for created_by
+        }
+        if (!saleItem.payment_method) {
+          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
+        }
+      });
+
+      // Update inventory_items to ensure received_quantity exists
+      trans.table('inventory_items').toCollection().modify(inventoryItem => {
+        if (inventoryItem.received_quantity === undefined || inventoryItem.received_quantity === null) {
+          inventoryItem.received_quantity = inventoryItem.quantity || 0; // Default to quantity value
+        }
+      });
+    });
+
+    // Migration for version 6 - add payment_method to sale_items
+    this.version(6).upgrade(trans => {
+      // Update sale_items to ensure payment_method field exists
+      trans.table('sale_items').toCollection().modify(saleItem => {
+        if (!saleItem.payment_method) {
+          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
+        }
+      });
+    });
+
+    // Migration for version 7 - remove sales table (no longer needed)
+    this.version(7).upgrade(trans => {
+      // The sales table will be automatically removed from the schema
+      // Any existing sales data will be lost, but this matches the backend schema
+      console.log('Removing sales table to match backend schema');
+    });
+
+    // Add hooks for automatic timestamping and ID generation
+    // Tables WITH updated_at: products, suppliers, customers
+    this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.bills.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.bill_line_items.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.bill_audit_logs.hook('creating', this.addCreateFields);
+
+    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_batches
+    this.inventory_items.hook('creating', this.addCreateFields);
+    this.sale_items.hook('creating', this.addCreateFields);
+    this.transactions.hook('creating', this.addCreateFields);
+    this.inventory_batches.hook('creating', this.addCreateFields);
+
+    // Only add update hooks for tables that have updated_at
+    this.products.hook('updating', this.addUpdateFields);
+    this.suppliers.hook('updating', this.addUpdateFields);
+    this.customers.hook('updating', this.addUpdateFields);
+    this.bills.hook('updating', this.addUpdateFields);
+    this.bill_line_items.hook('updating', this.addUpdateFields);
+  }
+
+  private addCreateFields = (primKey: any, obj: any, trans: any) => {
+    const now = new Date().toISOString();
+    if (!obj.id) obj.id = uuidv4();
+    if (!obj.created_at) obj.created_at = now;
+    if (obj._synced === undefined) obj._synced = false;
+  };
+
+  private addCreateFieldsWithUpdatedAt = (primKey: any, obj: any, trans: any) => {
+    const now = new Date().toISOString();
+    if (!obj.id) obj.id = uuidv4();
+    if (!obj.created_at) obj.created_at = now;
+    if (obj.updated_at === undefined) obj.updated_at = now;
+    if (obj._synced === undefined) obj._synced = false;
+  };
+
+  private addUpdateFields = (modifications: any, primKey: any, obj: any, trans: any) => {
+    modifications.updated_at = new Date().toISOString();
+    if (modifications._synced === undefined) modifications._synced = false;
+  };
+
+  // Utility methods for sync management
+  async markAsSynced(tableName: string, recordId: string) {
+    const table = (this as any)[tableName];
+    if (table) {
+      await table.update(recordId, { 
+        _synced: true, 
+        _lastSyncedAt: new Date().toISOString() 
+      });
     }
   }
 
-  // User Profile
-  static async getUserProfile(userId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select(`
-          *,
-          stores(*)
-        `)
-        .eq('id', userId)
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
+  async getUnsyncedRecords(tableName: string) {
+    const table = (this as any)[tableName];
+    if (table) {
+      return await table.filter((record: any) => record._synced === false).toArray();
+    }
+    return [];
+  }
+
+  async softDelete(tableName: string, recordId: string) {
+    const table = (this as any)[tableName];
+    if (table) {
+      await table.update(recordId, { 
+        _deleted: true, 
+        _synced: false,
+        updated_at: new Date().toISOString()
+      });
     }
   }
 
-  static async createUserProfile(profile: Tables['users']['Insert']) {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .insert(profile)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
+  async addPendingSync(tableName: string, recordId: string, operation: 'create' | 'update' | 'delete', payload: any) {
+    await this.pending_syncs.add({
+      id: uuidv4(),
+      table_name: tableName,
+      record_id: recordId,
+      operation,
+      payload,
+      created_at: new Date().toISOString(),
+      retry_count: 0
+    });
   }
 
-  static async updateUserSettings(
-    userId: string, 
-    updates: {
-      preferred_currency?: 'USD' | 'LBP';
-      preferred_language?: 'en' | 'ar' | 'fr';
-      preferred_commission_rate?: number;
-    }
-  ) {
-    try {
-      console.log('SupabaseService: updateUserSettings called with userId:', userId, 'updates:', updates);
-      const { data, error } = await supabase
-        .from('users')
-        .update({ 
-          ...updates, 
-          updated_at: new Date().toISOString() 
-        })
-        .eq('id', userId)
-        .select()
-        .single();
-      
-      if (error) {
-        console.error('SupabaseService: Database error:', error);
-        throw error;
-      }
-      
-      console.log('SupabaseService: updateUserSettings successful, returned data:', data);
-      return data;
-    } catch (error) {
-      console.error('SupabaseService: Exception in updateUserSettings:', error);
-      handleSupabaseError(error);
-    }
+  async getPendingSyncs() {
+    return await this.pending_syncs.orderBy('created_at').toArray();
   }
 
-  // Stores
-  static async getStores() {
-    try {
-      const { data, error } = await supabase
-        .from('stores')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
+  async removePendingSync(id: string) {
+    await this.pending_syncs.delete(id);
   }
 
-  // Real-time subscriptions
-  static subscribeToTable(table: string, callback: (payload: any) => void, storeId?: string) {
-    let channel = supabase
-      .channel(`${table}_changes`)
-      .on('postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table,
-          ...(storeId && { filter: `store_id=eq.${storeId}` })
-        }, 
-        callback
-      );
+  async updateSyncMetadata(tableName: string, lastSyncedAt: string, syncToken?: string) {
+    await this.sync_metadata.put({
+      id: tableName,
+      table_name: tableName,
+      last_synced_at: lastSyncedAt,
+      sync_token: syncToken
+    });
+  }
 
-    return channel.subscribe();
+  async getSyncMetadata(tableName: string) {
+    return await this.sync_metadata.get(tableName);
+  }
+
+  async cleanupInvalidInventoryItems(): Promise<number> {
+    // Keep inventory items with quantity = 0 for Received Bills history.
+    // Only remove truly invalid rows (negative quantities).
+    const invalidItems = await this.inventory_items.filter(item => item.quantity < 0).toArray();
+    
+    if (invalidItems.length > 0) {
+      await this.inventory_items.bulkDelete(invalidItems.map(item => item.id));
+      console.log(`🧹 Cleaned up ${invalidItems.length} invalid inventory items (negative quantity)`);
+    }
+    
+    return invalidItems.length;
+  }
+
+  async validateDataIntegrity(storeId: string): Promise<{
+    orphanedInventory: any[];
+    orphanedSaleItems: any[];
+    orphanedTransactions: any[];
+  }> {
+    console.log('🔍 Validating data integrity...');
+    
+    // Get all data
+    const products = await this.products.where('store_id').equals(storeId).toArray();
+    const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
+    const customers = await this.customers.where('store_id').equals(storeId).toArray();
+    const inventory = await this.inventory_items.where('store_id').equals(storeId).toArray();
+    const saleItems = await this.sale_items.toArray();
+    const transactions = await this.transactions.where('store_id').equals(storeId).toArray();
+    
+    const productIds = new Set(products.map(p => p.id));
+    const supplierIds = new Set(suppliers.map(s => s.id));
+    const customerIds = new Set(customers.map(c => c.id));
+    
+    // Find orphaned records
+    const orphanedInventory = inventory.filter(item => 
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
+    );
+    
+    const orphanedSaleItems = saleItems.filter(item => 
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
+    );
+    
+    const orphanedTransactions = transactions.filter(transaction => 
+      // Add any transaction-specific validations here
+      false
+    );
+    
+    console.log('📊 Data integrity report:', {
+      orphanedInventory: orphanedInventory.length,
+      orphanedSaleItems: orphanedSaleItems.length,
+      orphanedTransactions: orphanedTransactions.length
+    });
+    
+    return {
+      orphanedInventory,
+      orphanedSaleItems,
+      orphanedTransactions
+    };
+  }
+
+  async cleanupOrphanedRecords(storeId: string): Promise<number> {
+    const integrity = await this.validateDataIntegrity(storeId);
+    let cleaned = 0;
+    
+    // Clean up orphaned inventory items
+    if (integrity.orphanedInventory.length > 0) {
+      await this.inventory_items.bulkDelete(integrity.orphanedInventory.map(item => item.id));
+      cleaned += integrity.orphanedInventory.length;
+      console.log(`🗑️ Removed ${integrity.orphanedInventory.length} orphaned inventory items`);
+    }
+    
+    // Clean up orphaned sale items
+    if (integrity.orphanedSaleItems.length > 0) {
+      await this.sale_items.bulkDelete(integrity.orphanedSaleItems.map(item => item.id));
+      cleaned += integrity.orphanedSaleItems.length;
+      console.log(`🗑️ Removed ${integrity.orphanedSaleItems.length} orphaned sale items`);
+    }
+    
+    return cleaned;
   }
 }
+
+export const db = new POSDatabase();
+
+// Export utility functions
+export const createId = () => uuidv4();
+
+export const createBaseEntity = (storeId: string, data: Partial<BaseEntity> = {}): Partial<BaseEntity> => {
+  const now = new Date().toISOString();
+  return {
+    id: createId(),
+    store_id: storeId,
+    created_at: now,
+    updated_at: now,
+    _synced: false,
+    ...data
+  };
+};

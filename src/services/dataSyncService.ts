@@ -1,376 +1,500 @@
-import { db } from '../lib/db';
-import { 
-  Customer, 
-  Supplier, 
-  Transaction, 
-  InventoryItem,
-  SaleItem
-} from '../types';
+import Dexie, { Table } from 'dexie';
+import { v4 as uuidv4 } from 'uuid';
 
-export interface SyncStatus {
-  table: string;
-  lastSync: string;
-  recordCount: number;
-  hasErrors: boolean;
-  errorMessage?: string;
+// Base interface for all entities with sync support
+interface BaseEntity {
+  id: string;
+  store_id: string;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
 }
 
-export interface DataIntegrityCheck {
-  table: string;
-  totalRecords: number;
-  validRecords: number;
-  orphanedRecords: number;
-  issues: string[];
+// Entity interfaces matching Supabase schema exactly
+export interface Product extends BaseEntity {
+  name: string;
+  category: string;
+  image: string;
 }
 
-export class DataSyncService {
-  private static instance: DataSyncService;
-  private syncStatus: Map<string, SyncStatus> = new Map();
+export interface Supplier extends BaseEntity {
+  name: string;
+  phone: string;
+  email: string | null;
+  address: string;
+  lb_balance: number | null; // Added balance field to match Supabase schema
+  usd_balance: number | null; // Added balance field to match Supabase schema
+}
 
-  private constructor() {
-    this.initializeSyncStatus();
-  }
+export interface  Customer extends BaseEntity {
+  name: string;
+  phone: string;
+  email: string | null;
+  address: string | null;
+  lb_balance: number; // Changed from current_debt to balance to match Supabase schema
+  usd_balance: number; // Changed from current_debt to balance to match Supabase schema
+  is_active: boolean;
+}
 
-  public static getInstance(): DataSyncService {
-    if (!DataSyncService.instance) {
-      DataSyncService.instance = new DataSyncService();
-    }
-    return DataSyncService.instance;
-  }
+export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
+  id: string;
+  product_id: string;
+  supplier_id: string;
+  type: string;
+  quantity: number;
+  unit: string;
+  weight: number | null;
+  porterage: number | null;
+  transfer_fee: number | null;
+  price: number | null;
+  commission_rate: number;
+  status: string;
+  received_at: string;
+  received_by: string;
+  store_id: string;
+  created_at: string;
+  received_quantity: number;
+  batch_id: string | null;
+}
 
-  private initializeSyncStatus() {
-    const tables = [
-      'customers', 'suppliers', 'transactions', 
-      'inventory_items', 'sale_items'
-    ];
 
-    tables.forEach(table => {
-      this.syncStatus.set(table, {
-        table,
-        lastSync: new Date().toISOString(),
-        recordCount: 0,
-        hasErrors: false
+
+export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
+  inventory_item_id: string; // Added to match Supabase schema
+  product_id: string;
+  supplier_id: string;
+  quantity: number;
+  weight: number | null;
+  unit_price: number;
+  received_value: number; // Added to match Supabase schema
+  payment_method: string; // Added payment method field
+  notes: string | null;
+  customer_id: string | null; // Added to match Supabase schema
+  created_by: string; // Added to match Supabase schema
+}
+
+export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
+  type: 'income' | 'expense';
+  category: string;
+  amount: number;
+  currency: 'USD' | 'LBP';
+  description: string;
+  reference: string | null;
+  store_id: string;
+  created_by: string;
+}
+
+export interface ExpenseCategory extends BaseEntity {
+  name: string;
+  description: string | null;
+  is_active: boolean;
+}
+
+// Sync metadata interface
+export interface SyncMetadata {
+  id: string;
+  table_name: string;
+  last_synced_at: string;
+  sync_token?: string;
+}
+
+// Pending sync operation
+export interface PendingSync {
+  id: string;
+  table_name: string;
+  record_id: string;
+  operation: 'create' | 'update' | 'delete';
+  payload: any;
+  created_at: string;
+  retry_count: number;
+  last_error?: string;
+}
+
+export interface JournalEntry extends BaseEntity {
+  date: string;
+  reference: string;
+  description: string;
+  entries: Array<{
+    account: string;
+    debit: number;
+    credit: number;
+  }>;
+  total_debit: number;
+  total_credit: number;
+  created_by: string;
+}
+
+export interface Bill extends BaseEntity {
+  bill_number: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  subtotal: number;
+  total_amount: number;
+  payment_method: 'cash' | 'card' | 'credit';
+  payment_status: 'paid' | 'partial' | 'pending';
+  amount_paid: number;
+  amount_due: number;
+  bill_date: string;
+  notes: string | null;
+  status: 'active' | 'cancelled' | 'refunded';
+  created_by: string;
+  last_modified_by: string | null;
+  last_modified_at: string | null;
+}
+
+export interface BillLineItem extends BaseEntity {
+  bill_id: string;
+  product_id: string;
+  product_name: string;
+  supplier_id: string;
+  supplier_name: string;
+  inventory_item_id: string | null;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  weight: number | null;
+  notes: string | null;
+  line_order: number;
+}
+
+export interface BillAuditLog extends Omit<BaseEntity, 'updated_at'> {
+  bill_id: string;
+  action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
+  field_changed: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  change_reason: string | null;
+  changed_by: string;
+  ip_address: string | null;
+}
+
+export interface inventory_batches extends BaseEntity {
+  id: string;
+  supplier_id: string;
+  status: string;
+  porterage: number | null;
+  transfer_fee: number | null;
+  received_at: string;
+  store_id: string;
+  created_by: string;
+}
+
+class POSDatabase extends Dexie {
+  // Core tables
+  products!: Table<Product, string>;
+  suppliers!: Table<Supplier, string>;
+  customers!: Table<Customer, string>;
+  inventory_items!: Table<InventoryItem, string>;
+  sale_items!: Table<SaleItem, string>;
+  transactions!: Table<Transaction, string>;
+  inventory_batches!: Table<inventory_batches, string>;
+
+  // Sync management tables
+  sync_metadata!: Table<SyncMetadata, string>;
+  pending_syncs!: Table<PendingSync, string>;
+
+  // Bill management tables
+  bills!: Table<Bill, string>;
+  bill_line_items!: Table<BillLineItem, string>;
+  bill_audit_logs!: Table<BillAuditLog, string>;
+
+  constructor() {
+    super('POSDatabase');
+    
+    this.version(8).stores({
+      // Core tables with enhanced indexing to match database schema
+      // Tables WITH updated_at: products, suppliers, customers
+      products: 'id, store_id, name, category, updated_at',
+      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
+      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
+
+      // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
+      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
+      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id and created_by indexes
+      transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
+      inventory_batches: 'id, store_id, supplier_id, received_at, created_by',
+  
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+
+      // Bill management
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_at',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, line_order, created_at',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at'
+    });
+
+    // Migration for version 5 - update existing records to match new schema
+    this.version(5).upgrade(trans => {
+      // Update suppliers to ensure type field exists
+      trans.table('suppliers').toCollection().modify(supplier => {
+        if (!supplier.type) {
+          supplier.type = 'commission'; // Default to commission for existing suppliers
+        }
+        if (supplier.lb_balance === undefined || supplier.lb_balance === null) {
+          supplier.lb_balance = 0; // Default balance for existing suppliers
+        }
+        if (supplier.usd_balance === undefined || supplier.usd_balance === null) {
+          supplier.usd_balance = 0; // Default balance for existing suppliers
+        }
       });
+
+      // Update customers to ensure balance field exists  
+      trans.table('customers').toCollection().modify(customer => {
+        if (customer.lb_balance === undefined || customer.lb_balance === null) {
+          customer.lb_balance = 0; // Default balance for existing customers
+        }
+        if (customer.usd_balance === undefined || customer.usd_balance === null) {
+          customer.usd_balance = 0; // Default balance for existing customers
+        }
+      });
+
+      // Update sale_items to ensure all required fields exist
+      trans.table('sale_items').toCollection().modify(saleItem => {
+        if (!saleItem.inventory_item_id) {
+          saleItem.inventory_item_id = ''; // Default empty string for missing inventory_item_id
+        }
+        if (saleItem.received_value === undefined || saleItem.received_value === null) {
+          saleItem.received_value = saleItem.total_price || 0; // Migrate from total_price to received_value
+        }
+        if (!saleItem.customer_id) {
+          saleItem.customer_id = null; // Default null for customer_id
+        }
+        if (!saleItem.created_by) {
+          saleItem.created_by = ''; // Default empty string for created_by
+        }
+        if (!saleItem.payment_method) {
+          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
+        }
+      });
+
+      // Update inventory_items to ensure received_quantity exists
+      trans.table('inventory_items').toCollection().modify(inventoryItem => {
+        if (inventoryItem.received_quantity === undefined || inventoryItem.received_quantity === null) {
+          inventoryItem.received_quantity = inventoryItem.quantity || 0; // Default to quantity value
+        }
+      });
+    });
+
+    // Migration for version 6 - add payment_method to sale_items
+    this.version(6).upgrade(trans => {
+      // Update sale_items to ensure payment_method field exists
+      trans.table('sale_items').toCollection().modify(saleItem => {
+        if (!saleItem.payment_method) {
+          saleItem.payment_method = 'cash'; // Default payment method for existing sale items
+        }
+      });
+    });
+
+    // Migration for version 7 - remove sales table (no longer needed)
+    this.version(7).upgrade(trans => {
+      // The sales table will be automatically removed from the schema
+      // Any existing sales data will be lost, but this matches the backend schema
+      console.log('Removing sales table to match backend schema');
+    });
+
+    // Add hooks for automatic timestamping and ID generation
+    // Tables WITH updated_at: products, suppliers, customers
+    this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.bills.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.bill_line_items.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.bill_audit_logs.hook('creating', this.addCreateFields);
+
+    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_batches
+    this.inventory_items.hook('creating', this.addCreateFields);
+    this.sale_items.hook('creating', this.addCreateFields);
+    this.transactions.hook('creating', this.addCreateFields);
+    this.inventory_batches.hook('creating', this.addCreateFields);
+
+    // Only add update hooks for tables that have updated_at
+    this.products.hook('updating', this.addUpdateFields);
+    this.suppliers.hook('updating', this.addUpdateFields);
+    this.customers.hook('updating', this.addUpdateFields);
+    this.bills.hook('updating', this.addUpdateFields);
+    this.bill_line_items.hook('updating', this.addUpdateFields);
+  }
+
+  private addCreateFields = (primKey: any, obj: any, trans: any) => {
+    const now = new Date().toISOString();
+    if (!obj.id) obj.id = uuidv4();
+    if (!obj.created_at) obj.created_at = now;
+    if (obj._synced === undefined) obj._synced = false;
+  };
+
+  private addCreateFieldsWithUpdatedAt = (primKey: any, obj: any, trans: any) => {
+    const now = new Date().toISOString();
+    if (!obj.id) obj.id = uuidv4();
+    if (!obj.created_at) obj.created_at = now;
+    if (obj.updated_at === undefined) obj.updated_at = now;
+    if (obj._synced === undefined) obj._synced = false;
+  };
+
+  private addUpdateFields = (modifications: any, primKey: any, obj: any, trans: any) => {
+    modifications.updated_at = new Date().toISOString();
+    if (modifications._synced === undefined) modifications._synced = false;
+  };
+
+  // Utility methods for sync management
+  async markAsSynced(tableName: string, recordId: string) {
+    const table = (this as any)[tableName];
+    if (table) {
+      await table.update(recordId, { 
+        _synced: true, 
+        _lastSyncedAt: new Date().toISOString() 
+      });
+    }
+  }
+
+  async getUnsyncedRecords(tableName: string) {
+    const table = (this as any)[tableName];
+    if (table) {
+      return await table.filter((record: any) => record._synced === false).toArray();
+    }
+    return [];
+  }
+
+  async softDelete(tableName: string, recordId: string) {
+    const table = (this as any)[tableName];
+    if (table) {
+      await table.update(recordId, { 
+        _deleted: true, 
+        _synced: false,
+        updated_at: new Date().toISOString()
+      });
+    }
+  }
+
+  async addPendingSync(tableName: string, recordId: string, operation: 'create' | 'update' | 'delete', payload: any) {
+    await this.pending_syncs.add({
+      id: uuidv4(),
+      table_name: tableName,
+      record_id: recordId,
+      operation,
+      payload,
+      created_at: new Date().toISOString(),
+      retry_count: 0
     });
   }
 
-  public async syncDataToLocalStorage(storeId: string): Promise<void> {
-    try {
-      console.log('🔄 Starting data synchronization...');
-
-      // Sync customers
-      await this.syncTable('customers', storeId, async () => {
-        const customers = await db.customers.where('store_id').equals(storeId).toArray();
-        const mappedCustomers = customers.map(c => ({
-          id: c.id,
-          name: c.name,
-          phone: c.phone,
-          email: c.email,
-          address: c.address,
-          balance: c.balance,
-          isActive: c.is_active,
-          createdAt: c.created_at
-        }));
-        localStorage.setItem('erp_customers', JSON.stringify(mappedCustomers));
-        return mappedCustomers.length;
-      });
-
-      // Sync suppliers
-      await this.syncTable('suppliers', storeId, async () => {
-        const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
-        const mappedSuppliers = suppliers.map(s => ({
-          id: s.id,
-          name: s.name,
-          phone: s.phone,
-          email: s.email,
-          address: s.address,
-          type: s.type,
-          balance: s.balance,
-          createdAt: s.created_at
-        }));
-        localStorage.setItem('erp_suppliers', JSON.stringify(mappedSuppliers));
-        return mappedSuppliers.length;
-      });
-
-      // Sync transactions
-      await this.syncTable('transactions', storeId, async () => {
-        const transactions = await db.transactions.where('store_id').equals(storeId).toArray();
-        const mappedTransactions = transactions.map(t => ({
-          id: t.id,
-          type: t.type,
-          category: t.category,
-          amount: t.amount,
-          currency: t.currency,
-          description: t.description,
-          reference: t.reference,
-          createdAt: t.created_at,
-          createdBy: t.created_by
-        }));
-        localStorage.setItem('erp_transactions', JSON.stringify(mappedTransactions));
-        return mappedTransactions.length;
-      });
-
-      // Sync inventory items
-      await this.syncTable('inventory_items', storeId, async () => {
-        const inventory = await db.inventory_items.where('store_id').equals(storeId).toArray();
-        const mappedInventory = inventory.map(item => ({
-          id: item.id,
-          productId: item.product_id,
-          supplierId: item.supplier_id,
-          type: item.type,
-          quantity: item.quantity,
-          receivedQuantity: item.received_quantity,
-          unit: item.unit,
-          weight: item.weight,
-          porterage: item.porterage,
-          transferFee: item.transfer_fee,
-          price: item.price,
-          commissionRate: item.commission_rate,
-          status: item.status,
-          receivedAt: item.received_at,
-          receivedBy: item.received_by,
-          createdAt: item.created_at
-        }));
-        localStorage.setItem('erp_inventory', JSON.stringify(mappedInventory));
-        return mappedInventory.length;
-      });
-
-      // Sync sale_items
-      await this.syncTable('sale_items', storeId, async () => {
-        const saleItems = await db.sale_items.toArray();
-        
-        const mappedSaleItems = saleItems.map(item => ({
-          id: item.id,
-          quantity: item.quantity,
-          inventoryItemId: item.inventory_item_id,
-          productId: item.product_id,
-          supplierId: item.supplier_id,
-          weight: item.weight,
-          unitPrice: item.unit_price,
-          receivedValue: item.received_value,
-          paymentMethod: item.payment_method,
-          notes: item.notes,
-          customerId: item.customer_id,
-          createdAt: item.created_at,
-          createdBy: item.created_by
-        }));
-        localStorage.setItem('erp_sale_items', JSON.stringify(mappedSaleItems));
-        return mappedSaleItems.length;
-      });
-
-      // Sync bills
-      await this.syncTable('bills', storeId, async () => {
-        const bills = await db.bills.where('store_id').equals(storeId).toArray();
-        localStorage.setItem('erp_bills', JSON.stringify(bills));
-        return bills.length;
-      });
-
-      // Sync bill line items
-      await this.syncTable('bill_line_items', storeId, async () => {
-        const billLineItems = await db.bill_line_items.where('store_id').equals(storeId).toArray();
-        localStorage.setItem('erp_bill_line_items', JSON.stringify(billLineItems));
-        return billLineItems.length;
-      });
-
-      // Sync bill audit logs
-      await this.syncTable('bill_audit_logs', storeId, async () => {
-        const billAuditLogs = await db.bill_audit_logs.where('store_id').equals(storeId).toArray();
-        localStorage.setItem('erp_bill_audit_logs', JSON.stringify(billAuditLogs));
-        return billAuditLogs.length;
-      });
-      console.log('✅ Data synchronization completed successfully');
-
-    } catch (error) {
-      console.error('❌ Data synchronization failed:', error);
-      throw error;
-    }
+  async getPendingSyncs() {
+    return await this.pending_syncs.orderBy('created_at').toArray();
   }
 
-  private async syncTable(
-    tableName: string, 
-    storeId: string, 
-    syncFunction: () => Promise<number>
-  ): Promise<void> {
-    try {
-      const recordCount = await syncFunction();
-      const status = this.syncStatus.get(tableName);
-      if (status) {
-        status.recordCount = recordCount;
-        status.lastSync = new Date().toISOString();
-        status.hasErrors = false;
-        status.errorMessage = undefined;
-      }
-      console.log(`✅ Synced ${tableName}: ${recordCount} records`);
-    } catch (error) {
-      const status = this.syncStatus.get(tableName);
-      if (status) {
-        status.hasErrors = true;
-        status.errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      }
-      console.error(`❌ Failed to sync ${tableName}:`, error);
-      throw error;
-    }
+  async removePendingSync(id: string) {
+    await this.pending_syncs.delete(id);
   }
 
-  public getSyncStatus(): SyncStatus[] {
-    return Array.from(this.syncStatus.values());
+  async updateSyncMetadata(tableName: string, lastSyncedAt: string, syncToken?: string) {
+    await this.sync_metadata.put({
+      id: tableName,
+      table_name: tableName,
+      last_synced_at: lastSyncedAt,
+      sync_token: syncToken
+    });
   }
 
-  public async validateDataIntegrity(storeId: string): Promise<DataIntegrityCheck[]> {
-    const checks: DataIntegrityCheck[] = [];
-
-    try {
-      // Check customers
-      const customers = await db.customers.where('store_id').equals(storeId).toArray();
-      const validCustomers = customers.filter(c => 
-        c.name && c.phone && c.is_active !== undefined
-      );
-      checks.push({
-        table: 'customers',
-        totalRecords: customers.length,
-        validRecords: validCustomers.length,
-        orphanedRecords: customers.length - validCustomers.length,
-        issues: customers.length - validCustomers.length > 0 ? ['Invalid customer records found'] : []
-      });
-
-      // Check suppliers
-      const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
-      const validSuppliers = suppliers.filter(s => 
-        s.name && s.phone && s.type
-      );
-      checks.push({
-        table: 'suppliers',
-        totalRecords: suppliers.length,
-        validRecords: validSuppliers.length,
-        orphanedRecords: suppliers.length - validSuppliers.length,
-        issues: suppliers.length - validSuppliers.length > 0 ? ['Invalid supplier records found'] : []
-      });
-
-      // Check inventory items
-      const inventory = await db.inventory_items.where('store_id').equals(storeId).toArray();
-      const validInventory = inventory.filter(item => 
-        item.product_id && item.supplier_id && item.quantity >= 0
-      );
-      checks.push({
-        table: 'inventory_items',
-        totalRecords: inventory.length,
-        validRecords: validInventory.length,
-        orphanedRecords: inventory.length - validInventory.length,
-        issues: inventory.length - validInventory.length > 0 ? ['Invalid inventory records found'] : []
-      });
-
-      // Check for orphaned records
-      const orphanedChecks = await this.checkOrphanedRecords(storeId);
-      checks.push(...orphanedChecks);
-
-    } catch (error) {
-      console.error('❌ Data integrity check failed:', error);
-    }
-
-    return checks;
+  async getSyncMetadata(tableName: string) {
+    return await this.sync_metadata.get(tableName);
   }
 
-  private async checkOrphanedRecords(storeId: string): Promise<DataIntegrityCheck[]> {
-    const checks: DataIntegrityCheck[] = [];
-
-    try {
-      // Get all related data
-      const products = await db.products.where('store_id').equals(storeId).toArray();
-      const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
-      const customers = await db.customers.where('store_id').equals(storeId).toArray();
-      const inventory = await db.inventory_items.where('store_id').equals(storeId).toArray();
-      const saleItems = await db.sale_items.toArray();
-
-      const productIds = new Set(products.map(p => p.id));
-      const supplierIds = new Set(suppliers.map(s => s.id));
-      const customerIds = new Set(customers.map(c => c.id));
-
-      // Check orphaned inventory items
-      const orphanedInventory = inventory.filter(item => 
-        !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
-      );
-      checks.push({
-        table: 'orphaned_inventory',
-        totalRecords: inventory.length,
-        validRecords: inventory.length - orphanedInventory.length,
-        orphanedRecords: orphanedInventory.length,
-        issues: orphanedInventory.length > 0 ? ['Inventory items with invalid product or supplier references'] : []
-      });
-
-      // Check orphaned sale items
-      const orphanedSaleItems = saleItems.filter(item => 
-        !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
-      );
-      checks.push({
-        table: 'orphaned_sale_items',
-        totalRecords: saleItems.length,
-        validRecords: saleItems.length - orphanedSaleItems.length,
-        orphanedRecords: orphanedSaleItems.length,
-        issues: orphanedSaleItems.length > 0 ? ['Sale items with invalid product or supplier references'] : []
-      });
-
-    } catch (error) {
-      console.error('❌ Orphaned records check failed:', error);
-    }
-
-    return checks;
-  }
-
-  public async cleanupOrphanedRecords(storeId: string): Promise<number> {
-    let cleanedCount = 0;
-
-    try {
-      console.log('🧹 Starting orphaned records cleanup...');
-
-      // Get all related data
-      const products = await db.products.where('store_id').equals(storeId).toArray();
-      const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
-      const inventory = await db.inventory_items.where('store_id').equals(storeId).toArray();
-      const saleItems = await db.sale_items.toArray();
-
-      const productIds = new Set(products.map(p => p.id));
-      const supplierIds = new Set(suppliers.map(s => s.id));
-
-      // Clean up orphaned inventory items
-      const orphanedInventory = inventory.filter(item => 
-        !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
-      );
-      if (orphanedInventory.length > 0) {
-        await db.inventory_items.bulkDelete(orphanedInventory.map(item => item.id));
-        cleanedCount += orphanedInventory.length;
-        console.log(`🗑️ Removed ${orphanedInventory.length} orphaned inventory items`);
-      }
-
-      // Clean up orphaned sale items
-      const orphanedSaleItems = saleItems.filter(item => 
-        !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
-      );
-      if (orphanedSaleItems.length > 0) {
-        await db.sale_items.bulkDelete(orphanedSaleItems.map(item => item.id));
-        cleanedCount += orphanedSaleItems.length;
-        console.log(`🗑️ Removed ${orphanedSaleItems.length} orphaned sale items`);
-      }
-
-      console.log(`✅ Cleanup completed: ${cleanedCount} records removed`);
-
-    } catch (error) {
-      console.error('❌ Cleanup failed:', error);
-      throw error;
-    }
-
-    return cleanedCount;
-  }
-
-  public async reloadAllData(storeId: string): Promise<void> {
-    console.log('🔄 Reloading all data...');
-    await this.syncDataToLocalStorage(storeId);
+  async cleanupInvalidInventoryItems(): Promise<number> {
+    // Keep inventory items with quantity = 0 for Received Bills history.
+    // Only remove truly invalid rows (negative quantities).
+    const invalidItems = await this.inventory_items.filter(item => item.quantity < 0).toArray();
     
-    // Force reload of ERP Financial Service
-    const { erpFinancialService } = await import('./erpFinancialService');
-    erpFinancialService.reloadData();
+    if (invalidItems.length > 0) {
+      await this.inventory_items.bulkDelete(invalidItems.map(item => item.id));
+      console.log(`🧹 Cleaned up ${invalidItems.length} invalid inventory items (negative quantity)`);
+    }
     
-    console.log('✅ All data reloaded successfully');
+    return invalidItems.length;
+  }
+
+  async validateDataIntegrity(storeId: string): Promise<{
+    orphanedInventory: any[];
+    orphanedSaleItems: any[];
+    orphanedTransactions: any[];
+  }> {
+    console.log('🔍 Validating data integrity...');
+    
+    // Get all data
+    const products = await this.products.where('store_id').equals(storeId).toArray();
+    const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
+    const customers = await this.customers.where('store_id').equals(storeId).toArray();
+    const inventory = await this.inventory_items.where('store_id').equals(storeId).toArray();
+    const saleItems = await this.sale_items.toArray();
+    const transactions = await this.transactions.where('store_id').equals(storeId).toArray();
+    
+    const productIds = new Set(products.map(p => p.id));
+    const supplierIds = new Set(suppliers.map(s => s.id));
+    const customerIds = new Set(customers.map(c => c.id));
+    
+    // Find orphaned records
+    const orphanedInventory = inventory.filter(item => 
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
+    );
+    
+    const orphanedSaleItems = saleItems.filter(item => 
+      !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
+    );
+    
+    const orphanedTransactions = transactions.filter(transaction => 
+      // Add any transaction-specific validations here
+      false
+    );
+    
+    console.log('📊 Data integrity report:', {
+      orphanedInventory: orphanedInventory.length,
+      orphanedSaleItems: orphanedSaleItems.length,
+      orphanedTransactions: orphanedTransactions.length
+    });
+    
+    return {
+      orphanedInventory,
+      orphanedSaleItems,
+      orphanedTransactions
+    };
+  }
+
+  async cleanupOrphanedRecords(storeId: string): Promise<number> {
+    const integrity = await this.validateDataIntegrity(storeId);
+    let cleaned = 0;
+    
+    // Clean up orphaned inventory items
+    if (integrity.orphanedInventory.length > 0) {
+      await this.inventory_items.bulkDelete(integrity.orphanedInventory.map(item => item.id));
+      cleaned += integrity.orphanedInventory.length;
+      console.log(`🗑️ Removed ${integrity.orphanedInventory.length} orphaned inventory items`);
+    }
+    
+    // Clean up orphaned sale items
+    if (integrity.orphanedSaleItems.length > 0) {
+      await this.sale_items.bulkDelete(integrity.orphanedSaleItems.map(item => item.id));
+      cleaned += integrity.orphanedSaleItems.length;
+      console.log(`🗑️ Removed ${integrity.orphanedSaleItems.length} orphaned sale items`);
+    }
+    
+    return cleaned;
   }
 }
 
-export const dataSyncService = DataSyncService.getInstance(); 
+export const db = new POSDatabase();
+
+// Export utility functions
+export const createId = () => uuidv4();
+
+export const createBaseEntity = (storeId: string, data: Partial<BaseEntity> = {}): Partial<BaseEntity> => {
+  const now = new Date().toISOString();
+  return {
+    id: createId(),
+    store_id: storeId,
+    created_at: now,
+    updated_at: now,
+    _synced: false,
+    ...data
+  };
+};
