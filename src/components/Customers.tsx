@@ -133,7 +133,8 @@ export default function Customers() {
         currency: safeAmount.currency,
         description: `Payment from ${customer.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
         reference: paymentForm.reference,
-        created_by: userProfile?.id || ''
+        created_by: userProfile?.id || '',
+        id: ''
       });
       
       showToast(`Payment received! ${customer.name} balance updated`, 'success');
@@ -892,6 +893,7 @@ export default function Customers() {
                 >
                   Cancel
                 </button>
+
                 <button
                   type="submit"
                   className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"

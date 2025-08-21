@@ -85,28 +85,28 @@ export class AccountStatementService {
 
     // Filter transactions within date range
     const filteredSales = sales.filter(sale => 
-      sale.customer_id === customer.id && 
-      new Date(sale.created_at) >= new Date(startDate) &&
-      new Date(sale.created_at) <= new Date(endDate)
+      sale.customerId === customer.id && 
+      sale.created_at && new Date(sale.created_at) >= new Date(startDate) &&
+      sale.created_at && new Date(sale.created_at) <= new Date(endDate)
     );
 
     const filteredTransactions = transactions.filter(transaction => 
       transaction.description.includes(customer.name) &&
-      new Date(transaction.created_at) >= new Date(startDate) &&
-      new Date(transaction.created_at) <= new Date(endDate)
+      new Date(transaction.createdAt) >= new Date(startDate) &&
+      new Date(transaction.createdAt) <= new Date(endDate)
     );
 
     // Build transaction history
     const statementTransactions: StatementTransaction[] = [];
-    let runningBalance = {
-      USD: customer.usd_balance || 0,
-      LBP: customer.lb_balance || 0
-    };
+    
+    // Start with opening balance
+    let runningBalanceUSD = customer.usd_balance || 0;
+    let runningBalanceLBP = customer.lb_balance || 0;
 
     // Add sales transactions
     filteredSales.forEach(sale => {
-      const product = products.find(p => p.id === sale.product_id);
-      const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
+      const product = products.find(p => p.id === sale.productId);
+      const inventoryItem = inventory.find(i => i.id === sale.inventoryItemId);
 
       if (product) {
         // Create product details for detailed view
@@ -115,29 +115,32 @@ export class AccountStatementService {
           productName: product.name,
           quantity: sale.quantity,
           unit: inventoryItem?.unit || 'piece',
-          unitPrice: sale.unit_price,
-          totalPrice: sale.received_value,
+          unitPrice: sale.unitPrice,
+          totalPrice: sale.totalPrice,
           weight: sale.weight || undefined,
-          notes: sale.notes || undefined
-        }] : undefined;
+          notes: sale.notes || undefined,
+        }] : [];
 
         const transaction: StatementTransaction = {
           id: sale.id,
-          date: sale.created_at,
-          type: sale.payment_method === 'credit' ? 'credit_sale' : 'sale',
+          date: sale.created_at || now.toISOString(),
+          type: sale.paymentMethod === 'credit' ? 'credit_sale' : 'sale',
           description: viewMode === 'summary' 
-            ? `${sale.payment_method === 'credit' ? 'Credit Sale' : 'Sale'}`
-            : `Sale: ${product.name} (${sale.quantity} ${inventoryItem?.unit || 'piece'}${sale.weight ? `, ${sale.weight}kg` : ''})`,
-          amount: sale.received_value,
-          currency: 'USD', // Assuming USD for sales
-          balanceAfter: runningBalance.USD,
-          paymentMethod: sale.payment_method,
-          productDetails
+            ? `${sale.paymentMethod === 'credit' ? 'Credit Sale' : 'Sale'}`
+            : `Sale: ${product.name || '-'} | ${sale.quantity} | ${sale.weight ? ` ${sale.weight}kg` : '-'} | ${inventoryItem?.unit || 'piece'}`,
+
+          currency: 'LBP', // Assuming LBP for sales
+          balanceAfter: runningBalanceLBP,
+          paymentMethod: sale.paymentMethod || 'cash',
+          amount: sale.totalPrice,
+          productDetails,
+          reference: "S-" + sale.id.slice(-8)
         };
 
-        if (sale.payment_method === 'credit') {
-          runningBalance.USD += sale.received_value;
-          transaction.balanceAfter = runningBalance.USD;
+        if (sale.paymentMethod === 'credit') {
+          // For credit sales, increase the customer's debt (balance)
+          runningBalanceLBP += sale.totalPrice;
+          transaction.balanceAfter = runningBalanceLBP;
         }
 
         statementTransactions.push(transaction);
@@ -149,26 +152,27 @@ export class AccountStatementService {
       if (transaction.type === 'income' && transaction.category === 'Customer Payment') {
         const transactionRecord: StatementTransaction = {
           id: transaction.id,
-          date: transaction.created_at,
+          date: transaction.createdAt,
           type: 'payment',
           description: viewMode === 'summary' 
             ? 'Payment Received'
             : transaction.description,
           amount: transaction.amount,
-          currency: transaction.currency as 'USD' | 'LBP',
-          balanceAfter: runningBalance[transaction.currency as 'USD' | 'LBP'],
-          reference: transaction.reference || undefined,
+          currency: transaction.currency,
+          balanceAfter: transaction.currency === 'USD' ? runningBalanceUSD : runningBalanceLBP,
+          reference: "P-" + transaction.id.slice(-8),
           paymentMethod: 'Payment Received'
         };
 
-        // Update running balance
+        // Update running balance based on currency
         if (transaction.currency === 'USD') {
-          runningBalance.USD = Math.max(0, runningBalance.USD - transaction.amount);
+          runningBalanceUSD = Math.max(0, runningBalanceUSD - transaction.amount);
+          transactionRecord.balanceAfter = runningBalanceUSD;
         } else {
-          runningBalance.LBP = Math.max(0, runningBalance.LBP - transaction.amount);
+          runningBalanceLBP = Math.max(0, runningBalanceLBP - transaction.amount);
+          transactionRecord.balanceAfter = runningBalanceLBP;
         }
 
-        transactionRecord.balanceAfter = runningBalance[transaction.currency as 'USD' | 'LBP'];
         statementTransactions.push(transactionRecord);
       }
     });
@@ -178,14 +182,18 @@ export class AccountStatementService {
 
     // Calculate financial summary
     const totalSales = filteredSales.reduce((sum, sale) => {
-      if (sale.payment_method === 'credit') {
-        return sum + sale.received_value;
+      if (sale.paymentMethod === 'credit') {
+        return sum + sale.totalPrice;
       }
       return sum;
     }, 0);
 
-    const totalPayments = filteredTransactions
-      .filter(t => t.type === 'income' && t.category === 'Customer Payment')
+    const totalPaymentsUSD = filteredTransactions
+      .filter(t => t.type === 'income' && t.category === 'Customer Payment' && t.currency === 'USD')
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const totalPaymentsLBP = filteredTransactions
+      .filter(t => t.type === 'income' && t.category === 'Customer Payment' && t.currency === 'LBP')
       .reduce((sum, t) => sum + t.amount, 0);
 
     const openingBalance = {
@@ -206,13 +214,16 @@ export class AccountStatementService {
       transactions: statementTransactions,
       financialSummary: {
         openingBalance,
-        currentBalance: runningBalance,
-        totalSales: { USD: totalSales, LBP: 0 },
-        totalPayments: { USD: totalPayments, LBP: 0 },
+        currentBalance: {
+          USD: runningBalanceUSD,
+          LBP: runningBalanceLBP
+        },
+        totalSales: { USD: 0, LBP: totalSales },
+        totalPayments: { USD: totalPaymentsUSD, LBP: totalPaymentsLBP },
         totalReceivings: { USD: 0, LBP: 0 },
         netChange: {
-          USD: totalPayments - totalSales,
-          LBP: 0
+          USD: totalPaymentsUSD,
+          LBP: totalPaymentsLBP - totalSales
         }
       },
       productSummary
@@ -237,31 +248,32 @@ export class AccountStatementService {
 
     // Filter sales related to this supplier
     const filteredSales = sales.filter(sale => 
-      sale.supplier_id === supplier.id && 
-      new Date(sale.created_at) >= new Date(startDate) &&
-      new Date(sale.created_at) <= new Date(endDate)
+      sale.supplierId === supplier.id && 
+      sale.created_at && new Date(sale.created_at) >= new Date(startDate) &&
+      sale.created_at && new Date(sale.created_at) <= new Date(endDate)
     );
 
     const filteredTransactions = transactions.filter(transaction => 
       transaction.description.includes(supplier.name) &&
-      new Date(transaction.created_at) >= new Date(startDate) &&
-      new Date(transaction.created_at) <= new Date(endDate)
+      new Date(transaction.createdAt) >= new Date(startDate) &&
+      new Date(transaction.createdAt) <= new Date(endDate)
     );
 
     // Build transaction history
     const statementTransactions: StatementTransaction[] = [];
-    let runningBalance = {
-      USD: supplier.usd_balance || 0,
-      LBP: supplier.lb_balance || 0
-    };
+    
+    // Start with opening balance
+    let runningBalanceUSD = supplier.usd_balance || 0;
+    let runningBalanceLBP = supplier.lb_balance || 0;
 
     // Add commission transactions (sales generate commission for suppliers)
     filteredSales.forEach(sale => {
-      const product = products.find(p => p.id === sale.product_id);
-      const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
+      const product = products.find(p => p.id === sale.productId);
+      const inventoryItem = inventory.find(i => i.id === sale.inventoryItemId);
 
       if (product && inventoryItem) {
-        const commissionAmount = (sale.received_value * (inventoryItem.commission_rate || 0.1)) / 100;
+        const commissionRate = inventoryItem.commissionRate || 0.1;
+        const commissionAmount = (sale.totalPrice * commissionRate) / 100;
 
         // Create product details for detailed view
         const productDetails: StatementProductDetail[] = viewMode === 'detailed' ? [{
@@ -269,30 +281,30 @@ export class AccountStatementService {
           productName: product.name,
           quantity: sale.quantity,
           unit: inventoryItem.unit || 'piece',
-          unitPrice: sale.unit_price,
-          totalPrice: sale.received_value,
+          unitPrice: sale.unitPrice,
+          totalPrice: sale.totalPrice,
           weight: sale.weight || undefined,
           commissionRate,
           commissionAmount,
           notes: sale.notes || undefined
-        }] : undefined;
+        }] : [];
 
         const transaction: StatementTransaction = {
           id: sale.id,
-          date: sale.created_at,
+          date: sale.created_at || now.toISOString(),
           type: 'commission',
           description: viewMode === 'summary'
             ? `Commission (${commissionRate}%)`
-            : `Commission: ${product.name} sale (${commissionRate}% of $${sale.received_value.toFixed(2)})`,
+            : `Commission: ${product.name} sale (${commissionRate}% of $${sale.totalPrice.toFixed(2)})`,
           amount: commissionAmount,
-          currency: 'USD',
-          balanceAfter: runningBalance.USD,
+          currency: "LBP",
+          balanceAfter: runningBalanceLBP,
           reference: `SALE-${sale.id.slice(-8)}`,
           productDetails
         };
 
-        runningBalance.USD += commissionAmount;
-        transaction.balanceAfter = runningBalance.USD;
+        runningBalanceLBP += commissionAmount;
+        transaction.balanceAfter = runningBalanceLBP;
         statementTransactions.push(transaction);
       }
     });
@@ -302,26 +314,27 @@ export class AccountStatementService {
       if (transaction.type === 'expense' && transaction.category === 'Supplier Payment') {
         const transactionRecord: StatementTransaction = {
           id: transaction.id,
-          date: transaction.created_at,
+          date: transaction.createdAt,
           type: 'payment',
           description: viewMode === 'summary'
             ? 'Payment Sent'
             : transaction.description,
           amount: transaction.amount,
-          currency: transaction.currency as 'USD' | 'LBP',
-          balanceAfter: runningBalance[transaction.currency as 'USD' | 'LBP'],
+          currency: transaction.currency,
+          balanceAfter: transaction.currency === 'USD' ? runningBalanceUSD : runningBalanceLBP,
           reference: transaction.reference || undefined,
           paymentMethod: 'Payment Sent'
         };
 
         // Update running balance
         if (transaction.currency === 'USD') {
-          runningBalance.USD = Math.max(0, runningBalance.USD - transaction.amount);
+          runningBalanceUSD = Math.max(0, runningBalanceUSD - transaction.amount);
+          transactionRecord.balanceAfter = runningBalanceUSD;
         } else {
-          runningBalance.LBP = Math.max(0, runningBalance.LBP - transaction.amount);
+          runningBalanceLBP = Math.max(0, runningBalanceLBP - transaction.amount);
+          transactionRecord.balanceAfter = runningBalanceLBP;
         }
 
-        transactionRecord.balanceAfter = runningBalance[transaction.currency as 'USD' | 'LBP'];
         statementTransactions.push(transactionRecord);
       }
     });
@@ -331,13 +344,17 @@ export class AccountStatementService {
 
     // Calculate financial summary
     const totalCommissions = filteredSales.reduce((sum, sale) => {
-      const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
-      const commissionRate = inventoryItem?.commission_rate || 0.1;
-      return sum + ((sale.received_value * commissionRate) / 100);
+      const inventoryItem = inventory.find(i => i.id === sale.inventoryItemId);
+      const commissionRate = inventoryItem?.commissionRate || 0.1;
+      return sum + ((sale.totalPrice * commissionRate) / 100);
     }, 0);
 
-    const totalPayments = filteredTransactions
-      .filter(t => t.type === 'expense' && t.category === 'Supplier Payment')
+    const totalPaymentsUSD = filteredTransactions
+      .filter(t => t.type === 'expense' && t.category === 'Supplier Payment' && t.currency === 'USD')
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const totalPaymentsLBP = filteredTransactions
+      .filter(t => t.type === 'expense' && t.category === 'Supplier Payment' && t.currency === 'LBP')
       .reduce((sum, t) => sum + t.amount, 0);
 
     const openingBalance = {
@@ -358,13 +375,16 @@ export class AccountStatementService {
       transactions: statementTransactions,
       financialSummary: {
         openingBalance,
-        currentBalance: runningBalance,
+        currentBalance: {
+          USD: runningBalanceUSD,
+          LBP: runningBalanceLBP
+        },
         totalSales: { USD: 0, LBP: 0 },
-        totalPayments: { USD: totalPayments, LBP: 0 },
-        totalReceivings: { USD: totalCommissions, LBP: 0 },
+        totalPayments: { USD: totalPaymentsUSD, LBP: totalPaymentsLBP },
+        totalReceivings: { USD: 0, LBP: totalCommissions },
         netChange: {
-          USD: totalCommissions - totalPayments,
-          LBP: 0
+          USD: -totalPaymentsUSD,
+          LBP: totalCommissions - totalPaymentsLBP
         }
       },
       productSummary
@@ -397,10 +417,10 @@ export class AccountStatementService {
 
     // Aggregate product data
     sales.forEach(sale => {
-      const product = products.find(p => p.id === sale.product_id);
+      const product = products.find(p => p.id === sale.productId);
       if (!product) return;
 
-      const existing = productStats.get(sale.product_id) || {
+      const existing = productStats.get(sale.productId) || {
         productName: product.name,
         category: product.category,
         totalQuantity: 0,
@@ -409,10 +429,10 @@ export class AccountStatementService {
       };
 
       existing.totalQuantity += sale.quantity;
-      existing.totalValue += sale.received_value;
+      existing.totalValue += sale.totalPrice;
       existing.transactionCount += 1;
 
-      productStats.set(sale.product_id, existing);
+      productStats.set(sale.productId, existing);
     });
 
     // Calculate top products
