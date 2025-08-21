@@ -216,7 +216,43 @@ export default function AccountStatementModal({
                   value={dateRange.start}
                   onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
                   className="border border-gray-300 rounded px-2 py-1 text-sm"
-            {/* View Mode Toggle */}
+                />
+                <span className="text-gray-500">to</span>
+                <input
+                  type="date"
+                  value={dateRange.end}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                />
+              </div>
+              
+              <button
+                onClick={handleExportPDF}
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export</span>
+              </button>
+              
+              <button
+                onClick={handlePrint}
+                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print</span>
+              </button>
+              
+              <button
+                onClick={onClose}
+                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+
+          {/* View Mode Toggle */}
+          <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-1 bg-gray-100 p-1 rounded-lg">
                 <button
@@ -239,37 +275,11 @@ export default function AccountStatementModal({
                   }`}
                 >
                   <List className="w-4 h-4" />
-              <div className="flex items-center space-x-3">
-                {/* Date Range Picker */}
-                <div className="flex items-center space-x-2">
-                  <Calendar className="w-4 h-4 text-gray-500" />
-                  <input
-                    type="date"
-                    value={dateRange.start}
-                    onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-                    className="border border-gray-300 rounded px-2 py-1 text-sm"
-                  />
-                  <span className="text-gray-500">to</span>
-                  <input
-                    type="date"
-                    value={dateRange.end}
-                    onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-                    className="border border-gray-300 rounded px-2 py-1 text-sm"
-                  />
-                </div>
-                
-                <button
-                  onClick={handleExportPDF}
-                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Export</span>
+                  <span className="font-medium">Detailed View</span>
                 </button>
-                
-                <button
-                  onClick={handlePrint}
-                  className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                >
+              </div>
+            </div>
+          </div>
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-6 space-y-8">
