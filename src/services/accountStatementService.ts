@@ -10,10 +10,10 @@ export interface AccountStatement {
     start: string;
     end: string;
   };
-  
+
   viewMode: 'summary' | 'detailed';
   transactions: StatementTransaction[];
-  
+
   financialSummary: {
     openingBalance: {
       USD: number;
@@ -40,7 +40,7 @@ export interface AccountStatement {
       LBP: number;
     };
   };
-  
+
   // Additional metrics for detailed view
   productSummary?: {
     totalProducts: number;
@@ -107,7 +107,7 @@ export class AccountStatementService {
     filteredSales.forEach(sale => {
       const product = products.find(p => p.id === sale.product_id);
       const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
-      
+
       if (product) {
         // Create product details for detailed view
         const productDetails: StatementProductDetail[] = viewMode === 'detailed' ? [{
@@ -259,10 +259,10 @@ export class AccountStatementService {
     filteredSales.forEach(sale => {
       const product = products.find(p => p.id === sale.product_id);
       const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
-      
+
       if (product && inventoryItem) {
         const commissionAmount = (sale.received_value * (inventoryItem.commission_rate || 0.1)) / 100;
-        
+
         // Create product details for detailed view
         const productDetails: StatementProductDetail[] = viewMode === 'detailed' ? [{
           productId: product.id,
@@ -428,7 +428,7 @@ export class AccountStatementService {
 
     // Calculate category breakdown
     const categoryBreakdown: Record<string, { quantity: number; value: number }> = {};
-    
+
     productStats.forEach(stat => {
       if (!categoryBreakdown[stat.category]) {
         categoryBreakdown[stat.category] = { quantity: 0, value: 0 };
@@ -479,13 +479,13 @@ export class AccountStatementService {
       text += `PRODUCT SUMMARY\n`;
       text += `==============\n`;
       text += `Total Products: ${statement.productSummary.totalProducts}\n\n`;
-      
+
       text += `Top Products:\n`;
       statement.productSummary.topProducts.forEach((product, index) => {
         text += `${index + 1}. ${product.productName}: ${product.totalQuantity} units, $${product.totalValue.toFixed(2)} (avg: $${product.averagePrice.toFixed(2)})\n`;
       });
       text += `\n`;
-      
+
       text += `Category Breakdown:\n`;
       Object.entries(statement.productSummary.categoryBreakdown).forEach(([category, data]) => {
         text += `${category}: ${data.quantity} units, $${data.value.toFixed(2)}\n`;
@@ -504,7 +504,7 @@ export class AccountStatementService {
       if (transaction.reference) {
         text += `  Reference: ${transaction.reference}\n`;
       }
-      
+
       // Add product details for detailed view
       if (statement.viewMode === 'detailed' && transaction.productDetails) {
         transaction.productDetails.forEach(detail => {

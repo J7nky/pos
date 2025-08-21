@@ -74,11 +74,11 @@ export default function AccountStatementModal({
 
   const generateStatement = async () => {
     if (!entity) return;
-    
+
     setIsLoading(true);
     try {
       const accountStatementService = AccountStatementService.getInstance();
-      
+
       let newStatement: AccountStatement;
       if (entityType === 'customer') {
         newStatement = accountStatementService.generateCustomerStatement(
@@ -101,7 +101,7 @@ export default function AccountStatementModal({
           viewMode
         );
       }
-      
+
       setStatement(newStatement);
     } catch (error) {
       console.error('Error generating statement:', error);
@@ -113,11 +113,11 @@ export default function AccountStatementModal({
 
   const handleExportPDF = async () => {
     if (!statement) return;
-    
+
     try {
       const accountStatementService = AccountStatementService.getInstance();
       const blob = await accountStatementService.exportToPDF(statement);
-      
+
       // Create download link
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -127,7 +127,7 @@ export default function AccountStatementModal({
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
       showToast('Statement exported successfully!', 'success');
     } catch (error) {
       console.error('Error exporting PDF:', error);
@@ -186,11 +186,11 @@ export default function AccountStatementModal({
   return (
     <>
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
-      
+
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-lg max-w-7xl w-full max-h-[95vh] overflow-hidden">
+        <div className="bg-white rounded-lg max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
           {/* Header */}
-          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+          <div className="p-6 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center space-x-3">
               {entityType === 'customer' ? (
                 <Users className="w-6 h-6 text-blue-600" />
@@ -206,7 +206,7 @@ export default function AccountStatementModal({
                 </p>
               </div>
             </div>
-            
+
             <div className="flex items-center space-x-3">
               {/* Date Range Picker */}
               <div className="flex items-center space-x-2">
@@ -225,7 +225,7 @@ export default function AccountStatementModal({
                   className="border border-gray-300 rounded px-2 py-1 text-sm"
                 />
               </div>
-              
+
               <button
                 onClick={handleExportPDF}
                 className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -233,7 +233,7 @@ export default function AccountStatementModal({
                 <Download className="w-4 h-4" />
                 <span>Export</span>
               </button>
-              
+
               <button
                 onClick={handlePrint}
                 className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -241,7 +241,7 @@ export default function AccountStatementModal({
                 <Printer className="w-4 h-4" />
                 <span>Print</span>
               </button>
-              
+
               <button
                 onClick={onClose}
                 className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
@@ -252,7 +252,7 @@ export default function AccountStatementModal({
           </div>
 
           {/* View Mode Toggle */}
-          <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+          <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex-shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-1 bg-gray-100 p-1 rounded-lg">
                 <button
@@ -291,8 +291,9 @@ export default function AccountStatementModal({
               <>
                 {/* Financial Summary Section - Always Visible */}
                 <div className="space-y-8">
-                  <div className="bg-gray-50 rounded-lg p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                {/* Financial Summary Section */}
+                <div className="bg-gray-50 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                       <DollarSign className="w-6 h-6 mr-3 text-blue-600" />
                       Financial Overview
                     </h3>
@@ -301,7 +302,7 @@ export default function AccountStatementModal({
                       <span>Period: {new Date(statement.dateRange.start).toLocaleDateString()} - {new Date(statement.dateRange.end).toLocaleDateString()}</span>
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                       <div className="flex items-center justify-between mb-2">
@@ -315,7 +316,7 @@ export default function AccountStatementModal({
                         {formatCurrency(statement.financialSummary.openingBalance.LBP, 'LBP')}
                       </div>
                     </div>
-                    
+
                     <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                       <div className="flex items-center justify-between mb-2">
                         <div className="text-sm font-medium text-gray-500">Current Balance</div>
@@ -330,7 +331,7 @@ export default function AccountStatementModal({
                         {formatCurrency(statement.financialSummary.currentBalance.LBP, 'LBP')}
                       </div>
                     </div>
-                    
+
                     {entityType === 'customer' ? (
                       <>
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
@@ -342,7 +343,7 @@ export default function AccountStatementModal({
                             {formatCurrency(statement.financialSummary.totalSales.USD, 'USD')}
                           </div>
                         </div>
-                        
+
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
                             <div className="text-sm font-medium text-gray-500">Total Payments</div>
@@ -364,7 +365,7 @@ export default function AccountStatementModal({
                             {formatCurrency(statement.financialSummary.totalReceivings.USD, 'USD')}
                           </div>
                         </div>
-                        
+
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
                             <div className="text-sm font-medium text-gray-500">Total Payments</div>
@@ -377,76 +378,9 @@ export default function AccountStatementModal({
                       </>
                     )}
                   </div>
-                  
-                  <div className="mt-8 pt-6 border-t border-blue-200">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xl font-semibold text-gray-900">Net Change</span>
-                      <span className={`text-3xl font-bold ${
-                        statement.financialSummary.netChange.USD >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {formatCurrency(statement.financialSummary.netChange.USD, 'USD')}
-                      </span>
-                    </div>
-                  </div>
-                </div>
 
-                {/* Product Summary Section - Only for Detailed View */}
-                {viewMode === 'detailed' && statement.productSummary && (
-                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200">
-                    <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center">
-                      <ShoppingBag className="w-6 h-6 mr-3 text-green-600" />
-                      Product Analysis
-                    </h3>
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                      {/* Top Products */}
-                      <div className="bg-white rounded-lg p-6 border border-gray-200">
-                        <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                          <BarChart3 className="w-5 h-5 mr-2 text-blue-600" />
-                          Top Products by Value
-                        </h4>
-                        <div className="space-y-3">
-                          {statement.productSummary.topProducts.slice(0, 5).map((product, index) => (
-                            <div key={product.productName} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                              <div className="flex items-center space-x-3">
-                                <span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">
-                                  {index + 1}
-                                </span>
-                                <div>
-                                  <div className="font-medium text-gray-900">{product.productName}</div>
-                                  <div className="text-sm text-gray-500">{product.totalQuantity} units</div>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="font-semibold text-gray-900">{formatCurrency(product.totalValue, 'USD')}</div>
-                                <div className="text-sm text-gray-500">avg: {formatCurrency(product.averagePrice, 'USD')}</div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      
-                      {/* Category Breakdown */}
-                      <div className="bg-white rounded-lg p-6 border border-gray-200">
-                        <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                          <Package className="w-5 h-5 mr-2 text-purple-600" />
-                          Category Breakdown
-                        </h4>
-                        <div className="space-y-3">
-                          {Object.entries(statement.productSummary.categoryBreakdown).map(([category, data]) => (
-                            <div key={category} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                              <div className="font-medium text-gray-900">{category}</div>
-                              <div className="text-right">
-                                <div className="font-semibold text-gray-900">{formatCurrency(data.value, 'USD')}</div>
-                                <div className="text-sm text-gray-500">{data.quantity} units</div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+             
+                </div>
 
                 {/* Transaction History Section */}
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
@@ -459,7 +393,7 @@ export default function AccountStatementModal({
                       {statement.transactions.length} transactions found
                     </p>
                   </div>
-                  
+
                   {statement.transactions.length === 0 ? (
                     <div className="text-center py-16">
                       <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
