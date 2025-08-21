@@ -1,23 +1,5 @@
 import { Customer, Supplier, Transaction, SaleItem, InventoryItem, Product } from '../types';
-
-export interface StatementTransaction {
-  id: string;
-  date: string;
-  type: 'sale' | 'payment' | 'receiving' | 'credit_sale' | 'commission';
-  description: string;
-  amount: number;
-  currency: 'USD' | 'LBP';
-  balanceAfter: number;
-  reference?: string;
-  productInfo?: {
-    productName: string;
-    quantity: number;
-    unitPrice: number;
-    totalPrice: number;
-    weight?: number;
-  };
-  paymentMethod?: string;
-}
+import { StatementTransaction, StatementProductDetail } from '../types';
 
 export interface AccountStatement {
   entityId: string;
@@ -29,10 +11,9 @@ export interface AccountStatement {
     end: string;
   };
   
-  // Section 1: Detailed Transaction History
+  viewMode: 'summary' | 'detailed';
   transactions: StatementTransaction[];
   
-  // Section 2: Financial Summary
   financialSummary: {
     openingBalance: {
       USD: number;
@@ -59,6 +40,21 @@ export interface AccountStatement {
       LBP: number;
     };
   };
+  
+  // Additional metrics for detailed view
+  productSummary?: {
+    totalProducts: number;
+    topProducts: Array<{
+      productName: string;
+      totalQuantity: number;
+      totalValue: number;
+      averagePrice: number;
+    }>;
+    categoryBreakdown: Record<string, {
+      quantity: number;
+      value: number;
+    }>;
+  };
 }
 
 export class AccountStatementService {
@@ -80,7 +76,8 @@ export class AccountStatementService {
     transactions: Transaction[],
     products: Product[],
     inventory: InventoryItem[],
-    dateRange?: { start: string; end: string }
+    dateRange?: { start: string; end: string },
+    viewMode: 'summary' | 'detailed' = 'detailed'
   ): AccountStatement {
     const now = new Date();
     const startDate = dateRange?.start || new Date(now.getFullYear(), 0, 1).toISOString(); // Start of year
@@ -112,22 +109,30 @@ export class AccountStatementService {
       const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
       
       if (product) {
+        // Create product details for detailed view
+        const productDetails: StatementProductDetail[] = viewMode === 'detailed' ? [{
+          productId: product.id,
+          productName: product.name,
+          quantity: sale.quantity,
+          unit: inventoryItem?.unit || 'piece',
+          unitPrice: sale.unit_price,
+          totalPrice: sale.received_value,
+          weight: sale.weight || undefined,
+          notes: sale.notes || undefined
+        }] : undefined;
+
         const transaction: StatementTransaction = {
           id: sale.id,
           date: sale.created_at,
           type: sale.payment_method === 'credit' ? 'credit_sale' : 'sale',
-          description: `Sale: ${product.name}`,
+          description: viewMode === 'summary' 
+            ? `${sale.payment_method === 'credit' ? 'Credit Sale' : 'Sale'}`
+            : `Sale: ${product.name} (${sale.quantity} ${inventoryItem?.unit || 'piece'}${sale.weight ? `, ${sale.weight}kg` : ''})`,
           amount: sale.received_value,
           currency: 'USD', // Assuming USD for sales
           balanceAfter: runningBalance.USD,
-          productInfo: {
-            productName: product.name,
-            quantity: sale.quantity,
-            unitPrice: sale.unit_price,
-            totalPrice: sale.received_value,
-            weight: sale.weight || undefined
-          },
-          paymentMethod: sale.payment_method
+          paymentMethod: sale.payment_method,
+          productDetails
         };
 
         if (sale.payment_method === 'credit') {
@@ -146,7 +151,9 @@ export class AccountStatementService {
           id: transaction.id,
           date: transaction.created_at,
           type: 'payment',
-          description: transaction.description,
+          description: viewMode === 'summary' 
+            ? 'Payment Received'
+            : transaction.description,
           amount: transaction.amount,
           currency: transaction.currency as 'USD' | 'LBP',
           balanceAfter: runningBalance[transaction.currency as 'USD' | 'LBP'],
@@ -186,12 +193,16 @@ export class AccountStatementService {
       LBP: customer.lb_balance || 0
     };
 
+    // Calculate product summary for detailed view
+    const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(filteredSales, products) : undefined;
+
     return {
       entityId: customer.id,
       entityName: customer.name,
       entityType: 'customer',
       statementDate: now.toISOString(),
       dateRange: { start: startDate, end: endDate },
+      viewMode,
       transactions: statementTransactions,
       financialSummary: {
         openingBalance,
@@ -203,7 +214,8 @@ export class AccountStatementService {
           USD: totalPayments - totalSales,
           LBP: 0
         }
-      }
+      },
+      productSummary
     };
   }
 
@@ -216,7 +228,8 @@ export class AccountStatementService {
     transactions: Transaction[],
     products: Product[],
     inventory: InventoryItem[],
-    dateRange?: { start: string; end: string }
+    dateRange?: { start: string; end: string },
+    viewMode: 'summary' | 'detailed' = 'detailed'
   ): AccountStatement {
     const now = new Date();
     const startDate = dateRange?.start || new Date(now.getFullYear(), 0, 1).toISOString();
@@ -250,22 +263,32 @@ export class AccountStatementService {
       if (product && inventoryItem) {
         const commissionAmount = (sale.received_value * (inventoryItem.commission_rate || 0.1)) / 100;
         
+        // Create product details for detailed view
+        const productDetails: StatementProductDetail[] = viewMode === 'detailed' ? [{
+          productId: product.id,
+          productName: product.name,
+          quantity: sale.quantity,
+          unit: inventoryItem.unit || 'piece',
+          unitPrice: sale.unit_price,
+          totalPrice: sale.received_value,
+          weight: sale.weight || undefined,
+          commissionRate,
+          commissionAmount,
+          notes: sale.notes || undefined
+        }] : undefined;
+
         const transaction: StatementTransaction = {
           id: sale.id,
           date: sale.created_at,
           type: 'commission',
-          description: `Commission: ${product.name} sale`,
+          description: viewMode === 'summary'
+            ? `Commission (${commissionRate}%)`
+            : `Commission: ${product.name} sale (${commissionRate}% of $${sale.received_value.toFixed(2)})`,
           amount: commissionAmount,
           currency: 'USD',
           balanceAfter: runningBalance.USD,
-          productInfo: {
-            productName: product.name,
-            quantity: sale.quantity,
-            unitPrice: sale.unit_price,
-            totalPrice: sale.received_value,
-            weight: sale.weight || undefined
-          },
-          reference: `SALE-${sale.id.slice(-8)}`
+          reference: `SALE-${sale.id.slice(-8)}`,
+          productDetails
         };
 
         runningBalance.USD += commissionAmount;
@@ -281,7 +304,9 @@ export class AccountStatementService {
           id: transaction.id,
           date: transaction.created_at,
           type: 'payment',
-          description: transaction.description,
+          description: viewMode === 'summary'
+            ? 'Payment Sent'
+            : transaction.description,
           amount: transaction.amount,
           currency: transaction.currency as 'USD' | 'LBP',
           balanceAfter: runningBalance[transaction.currency as 'USD' | 'LBP'],
@@ -320,12 +345,16 @@ export class AccountStatementService {
       LBP: supplier.lb_balance || 0
     };
 
+    // Calculate product summary for detailed view
+    const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(filteredSales, products) : undefined;
+
     return {
       entityId: supplier.id,
       entityName: supplier.name,
       entityType: 'supplier',
       statementDate: now.toISOString(),
       dateRange: { start: startDate, end: endDate },
+      viewMode,
       transactions: statementTransactions,
       financialSummary: {
         openingBalance,
@@ -337,7 +366,81 @@ export class AccountStatementService {
           USD: totalCommissions - totalPayments,
           LBP: 0
         }
+      },
+      productSummary
+    };
+  }
+
+  /**
+   * Calculate product summary statistics
+   */
+  private calculateProductSummary(sales: SaleItem[], products: Product[]): {
+    totalProducts: number;
+    topProducts: Array<{
+      productName: string;
+      totalQuantity: number;
+      totalValue: number;
+      averagePrice: number;
+    }>;
+    categoryBreakdown: Record<string, {
+      quantity: number;
+      value: number;
+    }>;
+  } {
+    const productStats = new Map<string, {
+      productName: string;
+      category: string;
+      totalQuantity: number;
+      totalValue: number;
+      transactionCount: number;
+    }>();
+
+    // Aggregate product data
+    sales.forEach(sale => {
+      const product = products.find(p => p.id === sale.product_id);
+      if (!product) return;
+
+      const existing = productStats.get(sale.product_id) || {
+        productName: product.name,
+        category: product.category,
+        totalQuantity: 0,
+        totalValue: 0,
+        transactionCount: 0
+      };
+
+      existing.totalQuantity += sale.quantity;
+      existing.totalValue += sale.received_value;
+      existing.transactionCount += 1;
+
+      productStats.set(sale.product_id, existing);
+    });
+
+    // Calculate top products
+    const topProducts = Array.from(productStats.values())
+      .map(stat => ({
+        productName: stat.productName,
+        totalQuantity: stat.totalQuantity,
+        totalValue: stat.totalValue,
+        averagePrice: stat.totalValue / stat.totalQuantity
+      }))
+      .sort((a, b) => b.totalValue - a.totalValue)
+      .slice(0, 10);
+
+    // Calculate category breakdown
+    const categoryBreakdown: Record<string, { quantity: number; value: number }> = {};
+    
+    productStats.forEach(stat => {
+      if (!categoryBreakdown[stat.category]) {
+        categoryBreakdown[stat.category] = { quantity: 0, value: 0 };
       }
+      categoryBreakdown[stat.category].quantity += stat.totalQuantity;
+      categoryBreakdown[stat.category].value += stat.totalValue;
+    });
+
+    return {
+      totalProducts: productStats.size,
+      topProducts,
+      categoryBreakdown
     };
   }
 
@@ -359,6 +462,7 @@ export class AccountStatementService {
     text += `==================\n\n`;
     text += `Entity: ${statement.entityName}\n`;
     text += `Type: ${statement.entityType.charAt(0).toUpperCase() + statement.entityType.slice(1)}\n`;
+    text += `View Mode: ${statement.viewMode.charAt(0).toUpperCase() + statement.viewMode.slice(1)}\n`;
     text += `Statement Date: ${new Date(statement.statementDate).toLocaleDateString()}\n`;
     text += `Period: ${new Date(statement.dateRange.start).toLocaleDateString()} - ${new Date(statement.dateRange.end).toLocaleDateString()}\n\n`;
 
@@ -370,6 +474,25 @@ export class AccountStatementService {
     text += `Current Balance (USD): $${statement.financialSummary.currentBalance.USD.toFixed(2)}\n`;
     text += `Current Balance (LBP): ${statement.financialSummary.currentBalance.LBP.toLocaleString()}\n\n`;
 
+    // Product Summary (for detailed view)
+    if (statement.viewMode === 'detailed' && statement.productSummary) {
+      text += `PRODUCT SUMMARY\n`;
+      text += `==============\n`;
+      text += `Total Products: ${statement.productSummary.totalProducts}\n\n`;
+      
+      text += `Top Products:\n`;
+      statement.productSummary.topProducts.forEach((product, index) => {
+        text += `${index + 1}. ${product.productName}: ${product.totalQuantity} units, $${product.totalValue.toFixed(2)} (avg: $${product.averagePrice.toFixed(2)})\n`;
+      });
+      text += `\n`;
+      
+      text += `Category Breakdown:\n`;
+      Object.entries(statement.productSummary.categoryBreakdown).forEach(([category, data]) => {
+        text += `${category}: ${data.quantity} units, $${data.value.toFixed(2)}\n`;
+      });
+      text += `\n`;
+    }
+
     // Transaction History
     text += `TRANSACTION HISTORY\n`;
     text += `==================\n`;
@@ -380,6 +503,19 @@ export class AccountStatementService {
       text += `  Balance After: ${transaction.currency} ${transaction.balanceAfter.toFixed(2)}\n`;
       if (transaction.reference) {
         text += `  Reference: ${transaction.reference}\n`;
+      }
+      
+      // Add product details for detailed view
+      if (statement.viewMode === 'detailed' && transaction.productDetails) {
+        transaction.productDetails.forEach(detail => {
+          text += `    Product: ${detail.productName}\n`;
+          text += `    Quantity: ${detail.quantity} ${detail.unit}\n`;
+          text += `    Unit Price: $${detail.unitPrice.toFixed(2)}\n`;
+          text += `    Total: $${detail.totalPrice.toFixed(2)}\n`;
+          if (detail.weight) text += `    Weight: ${detail.weight}kg\n`;
+          if (detail.commissionRate) text += `    Commission: ${detail.commissionRate}% ($${detail.commissionAmount?.toFixed(2)})\n`;
+          if (detail.notes) text += `    Notes: ${detail.notes}\n`;
+        });
       }
       text += `\n`;
     });
