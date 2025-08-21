@@ -214,14 +214,31 @@ export default function AccountStatementModal({
                 <input
                   type="date"
                   value={dateRange.start}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                  onChange={(e)=>{
+                    const selectedDate = new Date(e.target.value);
+                    const today = new Date();
+                    today.setHours(23, 59, 59, 999); // End of today
+                    
+                    if (selectedDate <= today) {
+                      setDateRange(prev => ({ ...prev, start: e.target.value }));
+                    }
+                  }}
                   className="border border-gray-300 rounded px-2 py-1 text-sm"
                 />
                 <span className="text-gray-500">to</span>
                 <input
                   type="date"
                   value={dateRange.end}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                  max={new Date().toISOString().split('T')[0]}
+                  onChange={(e) => {
+                    const selectedDate = new Date(e.target.value);
+                    const today = new Date();
+                    today.setHours(23, 59, 59, 999); // End of today
+                    
+                    if (selectedDate <= today) {
+                      setDateRange(prev => ({ ...prev, end: e.target.value }));
+                    }
+                  }}
                   className="border border-gray-300 rounded px-2 py-1 text-sm"
                 />
               </div>
@@ -383,7 +400,7 @@ export default function AccountStatementModal({
                 </div>
 
                 {/* Transaction History Section */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm mt-4">
                   <div className="p-6 border-b border-gray-200">
                     <h3 className="text-xl font-bold text-gray-900 flex items-center">
                       <FileText className="w-6 h-6 mr-3 text-gray-600" />
@@ -408,19 +425,20 @@ export default function AccountStatementModal({
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Date
                             </th>
+                           
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Type
                             </th>
-                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Description
-                            </th>
                             {viewMode === 'detailed' && (
                               <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Product Details
+                                Description
                               </th>
                             )}
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Amount
+                              Credit
+                            </th>
+                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Debit
                             </th>
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Balance After
@@ -436,17 +454,10 @@ export default function AccountStatementModal({
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                 {new Date(transaction.date).toLocaleDateString()}
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="flex items-center space-x-2">
-                                  {getTransactionIcon(transaction.type)}
-                                  <span className="text-sm font-medium text-gray-900">
-                                    {getTransactionTypeLabel(transaction.type)}
-                                  </span>
-                                </div>
-                              </td>
+                           
                               <td className="px-6 py-4">
                                 <div className="text-sm font-medium text-gray-900">
-                                  {transaction.description}
+                                  {transaction.type}
                                 </div>
                                 {transaction.paymentMethod && (
                                   <div className="text-xs text-gray-500 mt-1 flex items-center">
@@ -457,8 +468,12 @@ export default function AccountStatementModal({
                               </td>
                               {viewMode === 'detailed' && (
                                 <td className="px-6 py-4">
-                                  {transaction.productDetails && transaction.productDetails.length > 0 ? (
+                                   <div className="text-sm font-medium text-gray-900">
+                                  {transaction.description}
+                                </div>
+                                  {/* {transaction.productDetails && transaction.productDetails.length > 0 ? (
                                     <div className="space-y-2">
+
                                       {transaction.productDetails.map((detail, index) => (
                                         <div key={index} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                                           <div className="font-medium text-gray-900 mb-2 flex items-center">
@@ -502,24 +517,39 @@ export default function AccountStatementModal({
                                               {detail.notes}
                                             </div>
                                           )}
-                                        </div>
-                                      ))}
+                                        </div> */}
+                                      {/* ))}
                                     </div>
                                   ) : (
                                     <span className="text-sm text-gray-400">No product details</span>
-                                  )}
+                                  )} */}
                                 </td>
                               )}
+                              {/* credit */}
                               <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`text-sm font-bold ${
-                                  transaction.type === 'payment' ? 'text-green-600' : 'text-red-600'
-                                }`}>
-                                  {formatCurrency(transaction.amount, transaction.currency)}
-                                </span>
+                                {transaction.type === 'payment' ? (
+                                  <span className="text-sm font-bold text-green-600">
+                                    {formatCurrency(transaction.amount || 0, transaction.currency)}
+                                  </span>
+                                ) : (
+                                  <span className="text-sm text-gray-400">-</span>
+                                )}
                               </td>
+                              {/* debit */}
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                {transaction.type !== 'payment' ? (
+                                  <span className="text-sm font-bold text-red-600">
+                                    {formatCurrency(transaction.amount || 0, transaction.currency)}
+                                  </span>
+                                ) : (
+                                  <span className="text-sm text-gray-400">-</span>
+                                )}
+                              </td>
+                              {/* balance USD/LBP */}
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                 {formatCurrency(transaction.balanceAfter, transaction.currency)}
                               </td>
+                              {/* reference */}
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 {transaction.reference || '-'}
                               </td>

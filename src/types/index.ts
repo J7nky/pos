@@ -93,6 +93,7 @@ export interface SaleItem {
   notes?: string;
   createdBy?: string; // Added to match Supabase schema
   inventoryType?: 'commission' | 'cash'; // Added for inventory tracking
+  created_at?: string; // Added to match Supabase schema
 }
 
 // Added missing interfaces to match database schema

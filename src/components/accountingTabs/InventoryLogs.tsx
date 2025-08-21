@@ -474,7 +474,7 @@ export default function InventoryLogs() {
       </div>
     );
   }
-
+console.log(transactions,'transactions');
   return (
     <div className="space-y-6">
       {/* Toast */}
@@ -835,7 +835,7 @@ export default function InventoryLogs() {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Transactions</h3>
           <div className="space-y-4">
-            {transactions.slice(0, 10).map((transaction: any) => (
+            {transactions.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 10).map((transaction: any) => (
               <div key={transaction.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
                 <div className="flex items-center">
                   {transaction.type === 'income' ? (
@@ -851,13 +851,13 @@ export default function InventoryLogs() {
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className={`text-sm font-medium ${
+                <div className="text-right ">
+                  <div className={`text-lg font-medium ${
                     transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
                   }`}>
-                    {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
+                    {transaction.type === 'income' ? '+' : '-'}
+                    {transaction.amount} {transaction.currency}
                   </div>
-                  <div className="text-xs text-gray-500">{transaction.currency}</div>
                 </div>
               </div>
             ))}

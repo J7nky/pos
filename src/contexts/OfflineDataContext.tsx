@@ -239,20 +239,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // RULE 2 FIX: For cash sales, update cash drawer
-      const isCashSale = items.some(item => item.payment_method === 'cash');
-      if (isCashSale && cashDrawer) {
-        const totalCashAmount = items
-          .filter(item => item.payment_method === 'cash')
-          .reduce((sum, item) => sum + (item.received_value || 0), 0);
-        
-        const updatedDrawer = {
-          ...cashDrawer,
-          currentAmount: cashDrawer.currentAmount + totalCashAmount,
-          totalCashSales: cashDrawer.totalCashSales + totalCashAmount
-        };
-        setCashDrawer(updatedDrawer);
-      }
     } catch (error) {
       console.error('❌ Data initialization failed:', error);
       // Still try to load what we can from local storage
@@ -651,15 +637,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         id: createId(),
         bill_id: billId,
         store_id: storeId,
-        action: 'update' as const,
+        action: 'update',
         changed_by: changedBy,
         change_reason: changeReason || null,
-        field_changed: 'multiple_fields',
-        old_value: null,
-        new_value: JSON.stringify(updates),
-        ip_address: null,
+        changes: JSON.stringify(updates),
         created_at: now,
-        updated_at: now,
         _synced: isOnline // Mark as synced if we successfully updated in Supabase
       };
       
@@ -1071,7 +1053,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         received_quantity: it.received_quantity ?? it.quantity,
         batch_id: batchId as string | null
       }));
-      
+
       await db.inventory_items.bulkAdd(mappedItems);
     });
 
@@ -1125,7 +1107,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Add the value of the credit to the customer's balance
   
       // Deduct from specific inventory items
-      for (const item of items) {
+  for (const item of items) {
         if (item.inventory_item_id) {
           // Use the specific inventory item ID if provided
           const inventoryItem = await db.inventory_items.get(item.inventory_item_id);

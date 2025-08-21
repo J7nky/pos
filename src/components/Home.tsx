@@ -139,7 +139,7 @@ export default function Home() {
       change: cashDrawer ? `Opened: ${new Date(cashDrawer.openedAt).toLocaleTimeString()}` : 'Not opened today'
     },
     {
-      title: "Today's Expenses", 
+      title: "Today's Expense", 
       value: formatCurrency(todayExpenses),
       icon: Receipt,
       color: 'bg-red-500',
