@@ -6,6 +6,7 @@ import SupabaseLogin from './components/SupabaseLogin';
 import Layout from './components/Layout';
 import Home from './components/Home';
 import Inventory from './components/Inventory';
+import './styles/print.css';
 
 import POS from './components/POS';
 import Reports from './components/Reports';

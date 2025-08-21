@@ -109,7 +109,7 @@ export default function InventoryLogs() {
   const transactions = raw.transactions;
 
   // State
-  const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' | 'analytics'>('bills');
+  const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' >('bills');
   const [bills, setBills] = useState<Bill[]>([]);
   const [selectedBill, setSelectedBill] = useState<BillDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -306,6 +306,7 @@ export default function InventoryLogs() {
         
         // Add transaction
         await raw.addTransaction({
+          id: '',
           type: 'income',
           category: 'Customer Payment',
           amount: amount,
@@ -333,6 +334,7 @@ export default function InventoryLogs() {
         
         // Add transaction
         await raw.addTransaction({
+          id: '',
           type: 'expense',
           category: 'Supplier Payment',
           amount: amount,
@@ -563,7 +565,6 @@ export default function InventoryLogs() {
           { id: 'bills', label: 'Bills Management', icon: FileText },
           { id: 'inventory', label: 'Inventory Logs', icon: Package },
           { id: 'payments', label: 'Payment History', icon: DollarSign },
-          { id: 'analytics', label: 'Analytics', icon: BarChart3 }
         ].map(tab => (
           <button
             key={tab.id}
@@ -864,86 +865,6 @@ export default function InventoryLogs() {
         </div>
       )}
 
-      {/* Analytics Tab */}
-      {activeTab === 'analytics' && (
-        <div className="space-y-6">
-          {/* Sync Status Overview */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-              <RefreshCw className="w-5 h-5 text-blue-500 mr-2" />
-              Sync Status
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="text-center p-4 bg-green-50 rounded-lg">
-                <div className="text-2xl font-bold text-green-600">{analytics.syncedBills}</div>
-                <div className="text-sm text-green-700">Synced Bills</div>
-              </div>
-              <div className="text-center p-4 bg-yellow-50 rounded-lg">
-                <div className="text-2xl font-bold text-yellow-600">{analytics.pendingSyncBills}</div>
-                <div className="text-sm text-yellow-700">Pending Sync</div>
-              </div>
-              <div className="text-center p-4 bg-blue-50 rounded-lg">
-                <div className="text-2xl font-bold text-blue-600">{analytics.totalBills}</div>
-                <div className="text-sm text-blue-700">Total Bills</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Financial Overview */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Customer Balances</h3>
-              <div className="space-y-3">
-                {customers.filter(c => (c.lb_balance + c.usd_balance) > 0).slice(0, 5).map(customer => (
-                  <div key={customer.id} className="flex items-center justify-between">
-                    <span className="text-gray-900">{customer.name}</span>
-                    <div className="text-right">
-                      <div className="text-sm font-medium text-red-600">
-                        {formatCurrency(customer.lb_balance + customer.usd_balance)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Supplier Balances</h3>
-              <div className="space-y-3">
-                {suppliers.filter(s => ((s.lb_balance || 0) + (s.usd_balance || 0)) > 0).slice(0, 5).map(supplier => (
-                  <div key={supplier.id} className="flex items-center justify-between">
-                    <span className="text-gray-900">{supplier.name}</span>
-                    <div className="text-right">
-                      <div className="text-sm font-medium text-green-600">
-                        {formatCurrency((supplier.lb_balance || 0) + (supplier.usd_balance || 0))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Low Stock Alert */}
-          {analytics.lowStockItems.length > 0 && (
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <AlertTriangle className="w-5 h-5 text-amber-500 mr-2" />
-                Low Stock Alert
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {analytics.lowStockItems.map((item: any) => (
-                  <div key={item.productId} className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                    <div className="font-medium text-gray-900">{item.productName}</div>
-                    <div className="text-sm text-amber-700">Only {item.currentStock} remaining</div>
-                    <div className="text-xs text-gray-500">Threshold: {raw.lowStockThreshold}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Payment Form Modal */}
       {showPaymentForm && (
