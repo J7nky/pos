@@ -159,6 +159,32 @@ export interface Transaction {
   createdBy: string;
 }
 
+export interface StatementProductDetail {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  totalPrice: number;
+  weight?: number;
+  commissionRate?: number;
+  commissionAmount?: number;
+  notes?: string;
+}
+
+export interface StatementTransaction {
+  id: string;
+  date: string;
+  type: 'sale' | 'payment' | 'receiving' | 'credit_sale' | 'commission';
+  description: string;
+  amount: number;
+  currency: 'USD' | 'LBP';
+  balanceAfter: number;
+  reference?: string;
+  paymentMethod?: string;
+  productDetails?: StatementProductDetail[];
+}
+
 export interface CashDrawer {
   id: string;
   openingAmount: number;
