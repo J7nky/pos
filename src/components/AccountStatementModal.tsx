@@ -282,7 +282,7 @@ export default function AccountStatementModal({
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-8 max-h-[calc(95vh-200px)]">
+          <div className="flex-1 overflow-y-auto p-6">
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -290,9 +290,9 @@ export default function AccountStatementModal({
             ) : statement ? (
               <>
                 {/* Financial Summary Section - Always Visible */}
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200">
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xl font-bold text-gray-900 flex items-center">
+                <div className="space-y-8">
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                       <DollarSign className="w-6 h-6 mr-3 text-blue-600" />
                       Financial Overview
                     </h3>
