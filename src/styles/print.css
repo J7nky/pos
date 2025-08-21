@@ -1,0 +1,145 @@
+/* Print styles for Account Statement */
+@media print {
+  /* Hide non-essential elements */
+  .no-print {
+    display: none !important;
+  }
+  
+  /* Ensure proper page breaks */
+  .page-break {
+    page-break-before: always;
+  }
+  
+  /* Optimize for print */
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 12pt !important;
+    line-height: 1.4 !important;
+  }
+  
+  /* Modal styling for print */
+  .fixed.inset-0 {
+    position: static !important;
+    background: white !important;
+  }
+  
+  .bg-white.rounded-lg {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+  }
+  
+  /* Table styling for print */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  
+  th, td {
+    border: 1px solid #ccc !important;
+    padding: 8px !important;
+    text-align: left !important;
+  }
+  
+  th {
+    background-color: #f8f9fa !important;
+    font-weight: bold !important;
+  }
+  
+  /* Ensure proper spacing */
+  .space-y-8 > * + * {
+    margin-top: 2rem !important;
+  }
+  
+  .space-y-6 > * + * {
+    margin-top: 1.5rem !important;
+  }
+  
+  .space-y-4 > * + * {
+    margin-top: 1rem !important;
+  }
+  
+  /* Financial summary cards */
+  .grid.grid-cols-1.md\\:grid-cols-2.lg\\:grid-cols-4 {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 1rem !important;
+  }
+  
+  .bg-white.p-4.rounded-lg.border {
+    border: 1px solid #ccc !important;
+    padding: 1rem !important;
+    background: white !important;
+  }
+  
+  /* Hide scrollbars and ensure content fits */
+  .overflow-y-auto {
+    overflow: visible !important;
+  }
+  
+  .max-h-\\[95vh\\] {
+    max-height: none !important;
+  }
+  
+  /* Ensure text is readable */
+  .text-gray-900 {
+    color: black !important;
+  }
+  
+  .text-gray-600 {
+    color: #666 !important;
+  }
+  
+  .text-gray-500 {
+    color: #777 !important;
+  }
+  
+  /* Color coding for amounts */
+  .text-green-600 {
+    color: #059669 !important;
+  }
+  
+  .text-red-600 {
+    color: #dc2626 !important;
+  }
+  
+  .text-blue-600 {
+    color: #2563eb !important;
+  }
+  
+  .text-purple-600 {
+    color: #9333ea !important;
+  }
+  
+  .text-orange-600 {
+    color: #ea580c !important;
+  }
+  
+  .text-indigo-600 {
+    color: #4f46e5 !important;
+  }
+  
+  /* Header styling */
+  .p-6.border-b.border-gray-200 {
+    border-bottom: 2px solid #ccc !important;
+    padding: 1.5rem !important;
+    margin-bottom: 2rem !important;
+  }
+  
+  /* Ensure icons are visible */
+  svg {
+    display: inline-block !important;
+  }
+  
+  /* Page margins */
+  @page {
+    margin: 1in;
+    size: A4;
+  }
+  
+  /* Force background colors and images */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+}

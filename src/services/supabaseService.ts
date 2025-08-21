@@ -6,7 +6,7 @@ type Tables = Database['public']['Tables'];
 // Generic CRUD operations
 export class SupabaseService {
   // Products
-  static async getProducts(storeId: string) {
+  static async getProducts(storeId: any) {
     try {
       const { data, error } = await supabase
         .from('products')
@@ -21,7 +21,7 @@ export class SupabaseService {
     }
   }
 
-  static async createProduct(product: Tables['products']['Insert']) {
+  static async createProduct(product: any) {
     try {
       const { data, error } = await supabase
         .from('products')
@@ -36,7 +36,7 @@ export class SupabaseService {
     }
   }
 
-  static async updateProduct(id: string, updates: Tables['products']['Update']) {
+  static async updateProduct(id: any, updates: any) {
     try {
       const { data, error } = await supabase
         .from('products')
@@ -52,7 +52,7 @@ export class SupabaseService {
     }
   }
 
-  static async deleteProduct(id: string) {
+  static async deleteProduct(id: any) {
     try {
       const { error } = await supabase
         .from('products')
@@ -66,7 +66,7 @@ export class SupabaseService {
   }
 
   // Suppliers
-  static async getSuppliers(storeId: string) {
+  static async getSuppliers(storeId: any) {
     try {
       const { data, error } = await supabase
         .from('suppliers')
@@ -81,7 +81,7 @@ export class SupabaseService {
     }
   }
 
-  static async createSupplier(supplier: Tables['suppliers']['Insert']) {
+  static async createSupplier(supplier: any) {
     try {
       const { data, error } = await supabase
         .from('suppliers')
@@ -97,7 +97,7 @@ export class SupabaseService {
   }
 
   // Customers
-  static async getCustomers(storeId: string) {
+  static async getCustomers(storeId: any) {
     try {
       const { data, error } = await supabase
         .from('customers')
@@ -112,7 +112,7 @@ export class SupabaseService {
     }
   }
 
-  static async createCustomer(customer: Tables['customers']['Insert']) {
+  static async createCustomer(customer: any) {
     try {
       const { data, error } = await supabase
         .from('customers')
@@ -127,7 +127,7 @@ export class SupabaseService {
     }
   }
 
-  static async updateCustomer(id: string, updates: Tables['customers']['Update']) {
+  static async updateCustomer(id: any, updates: any) {
     try {
       const { data, error } = await supabase
         .from('customers')
@@ -144,7 +144,7 @@ export class SupabaseService {
   }
 
   // Inventory
-  static async getInventoryItems(storeId: string) {
+  static async getInventoryItems(storeId: any) {
     try {
       const { data, error } = await supabase
         .from('inventory_items')
@@ -163,7 +163,7 @@ export class SupabaseService {
     }
   }
 
-  static async createInventoryItem(item: Tables['inventory_items']['Insert']) {
+  static async createInventoryItem(item: any) {
     try {
       const { data, error } = await supabase
         .from('inventory_items')
@@ -178,7 +178,7 @@ export class SupabaseService {
     }
   }
 
-  static async updateInventoryItem(id: string, updates: Tables['inventory_items']['Update']) {
+  static async updateInventoryItem(id: any, updates: any) {
     try {
       const { data, error } = await supabase
         .from('inventory_items')
@@ -193,7 +193,7 @@ export class SupabaseService {
     }
   }
 
-  static async deleteInventoryItem(id: string) {
+  static async deleteInventoryItem(id: any) {
     try {
       const { error } = await supabase
         .from('inventory_items')
@@ -207,7 +207,7 @@ export class SupabaseService {
   }
 
   // Sale Items (since there's no sales table, we work directly with sale_items)
-  static async getSaleItems(storeId: string, limit?: number) {
+  static async getSaleItems(storeId: any, limit?: number) {
     try {
       let query = supabase
         .from('sale_items')
@@ -232,7 +232,7 @@ export class SupabaseService {
     }
   }
 
-  static async createSaleItem(item: Tables['sale_items']['Insert']) {
+  static async createSaleItem(item: any) {
     try {
       const { data, error } = await supabase
         .from('sale_items')
@@ -247,7 +247,7 @@ export class SupabaseService {
     }
   }
 
-  static async deleteSaleItem(id: string) {
+  static async deleteSaleItem(id: any) {
     try {
       const { error } = await supabase
         .from('sale_items')
@@ -260,7 +260,7 @@ export class SupabaseService {
     }
   }
 
-  static async deleteSaleItemsByInventoryItem(inventoryItemId: string) {
+  static async deleteSaleItemsByInventoryItem(inventoryItemId: any) {
     try {
       const { error } = await supabase
         .from('sale_items')
@@ -273,7 +273,7 @@ export class SupabaseService {
     }
   }
 
-  static async updateSaleItem(id: string, updates: Tables['sale_items']['Update']) {
+    static async updateSaleItem(id: any, updates: any) {
     try {
       const { data, error } = await supabase
         .from('sale_items')
@@ -290,7 +290,7 @@ export class SupabaseService {
   }
 
   // Transactions
-  static async getTransactions(storeId: string, type?: 'income' | 'expense') {
+  static async getTransactions(storeId: any, type?: any) {
     try {
       let query = supabase
         .from('transactions')
@@ -311,7 +311,7 @@ export class SupabaseService {
     }
   }
 
-  static async createTransaction(transaction: Tables['transactions']['Insert']) {
+  static async createTransaction(transaction: any) {
     try {
       const { data, error } = await supabase
         .from('transactions')
@@ -327,8 +327,8 @@ export class SupabaseService {
   }
 
   static async createTransactionWithInventoryLog(
-    transaction: Tables['transactions']['Insert'],
-    inventoryLogId?: string
+    transaction: any,
+    inventoryLogId?: any
   ) {
     try {
       // Create the transaction
@@ -344,7 +344,7 @@ export class SupabaseService {
       if (inventoryLogId && transactionData) {
         const { error: linkError } = await supabase
           .rpc('link_transaction_to_inventory_log', {
-            p_transaction_id: transactionData.id,
+            p_transaction_id: transactionData?.id as any,
             p_inventory_log_id: inventoryLogId
           });
 
@@ -360,7 +360,7 @@ export class SupabaseService {
   }
 
   // Bills Management
-  static async getBills(storeId: string, filters?: {
+  static async getBills(storeId: any, filters?: {
     searchTerm?: string;
     dateFrom?: string;
     dateTo?: string;
@@ -391,13 +391,13 @@ export class SupabaseService {
         query = query.lte('bill_date', filters.dateTo);
       }
       if (filters?.paymentStatus) {
-        query = query.eq('payment_status', filters.paymentStatus);
+        query = query.eq('payment_status', filters.paymentStatus as any);
       }
       if (filters?.customerId) {
-        query = query.eq('customer_id', filters.customerId);
+        query = query.eq('customer_id', filters.customerId as any);
       }
       if (filters?.status) {
-        query = query.eq('status', filters.status);
+        query = query.eq('status', filters.status as any);
       }
 
       query = query.order('bill_date', { ascending: false });
@@ -420,7 +420,7 @@ export class SupabaseService {
 
 
 
-  static async getBillDetails(billId: string) {
+  static async getBillDetails(billId: any) {
     try {
       const { data, error } = await supabase
         .from('bills')
@@ -448,7 +448,7 @@ export class SupabaseService {
     }
   }
 
-  static async createBill(billData: any, lineItems: any[]) {
+  static async createBill(billData: any, lineItems: any) {
     try {
       // Start a transaction
       const { data: bill, error: billError } = await supabase
@@ -461,7 +461,7 @@ export class SupabaseService {
 
       if (lineItems.length > 0) {
         // Add line items with the bill ID
-        const lineItemsWithBillId = lineItems.map(item => ({
+        const lineItemsWithBillId = lineItems.map((item: any) => ({
           ...item,
           bill_id: bill.id
         }));
@@ -479,7 +479,7 @@ export class SupabaseService {
     }
   }
 
-  static async updateBill(billId: string, updates: any) {
+  static async updateBill(billId: any, updates: any) {
     try {
       const { data, error } = await supabase
         .from('bills')
@@ -495,7 +495,7 @@ export class SupabaseService {
     }
   }
 
-  static async deleteBill(billId: string, softDelete: boolean = true) {
+  static async deleteBill(billId: any, softDelete: boolean = true) {
     try {
       if (softDelete) {
         // Soft delete - mark as cancelled
@@ -504,7 +504,7 @@ export class SupabaseService {
           .update({ 
             status: 'cancelled',
             updated_at: new Date().toISOString()
-          })
+          } as any)
           .eq('id', billId);
 
         if (error) throw error;
@@ -558,7 +558,7 @@ export class SupabaseService {
     try {
       const { data, error } = await supabase
         .from('bill_line_items')
-        .insert(lineItem)
+        .insert(lineItem as any)
         .select()
         .single();
       
@@ -569,7 +569,7 @@ export class SupabaseService {
     }
   }
 
-  static async updateBillLineItem(lineItemId: string, updates: {
+  static async updateBillLineItem(lineItemId: any, updates: {
     quantity?: number;
     unit_price?: number;
     line_total?: number;
@@ -582,7 +582,7 @@ export class SupabaseService {
         .update({
           ...updates,
           updated_at: new Date().toISOString()
-        })
+        } as any)
         .eq('id', lineItemId)
         .select()
         .single();
@@ -594,7 +594,7 @@ export class SupabaseService {
     }
   }
 
-  static async deleteBillLineItem(lineItemId: string) {
+  static async deleteBillLineItem(lineItemId: any) {
     try {
       const { error } = await supabase
         .from('bill_line_items')
@@ -609,7 +609,7 @@ export class SupabaseService {
   }
 
   // Bill Audit Logs
-  static async getBillAuditLogs(billId: string) {
+  static async getBillAuditLogs(billId: any) {
     try {
       const { data, error } = await supabase
         .from('bill_audit_logs')
@@ -628,7 +628,7 @@ export class SupabaseService {
   }
 
   // User Profile
-  static async getUserProfile(userId: string) {
+  static async getUserProfile(userId: any) {
     try {
       const { data, error } = await supabase
         .from('users')
@@ -646,7 +646,7 @@ export class SupabaseService {
     }
   }
 
-  static async createUserProfile(profile: Tables['users']['Insert']) {
+  static async createUserProfile(profile: any) {
     try {
       const { data, error } = await supabase
         .from('users')
@@ -662,7 +662,7 @@ export class SupabaseService {
   }
 
   static async updateUserSettings(
-    userId: string, 
+    userId: any, 
     updates: {
       preferred_currency?: 'USD' | 'LBP';
       preferred_language?: 'en' | 'ar' | 'fr';
@@ -673,10 +673,10 @@ export class SupabaseService {
       console.log('SupabaseService: updateUserSettings called with userId:', userId, 'updates:', updates);
       const { data, error } = await supabase
         .from('users')
-        .update({ 
-          ...updates, 
-          updated_at: new Date().toISOString() 
-        })
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        } as any)
         .eq('id', userId)
         .select()
         .single();

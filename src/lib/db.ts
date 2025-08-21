@@ -77,6 +77,7 @@ export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
 
 // Bill management interface for comprehensive bill operations
 export interface Bill extends BaseEntity {
+  store_id: string;
   bill_number: string;
   customer_id: string | null;
   customer_name: string | null;
@@ -706,8 +707,8 @@ class POSDatabase extends Dexie {
         updated_at: now,
         _synced: false,
         bill_id: billId,
-        line_order: nextOrder ,
-        ...lineItem
+        ...lineItem,
+        line_order: nextOrder
       };
       
       await this.bill_line_items.add(newLineItem);
@@ -895,7 +896,7 @@ class POSDatabase extends Dexie {
 
   // Enhanced bill management methods for offline support
   async createBillWithLineItems(
-    billData: Omit<Bill, 'id' | keyof BaseEntity>,
+    billData: any,
     lineItems: Omit<BillLineItem, 'id' | 'bill_id' | keyof BaseEntity>[]
   ): Promise<string> {
     const billId = createId();
@@ -905,7 +906,7 @@ class POSDatabase extends Dexie {
       // Create the bill
       const bill: Bill = {
         id: billId,
-        store_id: billData.store_id,
+        store_id: billData?.store_id,
         created_at: now,
         updated_at: now,
         _synced: false,
@@ -922,8 +923,9 @@ class POSDatabase extends Dexie {
         updated_at: now,
         _synced: false,
         bill_id: billId,
+        ...item,
         line_order: index + 1,
-        ...item
+
       }));
       
       await this.bill_line_items.bulkAdd(billLineItems);

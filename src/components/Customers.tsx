@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck, DollarSign, CreditCard, TrendingDown } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText } from 'lucide-react';
 import { Customer, Supplier } from '../types';
 import Toast from './common/Toast';
 import SearchableSelect from './common/SearchableSelect';
 import { CurrencyService } from '../services/currencyService';
+import AccountStatementModal from './AccountStatementModal';
 
 export default function Customers() {
   const raw = useOfflineData();
@@ -56,6 +57,10 @@ export default function Customers() {
     description: '',
     reference: ''
   });
+
+  // Account statement modal states
+  const [showAccountStatement, setShowAccountStatement] = useState<'customer' | 'supplier' | null>(null);
+  const [selectedEntity, setSelectedEntity] = useState<Customer | Supplier | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type, visible: true });
@@ -241,6 +246,12 @@ export default function Customers() {
   const handleRecordSupplierPayment = (supplier: Supplier) => {
     setPaymentForm(prev => ({ ...prev, supplierId: supplier.id }));
     setShowPaymentForm('supplier');
+  };
+
+  // Account statement handlers
+  const handleViewAccountStatement = (entity: Customer | Supplier, type: 'customer' | 'supplier') => {
+    setSelectedEntity(entity);
+    setShowAccountStatement(type);
   };
 
   // Customer handlers
@@ -524,6 +535,13 @@ export default function Customers() {
                           >
                             <DollarSign className="w-4 h-4" />
                           </button>
+                          <button 
+                            onClick={() => handleViewAccountStatement(customer, 'customer')}
+                            className="text-purple-600 hover:text-purple-800"
+                            title="View Account Statement"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -590,13 +608,20 @@ export default function Customers() {
                            >
                              <Edit className="w-4 h-4" />
                            </button>
-                                                       <button 
+                           <button 
                               onClick={() => handleRecordSupplierPayment(supplier)}
                               className="text-red-600 hover:text-red-800"
                               title="Make payment"
                             >
                               <CreditCard className="w-4 h-4" />
                             </button>
+                           <button 
+                             onClick={() => handleViewAccountStatement(supplier, 'supplier')}
+                             className="text-purple-600 hover:text-purple-800"
+                             title="View Account Statement"
+                           >
+                             <FileText className="w-4 h-4" />
+                           </button>
                          </div>
                        </td>
                      </tr>
@@ -979,6 +1004,23 @@ export default function Customers() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Account Statement Modal */}
+      {showAccountStatement && selectedEntity && (
+        <AccountStatementModal
+          isOpen={!!showAccountStatement}
+          onClose={() => {
+            setShowAccountStatement(null);
+            setSelectedEntity(null);
+          }}
+          entity={selectedEntity}
+          entityType={showAccountStatement}
+          sales={raw.sales || []}
+          transactions={raw.transactions || []}
+          products={raw.products || []}
+          inventory={raw.inventory || []}
+        />
       )}
     </div>
   );

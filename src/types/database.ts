@@ -318,7 +318,7 @@ export interface Database {
           customer_id: string | null;
         };
         Insert: {
-          id?: string;
+          id: string;
           type: 'income' | 'expense';
           category: string;
           amount: number;
@@ -332,7 +332,7 @@ export interface Database {
           customer_id?: string | null;
         };
         Update: {
-          id?: string;
+          id: string;
           amount?: number;
           description?: string;
           reference?: string | null;
