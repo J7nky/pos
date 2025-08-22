@@ -1,6 +1,94 @@
 export interface Database {
   public: {
     Tables: {
+       
+      cash_drawer_accounts: {
+        Row: {
+          id: string;
+          store_id: string;
+          account_code: string;
+          name: string;
+          current_balance: number;
+          currency: 'USD' | 'LBP';
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          account_code: string;
+          name: string;
+          current_balance?: number;
+          currency?: 'USD' | 'LBP';
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          account_code?: string;
+          name?: string;
+          current_balance?: number;
+          currency?: 'USD' | 'LBP';
+          is_active?: boolean;
+          updated_at?: string;
+        };
+      };
+      
+      cash_drawer_sessions: {
+        Row: {
+          id: string;
+          store_id: string;
+          account_id: string;
+          opened_by: string;
+          opened_at: string;
+          closed_at: string | null;
+          closed_by: string | null;
+          opening_amount: number;
+          expected_amount: number | null;
+          actual_amount: number | null;
+          variance: number | null;
+          status: 'open' | 'closed';
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          account_id: string;
+          opened_by: string;
+          opened_at?: string;
+          closed_at?: string | null;
+          closed_by?: string | null;
+          opening_amount: number;
+          expected_amount?: number | null;
+          actual_amount?: number | null;
+          variance?: number | null;
+          status?: 'open' | 'closed';
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          account_id?: string;
+          opened_by?: string;
+          opened_at?: string;
+          closed_at?: string | null;
+          closed_by?: string | null;
+          opening_amount?: number;
+          expected_amount?: number | null;
+          actual_amount?: number | null;
+          variance?: number | null;
+          status?: 'open' | 'closed';
+          notes?: string | null;
+          updated_at?: string;
+        };
+      };
       users: {
         Row: {
           id: string;

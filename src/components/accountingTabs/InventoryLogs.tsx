@@ -5,6 +5,7 @@ import { SupabaseService } from '../../services/supabaseService';
 import { useCurrency } from '../../hooks/useCurrency';
 import SearchableSelect from '../common/SearchableSelect';
 import MoneyInput from '../common/MoneyInput';
+import { CashDrawerBalanceReport } from '../CashDrawerBalanceReport';
 import { 
   FileText, 
   Search, 
@@ -38,7 +39,8 @@ import {
   PlusCircle,
   MinusCircle,
   Activity,
-  BarChart3
+  BarChart3,
+  
 } from 'lucide-react';
 
 interface Bill {
@@ -107,9 +109,10 @@ export default function InventoryLogs() {
   const inventory = raw.inventory;
   const products = raw.products;
   const transactions = raw.transactions;
+  const { getCashDrawerBalanceReport } = raw; // Add this line
 
   // State
-  const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' >('bills');
+  const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' | 'cash-drawer'>('bills');
   const [bills, setBills] = useState<Bill[]>([]);
   const [selectedBill, setSelectedBill] = useState<BillDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -565,6 +568,7 @@ console.log(transactions,'transactions');
           { id: 'bills', label: 'Bills Management', icon: FileText },
           { id: 'inventory', label: 'Inventory Logs', icon: Package },
           { id: 'payments', label: 'Payment History', icon: DollarSign },
+          { id: 'cash-drawer', label: 'Cash Drawer', icon: Wallet },
         ].map(tab => (
           <button
             key={tab.id}
@@ -865,7 +869,18 @@ console.log(transactions,'transactions');
         </div>
       )}
 
-
+      {/* Cash Drawer Tab */}
+      {activeTab === 'cash-drawer' && (
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Cash Drawer</h3>
+          <div className="space-y-4">
+            <CashDrawerBalanceReport
+              storeId={storeId || ''}
+              getBalanceReport={getCashDrawerBalanceReport  }
+            />
+          </div>
+        </div>
+      )}
       {/* Payment Form Modal */}
       {showPaymentForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
