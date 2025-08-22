@@ -7,7 +7,19 @@ export interface User {
   storeId: string;
   createdAt: string;
 }
-
+export interface Sale {
+  id: string;
+  storeId: string;
+  customerId: string;
+  customerName: string;
+  totalAmount: number;
+  paymentMethod: 'cash' | 'card' | 'credit';
+  status: 'pending' | 'paid' | 'cancelled';
+  notes: string;
+  createdBy: string;
+  createdAt: string;
+  amountPaid: number;
+}
 export interface Store {
   id: string;
   name: string;
@@ -93,7 +105,6 @@ export interface SaleItem {
   notes?: string;
   createdBy?: string; // Added to match Supabase schema
   inventoryType?: 'commission' | 'cash'; // Added for inventory tracking
-  created_at?: string; // Added to match Supabase schema
 }
 
 // Added missing interfaces to match database schema
@@ -158,32 +169,6 @@ export interface Transaction {
   reference?: string;
   createdAt: string;
   createdBy: string;
-}
-
-export interface StatementProductDetail {
-  productId: string;
-  productName: string;
-  quantity: number;
-  unit: string;
-  unitPrice: number;
-  totalPrice: number;
-  weight?: number;
-  commissionRate?: number;
-  commissionAmount?: number;
-  notes?: string;
-}
-
-export interface StatementTransaction {
-  id: string;
-  date: string;
-  type: 'sale' | 'payment' | 'receiving' | 'credit_sale' | 'commission';
-  description: string;
-  amount: number;
-  currency: 'USD' | 'LBP';
-  balanceAfter: number;
-  reference?: string;
-  paymentMethod?: string;
-  productDetails?: StatementProductDetail[];
 }
 
 export interface CashDrawer {

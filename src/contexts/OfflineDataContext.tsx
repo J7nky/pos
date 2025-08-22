@@ -1343,17 +1343,65 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     isAutoSyncing
   });
 
-  const openCashDrawer = (amount: number, openedBy: string) => {
-    const drawer = {
-      id: createId(),
-      openingAmount: amount,
-      currentAmount: amount,
-      openedBy,
-      openedAt: new Date().toISOString(),
-      isOpen: true
-    };
-    setCashDrawer(drawer);
-    localStorage.setItem('erp_cash_drawer', JSON.stringify(drawer));
+  const openCashDrawer = async (amount: number, openedBy: string) => {
+    if (!storeId) return;
+    
+    try {
+      // Get or create cash drawer account
+      let account = await db.getCashDrawerAccount(storeId);
+      if (!account) {
+        // Create default account if it doesn't exist
+        account = {
+          id: createId(),
+          store_id: storeId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          _synced: false,
+          accountCode: '1001',
+          name: 'Cash Drawer',
+          currentBalance: 0,
+          currency: currency,
+          isActive: true
+        };
+        await db.cash_drawer_accounts.add(account);
+      }
+
+      // Open new session
+      const sessionId = await db.openCashDrawerSession(storeId, account.id, amount, openedBy);
+      
+      // Update local state
+      setCashDrawer({
+        id: sessionId,
+        accountId: account.id,
+        currentBalance: amount,
+        currency: account.currency,
+        lastUpdated: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error opening cash drawer:', error);
+    }
+  };
+
+  const closeCashDrawer = async (actualAmount: number, closedBy: string, notes?: string) => {
+    if (!cashDrawer?.id) return;
+    
+    try {
+      await db.closeCashDrawerSession(cashDrawer.id, actualAmount, closedBy, notes);
+      
+      // Update local state
+      setCashDrawer({
+        ...cashDrawer,
+        currentBalance: 0,
+        lastUpdated: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error closing cash drawer:', error);
+    }
+  };
+
+  const getCashDrawerBalanceReport = async (startDate?: string, endDate?: string) => {
+    if (!storeId) return [];
+    return await db.getCashDrawerBalanceReport(storeId, startDate, endDate);
   };
 
   const getStockLevels = () => stockLevels;
@@ -1555,7 +1603,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       fullResync,
       debouncedSync,
       getSyncStatus,
-      validateAndCleanData
+      validateAndCleanData,
+      openCashDrawer,
+      closeCashDrawer,
+      getCashDrawerBalanceReport
     }}>
       {children}
     </OfflineDataContext.Provider>
