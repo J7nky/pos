@@ -24,9 +24,23 @@ interface LayoutProps {
 
 export default function Layout({ children, currentPage, onPageChange }: LayoutProps) {
   const { userProfile, signOut } = useSupabaseAuth();
+  const { t } = useI18n();
+
+  // Only try to use offline data if userProfile is available
+  // This prevents the context error when the auth context is still loading
+  if (!userProfile) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   const { isOnline, products, customers, inventory, getSyncStatus } = useOfflineData();
   const { unsyncedCount, isSyncing } = getSyncStatus();
-  const { t } = useI18n();
 
   // Listen for navigation events from Fast Actions
   React.useEffect(() => {

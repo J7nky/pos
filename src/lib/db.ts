@@ -1,6 +1,6 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
-
+  
 // Base interface for all entities with sync support
 interface BaseEntity {
   id: string;
@@ -18,7 +18,27 @@ export interface Product extends BaseEntity {
   category: string;
   image: string;
 }
+export interface CashDrawerAccount extends BaseEntity {
+  accountCode: string;
+  name: string;
+  currentBalance: number;
+  currency: 'USD' | 'LBP';
+  isActive: boolean;
+}
 
+export interface CashDrawerSession extends BaseEntity {
+  accountId: string;
+  openedBy: string;
+  openedAt: string;
+  closedAt?: string;
+  closedBy?: string;
+  openingAmount: number;
+  expectedAmount?: number;
+  actualAmount?: number;
+  variance?: number;
+  status: 'open' | 'closed';
+  notes?: string;
+}
 export interface Supplier extends BaseEntity {
   name: string;
   phone: string;
@@ -200,11 +220,18 @@ class POSDatabase extends Dexie {
   // Sync management tables
   sync_metadata!: Table<SyncMetadata, string>;
   pending_syncs!: Table<PendingSync, string>;
-
+  cash_drawer_accounts!: Table<CashDrawerAccount, string>;
+  cash_drawer_sessions!: Table<CashDrawerSession, string>;
   constructor() {
     super('POSDatabase');
     
-    this.version(9).stores({
+    console.log('🔧 Initializing POSDatabase...');
+    
+    this.version(10).stores({
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at',
+      
       // Core tables with enhanced indexing to match database schema
       // Tables WITH updated_at: products, suppliers, customers
       products: 'id, store_id, name, category, updated_at',
@@ -213,7 +240,7 @@ class POSDatabase extends Dexie {
 
       // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
-      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id and created_by indexes
+      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at', // Added payment_method and customer_id indexes
       transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
       inventory_batches: 'id, store_id, supplier_id, received_at, created_by',
   
@@ -229,6 +256,8 @@ class POSDatabase extends Dexie {
 
     // Migration for version 5 - update existing records to match new schema
     this.version(5).upgrade(trans => {
+      console.log('🔄 Running migration v5: Updating existing records to match new schema');
+      
       // Update suppliers to ensure type field exists
       trans.table('suppliers').toCollection().modify(supplier => {
         if (!supplier.type) {
@@ -264,7 +293,7 @@ class POSDatabase extends Dexie {
           saleItem.customer_id = null; // Default null for customer_id
         }
         if (!saleItem.created_by) {
-          saleItem.created_by = ''; // Default empty string for created_by
+          saleItem.created_by = '00000000-0000-0000-0000-000000000000'; // Use fallback UUID instead of empty string
         }
         if (!saleItem.payment_method) {
           saleItem.payment_method = 'cash'; // Default payment method for existing sale items
@@ -274,9 +303,11 @@ class POSDatabase extends Dexie {
       // Update inventory_items to ensure received_quantity exists
       trans.table('inventory_items').toCollection().modify(inventoryItem => {
         if (inventoryItem.received_quantity === undefined || inventoryItem.received_quantity === null) {
-          inventoryItem.received_quantity = inventoryItem.quantity || 0; // Default to quantity value
+          inventoryItem.received_quantity = inventoryItem.quantity || 0; // Default to quantity for existing items
         }
       });
+
+      console.log('✅ Migration v5 completed');
     });
 
     // Migration for version 6 - add payment_method to sale_items
@@ -295,7 +326,14 @@ class POSDatabase extends Dexie {
       // Any existing sales data will be lost, but this matches the backend schema
       console.log('Removing sales table to match backend schema');
     });
+    // Add hooks for cash drawer tables
+    this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.cash_drawer_sessions.hook('creating', this.addCreateFields);
+    this.cash_drawer_accounts.hook('updating', this.addUpdateFields);
 
+    // Add hooks for automatic cash drawer updates
+    this.transactions.hook('updating', this.handleTransactionCreated);
+    this.sale_items.hook('updating', this.handleSaleItemCreated);
     // Add hooks for automatic timestamping and ID generation
     // Tables WITH updated_at: products, suppliers, customers
     this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
@@ -323,6 +361,176 @@ class POSDatabase extends Dexie {
     this.version(9).upgrade(trans => {
       console.log('Initializing bill management tables for offline support');
     });
+
+    // Migration for version 11 - fix sale items with empty created_by fields
+    this.version(11).upgrade(trans => {
+      console.log('🔄 Running migration v11: Fixing sale items with empty created_by fields');
+      
+      trans.table('sale_items').toCollection().modify(saleItem => {
+        if (saleItem.created_by === '') {
+          saleItem.created_by = '00000000-0000-0000-0000-000000000000';
+          console.log(`🔧 Fixed sale item ${saleItem.id}: empty created_by -> fallback UUID`);
+        }
+      });
+      
+      console.log('✅ Migration v11 completed');
+    });
+    
+    console.log('✅ POSDatabase initialization completed');
+  }
+  async getCashDrawerAccount(storeId: string): Promise<CashDrawerAccount | null> {
+    const accounts = await this.cash_drawer_accounts
+      .where('store_id')
+      .equals(storeId)
+      .filter(acc => acc.isActive)
+      .first();
+    
+    return accounts || null;
+  }
+
+  async getCurrentCashDrawerSession(storeId: string): Promise<CashDrawerSession | null> {
+    const sessions = await this.cash_drawer_sessions
+      .where('store_id')
+      .equals(storeId)
+      .filter(sess => sess.status === 'open')
+      .first();
+    
+    return sessions || null;
+  }
+
+  async openCashDrawerSession(
+    storeId: string,
+    accountId: string,
+    openingAmount: number,
+    openedBy: string
+  ): Promise<string> {
+    const sessionId = createId();
+    const now = new Date().toISOString();
+    
+    const session: CashDrawerSession = {
+      id: sessionId,
+      store_id: storeId,
+      created_at: now,
+      updated_at: now,
+      _synced: false,
+      accountId,
+      openedBy,
+      openedAt: now,
+      openingAmount,
+      status: 'open'
+    };
+
+    await this.cash_drawer_sessions.add(session);
+    
+    // Update account balance
+    await this.updateCashDrawerBalance(accountId, openingAmount, true);
+    
+    return sessionId;
+  }
+
+  async closeCashDrawerSession(
+    sessionId: string,
+    actualAmount: number,
+    closedBy: string,
+    notes?: string
+  ): Promise<void> {
+    const session = await this.cash_drawer_sessions.get(sessionId);
+    if (!session || session.status !== 'open') return;
+
+    // Calculate expected amount from transactions
+    const expectedAmount = await this.calculateExpectedCashDrawerAmount(sessionId, session.openingAmount);
+    const variance = actualAmount - expectedAmount;
+    const now = new Date().toISOString();
+
+    // Update session
+    await this.cash_drawer_sessions.update(sessionId, {
+      closedAt: now,
+      closedBy,
+      expectedAmount,
+      actualAmount,
+      variance,
+      status: 'closed',
+      notes,
+      _synced: false
+    });
+
+    // Update account balance
+    await this.updateCashDrawerBalance(session.accountId, expectedAmount, false); // Remove expected
+    await this.updateCashDrawerBalance(session.accountId, actualAmount, true); // Add actual
+  }
+
+  private async calculateExpectedCashDrawerAmount(sessionId: string, openingAmount: number): Promise<number> {
+    // Get all cash transactions for this session
+    const cashSales = await this.sale_items
+      .where('created_by')
+      .equals(sessionId)
+      .filter(item => item.payment_method === 'cash')
+      .toArray();
+    
+    const cashPayments = await this.transactions
+      .filter(trans => 
+        trans.type === 'income' && 
+        trans.category === 'cash_payment' &&
+        trans.created_by === sessionId
+      )
+      .toArray();
+    
+    const cashExpenses = await this.transactions
+      .filter(trans => 
+        trans.type === 'expense' && 
+        trans.category === 'cash_expense' &&
+        trans.created_by === sessionId
+      )
+      .toArray();
+
+    const totalSales = cashSales.reduce((sum, item) => sum + item.received_value, 0);
+    const totalPayments = cashPayments.reduce((sum, trans) => sum + trans.amount, 0);
+    const totalExpenses = cashExpenses.reduce((sum, trans) => sum + trans.amount, 0);
+
+    return openingAmount + totalSales + totalPayments - totalExpenses;
+  }
+
+  private async updateCashDrawerBalance(accountId: string, amount: number, isDebit: boolean): Promise<void> {
+    const account = await this.cash_drawer_accounts.get(accountId);
+    if (account) {
+      const balanceChange = isDebit ? amount : -amount;
+      await this.cash_drawer_accounts.update(accountId, {
+        currentBalance: account.currentBalance + balanceChange,
+        _synced: false
+      });
+    }
+  }
+
+  async getCashDrawerBalanceReport(storeId: string, startDate?: string, endDate?: string): Promise<any[]> {
+    let sessions = await this.cash_drawer_sessions
+      .where('store_id')
+      .equals(storeId)
+      .filter(sess => sess.status === 'closed')
+      .toArray();
+
+    // Apply date filters
+    if (startDate) {
+      sessions = sessions.filter(sess => sess.closedAt! >= startDate);
+    }
+    if (endDate) {
+      sessions = sessions.filter(sess => sess.closedAt! <= endDate);
+    }
+
+    // Sort by date
+    sessions.sort((a, b) => new Date(b.closedAt!).getTime() - new Date(a.closedAt!).getTime());
+
+    return sessions.map(session => ({
+      sessionId: session.id,
+      employeeName: session.closedBy || 'Unknown',
+      date: session.closedAt!,
+      openingAmount: session.openingAmount,
+      expectedAmount: session.expectedAmount!,
+      actualAmount: session.actualAmount!,
+      variance: session.variance!,
+      status: Math.abs(session.variance!) < 0.01 ? 'balanced' : 'unbalanced',
+      variancePercentage: session.expectedAmount ? 
+        (Math.abs(session.variance!) / session.expectedAmount) * 100 : 0
+    }));
   }
 
   private addCreateFields = (primKey: any, obj: any, trans: any) => {
@@ -343,6 +551,67 @@ class POSDatabase extends Dexie {
   private addUpdateFields = (modifications: any, primKey: any, obj: any, trans: any) => {
     modifications.updated_at = new Date().toISOString();
     if (modifications._synced === undefined) modifications._synced = false;
+  };
+
+  // Hook for automatic cash drawer updates when transactions are created
+  private handleTransactionCreated = async (primKey: any, obj: any, trans: any) => {
+    try {
+      // Only process cash drawer related transactions
+      if (obj.category && obj.category.startsWith('cash_drawer_')) {
+        return; // Skip to avoid infinite loops
+      }
+
+      // Import the service dynamically to avoid circular dependencies
+      const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+      
+      // Determine transaction type and update cash drawer accordingly
+      if (obj.type === 'income' && obj.category === 'Customer Payment') {
+        await cashDrawerUpdateService.updateCashDrawerForCustomerPayment({
+          amount: obj.amount,
+          currency: obj.currency,
+          storeId: obj.store_id,
+          createdBy: obj.created_by,
+          customerId: obj.reference?.replace('PAY-', '') || '',
+          description: obj.description
+        });
+      } else if (obj.type === 'expense') {
+        await cashDrawerUpdateService.updateCashDrawerForExpense({
+          amount: obj.amount,
+          currency: obj.currency,
+          storeId: obj.store_id,
+          createdBy: obj.created_by,
+          description: obj.description,
+          category: obj.category
+        });
+      }
+    } catch (error) {
+      console.error('Error in transaction created hook:', error);
+    }
+  };
+
+  // Hook for automatic cash drawer updates when sale items are created
+  private handleSaleItemCreated = async (primKey: any, obj: any, trans: any) => {
+    try {
+      // Only process cash sales
+      if (obj.payment_method !== 'cash') {
+        return;
+      }
+
+      // Import the service dynamically to avoid circular dependencies
+      const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+      
+      await cashDrawerUpdateService.updateCashDrawerForSale({
+        amount: obj.received_value || 0,
+        currency: 'USD', // Assuming USD for now
+        paymentMethod: obj.payment_method,
+        storeId: obj.store_id,
+        createdBy: obj.created_by,
+        customerId: obj.customer_id || undefined,
+        billNumber: `SALE-${Date.now()}`
+      });
+    } catch (error) {
+      console.error('Error in sale item created hook:', error);
+    }
   };
 
   // Utility methods for sync management
@@ -1145,6 +1414,7 @@ class POSDatabase extends Dexie {
     });
   }
 }
+
 
 export const db = new POSDatabase();
 

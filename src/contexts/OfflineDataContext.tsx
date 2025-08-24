@@ -124,6 +124,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const { isOnline, justCameOnline } = useNetworkStatus();
   const storeId = userProfile?.store_id;
 
+  console.log('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline);
+
   // Data states - matching SupabaseDataContext structure
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
   const [suppliers, setSuppliers] = useState<Tables['suppliers']['Row'][]>([]);
@@ -183,6 +185,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const initializeData = async () => {
     if (!storeId) return;
 
+    console.log('🔄 Initializing data for store:', storeId);
+
     try {
       // Clean up any invalid/orphaned data first
       const [invalidCleaned, orphanedCleaned] = await Promise.all([
@@ -194,6 +198,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
       }
 
+      console.log('📊 Loading local data...');
       // Load local data first
       await refreshData();
       await updateUnsyncedCount();
@@ -204,6 +209,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
         db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
       ]);
+
+      console.log(`📈 Local data counts: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
 
       const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
 
@@ -366,6 +373,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const refreshData = async () => {
     if (!storeId) return;
 
+    console.log('🔄 Refreshing data for store:', storeId);
+
     try {
       // Load all data from Dexie
       const [
@@ -394,6 +403,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         db.bill_audit_logs.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
 
       ]);
+
+      console.log(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${saleItemsData.length} sale items, ${transactionsData.length} transactions, ${billsData.length} bills`);
 
       // Transform data to match SupabaseDataContext structure
       setProducts(productsData as Tables['products']['Row'][]);
@@ -428,8 +439,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Set sales directly as sale_items (no transformation needed)
       setSales(saleItemsData);
 
+      console.log('✅ Data refresh completed successfully');
+
     } catch (error) {
-      console.error('Error loading data from Dexie:', error);
+      console.error('❌ Error loading data from Dexie:', error);
     }
   };
 
@@ -545,13 +558,24 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const billId = createId();
     const now = new Date().toISOString();
 
+    // Ensure bill data is clean and doesn't contain line item fields
+    const cleanBillData = { ...billData };
+    const lineItemFields = ['inventory_item_id', 'product_id', 'supplier_id', 'quantity', 'unit_price', 'line_total', 'weight', 'line_order'];
+    
+    lineItemFields.forEach(field => {
+      if (cleanBillData[field] !== undefined) {
+        console.warn(`🚫 Removing line item field '${field}' from bill data:`, cleanBillData[field]);
+        delete cleanBillData[field];
+      }
+    });
+
     const bill = {
       id: billId,
       store_id: storeId,
       created_at: now,
       updated_at: now,
       _synced: false,
-      ...billData
+      ...cleanBillData
     };
 
     const mappedLineItems = lineItems.map(item => ({
@@ -580,6 +604,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.warn('Failed to create bill in Supabase, falling back to local only:', error);
       }
     }
+
+    // Log the final bill data for debugging
+    console.log('📋 Final bill data before storage:', Object.keys(bill));
+    console.log('📋 Final line items data before storage:', mappedLineItems.length, 'items');
 
     await db.transaction('rw', [db.bills, db.bill_line_items], async () => {
       await db.bills.add(bill);
@@ -1027,11 +1055,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _synced: false
     } as any;
 
-    // For now, we just persist batch locally; sync service currently does not upload batches
-    // but storing locally allows future extension and UI references.
+    // Both batch and items are persisted locally and will be synced to Supabase.
+    // The sync service ensures inventory_batches are uploaded before inventory_items
+    // to maintain foreign key constraints.
     await db.transaction('rw', [db.inventory_batches, db.inventory_items], async () => {
       await db.inventory_batches.add(batchRecord);
-
       const now = new Date().toISOString();
       const receiveTs = received_at || now;
 
@@ -1065,10 +1093,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const addSale = async (
-   
     items: any[]
   ): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
+    
+    // Get the current user ID from the auth context
+    const currentUserId = userProfile?.id;
+    if (!currentUserId) {
+      throw new Error('No user ID available - user not authenticated');
+    }
+    
     const saleItemsWithIds = items.map(item => ({
       id: createId(),
       quantity: item.quantity,
@@ -1083,10 +1117,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Remove total_price - doesn't exist in Supabase schema, use received_value instead
       received_value: item.received_value || item.total_price || (item.unit_price * item.quantity),
       payment_method: item.payment_method || 'cash', // Add payment method field
-        notes: item.notes ?? null,
+      notes: item.notes ?? null,
       store_id: storeId,
       customer_id: item.customer_id ?? null,
-      created_by: item.created_by || 'system'
+      created_by: item.created_by || currentUserId // Use the created_by from the item or fallback to current user
     }));
 
     // if (items.some(item => item.payment_method === 'credit') ||  items.some(item =>( item.received_value < item.unit_price * item.quantity) && item.payment_method !== 'credit')) {

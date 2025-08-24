@@ -24,6 +24,7 @@ import {
 import { SaleItem, Customer } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
+import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 
 interface BillTab {
   id: string;
@@ -485,32 +486,31 @@ export default function POS() {
       }));
 
       await addSale(
-        activeTab.cart.map(item => ({
-          id: uuidv4(),
-          inventory_item_id: item.inventoryItemId || '',
-          product_id: item.productId,
-          supplier_id: item.supplierId,
-          type: item.inventoryType || 'cash',
-          quantity: item.quantity,
-          unit: 'piece',
-          weight: item.weight || null,
-          porterage: null,
-          unit_price: item.unitPrice||0,
-          received_value: item.totalPrice || 0,
-          payment_method: item.paymentMethod || activeTab.paymentMethod,
-          notes: item.notes || null,
-          store_id: raw.storeId,
-          customer_id: activeTab.selectedCustomer || null,
-          created_at: new Date().toISOString(),
-          created_by: userProfile?.id || '',
-          received_quantity: item.quantity,
-          transfer_fee: 0,
-          price: item.unitPrice,
-          commission_rate: 0,
-          received_at: new Date().toISOString(),
-          received_by: userProfile?.id || ''
-        }))
+        saleItemsData
       );
+      
+      // Update cash drawer for cash sales
+      if (activeTab.paymentMethod === 'cash') {
+        try {
+          const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForSale({
+            amount: total,
+            currency: 'USD', // Assuming USD for now, can be made dynamic
+            paymentMethod: activeTab.paymentMethod,
+            storeId: raw.storeId,
+            createdBy: userProfile?.id || '',
+            customerId: activeTab.selectedCustomer || undefined,
+            billNumber: billData.bill_number
+          });
+
+          if (cashDrawerResult.success) {
+            console.log(`💰 Cash drawer updated: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
+          } else {
+            console.warn('⚠️ Cash drawer update failed:', cashDrawerResult.error);
+          }
+        } catch (error) {
+          console.error('Error updating cash drawer:', error);
+        }
+      }
       
       await raw.refreshData(); // Ensure UI is in sync with backend
       
