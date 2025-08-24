@@ -22,6 +22,7 @@ import {
   ChevronDown,
   EyeOff
 } from 'lucide-react';
+import CashDrawerMonitor from './CashDrawerMonitor';
 
 export default function Home() {
   const raw = useOfflineData();
@@ -246,7 +247,7 @@ export default function Home() {
                 <stat.icon className="w-6 h-6 text-white" />
               </div>
             </div>
-            {index === 0 && !cashDrawer && (
+            {index === 0 && ! cashDrawer && (
               <button
                 onClick={handleOpenDrawer}
                 className="mt-3 w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm"
@@ -256,6 +257,11 @@ export default function Home() {
             )}
           </div>
         ))}
+      </div>
+
+      {/* Cash Drawer Monitor */}
+      <div className="mb-8">
+        <CashDrawerMonitor />
       </div>
 
       <div className={`grid grid-cols-1 ${lowStockAlertsEnabled ? 'lg:grid-cols-2' : ''} gap-6`}>

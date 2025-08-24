@@ -1256,7 +1256,7 @@ export default function Accounting() {
 
           const bill = {
             id: `bill-${item.id}`,
-            inventoryItemId: item.id,
+            // inventoryItemId: item.id,
             supplierId: item.supplier_id,
             supplierName: supplier.name,
             productId: item.product_id,

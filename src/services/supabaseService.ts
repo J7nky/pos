@@ -450,6 +450,8 @@ export class SupabaseService {
 
   static async createBill(billData: any, lineItems: any) {
     try {
+    console.log('helloooo',billData);
+
       // Start a transaction
       const { data: bill, error: billError } = await supabase
         .from('bills')
