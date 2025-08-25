@@ -331,6 +331,7 @@ export default function POS() {
 
   const subtotal = activeTab.cart.reduce((sum, item) => sum + (item.totalPrice ?? 0), 0);
   const total = Math.round(subtotal * 100) / 100; // Fix floating point precision
+
   const change = activeTab.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
   // Validation helpers
@@ -428,6 +429,7 @@ export default function POS() {
         bill_date: new Date().toISOString(),
         notes: activeTab.notes || null,
         created_by: userProfile?.id || ''
+        ,_synced:false
       };
 
       // Create bill line items data
@@ -450,7 +452,6 @@ export default function POS() {
           line_order: i + 1
         };
       });
-
       // Use offline-first bill creation from OfflineDataContext
       const createdBillId = await raw.createBill(billData, lineItemsData);
     
@@ -492,6 +493,7 @@ export default function POS() {
       // Update cash drawer for cash sales
       if (activeTab.paymentMethod === 'cash') {
         try {
+          console.log(total,'total cash')
           const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForSale({
             amount: total,
             currency: 'USD', // Assuming USD for now, can be made dynamic

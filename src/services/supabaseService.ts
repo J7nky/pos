@@ -1,5 +1,17 @@
-import { supabase, handleSupabaseError } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
+import { handleSupabaseError } from '../lib/supabase';
 import { Database } from '../types/database';
+
+// Utility function to clean local-only fields before sending to Supabase
+function cleanDataForSupabase(data: any): any {
+  const { _synced, _lastSyncedAt, _deleted, _pendingSync, _syncError, _retryCount, ...cleanData } = data;
+  return cleanData;
+}
+
+// Utility function to clean an array of items
+function cleanArrayForSupabase(items: any[]): any[] {
+  return items.map(item => cleanDataForSupabase(item));
+}
 
 type Tables = Database['public']['Tables'];
 
@@ -23,9 +35,10 @@ export class SupabaseService {
 
   static async createProduct(product: any) {
     try {
+      const cleanProduct = cleanDataForSupabase(product);
       const { data, error } = await supabase
         .from('products')
-        .insert(product)
+        .insert(cleanProduct)
         .select()
         .single();
       
@@ -38,9 +51,10 @@ export class SupabaseService {
 
   static async updateProduct(id: any, updates: any) {
     try {
+      const cleanUpdates = cleanDataForSupabase(updates);
       const { data, error } = await supabase
         .from('products')
-        .update({ ...updates, updated_at: new Date().toISOString() })
+        .update({ ...cleanUpdates, updated_at: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single();
@@ -83,9 +97,27 @@ export class SupabaseService {
 
   static async createSupplier(supplier: any) {
     try {
+      const cleanSupplier = cleanDataForSupabase(supplier);
       const { data, error } = await supabase
         .from('suppliers')
-        .insert(supplier)
+        .insert(cleanSupplier)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async updateSupplier(id: any, updates: any) {
+    try {
+      const cleanUpdates = cleanDataForSupabase(updates);
+      const { data, error } = await supabase
+        .from('suppliers')
+        .update({ ...cleanUpdates, updated_at: new Date().toISOString() })
+        .eq('id', id)
         .select()
         .single();
       
@@ -114,9 +146,10 @@ export class SupabaseService {
 
   static async createCustomer(customer: any) {
     try {
+      const cleanCustomer = cleanDataForSupabase(customer);
       const { data, error } = await supabase
         .from('customers')
-        .insert(customer)
+        .insert(cleanCustomer)
         .select()
         .single();
       
@@ -129,9 +162,10 @@ export class SupabaseService {
 
   static async updateCustomer(id: any, updates: any) {
     try {
+      const cleanUpdates = cleanDataForSupabase(updates);
       const { data, error } = await supabase
         .from('customers')
-        .update({ ...updates, updated_at: new Date().toISOString() })
+        .update({ ...cleanUpdates, updated_at: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single();
@@ -165,9 +199,10 @@ export class SupabaseService {
 
   static async createInventoryItem(item: any) {
     try {
+      const cleanItem = cleanDataForSupabase(item);
       const { data, error } = await supabase
         .from('inventory_items')
-        .insert(item)
+        .insert(cleanItem)
         .select()
         .single();
       
@@ -180,9 +215,10 @@ export class SupabaseService {
 
   static async updateInventoryItem(id: any, updates: any) {
     try {
+      const cleanUpdates = cleanDataForSupabase(updates);
       const { data, error } = await supabase
         .from('inventory_items')
-        .update({ ...updates })
+        .update({ ...cleanUpdates })
         .eq('id', id)
         .select()
         .single();
@@ -234,9 +270,10 @@ export class SupabaseService {
 
   static async createSaleItem(item: any) {
     try {
+      const cleanItem = cleanDataForSupabase(item);
       const { data, error } = await supabase
         .from('sale_items')
-        .insert(item)
+        .insert(cleanItem)
         .select()
         .single();
       
@@ -275,9 +312,10 @@ export class SupabaseService {
 
     static async updateSaleItem(id: any, updates: any) {
     try {
+      const cleanUpdates = cleanDataForSupabase(updates);
       const { data, error } = await supabase
         .from('sale_items')
-        .update(updates)
+        .update(cleanUpdates)
         .eq('id', id)
         .select()
         .single();
@@ -313,9 +351,10 @@ export class SupabaseService {
 
   static async createTransaction(transaction: any) {
     try {
+      const cleanTransaction = cleanDataForSupabase(transaction);
       const { data, error } = await supabase
         .from('transactions')
-        .insert(transaction)
+        .insert(cleanTransaction)
         .select()
         .single();
       
@@ -332,9 +371,10 @@ export class SupabaseService {
   ) {
     try {
       // Create the transaction
+      const cleanTransaction = cleanDataForSupabase(transaction);
       const { data: transactionData, error: transactionError } = await supabase
         .from('transactions')
-        .insert(transaction)
+        .insert(cleanTransaction)
         .select()
         .single();
       
@@ -452,18 +492,22 @@ export class SupabaseService {
     try {
     console.log('helloooo',billData);
 
+      // Filter out local-only fields that shouldn't be sent to Supabase
+      const cleanBillData = cleanDataForSupabase(billData);
+      const cleanLineItems = cleanArrayForSupabase(lineItems);
+
       // Start a transaction
       const { data: bill, error: billError } = await supabase
         .from('bills')
-        .insert(billData)
+        .insert(cleanBillData)
         .select()
         .single();
 
       if (billError) throw billError;
 
-      if (lineItems.length > 0) {
+      if (cleanLineItems.length > 0) {
         // Add line items with the bill ID
-        const lineItemsWithBillId = lineItems.map((item: any) => ({
+        const lineItemsWithBillId = cleanLineItems.map((item: any) => ({
           ...item,
           bill_id: bill.id
         }));
@@ -483,9 +527,12 @@ export class SupabaseService {
 
   static async updateBill(billId: any, updates: any) {
     try {
+      // Filter out local-only fields that shouldn't be sent to Supabase
+      const cleanUpdates = cleanDataForSupabase(updates);
+
       const { data, error } = await supabase
         .from('bills')
-        .update(updates)
+        .update(cleanUpdates)
         .eq('id', billId)
         .select()
         .single();
@@ -528,9 +575,10 @@ export class SupabaseService {
 
   static async createBillAuditLog(auditData: any) {
     try {
+      const cleanAuditData = cleanDataForSupabase(auditData);
       const { data, error } = await supabase
         .from('bill_audit_logs')
-        .insert(auditData)
+        .insert(cleanAuditData)
         .select()
         .single();
 
@@ -558,9 +606,10 @@ export class SupabaseService {
     line_order: number;
   }) {
     try {
+      const cleanLineItem = cleanDataForSupabase(lineItem as any);
       const { data, error } = await supabase
         .from('bill_line_items')
-        .insert(lineItem as any)
+        .insert(cleanLineItem)
         .select()
         .single();
       
@@ -579,10 +628,11 @@ export class SupabaseService {
     notes?: string | null;
   }) {
     try {
+      const cleanUpdates = cleanDataForSupabase(updates);
       const { data, error } = await supabase
         .from('bill_line_items')
         .update({
-          ...updates,
+          ...cleanUpdates,
           updated_at: new Date().toISOString()
         } as any)
         .eq('id', lineItemId)
@@ -650,9 +700,10 @@ export class SupabaseService {
 
   static async createUserProfile(profile: any) {
     try {
+      const cleanProfile = cleanDataForSupabase(profile);
       const { data, error } = await supabase
         .from('users')
-        .insert(profile)
+        .insert(cleanProfile)
         .select()
         .single();
       
@@ -673,10 +724,11 @@ export class SupabaseService {
   ) {
     try {
       console.log('SupabaseService: updateUserSettings called with userId:', userId, 'updates:', updates);
+      const cleanUpdates = cleanDataForSupabase(updates);
       const { data, error } = await supabase
         .from('users')
         .update({
-          ...updates,
+          ...cleanUpdates,
           updated_at: new Date().toISOString(),
         } as any)
         .eq('id', userId)

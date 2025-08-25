@@ -77,7 +77,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
   console.log('SupabaseDataProvider: Rendering...');
   const { userProfile } = useSupabaseAuth();
   const storeId = userProfile?.store_id;
-  console.log('SupabaseDataProvider: userProfile:', userProfile, 'storeId:', storeId);
+  // console.log('SupabaseDataProvider: userProfile:', userProfile, 'storeId:', storeId);
 
   // Data states
   const [products, setProducts] = useState<any[]>([]);

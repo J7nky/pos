@@ -962,7 +962,6 @@ export default function Accounting() {
       });
     });
     // Add sales transaction logs
-    console.log(sales, 'sale231');
 
 
       sales.forEach(sale => {

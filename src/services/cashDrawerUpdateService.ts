@@ -1,5 +1,7 @@
 import { db } from '../lib/db';
 import { createId } from '../lib/db';
+// Removed React hook import to avoid invalid hook usage in a service context
+import { currencyService } from './currencyService';
 
 export interface CashTransactionData {
   type: 'sale' | 'payment' | 'expense' | 'refund';
@@ -12,7 +14,9 @@ export interface CashTransactionData {
   sessionId?: string;
   customerId?: string;
   supplierId?: string;
+  preferredCurrency?: 'USD' | 'LBP';
 }
+
 
 export interface CashDrawerUpdateResult {
   success: boolean;
@@ -23,6 +27,7 @@ export interface CashDrawerUpdateResult {
 }
 
 export class CashDrawerUpdateService {
+  
   private static instance: CashDrawerUpdateService;
 
   private constructor() {}
@@ -40,20 +45,18 @@ export class CashDrawerUpdateService {
   public async updateCashDrawerForTransaction(
     transactionData: CashTransactionData
   ): Promise<CashDrawerUpdateResult> {
+
     try {
-      // Only process cash transactions
-      if (transactionData.currency !== 'USD') {
-        return {
-          success: false,
-          previousBalance: 0,
-          newBalance: 0,
-          error: 'Only USD transactions are supported for cash drawer updates'
-        };
-      }
+      // Determine preferred storage currency and normalize amount to it
+      const currency = transactionData.preferredCurrency || transactionData.currency || 'LBP';
+      const normalizedAmount = transactionData.currency === currency
+        ? transactionData.amount
+        : currencyService.convertCurrency(transactionData.amount, transactionData.currency, currency);
 
       // Get current cash drawer account
       let account = await db.getCashDrawerAccount(transactionData.storeId);
       if (!account) {
+        try{
         // Create default account if it doesn't exist
         account = {
           id: createId(),
@@ -64,21 +67,48 @@ export class CashDrawerUpdateService {
           accountCode: '1001',
           name: 'Cash Drawer',
           currentBalance: 0,
-          currency: 'USD',
+          currency: currency,
           isActive: true
         };
+
         await db.cash_drawer_accounts.add(account);
         console.log('💰 Created default cash drawer account for store:', transactionData.storeId);
+        }
+      catch(error){
+        console.error('Error creating a new cash account:', error);
+      }
       }
 
       // Get current cash drawer session
-      const session = await db.getCurrentCashDrawerSession(transactionData.storeId);
+      let session = await db.getCurrentCashDrawerSession(transactionData.storeId);
       if (!session) {
+       session={
+        id: createId(),
+        store_id: transactionData.storeId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        _synced: false,
+        accountId: account?.id||'',
+        openedBy: transactionData.createdBy || '',
+        openedAt: new Date().toISOString(),
+        closedAt: new Date().toISOString(),
+        closedBy: transactionData.createdBy || undefined,
+        openingAmount: normalizedAmount,
+        expectedAmount: 0,
+        actualAmount: normalizedAmount,
+        variance: 0,
+        status: 'open' ,
+        notes: ''
+       }
+       await db.cash_drawer_sessions.add(session);
+       console.log('💰 Created default cash drawer account for store:', transactionData.storeId);
+      }
+      if (!account) {
         return {
           success: false,
-          previousBalance: account.currentBalance,
-          newBalance: account.currentBalance,
-          error: 'No active cash drawer session'
+          previousBalance: 0,
+          newBalance: 0,
+          error: 'Failed to get or create cash drawer account'
         };
       }
 
@@ -89,19 +119,19 @@ export class CashDrawerUpdateService {
       switch (transactionData.type) {
         case 'sale':
           // Cash sales increase cash drawer
-          balanceChange = transactionData.amount;
+          balanceChange = normalizedAmount;
           break;
         case 'payment':
           // Customer payments increase cash drawer
-          balanceChange = transactionData.amount;
+          balanceChange = normalizedAmount;
           break;
         case 'expense':
           // Expenses decrease cash drawer
-          balanceChange = -transactionData.amount;
+          balanceChange = -normalizedAmount;
           break;
         case 'refund':
           // Refunds decrease cash drawer
-          balanceChange = -transactionData.amount;
+          balanceChange = -normalizedAmount;
           break;
         default:
           return {
@@ -127,7 +157,7 @@ export class CashDrawerUpdateService {
         type: balanceChange > 0 ? 'income' : 'expense',
         category: `cash_drawer_${transactionData.type}`,
         amount: Math.abs(balanceChange),
-        currency: 'USD',
+        currency: currency,
         description: `${transactionData.description} - Cash Drawer Update`,
         reference: transactionData.reference,
         store_id: transactionData.storeId,
@@ -161,6 +191,7 @@ export class CashDrawerUpdateService {
    */
   public async updateCashDrawerForSale(
     saleData: {
+      
       amount: number;
       currency: 'USD' | 'LBP';
       paymentMethod: string;
@@ -168,6 +199,7 @@ export class CashDrawerUpdateService {
       createdBy: string;
       customerId?: string;
       billNumber?: string;
+
     }
   ): Promise<CashDrawerUpdateResult> {
     // Only update for cash sales
