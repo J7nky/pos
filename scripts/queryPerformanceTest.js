@@ -183,3 +183,4 @@ const runQueryPerformanceTest = async () => {
 
 // Run the test
 runQueryPerformanceTest();
+
