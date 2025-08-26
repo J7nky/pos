@@ -237,3 +237,4 @@ const runPerformanceTests = async () => {
 
 // Run the performance tests
 runPerformanceTests();
+

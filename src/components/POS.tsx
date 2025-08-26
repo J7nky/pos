@@ -593,11 +593,11 @@ export default function POS() {
   };
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold text-gray-900 mb-6">{t('pos.header')}</h1>
+    <div className="p-6 pt-3">
+      {/* <h1 className="text-2xl font-bold text-gray-900 mb-6">{t('pos.header')}</h1> */}
 
       {/* Bill Tabs */}
-      <div className="mb-6">
+      <div className="mb-2">
         <div className="flex items-center space-x-2 border-b border-gray-200">
           {activeTabs.map((tab) => (
             <div
@@ -794,12 +794,21 @@ export default function POS() {
         {/* Cart and Checkout */}
         <div className="space-y-6">
           {/* Cart */}
-          <Cart 
+          <Cart
             activeTab={activeTab} 
             updateCartItem={updateCartItem} 
             removeFromCart={removeFromCart} 
             formatCurrency={formatCurrency} 
             inventory={inventory}
+            onCompleteSale={handleCheckout}
+            isProcessing={isProcessing}
+            completeSaleRef={completeSaleRef}
+            hasZeroPricedItem={hasZeroPricedItem}
+            isWalkInCustomer={isWalkInCustomer}
+            paymentMethod={activeTab.paymentMethod}
+            amountReceived={activeTab.amountReceived}
+            selectedCustomer={activeTab.selectedCustomer}
+            total={total}
           />
 
           {/* Totals and Payment */}
@@ -960,30 +969,33 @@ export default function POS() {
                   tabIndex={7}
                 />
               </div>
-
-              <AccessibleButton
-                ref={completeSaleRef}
-                onClick={handleCheckout}
-                disabled={  
-                  isProcessing ||
-                  activeTab.cart.length === 0 ||
-                  // Block walk-in sales when any item has price 0
-                  (isWalkInCustomer && hasZeroPricedItem) ||
-                  (activeTab.paymentMethod !== 'credit' && !activeTab.amountReceived) ||
-                  ((activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
-                  (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived || '0') < total && !activeTab.selectedCustomer))
-                }
-                variant="success"
-                size="lg"
-                touchOptimized
-                loading={isProcessing}
-                shortcut="Ctrl+Enter"
-                ariaLabel="Complete sale"
-                tabIndex={8}
-                className="w-full"
-              >
-                Complete Sale
-              </AccessibleButton>
+ {/* Fixed Complete Sale Button at Bottom of Cart */}
+ <div className="sticky bottom-0 bg-white p-4 shadow-md">
+      <AccessibleButton
+        ref={completeSaleRef}
+        onClick={handleCheckout}
+        disabled={  
+          isProcessing ||
+          activeTab.cart.length === 0 ||
+          // Block walk-in sales when any item has price 0
+          (isWalkInCustomer && hasZeroPricedItem) ||
+          (activeTab.paymentMethod !== 'credit' && !activeTab.amountReceived) ||
+          ((activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
+          (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived || '0') < total && !activeTab.selectedCustomer))
+        }
+        variant="success"
+        size="lg"
+        touchOptimized
+        loading={isProcessing}
+        shortcut="Ctrl+Enter"
+        ariaLabel="Complete sale"
+        tabIndex={8}
+        className="w-full"
+      >
+        Complete Sale
+      </AccessibleButton>
+    </div>
+              {/* Complete Sale button moved to Cart component */}
             </div>
           )}
         </div>
@@ -1052,8 +1064,8 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
   );
 };
 
-const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory }: any) => (
-  <div className="bg-white rounded-lg shadow-sm">
+const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, onCompleteSale, isProcessing, completeSaleRef, hasZeroPricedItem, isWalkInCustomer, paymentMethod, amountReceived, selectedCustomer, total }: any) => (
+  <div className="bg-white rounded-lg shadow-sm relative">
     <div className="p-4 border-b flex items-center">
       <ShoppingCart className="w-5 h-5 mr-2 text-gray-600" />
       <h2 className="text-lg font-semibold text-gray-900">Cart ({(activeTab?.cart || []).length})</h2>
@@ -1084,7 +1096,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     <Trash2 className="w-4 h-4" />
                   </AccessibleButton>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-4">
                   <div>
                     <label className="text-xs text-gray-500">Qty</label>
                     <input
@@ -1143,11 +1155,12 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       aria-label={`Price for ${item.productName}`}
                     />
                   </div>
+                  
+                  <div className="mt-8 ml-8 ">
+                  <span className="font-medium   border-t text-blue-500">{formatCurrency(item.totalPrice)}</span>
                 </div>
-                <div className="mt-2 text-right">
-                  <span className="font-medium text-gray-900">{formatCurrency(item.totalPrice)}</span>
-                  {item.weight && <div className="text-xs text-blue-600">{item.weight} kg</div>}
                 </div>
+             
               </div>
             );
           })}
@@ -1159,5 +1172,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
         </div>
       )}
     </div>
+    
+   
   </div>
 );

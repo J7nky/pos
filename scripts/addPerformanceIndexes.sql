@@ -61,3 +61,4 @@ SELECT
 FROM pg_indexes 
 WHERE tablename IN ('bills', 'bill_line_items', 'bill_audit_logs')
 ORDER BY tablename, indexname;
+

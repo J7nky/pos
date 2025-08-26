@@ -1862,7 +1862,7 @@ export default function Inventory() {
 
 
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-slate-100">Inventory Management</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Inventory Management</h1>
         {activeTab === 'receive' && (
           <button
             onClick={() => setShowReceiveForm(true)}

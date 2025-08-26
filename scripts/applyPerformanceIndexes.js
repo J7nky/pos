@@ -165,3 +165,4 @@ const applyIndexes = async () => {
 
 // Run the index creation
 applyIndexes();
+
