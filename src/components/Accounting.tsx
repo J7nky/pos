@@ -56,6 +56,8 @@ import Toast from './common/Toast';
 import { CurrencyService } from '../services/currencyService';
 import ReceivedBills from './accountingTabs/ReceivedBills';
 import InventoryLogs from './accountingTabs/InventoryLogs';
+import { createId } from '../lib/db';
+import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 
 export default function Accounting() {
   let raw;
@@ -114,6 +116,7 @@ export default function Accounting() {
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'customer-balances' | 'supplier-balances' | 'expenses' | 'journal' | 'nonpriced' | 'inventory-logs' | 'received-bills'>('dashboard');
+  const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
   const [showForm, setShowForm] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
@@ -131,6 +134,32 @@ export default function Accounting() {
       setIsDataReady(true);
     }
   }, [raw, transactions, customers, suppliers, products]);
+
+  // Fetch cash drawer balance
+  useEffect(() => {
+    const fetchBalance = async () => {
+      try {
+        if (userProfile?.store_id) {
+          const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile.store_id);
+          setCashDrawerBalance(balance);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    fetchBalance();
+  }, [userProfile?.store_id]);
+
+  const refreshCashDrawerBalance = async () => {
+    try {
+      if (userProfile?.store_id) {
+        const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile.store_id);
+        setCashDrawerBalance(balance);
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
 
   // Inventory logs state
   const [inventoryLogsSearchTerm, setInventoryLogsSearchTerm] = useState('');
@@ -449,6 +478,7 @@ export default function Accounting() {
 
       // Also add to legacy transaction system for compatibility
       addTransaction({
+        id: createId(),
         type: 'income',
         category: receiveForm.entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
         amount: safeAmount.amount,
@@ -457,6 +487,25 @@ export default function Accounting() {
         reference: receiveForm.reference,
         created_by: userProfile?.id || ''
       });
+
+      // Update cash drawer (increase for received payment)
+      if (!userProfile?.store_id) {
+        console.warn('Missing store_id: cannot update cash drawer');
+      } else {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'payment',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Payment received from ${entity.name}`,
+          reference: receiveForm.reference || `PAY-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || '',
+          customerId: receiveForm.entityType === 'customer' ? receiveForm.entityId : undefined,
+          supplierId: receiveForm.entityType === 'supplier' ? receiveForm.entityId : undefined
+        });
+      }
+
+      await refreshCashDrawerBalance();
 
     } catch (err) {
     console.log(err);
@@ -554,6 +603,7 @@ export default function Accounting() {
 
       // Also add to legacy transaction system for compatibility
       addTransaction({
+        id: createId(),
         type: 'expense',
         category: payForm.entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
         amount: safeAmount.amount,
@@ -562,6 +612,25 @@ export default function Accounting() {
         reference: payForm.reference,
         created_by: userProfile?.id || ''
       });
+
+      // Update cash drawer (decrease for sent payment)
+      if (!userProfile?.store_id) {
+        console.warn('Missing store_id: cannot update cash drawer');
+      } else {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'expense',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Payment sent to ${entity.name}`,
+          reference: payForm.reference || `PAY-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || '',
+          customerId: payForm.entityType === 'customer' ? payForm.entityId : undefined,
+          supplierId: payForm.entityType === 'supplier' ? payForm.entityId : undefined
+        });
+      }
+
+      await refreshCashDrawerBalance();
 
       showToast(`Payment sent! ${formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency)} paid to ${entity.name}`, 'success');
     } catch (err) {
@@ -610,6 +679,7 @@ export default function Accounting() {
 
       // Also add to legacy transaction system for compatibility
       addTransaction({
+        id: createId(),
         type: 'expense',
         category: category.name,
         amount: safeAmount.amount,
@@ -618,6 +688,23 @@ export default function Accounting() {
         reference: expenseForm.reference,
         created_by: userProfile?.id || ''
       });
+
+      // Update cash drawer (decrease for expense)
+      if (!userProfile?.store_id) {
+        console.warn('Missing store_id: cannot update cash drawer');
+      } else {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'expense',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Expense: ${category.name} - ${expenseForm.description}`,
+          reference: expenseForm.reference || `EXP-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || ''
+        });
+      }
+
+      await refreshCashDrawerBalance();
 
       showToast(`Expense recorded! Cash drawer updated: ${result.balanceBefore.toFixed(2)} → ${result.balanceAfter.toFixed(2)}`, 'success');
     } catch (err) {
@@ -1397,6 +1484,7 @@ export default function Accounting() {
       if (fees.commission > 0) {
         const safeCommissionAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.commission, 'USD');
         await addTransaction({
+          id: createId(),
           type: 'income',
           category: 'Commission',
           amount: safeCommissionAmount.amount,
@@ -1411,6 +1499,7 @@ export default function Accounting() {
       if (fees.porterage > 0) {
         const safePorterageAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.porterage, 'USD');
         await addTransaction({
+          id: createId(),
           type: 'income',
           category: 'Porterage',
           amount: safePorterageAmount.amount,
@@ -1425,6 +1514,7 @@ export default function Accounting() {
       if (fees.transfer > 0) {
         const safeTransferAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.transfer, 'USD');
         await addTransaction({
+          id: createId(),
           type: 'income',
           category: 'Transfer Fee',
           amount: safeTransferAmount.amount,
@@ -1439,6 +1529,7 @@ export default function Accounting() {
       if (fees.supplierAmount > 0) {
         const safeSupplierAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.supplierAmount, 'USD');
         await addTransaction({
+          id: createId(),
           supplier_id: bill.supplier_id,
           type: 'expense',
           category: 'Supplier Payment',
@@ -1493,7 +1584,7 @@ export default function Accounting() {
 
       // Add commission transaction
       await addTransaction({
-        id: '',
+        id: createId(),
         type: 'expense',
         category: 'Commission',
         amount: safeCommissionAmount.amount,
@@ -1505,7 +1596,7 @@ export default function Accounting() {
 
       // Add supplier payment transaction
       await addTransaction({
-        id: safeSupplierPayment.id,
+        id: createId(),
         type: 'expense',
         category: 'Supplier Payment',
         amount: safeSupplierPayment.amount,
@@ -2179,6 +2270,28 @@ export default function Accounting() {
         <div className="space-y-6">
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Cash Drawer Balance */}
+            <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-emerald-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 font-medium">Cash Drawer Balance</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {cashDrawerBalance === null ? '—' : formatCurrency(cashDrawerBalance)}
+                  </p>
+                  <div className="flex items-center mt-2 text-xs text-gray-500">
+                    <button
+                      onClick={async () => { await refreshCashDrawerBalance(); }}
+                      className="inline-flex items-center px-2 py-1 bg-gray-100 rounded hover:bg-gray-200"
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+                    </button>
+                  </div>
+                </div>
+                <div className="p-3 bg-emerald-100 rounded-full">
+                  <Wallet className="w-6 h-6 text-emerald-600" />
+                </div>
+              </div>
+            </div>
             <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-blue-500">
               <div className="flex items-center justify-between">
                 <div>
@@ -3036,21 +3149,7 @@ export default function Accounting() {
 
 
       {activeTab === 'inventory-logs' && (
-
-      <InventoryLogs
-        inventoryLogs={getInventoryTransactionLogs}
-        products={products}
-        suppliers={suppliers}
-        customers={customers}
-        sales={sales}
-        formatCurrency={formatCurrency}
-        formatCurrencyWithSymbol={formatCurrencyWithSymbol}
-        showToast={showToast}
-        onEditSale={handleEditSale}
-        onDeleteSale={handleDeleteSale}
-        userProfile={userProfile}
-        storeId={userProfile?.store_id}
-      />
+        <InventoryLogs />
       )}
 
       {activeTab === 'received-bills' && (

@@ -496,7 +496,7 @@ export default function POS() {
           console.log(total,'total cash')
           const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForSale({
             amount: total,
-            currency: 'USD', // Assuming USD for now, can be made dynamic
+            currency: 'LBP', // Assuming LBP for now, can be made dynamic
             paymentMethod: activeTab.paymentMethod,
             storeId: raw.storeId,
             createdBy: userProfile?.id || '',

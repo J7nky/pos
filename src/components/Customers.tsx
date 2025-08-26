@@ -7,6 +7,8 @@ import Toast from './common/Toast';
 import SearchableSelect from './common/SearchableSelect';
 import { CurrencyService } from '../services/currencyService';
 import AccountStatementModal from './AccountStatementModal';
+import { createId } from '../lib/db';
+import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 
 export default function Customers() {
   const raw = useOfflineData();
@@ -134,8 +136,24 @@ export default function Customers() {
         description: `Payment from ${customer.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
         reference: paymentForm.reference,
         created_by: userProfile?.id || '',
-        id: ''
+        id: createId()
       });
+
+      // Update cash drawer (increase for received payment)
+      if (userProfile?.store_id) {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'payment',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Payment received from ${customer.name}`,
+          reference: paymentForm.reference || `PAY-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || '',
+          customerId: paymentForm.customerId
+        });
+      } else {
+        console.warn('Missing store_id: cannot update cash drawer');
+      }
       
       showToast(`Payment received! ${customer.name} balance updated`, 'success');
     } catch (err) {
@@ -213,6 +231,7 @@ export default function Customers() {
       
       // Add to transaction system
       addTransaction({
+        id:createId(),
         type: 'expense',
         category: 'Supplier Payment',
         amount: safeAmount.amount,
@@ -221,6 +240,22 @@ export default function Customers() {
         reference: paymentForm.reference,
         created_by: userProfile?.id || ''
       });
+
+      // Update cash drawer (decrease for sent payment)
+      if (userProfile?.store_id) {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'expense',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Payment sent to ${supplier.name}`,
+          reference: paymentForm.reference || `PAY-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || '',
+          supplierId: paymentForm.supplierId
+        });
+      } else {
+        console.warn('Missing store_id: cannot update cash drawer');
+      }
       
       showToast(`Payment sent! ${supplier.name} payment recorded`, 'success');
     } catch (err) {
@@ -240,6 +275,7 @@ export default function Customers() {
   };
 
   const handleRecordCustomerPayment = (customer: Customer) => {
+    
     setPaymentForm(prev => ({ ...prev, customerId: customer.id }));
     setShowPaymentForm('customer');
   };

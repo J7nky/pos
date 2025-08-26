@@ -21,7 +21,7 @@ export interface Product extends BaseEntity {
 export interface CashDrawerAccount extends BaseEntity {
   accountCode: string;
   name: string;
-  currentBalance: number;
+  current_balance: number;
   currency: 'USD' | 'LBP';
   isActive: boolean;
 }
@@ -379,13 +379,22 @@ class POSDatabase extends Dexie {
     console.log('✅ POSDatabase initialization completed');
   }
   async getCashDrawerAccount(storeId: string): Promise<CashDrawerAccount | null> {
-    const accounts = await this.cash_drawer_accounts
+    // Prefer an explicitly active account; treat undefined as active to support older records
+    let account = await this.cash_drawer_accounts
       .where('store_id')
       .equals(storeId)
-      .filter(acc => acc.isActive)
+      .filter(acc => acc.isActive !== false)
       .first();
-    
-    return accounts || null;
+
+    if (account) return account;
+
+    // Fallback: reuse any existing account for this store (prevents duplicates)
+    account = await this.cash_drawer_accounts
+      .where('store_id')
+      .equals(storeId)
+      .first();
+
+    return account || null;
   }
 
   async getCurrentCashDrawerSession(storeId: string): Promise<CashDrawerSession | null> {
@@ -495,9 +504,9 @@ class POSDatabase extends Dexie {
     if (account) {
       const balanceChange = isDebit ? amount : -amount;
       await this.cash_drawer_accounts.update(accountId, {
-        currentBalance: account.currentBalance + balanceChange,
+        current_balance: (account as any).current_balance + balanceChange,
         _synced: false
-      });
+      } as any);
     }
   }
 
