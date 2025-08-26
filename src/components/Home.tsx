@@ -109,11 +109,37 @@ export default function Home() {
 
   useEffect(() => {
     loadCashDrawerStatus();
-    
-    // Refresh every 30 seconds
+
+    // Live update on cash drawer changes
+    const handleCashDrawerUpdated = (e: any) => {
+      // Optional: check store match
+      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
+      loadCashDrawerStatus();
+    };
+    window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+
+    // Refresh every 30 seconds as a fallback
     const interval = setInterval(loadCashDrawerStatus, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+    };
   }, [raw.storeId]);
+
+  // Re-fetch after initial sync completes, to avoid showing 0 before cloud data arrives
+  useEffect(() => {
+    if (!raw.storeId &&!raw.transactions) return;
+    if (!raw.loading?.sync) {
+      loadCashDrawerStatus();
+      
+    }
+  }, [raw.storeId,raw.transactions, raw.loading?.sync]);
+
+  // Re-fetch when transactions change (e.g., after sync brings cash_drawer_* records)
+  useEffect(() => {
+    if (!raw.storeId) return;
+    loadCashDrawerStatus();
+  }, [raw.storeId, transactions.length]);
 
   const lowStockItems = lowStockAlertsEnabled 
     ? stockLevels.filter(item => item.currentStock < lowStockThreshold)

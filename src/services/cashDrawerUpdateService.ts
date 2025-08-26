@@ -53,30 +53,35 @@ export class CashDrawerUpdateService {
         ? transactionData.amount
         : currencyService.convertCurrency(transactionData.amount, transactionData.currency, currency);
 
-      // Get current cash drawer account
+      // Get or create cash drawer account (single consolidated check)
       let account = await db.getCashDrawerAccount(transactionData.storeId);
       if (!account) {
-        try{
-        // Create default account if it doesn't exist
-        account = {
-          id: createId(),
-          store_id: transactionData.storeId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          accountCode: '1001',
-          name: 'Cash Drawer',
-          currentBalance: 0,
-          currency: currency,
-          isActive: true
-        };
-
-        await db.cash_drawer_accounts.add(account);
-        console.log('💰 Created default cash drawer account for store:', transactionData.storeId);
+        try {
+          account = {
+            id: createId(),
+            store_id: transactionData.storeId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            _synced: false,
+            accountCode: '1001',
+            name: 'Cash Drawer',
+            current_balance: 0,
+            currency: currency,
+            isActive: true
+          };
+          await db.cash_drawer_accounts.add(account);
+          console.log('💰 Created cash drawer account for store:', transactionData.storeId);
+        } catch (error) {
+          console.error('Error creating a new cash account:', error);
         }
-      catch(error){
-        console.error('Error creating a new cash account:', error);
       }
+      if (!account) {
+        return {
+          success: false,
+          previousBalance: 0,
+          newBalance: 0,
+          error: 'Cash drawer account not found'
+        };
       }
 
       // Get current cash drawer session
@@ -91,28 +96,18 @@ export class CashDrawerUpdateService {
         accountId: account?.id||'',
         openedBy: transactionData.createdBy || '',
         openedAt: new Date().toISOString(),
-        closedAt: new Date().toISOString(),
-        closedBy: transactionData.createdBy || undefined,
-        openingAmount: normalizedAmount,
+        openingAmount: 0,
         expectedAmount: 0,
-        actualAmount: normalizedAmount,
+        actualAmount: 0,
         variance: 0,
         status: 'open' ,
         notes: ''
        }
        await db.cash_drawer_sessions.add(session);
-       console.log('💰 Created default cash drawer account for store:', transactionData.storeId);
-      }
-      if (!account) {
-        return {
-          success: false,
-          previousBalance: 0,
-          newBalance: 0,
-          error: 'Failed to get or create cash drawer account'
-        };
+       console.log('💰 Created cash drawer session for store:', transactionData.storeId);
       }
 
-      const previousBalance = account.currentBalance;
+      const previousBalance = Number((account as any).current_balance ?? 0) || 0;
       let balanceChange = 0;
 
       // Calculate balance change based on transaction type
@@ -143,12 +138,12 @@ export class CashDrawerUpdateService {
       }
 
       // Update cash drawer account balance
-      const newBalance = previousBalance + balanceChange;
+      const newBalance = Number(previousBalance) + Number(balanceChange);
       await db.cash_drawer_accounts.update(account.id, {
-        currentBalance: newBalance,
+        current_balance: newBalance as any,
         updated_at: new Date().toISOString(),
         _synced: false
-      });
+      } as any);
 
       // Create transaction record for cash drawer tracking
       const transactionId = createId();
@@ -167,6 +162,19 @@ export class CashDrawerUpdateService {
       });
 
       console.log(`💰 Cash drawer updated: ${transactionData.type} - $${balanceChange.toFixed(2)} (Balance: $${previousBalance.toFixed(2)} → $${newBalance.toFixed(2)})`);
+
+      // Notify UI listeners about cash drawer change
+      try {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cash-drawer-updated', { detail: {
+            storeId: transactionData.storeId,
+            newBalance,
+            transactionId
+          }}));
+        }
+      } catch (e) {
+        // no-op in non-browser environments
+      }
 
       return {
         success: true,
@@ -312,14 +320,14 @@ export class CashDrawerUpdateService {
           _synced: false,
           accountCode: '1001',
           name: 'Cash Drawer',
-          currentBalance: 0,
+          current_balance: 0,
           currency: 'USD',
           isActive: true
         };
         await db.cash_drawer_accounts.add(account);
         console.log('💰 Created default cash drawer account for store:', storeId);
       }
-      return account?.currentBalance || 0;
+      return (account as any)?.current_balance || 0;
     } catch (error) {
       console.error('Error getting cash drawer balance:', error);
       return 0;

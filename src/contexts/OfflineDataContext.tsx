@@ -1393,7 +1393,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           _synced: false,
           accountCode: '1001',
           name: 'Cash Drawer',
-          currentBalance: 0,
+          current_balance: 0,
           currency: currency,
           isActive: true
         };
@@ -1408,7 +1408,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         id: sessionId,
         accountId: account.id,
         currentBalance: amount,
-        currency: account.currency,
+        currency: (account as any).currency,
         lastUpdated: new Date().toISOString()
       });
     } catch (error) {

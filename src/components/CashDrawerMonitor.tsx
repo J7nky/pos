@@ -4,13 +4,9 @@ import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 import { useCurrency } from '../hooks/useCurrency';
 import { useI18n } from '../i18n';
 import { 
-  DollarSign, 
   TrendingUp, 
   TrendingDown, 
   Clock, 
-  RefreshCw,
-  Eye,
-  EyeOff
 } from 'lucide-react';
 
 interface CashDrawerStatus {
@@ -53,11 +49,39 @@ export default function CashDrawerMonitor() {
 
   useEffect(() => {
     loadCashDrawerStatus();
-    
-    // Refresh every 30 seconds
+
+    // Live updates from cash drawer events
+    const handleCashDrawerUpdated = (e: any) => {
+      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
+      loadCashDrawerStatus();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+    }
+
+    // Refresh every 30 seconds (fallback)
     const interval = setInterval(loadCashDrawerStatus, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+      }
+    };
   }, [raw.storeId]);
+
+  // Re-fetch after initial sync completes
+  useEffect(() => {
+    if (!raw.storeId) return;
+    if (!raw.loading?.sync) {
+      loadCashDrawerStatus();
+    }
+  }, [raw.storeId, raw.loading?.sync]);
+
+  // Re-fetch when transactions change (e.g., after sync downloads new ones)
+  useEffect(() => {
+    if (!raw.storeId) return;
+    loadCashDrawerStatus();
+  }, [raw.storeId, raw.transactions?.length]);
 
   const filteredTransactions = (() => {
     if (!Array.isArray(transactionHistory)) return [];
