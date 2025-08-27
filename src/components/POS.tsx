@@ -19,7 +19,11 @@ import {
   User,
   Trash2,
   X,
-  PlusCircle
+  PlusCircle,
+  Package,
+  Receipt,
+  CheckCircle,
+  FileText
 } from 'lucide-react';
 import { SaleItem, Customer } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -811,59 +815,75 @@ export default function POS() {
             total={total}
           />
 
-          {/* Totals and Payment */}
+          {/* Enhanced Totals and Payment */}
           {activeTab.cart.length > 0 && (
-            <div className="bg-white rounded-lg shadow-sm p-4 space-y-4">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Subtotal:</span>
-                  <span>{formatCurrency(subtotal)}</span>
-                </div>
-                <div className="flex justify-between font-semibold border-t pt-2">
-                  <span>Total:</span>
-                  <span>{formatCurrency(total)}</span>
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+              {/* Order Summary Header */}
+              <div className="p-4 border-b bg-gradient-to-r from-green-50 to-emerald-50">
+                <div className="flex items-center">
+                  <div className="bg-green-100 p-2 rounded-lg mr-3">
+                    <Receipt className="w-5 h-5 text-green-600" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900">Order Summary</h3>
                 </div>
               </div>
 
-              {/* Customer Selection (moved here) */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Customer Name {(activeTab.paymentMethod === 'credit' || ((activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && parseFloat(activeTab.amountReceived || '0') < total)) ? <span className="text-red-500">*</span> : null}
-                </label>
+              <div className="p-4 space-y-4">
+                {/* Enhanced Totals */}
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center py-2">
+                    <span className="text-gray-600 font-medium">Subtotal:</span>
+                    <span className="text-gray-900 font-semibold">{formatCurrency(subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-t border-gray-100">
+                    <span className="text-lg font-semibold text-gray-900">Total Amount:</span>
+                    <span className="text-2xl font-bold text-green-600">{formatCurrency(total)}</span>
+                  </div>
+                </div>
+
+              {/* Enhanced Customer Selection */}
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <div className="flex items-center mb-3">
+                  <User className="w-5 h-5 text-gray-600 mr-2" />
+                  <label className="block text-sm font-medium text-gray-700">
+                    Customer Selection
+                    {(activeTab.paymentMethod === 'credit' || ((activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && parseFloat(activeTab.amountReceived || '0') < total)) ? 
+                      <span className="text-red-500 ml-1">*</span> : null}
+                  </label>
+                </div>
                 <div ref={customerSelectRef}>
                   <SearchableSelect
-                  options={
-                    activeTab.paymentMethod === 'credit'
-                      ? customers.filter(c => c.isActive).map(customer => ({
-                          id: customer.id,
-                          label: customer.name,
-                          value: customer.id,
-                          category: 'Customer'
-                        }))
-                      : [
-                          { id: '', label: 'Walk-in Customer', value: '', category: 'Customer' },
-                          ...customers.filter(c => c.isActive).map(customer => ({
+                    options={
+                      activeTab.paymentMethod === 'credit'
+                        ? customers.filter(c => c.isActive).map(customer => ({
                             id: customer.id,
                             label: customer.name,
                             value: customer.id,
                             category: 'Customer'
                           }))
-                        ]
-                  }
-                  value={activeTab.selectedCustomer}
-                  onChange={(value) => {
-                    updateActiveTab({ selectedCustomer: value as string });
-                    setCustomerError(null);
-                  }}
-                  searchPlaceholder="Search customers..."
-                  placeholder={activeTab.paymentMethod === 'credit' ? 'Select Customer' : 'Walk-in Customer'}
-
-                  recentSelections={recentCustomers}
-                  onRecentUpdate={setRecentCustomers}
-                  showAddOption={true}
-                  addOptionText="Add New Customer"
-                  onAddNew={() => setShowAddCustomerForm(true)}
-                  className={`w-full ${customerError ? 'border border-red-500' : ''}`}
+                        : [
+                            { id: '', label: 'Walk-in Customer', value: '', category: 'Customer' },
+                            ...customers.filter(c => c.isActive).map(customer => ({
+                              id: customer.id,
+                              label: customer.name,
+                              value: customer.id,
+                              category: 'Customer'
+                            }))
+                          ]
+                    }
+                    value={activeTab.selectedCustomer}
+                    onChange={(value) => {
+                      updateActiveTab({ selectedCustomer: value as string });
+                      setCustomerError(null);
+                    }}
+                    searchPlaceholder="Search customers..."
+                    placeholder={activeTab.paymentMethod === 'credit' ? 'Select Customer' : 'Walk-in Customer'}
+                    recentSelections={recentCustomers}
+                    onRecentUpdate={setRecentCustomers}
+                    showAddOption={true}
+                    addOptionText="Add New Customer"
+                    onAddNew={() => setShowAddCustomerForm(true)}
+                    className={`w-full ${customerError ? 'border border-red-500' : ''}`}
                   />
                 </div>
                 {customerError && (
@@ -871,130 +891,165 @@ export default function POS() {
                 )}
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Payment Method
-                </label>
-                <div className="grid grid-cols-3 gap-2">
+              {/* Enhanced Payment Method Selection */}
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <div className="flex items-center mb-3">
+                  <CreditCard className="w-5 h-5 text-gray-600 mr-2" />
+                  <label className="block text-sm font-medium text-gray-700">
+                    Payment Method
+                  </label>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
                   <button
                     type="button"
                     onClick={() => updateActiveTab({ paymentMethod: 'cash' })}
-                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${
+                    className={`p-4 text-sm rounded-lg border-2 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[56px] ${
                       activeTab.paymentMethod === 'cash' 
-                        ? 'bg-blue-50 border-blue-500 text-blue-700' 
-                        : 'bg-gray-50 border-gray-300'
+                        ? 'bg-green-50 border-green-500 text-green-700 shadow-md' 
+                        : 'bg-white border-gray-300 hover:border-green-300 hover:bg-green-50'
                     }`}
                     tabIndex={3}
                     accessKey="1"
                     aria-label="Cash payment (Ctrl+1)"
                   >
-                    <DollarSign className="w-4 h-4 mx-auto mb-1" />
-                    Cash
+                    <DollarSign className="w-5 h-5 mx-auto mb-2" />
+                    <span className="font-medium">Cash</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => updateActiveTab({ paymentMethod: 'card' })}
-                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${
+                    className={`p-4 text-sm rounded-lg border-2 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[56px] ${
                       activeTab.paymentMethod === 'card' 
-                        ? 'bg-blue-50 border-blue-500 text-blue-700' 
-                        : 'bg-gray-50 border-gray-300'
+                        ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-md' 
+                        : 'bg-white border-gray-300 hover:border-blue-300 hover:bg-blue-50'
                     }`}
                     tabIndex={4}
                     aria-label="Card payment"
                   >
-                    <CreditCard className="w-4 h-4 mx-auto mb-1" />
-                    Card
+                    <CreditCard className="w-5 h-5 mx-auto mb-2" />
+                    <span className="font-medium">Card</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => updateActiveTab({ paymentMethod: 'credit' })}
-                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${
+                    className={`p-4 text-sm rounded-lg border-2 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[56px] ${
                       activeTab.paymentMethod === 'credit' 
-                        ? 'bg-blue-50 border-blue-500 text-blue-700' 
-                        : 'bg-gray-50 border-gray-300'
+                        ? 'bg-purple-50 border-purple-500 text-purple-700 shadow-md' 
+                        : 'bg-white border-gray-300 hover:border-purple-300 hover:bg-purple-50'
                     }`}
                     tabIndex={5}
                     accessKey="2"
                     aria-label="Credit payment (Ctrl+2)"
                   >
-                    <User className="w-4 h-4 mx-auto mb-1" />
-                    Credit
+                    <User className="w-5 h-5 mx-auto mb-2" />
+                    <span className="font-medium">Credit</span>
                   </button>
                 </div>
               </div>
 
+              {/* Enhanced Amount Received Section */}
               {activeTab.paymentMethod !== 'credit' && (
-                // Only show Amount Received for cash or card
                 (activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && (
-                  <div>
-                    <MoneyInput
-                      label="Amount Received"
-                      value={activeTab.amountReceived}
-                      onChange={(value) => updateActiveTab({ amountReceived: value })}
-                      placeholder="0.00"
-                      step="0.01"
-                      min="0"
-                      autoCompleteValue={total}
-                      className="focus:ring-2 focus:ring-blue-500"
-                    />
-                    <input
-                      ref={amountInputRef}
-                      type="hidden"
-                      tabIndex={6}
-                      onFocus={() => {
-                        // Focus the actual MoneyInput when this hidden input is focused
-                        const moneyInput = amountInputRef.current?.parentElement?.querySelector('input[type="text"]') as HTMLInputElement;
-                        moneyInput?.focus();
-                      }}
-                    />
-                    {change > 0 && (
-                      <p className="text-sm text-green-600 mt-1">
-                        Change: {formatCurrency(change)}
-                      </p>
-                    )}
+                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <div className="flex items-center mb-3">
+                      <DollarSign className="w-5 h-5 text-gray-600 mr-2" />
+                      <label className="block text-sm font-medium text-gray-700">
+                        Payment Details
+                      </label>
+                    </div>
+                    <div className="space-y-3">
+                      <MoneyInput
+                        label="Amount Received"
+                        value={activeTab.amountReceived}
+                        onChange={(value) => updateActiveTab({ amountReceived: value })}
+                        placeholder="0.00"
+                        step="0.01"
+                        min="0"
+                        autoCompleteValue={total}
+                        className="focus:ring-2 focus:ring-blue-500"
+                      />
+                      <input
+                        ref={amountInputRef}
+                        type="hidden"
+                        tabIndex={6}
+                        onFocus={() => {
+                          const moneyInput = amountInputRef.current?.parentElement?.querySelector('input[type="text"]') as HTMLInputElement;
+                          moneyInput?.focus();
+                        }}
+                      />
+                      {change > 0 && (
+                        <div className="bg-green-50 p-3 rounded-lg border border-green-200">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-green-800">Change Due:</span>
+                            <span className="text-lg font-bold text-green-700">{formatCurrency(change)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Notes (Optional)
-                </label>
+              {/* Enhanced Notes Section */}
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <div className="flex items-center mb-3">
+                  <FileText className="w-5 h-5 text-gray-600 mr-2" />
+                  <label className="block text-sm font-medium text-gray-700">
+                    Order Notes (Optional)
+                  </label>
+                </div>
                 <textarea
                   value={activeTab.notes}
                   onChange={(e) => updateActiveTab({ notes: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  rows={2}
-                  placeholder="Add notes..."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  rows={3}
+                  placeholder="Add any special instructions, customer requests, or order notes..."
                   tabIndex={7}
                 />
               </div>
- {/* Fixed Complete Sale Button at Bottom of Cart */}
- <div className="sticky bottom-0 bg-white p-4 shadow-md">
-      <AccessibleButton
-        ref={completeSaleRef}
-        onClick={handleCheckout}
-        disabled={  
-          isProcessing ||
-          activeTab.cart.length === 0 ||
-          // Block walk-in sales when any item has price 0
-          (isWalkInCustomer && hasZeroPricedItem) ||
-          (activeTab.paymentMethod !== 'credit' && !activeTab.amountReceived) ||
-          ((activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
-          (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived || '0') < total && !activeTab.selectedCustomer))
-        }
-        variant="success"
-        size="lg"
-        touchOptimized
-        loading={isProcessing}
-        shortcut="Ctrl+Enter"
-        ariaLabel="Complete sale"
-        tabIndex={8}
-        className="w-full"
-      >
-        Complete Sale
-      </AccessibleButton>
-    </div>
+              {/* Enhanced Complete Sale Button */}
+              <div className="sticky bottom-0 bg-gradient-to-r from-green-50 to-emerald-50 p-6 shadow-lg border-t border-green-200">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center">
+                    <div className="bg-green-100 p-2 rounded-lg mr-3">
+                      <CheckCircle className="w-6 h-6 text-green-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">Ready to Complete Sale</h3>
+                      <p className="text-sm text-gray-600">
+                        Total: {formatCurrency(total)} • {activeTab.cart.length} item{(activeTab.cart.length !== 1 ? 's' : '')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-green-600">{formatCurrency(total)}</div>
+                    <div className="text-xs text-gray-500">Final Amount</div>
+                  </div>
+                </div>
+                
+                <AccessibleButton
+                  ref={completeSaleRef}
+                  onClick={handleCheckout}
+                  disabled={  
+                    isProcessing ||
+                    activeTab.cart.length === 0 ||
+                    (isWalkInCustomer && hasZeroPricedItem) ||
+                    (activeTab.paymentMethod !== 'credit' && !activeTab.amountReceived) ||
+                    ((activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
+                    (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived || '0') < total && !activeTab.selectedCustomer))
+                  }
+                  variant="success"
+                  size="lg"
+                  touchOptimized
+                  loading={isProcessing}
+                  shortcut="Ctrl+Enter"
+                  ariaLabel="Complete sale"
+                  tabIndex={8}
+                  className="w-full h-14 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+                >
+                  {isProcessing ? 'Processing...' : `Complete Sale - ${formatCurrency(total)}`}
+                </AccessibleButton>
+              </div>
               {/* Complete Sale button moved to Cart component */}
             </div>
           )}
@@ -1008,57 +1063,125 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
   const { t } = useI18n();
   
   return (
-    <div className="bg-white rounded-lg shadow-sm p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('pos.products')}</h2>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {(filteredProducts || []).map((product: any) => {
-        const stock = getProductStock(product.id);
-        const productInventoryItems = getProductInventoryItems(product.id) || [];
-        return (
-          <div key={product.id} className="border border-gray-200 rounded-lg p-3">
-            <img src={product.image} alt={product.name} className="w-full h-24 object-cover rounded-lg mb-2" />
-            <h3 className="font-medium text-gray-900 text-sm">{product.name}</h3>
-            <p className={`text-xs mb-2 ${stock < 5 ? 'text-red-600 font-bold' : 'text-gray-500'}`}>Stock: {stock}</p>
-            {productInventoryItems.length > 0 ? (
-              <div className="space-y-1">
-                {productInventoryItems.map((inventoryItem: any, index: number) => (
-                  <AccessibleButton
-                    key={inventoryItem.inventoryItemId}
-                    onClick={() => addToCart(product.id, inventoryItem.inventoryItemId)}
-                    variant="ghost"
-                    size="sm"
-                    touchOptimized
-                    disabled={inventoryItem.quantity === 0}
-                    className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs"
-                    ariaLabel={`Add ${product.name} from ${inventoryItem.supplierName}`}
-                    tabIndex={100 + index}
-                  >
-                    <div className="text-left">
-                      <div>{inventoryItem.supplierName} ({inventoryItem.quantity})</div>
-                      {inventoryItem.price > 0 && (
-                        <div className="text-xs text-gray-600">${inventoryItem.price.toFixed(2)}</div>
-                      )}
-                      <div className="text-xs text-gray-500">
-                        {"Recieved Quantity: " + inventoryItem.receivedQuantity}
-                      </div>
-                    </div>
-                  </AccessibleButton>
-                ))}
-              </div>
-            ) : (
-              <AccessibleButton 
-                disabled 
-                variant="ghost"
-                size="sm"
-                className="w-full bg-gray-100 text-gray-400 text-xs"
-                ariaLabel={`${product.name} - Out of stock`}
-              >
-                Out of Stock
-              </AccessibleButton>
-            )}
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+      {/* Enhanced Product Grid Header */}
+      <div className="p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <div className="bg-blue-100 p-2 rounded-lg mr-3">
+              <Package className="w-6 h-6 text-blue-600" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">{t('pos.products')}</h2>
+              <p className="text-sm text-gray-600">
+                {filteredProducts?.length || 0} products available
+              </p>
+            </div>
           </div>
-        );
-        })}
+        </div>
+      </div>
+
+      {/* Enhanced Product Grid */}
+      <div className="p-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          {(filteredProducts || []).map((product: any) => {
+            const stock = getProductStock(product.id);
+            const productInventoryItems = getProductInventoryItems(product.id) || [];
+            const isLowStock = stock < 5;
+            
+            return (
+              <div key={product.id} className="group border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:border-blue-300 transition-all duration-200 bg-white">
+                {/* Product Image */}
+                <div className="relative mb-3">
+                  <img 
+                    src={product.image} 
+                    alt={product.name} 
+                    className="w-full h-28 object-cover rounded-lg group-hover:scale-105 transition-transform duration-200" 
+                  />
+                  {isLowStock && (
+                    <div className="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full font-bold">
+                      Low Stock
+                    </div>
+                  )}
+                </div>
+
+                {/* Product Info */}
+                <div className="space-y-2 mb-3">
+                  <h3 className="font-semibold text-gray-900 text-sm leading-tight group-hover:text-blue-600 transition-colors duration-200">
+                    {product.name}
+                  </h3>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                      isLowStock 
+                        ? 'bg-red-100 text-red-700' 
+                        : stock < 10 
+                          ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-green-100 text-green-700'
+                    }`}>
+                      Stock: {stock}
+                    </span>
+                    {product.category && (
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                        {product.category}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Inventory Items */}
+                {productInventoryItems.length > 0 ? (
+                  <div className="space-y-2">
+                    {productInventoryItems.map((inventoryItem: any, index: number) => (
+                      <AccessibleButton
+                        key={inventoryItem.inventoryItemId}
+                        onClick={() => addToCart(product.id, inventoryItem.inventoryItemId)}
+                        variant="ghost"
+                        size="sm"
+                        touchOptimized
+                        disabled={inventoryItem.quantity === 0}
+                        className={`w-full p-3 rounded-lg border-2 transition-all duration-200 text-left ${
+                          inventoryItem.quantity === 0
+                            ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+                            : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 hover:shadow-md'
+                        }`}
+                        ariaLabel={`Add ${product.name} from ${inventoryItem.supplierName}`}
+                        tabIndex={100 + index}
+                      >
+                        <div className="space-y-1">
+                          <div className="font-medium text-sm">{inventoryItem.supplierName}</div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className={`px-2 py-1 rounded-full ${
+                              inventoryItem.quantity === 0 
+                                ? 'bg-red-100 text-red-700' 
+                                : 'bg-green-100 text-green-700'
+                            }`}>
+                              {inventoryItem.quantity} available
+                            </span>
+                            {inventoryItem.price > 0 && (
+                              <span className="font-semibold text-blue-700">
+                                ${inventoryItem.price.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            Received: {inventoryItem.receivedQuantity}
+                          </div>
+                        </div>
+                      </AccessibleButton>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2">
+                      <Package className="w-6 h-6 text-gray-400" />
+                    </div>
+                    <p className="text-xs text-gray-500">Out of Stock</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1066,113 +1189,180 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
 
 const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, onCompleteSale, isProcessing, completeSaleRef, hasZeroPricedItem, isWalkInCustomer, paymentMethod, amountReceived, selectedCustomer, total }: any) => (
   <div className="bg-white rounded-lg shadow-sm relative">
-    <div className="p-4 border-b flex items-center">
-      <ShoppingCart className="w-5 h-5 mr-2 text-gray-600" />
-      <h2 className="text-lg font-semibold text-gray-900">Cart ({(activeTab?.cart || []).length})</h2>
+    {/* Enhanced Cart Header */}
+    <div className="p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center">
+          <div className="bg-blue-100 p-2 rounded-lg mr-3">
+            <ShoppingCart className="w-6 h-6 text-blue-600" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Shopping Cart</h2>
+            <p className="text-sm text-gray-600">
+              {(activeTab?.cart || []).length} item{(activeTab?.cart || []).length !== 1 ? 's' : ''} • Total: {formatCurrency(total)}
+            </p>
+          </div>
+        </div>
+        {(activeTab?.cart || []).length > 0 && (
+          <div className="text-right">
+            <div className="text-2xl font-bold text-blue-600">{formatCurrency(total)}</div>
+            <div className="text-xs text-gray-500">Total Amount</div>
+          </div>
+        )}
+      </div>
     </div>
-    <div className="max-h-64 overflow-y-auto">
+
+    {/* Enhanced Cart Items */}
+    <div className="max-h-96 overflow-y-auto">
       {(activeTab?.cart || []).length > 0 ? (
-        <div className="divide-y divide-gray-200">
+        <div className="divide-y divide-gray-100">
           {(activeTab?.cart || []).map((item: any, index: number) => {
-            // Get the specific inventory item for this cart item
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
             
             return (
-              <div key={item.id} className="p-4">
-                <div className="flex items-start justify-between mb-2">
+              <div key={item.id} className="p-4 hover:bg-gray-50 transition-colors duration-150">
+                {/* Product Header */}
+                <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
-                    <h4 className="font-medium text-gray-900 text-sm">{item.productName}</h4>
-                    <p className="text-xs text-gray-500">{item.supplierName}</p>
+                    <div className="flex items-center space-x-2 mb-1">
+                      <h4 className="font-semibold text-gray-900 text-base">{item.productName}</h4>
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full font-medium">
+                        #{index + 1}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 flex items-center">
+                      <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
+                      {item.supplierName}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Available: {availableStock} units
+                    </p>
                   </div>
                   <AccessibleButton
                     onClick={() => removeFromCart(item.id)}
                     variant="ghost"
                     size="sm"
-                    className="text-red-500 hover:text-red-700 p-1 min-h-[44px]"
+                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors duration-150 min-h-[44px]"
                     ariaLabel={`Remove ${item.productName} from cart`}
                     tabIndex={200 + index * 4 + 4}
                   >
                     <Trash2 className="w-4 h-4" />
                   </AccessibleButton>
                 </div>
-                <div className="grid grid-cols-4 gap-4">
-                  <div>
-                    <label className="text-xs text-gray-500">Qty</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max={availableStock}
-                      value={item.quantity ?? ''}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === '') {
-                          updateCartItem(item.id, 'quantity', 1);
-                        } else {
-                          const numValue = parseInt(value);
-                          if (!isNaN(numValue)) {
-                            const clampedValue = Math.max(1, Math.min(availableStock, numValue));
-                            updateCartItem(item.id, 'quantity', clampedValue);
+
+                {/* Enhanced Input Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {/* Quantity */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Quantity</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="1"
+                        max={availableStock}
+                        value={item.quantity ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '') {
+                            updateCartItem(item.id, 'quantity', 1);
+                          } else {
+                            const numValue = parseInt(value);
+                            if (!isNaN(numValue)) {
+                              const clampedValue = Math.max(1, Math.min(availableStock, numValue));
+                              updateCartItem(item.id, 'quantity', clampedValue);
+                            }
                           }
-                        }
-                      }}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
-                      tabIndex={200 + index * 4 + 1}
-                      aria-label={`Quantity for ${item.productName}`}
-                    />
+                        }}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
+                        tabIndex={200 + index * 4 + 1}
+                        aria-label={`Quantity for ${item.productName}`}
+                      />
+                      <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
+                        units
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs text-gray-500">Weight</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={item.weight ?? ''}
-                      onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
-                      placeholder="kg"
-                      tabIndex={200 + index * 4 + 2}
-                      aria-label={`Weight for ${item.productName}`}
-                    />
+
+                  {/* Weight */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Weight</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={item.weight ?? ''}
+                        onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
+                        placeholder="0.00"
+                        tabIndex={200 + index * 4 + 2}
+                        aria-label={`Weight for ${item.productName}`}
+                      />
+                      <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
+                        kg
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs text-gray-500">Price</label>
+
+                  {/* Unit Price */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Unit Price</label>
                     <MoneyInput
                       step="0.01"
                       min="0"
                       value={item.unitPrice ?? ''}
                       onChange={(value) => updateCartItem(item.id, 'unitPrice', value ? parseFloat(value) : undefined)}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
                       placeholder="0.00"
                     />
                     <input
                       type="hidden"
                       tabIndex={200 + index * 4 + 3}
                       onFocus={() => {
-                        // Focus the actual MoneyInput when this hidden input is focused
                         const moneyInput = document.querySelector(`input[placeholder="0.00"]`) as HTMLInputElement;
                         moneyInput?.focus();
                       }}
                       aria-label={`Price for ${item.productName}`}
                     />
                   </div>
-                  
-                  <div className="mt-8 ml-8 ">
-                  <span className="font-medium   border-t text-blue-500">{formatCurrency(item.totalPrice)}</span>
+
+                  {/* Total Price */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Total</label>
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 rounded-lg border border-blue-200">
+                      <div className="text-lg font-bold text-blue-700 text-center">
+                        {formatCurrency(item.totalPrice)}
+                      </div>
+                    </div>
+                  </div>
                 </div>
+
+                {/* Item Summary */}
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">
+                      {item.quantity} × {formatCurrency(item.unitPrice || 0)} = {formatCurrency(item.totalPrice)}
+                    </span>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      item.unitPrice && item.unitPrice > 0 ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {item.unitPrice && item.unitPrice > 0 ? 'Priced' : 'Unpriced'}
+                    </span>
+                  </div>
                 </div>
-             
               </div>
             );
           })}
         </div>
       ) : (
-        <div className="p-8 text-center text-gray-500">
-          <ShoppingCart className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-          <p>Cart is empty</p>
+        <div className="p-12 text-center text-gray-500">
+          <div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <ShoppingCart className="w-10 h-10 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
+          <p className="text-gray-600">Start adding products to begin your sale</p>
         </div>
       )}
     </div>
-    
-   
   </div>
 );
