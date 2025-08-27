@@ -19,7 +19,7 @@ const SYNC_TABLES = [
   'products',
   'suppliers', 
   'customers',
-  'inventory_batches',
+  'inventory_bills',
   'inventory_items',
   'sale_items',
   'transactions',
@@ -83,7 +83,7 @@ export class SyncService {
         supabase.from('suppliers').select('id').eq('store_id', storeId),
         supabase.from('users').select('id').eq('store_id', storeId),
         supabase
-  .from('inventory_batches')
+  .from('inventory_bills')
   .select('id')
   .eq('store_id', storeId)
       ]);
@@ -222,7 +222,7 @@ export class SyncService {
            // Get local batch IDs to check against first (since batches are synced before items)
            let localBatchIds: Set<string>;
            try {
-             const localBatches = await db.inventory_batches.toArray();
+             const localBatches = await db.inventory_bills.toArray();
              localBatchIds = new Set(localBatches.map(b => b.id));
              console.log(`🔍 Found ${localBatchIds.size} local batch IDs for validation`);
            } catch (error) {
@@ -893,7 +893,7 @@ export class SyncService {
       }
     }
 
-    const tablesWithoutUpdatedAt = ['inventory_items', 'sale_items', 'transactions', 'inventory_batches'];
+    const tablesWithoutUpdatedAt = ['inventory_items', 'sale_items', 'transactions', 'inventory_bills'];
     
     if (tablesWithoutUpdatedAt.includes(tableName)) {
       delete cleanRecord.updated_at;
@@ -1021,7 +1021,7 @@ export class SyncService {
     // Updated supplier detection to handle new type field and distinguish from transactions
     if (record.phone && record.type && (record.type === 'commission' || record.type === 'cash') && !record.amount) return 'suppliers';
     if (record.phone && record.balance !== undefined && !record.type) return 'customers';
-    if (record.supplier_id && record.received_at && record.created_by && !record.product_id) return 'inventory_batches';
+    if (record.supplier_id && record.received_at && record.created_by && !record.product_id) return 'inventory_bills';
 
     return 'unknown';
   }
