@@ -110,7 +110,7 @@ export default function InventoryLogs() {
   const inventory = raw.inventory;
   const products = raw.products;
   const transactions = raw.transactions;
-  const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus } = raw; // Add this line
+  const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus, getCashDrawerSessionDetails } = raw; // Add this line
 
   // State
   const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' | 'cash-drawer'>('bills');
