@@ -6,6 +6,7 @@ import { useCurrency } from '../../hooks/useCurrency';
 import SearchableSelect from '../common/SearchableSelect';
 import MoneyInput from '../common/MoneyInput';
 import { CashDrawerBalanceReport } from '../CashDrawerBalanceReport';
+import { CurrentCashDrawerStatus } from '../CurrentCashDrawerStatus';
 import { 
   FileText, 
   Search, 
@@ -42,6 +43,7 @@ import {
   BarChart3,
   
 } from 'lucide-react';
+import { createId } from '../../lib/db';
 
 interface Bill {
   id: string;
@@ -109,7 +111,7 @@ export default function InventoryLogs() {
   const inventory = raw.inventory;
   const products = raw.products;
   const transactions = raw.transactions;
-  const { getCashDrawerBalanceReport } = raw; // Add this line
+  const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus, getCashDrawerSessionDetails } = raw; // Add this line
 
   // State
   const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' | 'cash-drawer'>('bills');
@@ -309,7 +311,7 @@ export default function InventoryLogs() {
         
         // Add transaction
         await raw.addTransaction({
-          id: '',
+          id: createId(),
           type: 'income',
           category: 'Customer Payment',
           amount: amount,
@@ -477,7 +479,6 @@ export default function InventoryLogs() {
       </div>
     );
   }
-console.log(transactions,'transactions');
   return (
     <div className="space-y-6">
       {/* Toast */}
@@ -872,11 +873,19 @@ console.log(transactions,'transactions');
       {/* Cash Drawer Tab */}
       {activeTab === 'cash-drawer' && (
         <div className="bg-white rounded-lg shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Cash Drawer</h3>
-          <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Cash Drawer Management</h3>
+          <div className="space-y-6">
+            {/* Current Status */}
+            <CurrentCashDrawerStatus 
+              storeId={storeId || ''} 
+              getCurrentStatus={getCurrentCashDrawerStatus}
+            />
+            
+            {/* Balance Report */}
             <CashDrawerBalanceReport
               storeId={storeId || ''}
-              getBalanceReport={getCashDrawerBalanceReport  }
+              getBalanceReport={getCashDrawerBalanceReport}
+              getSessionDetails={getCashDrawerSessionDetails}
             />
           </div>
         </div>
@@ -1363,7 +1372,7 @@ console.log(transactions,'transactions');
       {/* Audit Trail Modal */}
       {showAuditTrail && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900">
                 Audit Trail - {selectedBill.bill_number}

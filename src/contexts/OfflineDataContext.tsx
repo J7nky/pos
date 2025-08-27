@@ -44,6 +44,10 @@ interface OfflineDataContextType {
   currency: 'USD' | 'LBP';
   cashDrawer: any;
   openCashDrawer: (amount: number, openedBy: string) => void;
+  closeCashDrawer: (actualAmount: number, closedBy: string, notes?: string) => void;
+  getCashDrawerBalanceReport: (startDate?: string, endDate?: string) => Promise<any>;
+  getCurrentCashDrawerStatus: () => Promise<any>;
+  getCashDrawerSessionDetails: (sessionId: string) => Promise<any>;
   isOnline: boolean;
 
   // Loading states - exact match
@@ -1438,6 +1442,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return await db.getCashDrawerBalanceReport(storeId, startDate, endDate);
   };
 
+  const getCurrentCashDrawerStatus = async () => {
+    if (!storeId) return null;
+    return await db.getCurrentCashDrawerStatus(storeId);
+  };
+
+  const getCashDrawerSessionDetails = async (sessionId: string) => {
+    if (!storeId) return null;
+    return await db.getCashDrawerSessionDetails(sessionId);
+  };
+
   const getStockLevels = () => stockLevels;
 
   const toggleLowStockAlerts = (enabled: boolean) => {
@@ -1591,7 +1605,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       defaultCommissionRate,
       currency,
       cashDrawer,
-      openCashDrawer,
+      closeCashDrawer,
+      getCashDrawerBalanceReport,
+      getCurrentCashDrawerStatus,
+      getCashDrawerSessionDetails,
       isOnline,
 
       // Loading states - exact match
@@ -1639,8 +1656,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       getSyncStatus,
       validateAndCleanData,
       openCashDrawer,
-      closeCashDrawer,
-      getCashDrawerBalanceReport
+     
     }}>
       {children}
     </OfflineDataContext.Provider>

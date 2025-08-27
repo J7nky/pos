@@ -510,36 +510,169 @@ class POSDatabase extends Dexie {
     }
   }
 
-  async getCashDrawerBalanceReport(storeId: string, startDate?: string, endDate?: string): Promise<any[]> {
-    let sessions = await this.cash_drawer_sessions
-      .where('store_id')
-      .equals(storeId)
-      .filter(sess => sess.status === 'closed')
-      .toArray();
+  async getCurrentCashDrawerStatus(storeId: string): Promise<any> {
+    try {
+      const currentSession = await this.getCurrentCashDrawerSession(storeId);
+      if (!currentSession) {
+        return {
+          status: 'no_session',
+          message: 'No active cash drawer session'
+        };
+      }
 
-    // Apply date filters
-    if (startDate) {
-      sessions = sessions.filter(sess => sess.closedAt! >= startDate);
+      // Get current balance from account
+      const account = await this.cash_drawer_accounts
+        .where('store_id')
+        .equals(storeId)
+        .first();
+
+      if (!account) {
+        return {
+          status: 'no_account',
+          message: 'No cash drawer account found'
+        };
+      }
+
+      return {
+        status: 'active',
+        sessionId: currentSession.id,
+        openedBy: currentSession.openedBy,
+        openedAt: currentSession.openedAt,
+        openingAmount: currentSession.openingAmount,
+        currentBalance: account.current_balance || 0,
+        sessionDuration: Date.now() - new Date(currentSession.openedAt).getTime()
+      };
+    } catch (error) {
+      console.error('Error getting current cash drawer status:', error);
+      return {
+        status: 'error',
+        message: 'Error retrieving cash drawer status'
+      };
     }
-    if (endDate) {
-      sessions = sessions.filter(sess => sess.closedAt! <= endDate);
+  }
+
+  async getCashDrawerSessionDetails(sessionId: string): Promise<any> {
+    try {
+      const session = await this.cash_drawer_sessions.get(sessionId);
+      if (!session) {
+        throw new Error('Session not found');
+      }
+
+      // Get all cash transactions for this session
+      const cashSales = await this.sale_items
+        .where('created_by')
+        .equals(sessionId)
+        .filter(item => item.payment_method === 'cash')
+        .toArray();
+      
+      const cashPayments = await this.transactions
+        .filter(trans => 
+          trans.type === 'income' && 
+          trans.category === 'cash_payment' &&
+          trans.created_by === sessionId
+        )
+        .toArray();
+      
+      const cashExpenses = await this.transactions
+        .filter(trans => 
+          trans.type === 'expense' && 
+          trans.category === 'cash_expense' &&
+          trans.created_by === sessionId
+        )
+        .toArray();
+
+      return {
+        session,
+        transactions: {
+          sales: cashSales,
+          payments: cashPayments,
+          expenses: cashExpenses
+        },
+        totals: {
+          sales: cashSales.reduce((sum, item) => sum + item.received_value, 0),
+          payments: cashPayments.reduce((sum, trans) => sum + trans.amount, 0),
+          expenses: cashExpenses.reduce((sum, trans) => sum + trans.amount, 0)
+        }
+      };
+    } catch (error) {
+      console.error('Error getting session details:', error);
+      throw error;
     }
+  }
 
-    // Sort by date
-    sessions.sort((a, b) => new Date(b.closedAt!).getTime() - new Date(a.closedAt!).getTime());
+  async getCashDrawerBalanceReport(storeId: string, startDate?: string, endDate?: string): Promise<any> {
+    try {
+      let sessions = await this.cash_drawer_sessions
+        .where('store_id')
+        .equals(storeId)
+        .filter(sess => sess.status === 'closed')
+        .toArray();
 
-    return sessions.map(session => ({
-      sessionId: session.id,
-      employeeName: session.closedBy || 'Unknown',
-      date: session.closedAt!,
-      openingAmount: session.openingAmount,
-      expectedAmount: session.expectedAmount!,
-      actualAmount: session.actualAmount!,
-      variance: session.variance!,
-      status: Math.abs(session.variance!) < 0.01 ? 'balanced' : 'unbalanced',
-      variancePercentage: session.expectedAmount ? 
-        (Math.abs(session.variance!) / session.expectedAmount) * 100 : 0
-    }));
+      // Apply date filters
+      if (startDate) {
+        sessions = sessions.filter(sess => sess.closedAt! >= startDate);
+      }
+      if (endDate) {
+        sessions = sessions.filter(sess => sess.closedAt! <= endDate);
+      }
+
+      // Sort by date (most recent first)
+      sessions.sort((a, b) => new Date(b.closedAt!).getTime() - new Date(a.closedAt!).getTime());
+
+      // Transform sessions to report format
+      const reportData = sessions.map(session => ({
+        sessionId: session.id,
+        employeeName: session.closedBy || 'Unknown',
+        date: session.closedAt!,
+        openingAmount: session.openingAmount || 0,
+        expectedAmount: session.expectedAmount || 0,
+        actualAmount: session.actualAmount || 0,
+        variance: session.variance || 0,
+        status: Math.abs(session.variance || 0) < 0.01 ? 'balanced' : 'unbalanced',
+        variancePercentage: session.expectedAmount ? 
+          (Math.abs(session.variance || 0) / session.expectedAmount) * 100 : 0,
+        notes: session.notes || ''
+      }));
+
+      // Add summary statistics
+      if (reportData.length > 0) {
+        const summary = {
+          totalSessions: reportData.length,
+          totalOpening: reportData.reduce((sum, session) => sum + session.openingAmount, 0),
+          totalExpected: reportData.reduce((sum, session) => sum + session.expectedAmount, 0),
+          totalActual: reportData.reduce((sum, session) => sum + session.actualAmount, 0),
+          totalVariance: reportData.reduce((sum, session) => sum + session.variance, 0),
+          balancedSessions: reportData.filter(session => session.status === 'balanced').length,
+          unbalancedSessions: reportData.filter(session => session.status === 'unbalanced').length,
+          averageVariance: reportData.reduce((sum, session) => sum + Math.abs(session.variance), 0) / reportData.length
+        };
+
+        return {
+          sessions: reportData,
+          summary,
+          generatedAt: new Date().toISOString()
+        };
+      }
+
+      return {
+        sessions: [],
+        summary: {
+          totalSessions: 0,
+          totalOpening: 0,
+          totalExpected: 0,
+          totalActual: 0,
+          totalVariance: 0,
+          balancedSessions: 0,
+          unbalancedSessions: 0,
+          averageVariance: 0
+        },
+        generatedAt: new Date().toISOString()
+      };
+
+    } catch (error) {
+      console.error('Error generating cash drawer balance report:', error);
+      throw new Error(`Failed to generate cash drawer balance report: ${error.message}`);
+    }
   }
 
   private addCreateFields = (primKey: any, obj: any, trans: any) => {

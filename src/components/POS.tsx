@@ -19,7 +19,8 @@ import {
   User,
   Trash2,
   X,
-  PlusCircle
+  PlusCircle,
+  Package
 } from 'lucide-react';
 import { SaleItem, Customer } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -329,8 +330,7 @@ export default function POS() {
     updateActiveTab({ cart: updatedCart });
   };
 
-  const subtotal = activeTab.cart.reduce((sum, item) => sum + (item.totalPrice ?? 0), 0);
-  const total = Math.round(subtotal * 100) / 100; // Fix floating point precision
+  const total = activeTab.cart.reduce((sum, item) => sum + (item.totalPrice ?? 0), 0);
 
   const change = activeTab.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
@@ -815,10 +815,7 @@ export default function POS() {
           {activeTab.cart.length > 0 && (
             <div className="bg-white rounded-lg shadow-sm p-4 space-y-4">
               <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Subtotal:</span>
-                  <span>{formatCurrency(subtotal)}</span>
-                </div>
+             
                 <div className="flex justify-between font-semibold border-t pt-2">
                   <span>Total:</span>
                   <span>{formatCurrency(total)}</span>
@@ -1007,172 +1004,278 @@ export default function POS() {
 const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryItems, addToCart }: any) => {
   const { t } = useI18n();
   
+
   return (
-    <div className="bg-white rounded-lg shadow-sm p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('pos.products')}</h2>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {(filteredProducts || []).map((product: any) => {
-        const stock = getProductStock(product.id);
-        const productInventoryItems = getProductInventoryItems(product.id) || [];
-        return (
-          <div key={product.id} className="border border-gray-200 rounded-lg p-3">
-            <img src={product.image} alt={product.name} className="w-full h-24 object-cover rounded-lg mb-2" />
-            <h3 className="font-medium text-gray-900 text-sm">{product.name}</h3>
-            <p className={`text-xs mb-2 ${stock < 5 ? 'text-red-600 font-bold' : 'text-gray-500'}`}>Stock: {stock}</p>
-            {productInventoryItems.length > 0 ? (
-              <div className="space-y-1">
-                {productInventoryItems.map((inventoryItem: any, index: number) => (
-                  <AccessibleButton
-                    key={inventoryItem.inventoryItemId}
-                    onClick={() => addToCart(product.id, inventoryItem.inventoryItemId)}
-                    variant="ghost"
-                    size="sm"
-                    touchOptimized
-                    disabled={inventoryItem.quantity === 0}
-                    className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs"
-                    ariaLabel={`Add ${product.name} from ${inventoryItem.supplierName}`}
-                    tabIndex={100 + index}
-                  >
-                    <div className="text-left">
-                      <div>{inventoryItem.supplierName} ({inventoryItem.quantity})</div>
-                      {inventoryItem.price > 0 && (
-                        <div className="text-xs text-gray-600">${inventoryItem.price.toFixed(2)}</div>
-                      )}
-                      <div className="text-xs text-gray-500">
-                        {"Recieved Quantity: " + inventoryItem.receivedQuantity}
-                      </div>
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+    
+
+      {/* Enhanced Product Grid */}
+      <div className="p-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          {(filteredProducts || []).map((product: any) => {
+            const stock = getProductStock(product.id);
+            const productInventoryItems = getProductInventoryItems(product.id) || [];
+            const isLowStock = stock < 5;
+
+            return (
+              <div key={product.id} className="group border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:border-blue-300 transition-all duration-200 bg-white">
+                {/* Product Image */}
+                <div className="relative mb-3">
+                  <img 
+                    src={product.image} 
+                    alt={product.name} 
+                    className="w-full h-28 object-cover rounded-lg group-hover:scale-105 transition-transform duration-200" 
+                  />
+                  {isLowStock && (
+                    <div className="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full font-bold">
+                      Low Stock
                     </div>
-                  </AccessibleButton>
-                ))}
+                  )}
+                </div>
+
+                {/* Product Info */}
+                <div className="space-y-2 mb-3">
+                  <h3 className="font-semibold text-gray-900 text-sm leading-tight group-hover:text-blue-600 transition-colors duration-200">
+                    {product.name}
+                  </h3>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                      isLowStock 
+                        ? 'bg-red-100 text-red-700' 
+                        : stock < 10 
+                          ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-green-100 text-green-700'
+                    }`}>
+                      Stock: {stock}
+                    </span>
+                    {product.category && (
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                        {product.category}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Inventory Items */}
+                {productInventoryItems.length > 0 ? (
+                  <div className="space-y-2">
+                    {productInventoryItems.map((inventoryItem: any, index: number) => (
+                      <AccessibleButton
+                        key={inventoryItem.inventoryItemId}
+                        onClick={() => addToCart(product.id, inventoryItem.inventoryItemId)}
+                        variant="ghost"
+                        size="sm"
+                        touchOptimized
+                        disabled={inventoryItem.quantity === 0}
+                        className={`w-full p-3 rounded-lg border-2 transition-all duration-200 text-left ${
+                          inventoryItem.quantity === 0
+                            ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+                            : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 hover:shadow-md'
+                        }`}
+                        ariaLabel={`Add ${product.name} from ${inventoryItem.supplierName}`}
+                        tabIndex={100 + index}
+                      >
+                        <div className="space-y-1">
+                          <div className="font-medium text-sm">{inventoryItem.supplierName}</div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className={`px-2 py-1 rounded-full ${
+                              inventoryItem.quantity === 0 
+                                ? 'bg-red-100 text-red-700' 
+                                : 'bg-green-100 text-green-700'
+                            }`}>
+                              {inventoryItem.quantity} available
+                            </span>
+                            {inventoryItem.price > 0 && (
+                              <span className="font-semibold text-blue-700">
+                                ${inventoryItem.price.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            Received: {inventoryItem.receivedQuantity}
+                          </div>
+                        </div>
+                      </AccessibleButton>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2">
+                      <Package className="w-6 h-6 text-gray-400" />
+                    </div>
+                    <p className="text-xs text-gray-500">Out of Stock</p>
+                  </div>
+                )}
               </div>
-            ) : (
-              <AccessibleButton 
-                disabled 
-                variant="ghost"
-                size="sm"
-                className="w-full bg-gray-100 text-gray-400 text-xs"
-                ariaLabel={`${product.name} - Out of stock`}
-              >
-                Out of Stock
-              </AccessibleButton>
-            )}
-          </div>
-        );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 };
-
 const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, onCompleteSale, isProcessing, completeSaleRef, hasZeroPricedItem, isWalkInCustomer, paymentMethod, amountReceived, selectedCustomer, total }: any) => (
   <div className="bg-white rounded-lg shadow-sm relative">
-    <div className="p-4 border-b flex items-center">
-      <ShoppingCart className="w-5 h-5 mr-2 text-gray-600" />
-      <h2 className="text-lg font-semibold text-gray-900">Cart ({(activeTab?.cart || []).length})</h2>
-    </div>
-    <div className="max-h-64 overflow-y-auto">
+    {/* Enhanced Cart Header */}
+    {/* <div className="p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center">
+          <div className="bg-blue-100 p-2 rounded-lg mr-3">
+            <ShoppingCart className="w-6 h-6 text-blue-600" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Shopping Cart</h2>
+            <p className="text-sm text-gray-600">
+              {(activeTab?.cart || []).length} item{(activeTab?.cart || []).length !== 1 ? 's' : ''} • Total: {formatCurrency(total)}
+            </p>
+          </div>
+        </div>
+        {(activeTab?.cart || []).length > 0 && (
+          <div className="text-right">
+            <div className="text-2xl font-bold text-blue-600">{formatCurrency(total)}</div>
+            <div className="text-xs text-gray-500">Total Amount</div>
+          </div>
+        )}
+      </div>
+    </div> */}
+
+    {/* Enhanced Cart Items */}
+    <div className="max-h-96 overflow-y-auto">
       {(activeTab?.cart || []).length > 0 ? (
-        <div className="divide-y divide-gray-200">
+        <div className="divide-y divide-gray-100">
           {(activeTab?.cart || []).map((item: any, index: number) => {
-            // Get the specific inventory item for this cart item
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
-            
+
             return (
-              <div key={item.id} className="p-4">
-                <div className="flex items-start justify-between mb-2">
+              <div key={item.id} className="p-4 hover:bg-gray-50 transition-colors duration-150">
+                {/* Product Header */}
+                <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
-                    <h4 className="font-medium text-gray-900 text-sm">{item.productName}</h4>
-                    <p className="text-xs text-gray-500">{item.supplierName}</p>
+                    <div className="flex items-center space-x-2 mb-1">
+                      <h4 className="font-semibold text-gray-900 text-base">{item.productName}</h4>
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full font-medium">
+                        #{index + 1}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 flex items-center">
+                      <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
+                      {item.supplierName}
+                    </p>
+                
                   </div>
                   <AccessibleButton
                     onClick={() => removeFromCart(item.id)}
                     variant="ghost"
                     size="sm"
-                    className="text-red-500 hover:text-red-700 p-1 min-h-[44px]"
+                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors duration-150 min-h-[44px]"
                     ariaLabel={`Remove ${item.productName} from cart`}
                     tabIndex={200 + index * 4 + 4}
                   >
                     <Trash2 className="w-4 h-4" />
                   </AccessibleButton>
                 </div>
-                <div className="grid grid-cols-4 gap-4">
-                  <div>
-                    <label className="text-xs text-gray-500">Qty</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max={availableStock}
-                      value={item.quantity ?? ''}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === '') {
-                          updateCartItem(item.id, 'quantity', 1);
-                        } else {
-                          const numValue = parseInt(value);
-                          if (!isNaN(numValue)) {
-                            const clampedValue = Math.max(1, Math.min(availableStock, numValue));
-                            updateCartItem(item.id, 'quantity', clampedValue);
+
+                {/* Enhanced Input Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {/* Quantity */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Quantity</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="1"
+                        max={availableStock}
+                        value={item.quantity ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '') {
+                            updateCartItem(item.id, 'quantity', 1);
+                          } else {
+                            const numValue = parseInt(value);
+                            if (!isNaN(numValue)) {
+                              const clampedValue = Math.max(1, Math.min(availableStock, numValue));
+                              updateCartItem(item.id, 'quantity', clampedValue);
+                            }
                           }
-                        }
-                      }}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
-                      tabIndex={200 + index * 4 + 1}
-                      aria-label={`Quantity for ${item.productName}`}
-                    />
+                        }}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
+                        tabIndex={200 + index * 4 + 1}
+                        aria-label={`Quantity for ${item.productName}`}
+                      />
+                      <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
+                        units
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs text-gray-500">Weight</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={item.weight ?? ''}
-                      onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
-                      placeholder="kg"
-                      tabIndex={200 + index * 4 + 2}
-                      aria-label={`Weight for ${item.productName}`}
-                    />
+
+                  {/* Weight */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Weight</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={item.weight ?? ''}
+                        onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
+                        placeholder="0.00"
+                        tabIndex={200 + index * 4 + 2}
+                        aria-label={`Weight for ${item.productName}`}
+                      />
+                      <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
+                        kg
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs text-gray-500">Price</label>
+
+                  {/* Unit Price */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Unit Price</label>
                     <MoneyInput
                       step="0.01"
                       min="0"
                       value={item.unitPrice ?? ''}
                       onChange={(value) => updateCartItem(item.id, 'unitPrice', value ? parseFloat(value) : undefined)}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
                       placeholder="0.00"
                     />
                     <input
                       type="hidden"
                       tabIndex={200 + index * 4 + 3}
                       onFocus={() => {
-                        // Focus the actual MoneyInput when this hidden input is focused
                         const moneyInput = document.querySelector(`input[placeholder="0.00"]`) as HTMLInputElement;
                         moneyInput?.focus();
                       }}
                       aria-label={`Price for ${item.productName}`}
                     />
                   </div>
-                  
-                  <div className="mt-8 ml-8 ">
-                  <span className="font-medium   border-t text-blue-500">{formatCurrency(item.totalPrice)}</span>
+
+                  {/* Total Price */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Total</label>
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 rounded-lg border border-blue-200">
+                      <div className="text-lg font-bold text-blue-700 text-center">
+                        {formatCurrency(item.totalPrice)}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                </div>
-             
+
+        
               </div>
             );
           })}
         </div>
       ) : (
-        <div className="p-8 text-center text-gray-500">
-          <ShoppingCart className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-          <p>Cart is empty</p>
+        <div className="p-12 text-center text-gray-500">
+          <div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <ShoppingCart className="w-10 h-10 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
+          <p className="text-gray-600">Start adding products to begin your sale</p>
         </div>
       )}
     </div>
-    
-   
   </div>
 );
