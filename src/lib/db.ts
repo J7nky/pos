@@ -62,17 +62,10 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
   id: string;
   product_id: string;
   supplier_id: string;
-  type: string;
   quantity: number;
   unit: string;
   weight: number | null;
-  porterage: number | null;
-  transfer_fee: number | null;
   price: number | null;
-  commission_rate: number;
-  status: string;
-  received_at: string;
-  received_by: string;
   store_id: string;
   created_at: string;
   received_quantity: number;
