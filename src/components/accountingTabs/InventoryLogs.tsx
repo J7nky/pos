@@ -6,6 +6,7 @@ import { useCurrency } from '../../hooks/useCurrency';
 import SearchableSelect from '../common/SearchableSelect';
 import MoneyInput from '../common/MoneyInput';
 import { CashDrawerBalanceReport } from '../CashDrawerBalanceReport';
+import { CurrentCashDrawerStatus } from '../CurrentCashDrawerStatus';
 import { 
   FileText, 
   Search, 
@@ -109,7 +110,7 @@ export default function InventoryLogs() {
   const inventory = raw.inventory;
   const products = raw.products;
   const transactions = raw.transactions;
-  const { getCashDrawerBalanceReport } = raw; // Add this line
+  const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus } = raw; // Add this line
 
   // State
   const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' | 'cash-drawer'>('bills');
@@ -872,11 +873,19 @@ console.log(transactions,'transactions');
       {/* Cash Drawer Tab */}
       {activeTab === 'cash-drawer' && (
         <div className="bg-white rounded-lg shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Cash Drawer</h3>
-          <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Cash Drawer Management</h3>
+          <div className="space-y-6">
+            {/* Current Status */}
+            <CurrentCashDrawerStatus 
+              storeId={storeId || ''} 
+              getCurrentStatus={getCurrentCashDrawerStatus}
+            />
+            
+            {/* Balance Report */}
             <CashDrawerBalanceReport
               storeId={storeId || ''}
-              getBalanceReport={getCashDrawerBalanceReport  }
+              getBalanceReport={getCashDrawerBalanceReport}
+              getSessionDetails={getCashDrawerSessionDetails}
             />
           </div>
         </div>

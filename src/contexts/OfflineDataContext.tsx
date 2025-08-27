@@ -1438,6 +1438,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return await db.getCashDrawerBalanceReport(storeId, startDate, endDate);
   };
 
+  const getCurrentCashDrawerStatus = async () => {
+    if (!storeId) return null;
+    return await db.getCurrentCashDrawerStatus(storeId);
+  };
+
+  const getCashDrawerSessionDetails = async (sessionId: string) => {
+    if (!storeId) return null;
+    return await db.getCashDrawerSessionDetails(sessionId);
+  };
+
   const getStockLevels = () => stockLevels;
 
   const toggleLowStockAlerts = (enabled: boolean) => {
@@ -1640,7 +1650,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       validateAndCleanData,
       openCashDrawer,
       closeCashDrawer,
-      getCashDrawerBalanceReport
+      getCashDrawerBalanceReport,
+      getCurrentCashDrawerStatus,
+      getCashDrawerSessionDetails
     }}>
       {children}
     </OfflineDataContext.Provider>
