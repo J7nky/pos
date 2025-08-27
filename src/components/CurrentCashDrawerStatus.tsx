@@ -150,3 +150,4 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
     </div>
   );
 };
+

@@ -79,14 +79,17 @@ export interface Customer {
   createdAt: string;
 }
 
-export interface inventory_batches { id: string;
+export interface inventory_bills { id: string;
   supplier_id: string;
-  porterage: number ;
-  transfer_fee?: number ;
-  received_at: string; // ISO date string
+  porterage_fee?: number | null;
+  transfer_fee?: number | null;
+  received_at: string;
   store_id: string;
   created_by: string;
-    status: string;}
+  status?: string;
+  created_at:string;
+  notes?:string
+  }
 
 export interface SaleItem {
   id: string;

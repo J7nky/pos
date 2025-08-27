@@ -192,15 +192,17 @@ export interface JournalEntry extends BaseEntity {
   total_credit: number;
   created_by: string;
 }
-export interface inventory_batches extends BaseEntity {
+export interface inventory_bills extends BaseEntity {
   id: string;
   supplier_id: string;
-  status: string;
-  porterage: number | null;
-  transfer_fee: number | null;
+  porterage_fee?: number | null;
+  transfer_fee?: number | null;
   received_at: string;
   store_id: string;
   created_by: string;
+  status?: string;
+  created_at:string;
+  notes?:string
 }
 
 class POSDatabase extends Dexie {
@@ -211,7 +213,7 @@ class POSDatabase extends Dexie {
   inventory_items!: Table<InventoryItem, string>;
   sale_items!: Table<SaleItem, string>;
   transactions!: Table<Transaction, string>;
-  inventory_batches!: Table<inventory_batches, string>;
+  inventory_bills!: Table<inventory_bills, string>;
 
   // Bill management tables
   bills!: Table<Bill, string>;
@@ -242,7 +244,7 @@ class POSDatabase extends Dexie {
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
       sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at', // Added payment_method and customer_id indexes
       transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
-      inventory_batches: 'id, store_id, supplier_id, received_at, created_by',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by',
   
       // Bill management tables
       bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at',
@@ -340,11 +342,11 @@ class POSDatabase extends Dexie {
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
 
-    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_batches
+    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_bills
     this.inventory_items.hook('creating', this.addCreateFields);
     this.sale_items.hook('creating', this.addCreateFields);
     this.transactions.hook('creating', this.addCreateFields);
-    this.inventory_batches.hook('creating', this.addCreateFields);
+    this.inventory_bills.hook('creating', this.addCreateFields);
 
     // Only add update hooks for tables that have updated_at
     this.products.hook('updating', this.addUpdateFields);

@@ -310,36 +310,42 @@ export interface Database {
           batch_id?: string | null;
         };
       };
-      inventory_batches: {
+      inventory_bills: {
         Row: {
           id: string;
           supplier_id: string;
-          porterage: number | null;
-          transfer_fee: number | null;
+          porterage_fee?: number | null;
+          transfer_fee?: number | null;
           received_at: string;
           store_id: string;
           created_by: string;
           status?: string;
+          created_at:string;
+          notes?:string
         };
         Insert: {
-          id?: string;
+          id: string;
           supplier_id: string;
-          porterage?: number | null;
+          porterage_fee?: number | null;
           transfer_fee?: number | null;
-          received_at?: string;
-          store_id?: string;
-          created_by?: string;
+          received_at: string;
+          store_id: string;
+          created_by: string;
           status?: string;
+          created_at:string;
+          notes?:string
         };
         Update: {
-          id?: string;
-          supplier_id?: string;
-          status?: string;
-          porterage?: number | null;
+          id: string;
+          supplier_id: string;
+          porterage_fee?: number | null;
           transfer_fee?: number | null;
-          received_at?: string;
-          store_id?: string;
-          created_by?: string;
+          received_at: string;
+          store_id: string;
+          created_by: string;
+          status?: string;
+          created_at:string;
+          notes?:string
         };
       };
       sale_items: {
