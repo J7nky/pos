@@ -1,6 +1,94 @@
 export interface Database {
   public: {
     Tables: {
+       
+      cash_drawer_accounts: {
+        Row: {
+          id: string;
+          store_id: string;
+          account_code: string;
+          name: string;
+          current_balance: number;
+          currency: 'USD' | 'LBP';
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          account_code: string;
+          name: string;
+          current_balance?: number;
+          currency?: 'USD' | 'LBP';
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          account_code?: string;
+          name?: string;
+          current_balance?: number;
+          currency?: 'USD' | 'LBP';
+          is_active?: boolean;
+          updated_at?: string;
+        };
+      };
+      
+      cash_drawer_sessions: {
+        Row: {
+          id: string;
+          store_id: string;
+          account_id: string;
+          opened_by: string;
+          opened_at: string;
+          closed_at: string | null;
+          closed_by: string | null;
+          opening_amount: number;
+          expected_amount: number | null;
+          actual_amount: number | null;
+          variance: number | null;
+          status: 'open' | 'closed';
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          account_id: string;
+          opened_by: string;
+          opened_at?: string;
+          closed_at?: string | null;
+          closed_by?: string | null;
+          opening_amount: number;
+          expected_amount?: number | null;
+          actual_amount?: number | null;
+          variance?: number | null;
+          status?: 'open' | 'closed';
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          account_id?: string;
+          opened_by?: string;
+          opened_at?: string;
+          closed_at?: string | null;
+          closed_by?: string | null;
+          opening_amount?: number;
+          expected_amount?: number | null;
+          actual_amount?: number | null;
+          variance?: number | null;
+          status?: 'open' | 'closed';
+          notes?: string | null;
+          updated_at?: string;
+        };
+      };
       users: {
         Row: {
           id: string;
@@ -171,87 +259,86 @@ export interface Database {
       inventory_items: {
         Row: {
           id: string;
-          product_id: string;
-          supplier_id: string;
-          type: 'commission' | 'cash';
-          quantity: number;
-          unit: 'kg' | 'piece' | 'box' | 'bag';
-          weight: number | null;
-          porterage: number | null;
-          transfer_fee: number | null;
-          price: number | null;
-          commission_rate: number | null;
-          notes: string;
-          received_at: string;
-          received_by: string;
-          store_id: string;
-          created_at: string;
-          received_quantity: number;
-          batch_id: string | null;
+  product_id: string;
+  supplier_id: string;
+  quantity: number;
+  unit: string;
+  weight: number | null;
+  price: number | null;
+  store_id: string;
+  created_at: string;
+  received_quantity: number;
+  batch_id: string | null;
         };
-        Insert: {
-          id?: string;
-          product_id: string;
-          supplier_id: string;
-          type: 'commission' | 'cash';
-          quantity: number;
-          unit: 'kg' | 'piece' | 'box' | 'bag';
-          weight?: number | null;
-          porterage?: number | null;
-          transfer_fee?: number | null;
-          price?: number | null;
-          commission_rate?: number | null;
-          notes?: string;
-          received_at?: string;
-          received_by: string;
-          store_id: string;
-          created_at?: string;
-          received_quantity: number;
-          batch_id?: string | null;
+        Insert:{
+        id: string;
+        product_id?: string;
+        supplier_id?: string;
+        quantity?: number;
+        unit?: string;
+        weight?: number | null;
+        price?: number | null;
+        store_id?: string;
+        created_at?: string;
+        received_quantity?: number;
+        batch_id?: string | null;
         };
         Update: {
-          id?: string;
+          id: string;
+          product_id?: string;
+          supplier_id?: string;
           quantity?: number;
+          unit?: string;
           weight?: number | null;
-          porterage?: number | null;
-          transfer_fee?: number | null;
           price?: number | null;
-          commission_rate?: number | null;
-          notes?: string;
+          store_id?: string;
+          created_at?: string;
           received_quantity?: number;
           batch_id?: string | null;
         };
       };
-      inventory_batches: {
+      inventory_bills: {
         Row: {
           id: string;
           supplier_id: string;
-          porterage: number | null;
-          transfer_fee: number | null;
+          porterage_fee?: number | null;
+          transfer_fee?: number | null;
           received_at: string;
           store_id: string;
           created_by: string;
           status?: string;
+          created_at:string;
+          notes?:string;
+          commission_rate?:string;
+          type:string
         };
         Insert: {
-          id?: string;
+          id: string;
           supplier_id: string;
-          porterage?: number | null;
+          porterage_fee?: number | null;
           transfer_fee?: number | null;
-          received_at?: string;
-          store_id?: string;
-          created_by?: string;
+          received_at: string;
+          store_id: string;
+          created_by: string;
           status?: string;
+          created_at:string;
+          commission_rate?:string;
+          type?:string
+          notes?:string
         };
         Update: {
-          id?: string;
-          supplier_id?: string;
-          status?: string;
-          porterage?: number | null;
+          id: string;
+          supplier_id: string;
+          porterage_fee?: number | null;
           transfer_fee?: number | null;
-          received_at?: string;
-          store_id?: string;
-          created_by?: string;
+          received_at: string;
+          store_id: string;
+          created_by: string;
+          status?: string;
+          commission_rate?:string;
+          created_at:string;
+          type?:string
+          notes?:string
         };
       };
       sale_items: {
@@ -318,7 +405,7 @@ export interface Database {
           customer_id: string | null;
         };
         Insert: {
-          id?: string;
+          id: string;
           type: 'income' | 'expense';
           category: string;
           amount: number;
@@ -332,7 +419,7 @@ export interface Database {
           customer_id?: string | null;
         };
         Update: {
-          id?: string;
+          id: string;
           amount?: number;
           description?: string;
           reference?: string | null;

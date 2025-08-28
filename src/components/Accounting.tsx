@@ -56,6 +56,8 @@ import Toast from './common/Toast';
 import { CurrencyService } from '../services/currencyService';
 import ReceivedBills from './accountingTabs/ReceivedBills';
 import InventoryLogs from './accountingTabs/InventoryLogs';
+import { createId } from '../lib/db';
+import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 
 export default function Accounting() {
   let raw;
@@ -83,7 +85,7 @@ export default function Accounting() {
   const inventory = raw.inventory || [];
   const sales = raw.sales || [];
   const products = raw.products || [];
-  
+
   let userProfile;
   try {
     const auth = useSupabaseAuth();
@@ -92,7 +94,7 @@ export default function Accounting() {
     console.error('Error loading auth data:', error);
     userProfile = null;
   }
-  
+
   let currency, formatCurrency: any, formatCurrencyWithSymbol: any, getConvertedAmount: any;
   try {
     const currencyHook = useCurrency();
@@ -108,12 +110,13 @@ export default function Accounting() {
     formatCurrencyWithSymbol = (amount: number, curr: string) => `${curr === 'LBP' ? 'LBP' : '$'}${amount.toFixed(2)}`;
     getConvertedAmount = (amount: number, curr: string) => amount;
   }
-  
+
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('accounting_recent_customers', []);
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('accounting_recent_suppliers', []);
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
-  
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'customer-balances' | 'supplier-balances' | 'expenses' | 'journal' | 'nonpriced' | 'inventory-logs' | 'received-bills'>('dashboard');
+  const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
   const [showForm, setShowForm] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
@@ -132,6 +135,32 @@ export default function Accounting() {
     }
   }, [raw, transactions, customers, suppliers, products]);
 
+  // Fetch cash drawer balance
+  useEffect(() => {
+    const fetchBalance = async () => {
+      try {
+        if (userProfile?.store_id) {
+          const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile.store_id);
+          setCashDrawerBalance(balance);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    fetchBalance();
+  }, [userProfile?.store_id]);
+
+  const refreshCashDrawerBalance = async () => {
+    try {
+      if (userProfile?.store_id) {
+        const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile.store_id);
+        setCashDrawerBalance(balance);
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
   // Inventory logs state
   const [inventoryLogsSearchTerm, setInventoryLogsSearchTerm] = useState('');
   const [inventoryLogsProductFilter, setInventoryLogsProductFilter] = useState('');
@@ -142,7 +171,7 @@ export default function Accounting() {
   const [inventoryLogsSortDir, setInventoryLogsSortDir] = useState<'asc' | 'desc'>('desc');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<any>(null);
   const [showInventoryItemDetails, setShowInventoryItemDetails] = useState(false);
-  
+
   // Sales logs edit/delete state
   const [editingSale, setEditingSale] = useState<any>(null);
   const [showEditSaleModal, setShowEditSaleModal] = useState(false);
@@ -190,7 +219,7 @@ export default function Accounting() {
   const getPeriodData = useMemo(() => {
     const now = new Date();
     let startDate: Date;
-    
+
     switch (dashboardPeriod) {
       case 'today':
         startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -319,7 +348,7 @@ export default function Accounting() {
       const customersWithDebt = customers.filter(c => (c.lb_balance || 0) > 0 || (c.usd_balance || 0) > 0).length;
   const totalCustomerDebt = customers.reduce((sum, c) => sum + (c.lb_balance || 0) + (c.usd_balance || 0), 0);
     const avgDebtPerCustomer = customersWithDebt > 0 ? totalCustomerDebt / customersWithDebt : 0;
-    
+
     const recentTransactions = transactions
       .filter(t => new Date(t.createdAt) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
       .length;
@@ -373,33 +402,33 @@ export default function Accounting() {
   // Form handlers
   const handleReceiveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Validate required fields
     if (!receiveForm.amount || parseFloat(receiveForm.amount) <= 0) {
       showToast('Please enter a valid amount', 'error');
       return;
     }
-    
+
     if (!receiveForm.entityId) {
       showToast('Please select an entity', 'error');
       return;
     }
-    
+
     const entity = receiveForm.entityType === 'customer' ? customers.find(c => c.id === receiveForm.entityId) : suppliers.find(s => s.id === receiveForm.entityId);
     if (!entity) {
       showToast('Entity not found', 'error');
       return;
     }
-    
+
     try {
       // Use the ERP Financial Service to process the payment
       const { erpFinancialService } = await import('../services/erpFinancialService');
-      
+
       // Sync current entities to ERP service
       localStorage.setItem('erp_customers', JSON.stringify(customers));
       localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
       erpFinancialService.reloadData();
-      
+
       const result = erpFinancialService.processEntityPayment(
         receiveForm.entityType,
         receiveForm.entityId,
@@ -408,15 +437,15 @@ export default function Accounting() {
         `Payment from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
         userProfile?.id || ''
       );
-      
+
       // Update entity balance in main application
       // Store amounts in their respective currency fields
       const paymentAmount = parseFloat(receiveForm.amount);
-      
+
       if (receiveForm.entityType === 'customer') {
         const currentLbBalance = entity.lb_balance || 0;
         const currentUsdBalance = entity.usd_balance || 0;
-        
+
         if (receiveForm.currency === 'LBP') {
           await raw.updateCustomer(receiveForm.entityId, { 
             lb_balance: currentLbBalance + paymentAmount 
@@ -429,7 +458,7 @@ export default function Accounting() {
       } else {
         const currentLbBalance = entity.lb_balance || 0;
         const currentUsdBalance = entity.usd_balance || 0;
-        
+
         if (receiveForm.currency === 'LBP') {
           await raw.updateSupplier(receiveForm.entityId, { 
             lb_balance: currentLbBalance + paymentAmount 
@@ -440,15 +469,16 @@ export default function Accounting() {
           });
         }
       }
-      
+
       // Safely convert amount for database storage
       const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
         parseFloat(receiveForm.amount), 
         receiveForm.currency as 'USD' | 'LBP'
       );
-      
+
       // Also add to legacy transaction system for compatibility
       addTransaction({
+        id: createId(),
         type: 'income',
         category: receiveForm.entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
         amount: safeAmount.amount,
@@ -457,12 +487,31 @@ export default function Accounting() {
         reference: receiveForm.reference,
         created_by: userProfile?.id || ''
       });
-      
+
+      // Update cash drawer (increase for received payment)
+      if (!userProfile?.store_id) {
+        console.warn('Missing store_id: cannot update cash drawer');
+      } else {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'payment',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Payment received from ${entity.name}`,
+          reference: receiveForm.reference || `PAY-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || '',
+          customerId: receiveForm.entityType === 'customer' ? receiveForm.entityId : undefined,
+          supplierId: receiveForm.entityType === 'supplier' ? receiveForm.entityId : undefined
+        });
+      }
+
+      await refreshCashDrawerBalance();
+
     } catch (err) {
     console.log(err);
       showToast('Failed to record payment.', 'error');
     }
-    
+
     setReceiveForm({
       entityType: 'customer' as 'customer' | 'supplier',
       entityId: '',
@@ -482,29 +531,29 @@ export default function Accounting() {
       showToast('Please enter a valid amount', 'error');
       return;
     }
-    
+
     if (!payForm.entityId) {
       showToast('Please select an entity', 'error');
       return;
     }
-    
+
     const entity = payForm.entityType === 'customer' ? customers.find(c => c.id === payForm.entityId) : suppliers.find(s => s.id === payForm.entityId);
     if (!entity) {
       showToast('Entity not found', 'error');
       return;
     }
-    
+
     try {
       // Use the ERP Financial Service to process the payment
       const { erpFinancialService } = await import('../services/erpFinancialService');
-      
+
       // Sync current entities to ERP service
       console.log('Syncing entities to ERP service:', payForm.entityType === 'customer' ? customers.length : suppliers.length, 'entities');
       localStorage.setItem('erp_customers', JSON.stringify(customers));
       localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
       erpFinancialService.reloadData();
       console.log('Entity found for payment:', entity.name);
-      
+
       const result = erpFinancialService.processEntityPayment(
         payForm.entityType,
         payForm.entityId,
@@ -513,15 +562,15 @@ export default function Accounting() {
         `Payment to ${entity.name}${payForm.description ? ': ' + payForm.description : ''}`,
         userProfile?.id || ''
       );
-      
+
       // Update entity balance (reduce debt)
       const paymentAmount = parseFloat(payForm.amount);
-      
+
       if (payForm.entityType === 'customer') {
         console.log('Paying to customer:', paymentAmount);
         const currentLbBalance = entity.lb_balance || 0;
         const currentUsdBalance = entity.usd_balance || 0;
-        
+
         if (payForm.currency === 'LBP') {
           await raw.updateCustomer(payForm.entityId, { 
             lb_balance: currentLbBalance - paymentAmount 
@@ -534,7 +583,7 @@ export default function Accounting() {
       } else {
         const currentLbBalance = entity.lb_balance || 0;
         const currentUsdBalance = entity.usd_balance || 0;
-        
+
         if (payForm.currency === 'LBP') {
           await raw.updateSupplier(payForm.entityId, { 
             lb_balance: currentLbBalance - paymentAmount 
@@ -545,15 +594,16 @@ export default function Accounting() {
           });
         }
       }
-      
+
       // Safely convert amount for database storage
       const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
         parseFloat(payForm.amount), 
         payForm.currency as 'USD' | 'LBP'
       );
-      
+
       // Also add to legacy transaction system for compatibility
       addTransaction({
+        id: createId(),
         type: 'expense',
         category: payForm.entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
         amount: safeAmount.amount,
@@ -562,13 +612,32 @@ export default function Accounting() {
         reference: payForm.reference,
         created_by: userProfile?.id || ''
       });
-      
+
+      // Update cash drawer (decrease for sent payment)
+      if (!userProfile?.store_id) {
+        console.warn('Missing store_id: cannot update cash drawer');
+      } else {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'expense',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Payment sent to ${entity.name}`,
+          reference: payForm.reference || `PAY-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || '',
+          customerId: payForm.entityType === 'customer' ? payForm.entityId : undefined,
+          supplierId: payForm.entityType === 'supplier' ? payForm.entityId : undefined
+        });
+      }
+
+      await refreshCashDrawerBalance();
+
       showToast(`Payment sent! ${formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency)} paid to ${entity.name}`, 'success');
     } catch (err) {
       console.log(err);
       showToast('Failed to record payment.', 'error');
     }
-    
+
     setPayForm({
       entityType: 'supplier' as 'customer' | 'supplier',
       entityId: '',
@@ -588,12 +657,12 @@ export default function Accounting() {
     try {
       // Use the ERP Financial Service to process the expense
       const { erpFinancialService } = await import('../services/erpFinancialService');
-      
+
       // Sync current data to ERP service (for consistency)
       localStorage.setItem('erp_customers', JSON.stringify(customers));
       localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
       erpFinancialService.reloadData();
-      
+
       const result = erpFinancialService.processExpense(
         parseFloat(expenseForm.amount),
         expenseForm.currency as 'USD' | 'LBP',
@@ -601,15 +670,16 @@ export default function Accounting() {
         expenseForm.description,
         userProfile?.id || ''
       );
-      
+
       // Safely convert amount for database storage
       const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
         parseFloat(expenseForm.amount), 
         expenseForm.currency as 'USD' | 'LBP'
       );
-      
+
       // Also add to legacy transaction system for compatibility
       addTransaction({
+        id: createId(),
         type: 'expense',
         category: category.name,
         amount: safeAmount.amount,
@@ -618,6 +688,23 @@ export default function Accounting() {
         reference: expenseForm.reference,
         created_by: userProfile?.id || ''
       });
+
+      // Update cash drawer (decrease for expense)
+      if (!userProfile?.store_id) {
+        console.warn('Missing store_id: cannot update cash drawer');
+      } else {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'expense',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Expense: ${category.name} - ${expenseForm.description}`,
+          reference: expenseForm.reference || `EXP-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || ''
+        });
+      }
+
+      await refreshCashDrawerBalance();
 
       showToast(`Expense recorded! Cash drawer updated: ${result.balanceBefore.toFixed(2)} → ${result.balanceAfter.toFixed(2)}`, 'success');
     } catch (err) {
@@ -700,13 +787,13 @@ export default function Accounting() {
   }, [sales, activeTab]);
 
   const handleEditNonPriced = (item: any) => setShowEditNonPriced(item);
-  
+
   // Helper function to get current value including staged changes
   const getCurrentValue = (item: any, field: string) => {
     const stagedChanges = stagedNonPricedChanges[item.id] || {};
     return stagedChanges[field] !== undefined ? stagedChanges[field] : item[field];
   };
-  
+
   // Helper function to stage a change
   const stageChange = (itemId: string, field: string, value: any) => {
     setStagedNonPricedChanges(prev => ({
@@ -717,7 +804,7 @@ export default function Accounting() {
       }
     }));
   };
-  
+
   const handleSaveNonPriced = async (updated: any) => {
     if (!updated.unitPrice || updated.unitPrice <= 0) {
       showToast('Please enter a valid unit price', 'error');
@@ -727,7 +814,7 @@ export default function Accounting() {
       showToast('Please enter a valid quantity', 'error');
       return;
     }
-    
+
     try {
       // Update the sale record directly
       await updateSale(updated.id, {
@@ -736,7 +823,7 @@ export default function Accounting() {
         weight: updated.weight || null,
         received_value: updated.unitPrice * updated.quantity
       });
-      
+
       setShowEditNonPriced(null);
       showToast('Item updated successfully', 'success');
     } catch (error) {
@@ -744,12 +831,12 @@ export default function Accounting() {
       showToast('Error updating item', 'error');
     }
   };
-  
+
   const handleMarkPriced = async (item: any) => {
     // Get staged changes for this item
     const stagedChanges = stagedNonPricedChanges[item.id] || {};
     const updatedItem = { ...item, ...stagedChanges };
-    
+
     if (!updatedItem.unit_price || updatedItem.unit_price <= 0) {
       showToast('Set a valid price before marking as priced.', 'error');
       return;
@@ -758,7 +845,7 @@ export default function Accounting() {
       showToast('Set a valid quantity before marking as priced.', 'error');
       return;
     }
-    
+
     try {
       // Update the sale record to mark it as priced
       await updateSale(item.id, {
@@ -767,14 +854,14 @@ export default function Accounting() {
         weight: updatedItem.weight || null,
         received_value: updatedItem.unit_price * updatedItem.quantity
       });
-      
+
       // Clear staged changes for this item
       setStagedNonPricedChanges(prev => {
         const newChanges = { ...prev };
         delete newChanges[item.id];
         return newChanges;
       });
-      
+
       showToast('Item marked as priced successfully!', 'success');
     } catch (error) {
       console.error('Error marking item as priced:', error);
@@ -787,20 +874,20 @@ export default function Accounting() {
       .map(id => {
         const item = nonPricedItems.find(item => item.id === id);
         if (!item) return null;
-        
+
         // Get staged changes for this item
         const stagedChanges = stagedNonPricedChanges[item.id] || {};
         const updatedItem = { ...item, ...stagedChanges };
-        
+
         return updatedItem.unit_price > 0 && updatedItem.quantity > 0 ? updatedItem : null;
       })
       .filter(item => item !== null);
-    
+
     if (validItems.length === 0) {
       showToast('No valid items selected (items must have price and quantity)', 'error');
       return;
     }
-    
+
     try {
       for (const item of validItems) {
         await updateSale(item.id, {
@@ -810,7 +897,7 @@ export default function Accounting() {
           received_value: item.unit_price * item.quantity
         });
       }
-      
+
       // Clear staged changes for all processed items
       setStagedNonPricedChanges(prev => {
         const newChanges = { ...prev };
@@ -819,7 +906,7 @@ export default function Accounting() {
         });
         return newChanges;
       });
-      
+
       setSelectedNonPriced([]);
       setShowBulkActions(false);
       showToast(`${validItems.length} items marked as priced successfully!`, 'success');
@@ -847,7 +934,7 @@ export default function Accounting() {
         for (const id of selectedNonPriced) {
           await deleteSale(id);
         }
-        
+
         setSelectedNonPriced([]);
         setShowBulkActions(false);
         showToast('Items deleted successfully', 'success');
@@ -889,13 +976,13 @@ export default function Accounting() {
       const product = products.find(p => p.id === item.product_id);
       const customer = customers.find(c => c.id === item.customer_id);
       const supplier = suppliers.find(s => s.id === item.supplier_id);
-      
+
       // Get staged changes for this item
       const stagedChanges = stagedNonPricedChanges[item.id] || {};
       const currentUnitPrice = stagedChanges.unit_price !== undefined ? stagedChanges.unit_price : item.unit_price;
       const currentQuantity = stagedChanges.quantity !== undefined ? stagedChanges.quantity : item.quantity;
       const currentWeight = stagedChanges.weight !== undefined ? stagedChanges.weight : item.weight;
-      
+
       return {
         ...item,
         customerName: customer?.name || 'Walk-in Customer',
@@ -939,7 +1026,7 @@ export default function Accounting() {
     inventory.forEach(item => {
       const product = products.find(p => p.id === item.product_id);
       const supplier = suppliers.find(s => s.id === item.supplier_id);
-      
+
       logs.push({
         id: `inventory-${item.id}`,
         type: 'inventory_received',
@@ -962,9 +1049,8 @@ export default function Accounting() {
       });
     });
     // Add sales transaction logs
-    console.log(sales, 'sale231');
-    
-    
+
+
       sales.forEach(sale => {
         const product = products.find(p => p.id === sale.product_id);
         const supplier = suppliers.find(s => s.id === sale.supplier_id);
@@ -994,7 +1080,7 @@ export default function Accounting() {
         });
       });
 
-    
+
     // Add financial transaction logs
     transactions.forEach(transaction => {
       logs.push({
@@ -1046,7 +1132,7 @@ export default function Accounting() {
     if (inventoryLogsDateFilter !== 'all') {
       const now = new Date();
       let startDate: Date;
-      
+
       switch (inventoryLogsDateFilter) {
         case 'today':
           startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1060,7 +1146,7 @@ export default function Accounting() {
         default:
           startDate = new Date(0);
       }
-      
+
       filtered = filtered.filter(log => new Date(log.date) >= startDate);
     }
 
@@ -1179,13 +1265,13 @@ export default function Accounting() {
         item.product_id && 
         item.supplier_id
       );
-      
+
       console.log('Debug - Commission items found:', receivedItems.length);
-      
+
       receivedItems.forEach(item => {
         const product = products.find(p => p.id === item.product_id);
         const supplier = suppliers.find(s => s.id === item.supplier_id);
-        
+
         if (!product || !supplier) {
           console.warn('Missing product or supplier for item:', item.id);
           return;
@@ -1206,16 +1292,16 @@ export default function Accounting() {
         let totalSoldQuantity = 0;
         let totalRevenue = 0;
         let saleCount = 0;
-        
+
         // Sort sales by date to process them chronologically
         const sortedSales = relatedSales.sort((a, b) => 
           new Date(a.created_at || a.created_at).getTime() - new Date(b.created_at || b.created_at).getTime()
         );
-        
+
         // Track how much we've sold from this specific inventory item
         // We need to calculate the original quantity by adding back what was sold
         let totalSoldFromThisItem = 0;
-        
+
         for (const sale of sortedSales) {
           if (sale && Array.isArray(sale)) {
             for (const saleItem of sale) {
@@ -1223,7 +1309,7 @@ export default function Accounting() {
                   saleItem.supplierId === item.supplier_id &&
                   typeof saleItem.quantity === 'number' &&
                   typeof saleItem.totalPrice === 'number') {
-                
+
                 // Add to total sold from this inventory item
                 totalSoldFromThisItem += saleItem.quantity;
                 totalSoldQuantity += saleItem.quantity;
@@ -1237,26 +1323,26 @@ export default function Accounting() {
         // Calculate the original quantity and remaining quantity
         const originalQuantity = item.quantity + totalSoldFromThisItem;
         const remainingQuantity = item.quantity; // Current remaining quantity
-        
+
         // Show bills for commission items that have been sold or still have remaining quantity
         if (totalSoldFromThisItem > 0 || remainingQuantity > 0) {
           // Calculate estimated total value when fully sold
           const avgUnitPrice = totalSoldFromThisItem > 0 ? totalRevenue / totalSoldFromThisItem : (item.price || 0);
           const estimatedTotalValue = originalQuantity * avgUnitPrice;
-          
+
           // Calculate progress based on original quantity
           const progress = originalQuantity > 0 ? Math.min((totalSoldFromThisItem / originalQuantity) * 100, 100) : 0;
-          
+
           // Determine status based on progress
           let status = 'pending';
           if (progress >= 100) status = 'completed';
           else if (progress >= 75) status = 'nearly-complete';
           else if (progress >= 50) status = 'halfway';
           else if (progress > 0) status = 'in-progress';
-          
+
           const bill = {
             id: `bill-${item.id}`,
-            inventoryItemId: item.id,
+            // inventoryItemId: item.id,
             supplierId: item.supplier_id,
             supplierName: supplier.name,
             productId: item.product_id,
@@ -1276,7 +1362,7 @@ export default function Accounting() {
             supplierPayment: totalRevenue - ((totalRevenue * (item.commission_rate || 10)) / 100),
             daysSinceReceived: Math.floor((Date.now() - new Date(item.received_at || item.created_at).getTime()) / (1000 * 60 * 60 * 24))
           };
-          
+
           bills.push(bill);
         }
       });
@@ -1393,11 +1479,12 @@ export default function Accounting() {
 
       // Calculate total revenue from the bill
       const totalRevenue = fees.commission + fees.porterage + fees.transfer + fees.supplierAmount;
-      
+
       // Add commission transaction (if applicable)
       if (fees.commission > 0) {
         const safeCommissionAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.commission, 'USD');
         await addTransaction({
+          id: createId(),
           type: 'income',
           category: 'Commission',
           amount: safeCommissionAmount.amount,
@@ -1412,6 +1499,7 @@ export default function Accounting() {
       if (fees.porterage > 0) {
         const safePorterageAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.porterage, 'USD');
         await addTransaction({
+          id: createId(),
           type: 'income',
           category: 'Porterage',
           amount: safePorterageAmount.amount,
@@ -1426,6 +1514,7 @@ export default function Accounting() {
       if (fees.transfer > 0) {
         const safeTransferAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.transfer, 'USD');
         await addTransaction({
+          id: createId(),
           type: 'income',
           category: 'Transfer Fee',
           amount: safeTransferAmount.amount,
@@ -1440,6 +1529,7 @@ export default function Accounting() {
       if (fees.supplierAmount > 0) {
         const safeSupplierAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.supplierAmount, 'USD');
         await addTransaction({
+          id: createId(),
           supplier_id: bill.supplier_id,
           type: 'expense',
           category: 'Supplier Payment',
@@ -1455,7 +1545,7 @@ export default function Accounting() {
         if (supplier) {
           const currentUsdBalance = supplier.usd_balance || 0;
           const newBalance = currentUsdBalance + fees.supplierAmount;
-          
+
           await raw.updateSupplier(bill.supplier_id, {
             usd_balance: newBalance
           });
@@ -1491,9 +1581,10 @@ export default function Accounting() {
       // Safely convert amounts for database storage
       const safeCommissionAmount = CurrencyService.getInstance().safeConvertForDatabase(commissionAmount, 'USD');
       const safeSupplierPayment = CurrencyService.getInstance().safeConvertForDatabase(supplierPayment, 'USD');
-      
+
       // Add commission transaction
       await addTransaction({
+        id: createId(),
         type: 'expense',
         category: 'Commission',
         amount: safeCommissionAmount.amount,
@@ -1505,6 +1596,7 @@ export default function Accounting() {
 
       // Add supplier payment transaction
       await addTransaction({
+        id: createId(),
         type: 'expense',
         category: 'Supplier Payment',
         amount: safeSupplierPayment.amount,
@@ -1643,7 +1735,7 @@ export default function Accounting() {
     try {
       console.log('Debug - Total inventory items:', inventory.length);
       console.log('Debug - Inventory items with received_quantity issues:');
-      
+
       inventory.forEach((item, index) => {
         console.log(`Item ${index + 1}:`, {
           id: item.id,
@@ -1652,17 +1744,17 @@ export default function Accounting() {
           quantity: item.quantity
         });
       });
-      
+
       const itemsToUpdate = inventory.filter(item => 
         item.received_quantity === null || item.received_quantity === undefined || item.received_quantity === 0
       );
-      
+
       console.log('Debug - Filtered items to update:', itemsToUpdate.length);
-      
+
       if (itemsToUpdate.length > 0) {
         console.log(`Found ${itemsToUpdate.length} inventory items without received_quantity`);
         showToast(`Found ${itemsToUpdate.length} items that need received_quantity field. Please add new inventory items to see proper progress tracking.`, 'error');
-        
+
         // Log the items that need updating
         itemsToUpdate.forEach((item, index) => {
           console.log(`Item ${index + 1} needs received_quantity update:`, {
@@ -1695,11 +1787,11 @@ export default function Accounting() {
       );
       console.log('Inventory', inventory);
       console.log('Debug - All inventory items found:', allInventoryItems.length);
-      
+
       allInventoryItems.forEach(item => {
         const product = products.find(p => p.id === item.product_id);
         const supplier = suppliers.find(s => s.id === item.supplier_id);
-        
+
         if (!product || !supplier) {
           console.warn('Missing product or supplier for item:', item.id);
           return;
@@ -1720,15 +1812,15 @@ export default function Accounting() {
         let totalSoldQuantity = 0;
         let totalRevenue = 0;
         let saleCount = 0;
-        
+
         // Sort sales by date to process them chronologically
         const sortedSales = relatedSales.sort((a, b) => 
           new Date(a.created_at || a.created_at).getTime() - new Date(b.created_at || b.created_at).getTime()
         );
-        
+
         // Track how much we've sold from this specific inventory item
         let totalSoldFromThisItem = 0;
-        
+
         for (const sale of sortedSales) {
           if (sale && Array.isArray(sale)) {
             for (const saleItem of sale) {
@@ -1736,7 +1828,7 @@ export default function Accounting() {
                   saleItem.supplierId === item.supplier_id &&
                   typeof saleItem.quantity === 'number' &&
                   typeof saleItem.totalPrice === 'number') {
-                
+
                 // Add to total sold from this inventory item
                 totalSoldFromThisItem += saleItem.quantity;
                 totalRevenue += saleItem.totalPrice;
@@ -1749,14 +1841,14 @@ export default function Accounting() {
         // Handle the case where received_quantity is null/undefined
         // For existing items without received_quantity, we'll use quantity + sold items as the original quantity
         let originalReceivedQuantity = 0;
-        
+
         if (item.received_quantity !== null && item.received_quantity !== undefined && item.received_quantity > 0) {
           // Use the received_quantity field if it exists and is valid
           originalReceivedQuantity = item.received_quantity;
         } else {
           // For existing items without received_quantity, calculate it from current quantity + sold items
           originalReceivedQuantity = item.quantity + totalSoldFromThisItem;
-          
+
           // Special handling for items with quantity = 0 that haven't been sold yet
           // These items might need received_quantity to be set manually
           if (item.quantity === 0 && totalSoldFromThisItem === 0) {
@@ -1769,7 +1861,7 @@ export default function Accounting() {
               calculated_original: originalReceivedQuantity
             });
           }
-          
+
           // Debug: Log items that need received_quantity
           console.log('Debug - Item needs received_quantity:', {
             itemId: item.id,
@@ -1781,24 +1873,24 @@ export default function Accounting() {
           });
         }
         const remainingQuantity = item.quantity; // Current remaining quantity
-        
+
         // Calculate estimated total value when fully sold
         const avgUnitPrice = totalSoldFromThisItem > 0 ? totalRevenue / totalSoldFromThisItem : (item.price || 0);
         const estimatedTotalValue = originalReceivedQuantity * avgUnitPrice;
-        
+
         // Calculate progress based on original received quantity
         // Progress = (Total Sold / Original Received Quantity) × 100
         const soldFromThisItem = Math.max(originalReceivedQuantity - remainingQuantity, 0);
         const progress = originalReceivedQuantity > 0 
           ? (soldFromThisItem / originalReceivedQuantity) * 100 
           : 0;
-        
+
         // Ensure we have valid values
         const validOriginalQuantity = Math.max(originalReceivedQuantity, 0);
         const validSoldQuantity = Math.max(totalSoldFromThisItem, 0);
         const validRemainingQuantity = Math.max(remainingQuantity, 0);
         const validProgress = isNaN(progress) || !isFinite(progress) ? 0 : Math.max(0, Math.min(100, progress));
-        
+
         // Debug logging for problematic items
         if (originalReceivedQuantity === 0 || isNaN(progress) || !isFinite(progress)) {
           console.warn('Debug - Problematic item:', {
@@ -1811,7 +1903,7 @@ export default function Accounting() {
             remainingQuantity: item.quantity
           });
         }
-        
+
         // Determine status based on progress
         let status = 'pending';
         if (progress >= 100) status = 'completed';
@@ -1823,7 +1915,7 @@ export default function Accounting() {
         const totalCost = item.type === 'commission' ? 
           (item.porterage || 0) + (item.transfer_fee || 0) : 
           (item.price || 0) * originalReceivedQuantity;
-        
+
         const totalProfit = totalRevenue - totalCost;
 
         bills.push({
@@ -1897,7 +1989,7 @@ export default function Accounting() {
       // Sort
       filtered.sort((a, b) => {
         let aValue: any, bValue: any;
-        
+
         switch (receivedBillsSort) {
           case 'date':
             aValue = new Date(a.receivedAt).getTime();
@@ -2034,7 +2126,7 @@ export default function Accounting() {
       // Get the original sale to compare quantities
       const originalSale = editingSale;
       const quantityChanged = originalSale.quantity !== updatedSale.quantity;
-      
+
       await updateSale(editingSale.id, {
         quantity: updatedSale.quantity,
         weight: updatedSale.weight,
@@ -2044,7 +2136,7 @@ export default function Accounting() {
         customer_id: updatedSale.customerId || null,
         notes: updatedSale.notes || null
       });
-      
+
       showToast('Sale updated successfully', 'success');
       setShowEditSaleModal(false);
       setEditingSale(null);
@@ -2061,7 +2153,7 @@ export default function Accounting() {
 
   const handleConfirmDeleteSale = async () => {
     if (!saleToDelete) return;
-    
+
     try {
       await deleteSale(saleToDelete.id);
       showToast('Sale deleted successfully', 'success');
@@ -2119,7 +2211,7 @@ export default function Accounting() {
             Expense
           </button>
         </div>
-        
+
         <div className="flex items-center space-x-2">
           <select
             value={dashboardPeriod}
@@ -2178,6 +2270,28 @@ export default function Accounting() {
         <div className="space-y-6">
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Cash Drawer Balance */}
+            <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-emerald-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 font-medium">Cash Drawer Balance</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {cashDrawerBalance === null ? '—' : formatCurrency(cashDrawerBalance)}
+                  </p>
+                  <div className="flex items-center mt-2 text-xs text-gray-500">
+                    <button
+                      onClick={async () => { await refreshCashDrawerBalance(); }}
+                      className="inline-flex items-center px-2 py-1 bg-gray-100 rounded hover:bg-gray-200"
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+                    </button>
+                  </div>
+                </div>
+                <div className="p-3 bg-emerald-100 rounded-full">
+                  <Wallet className="w-6 h-6 text-emerald-600" />
+                </div>
+              </div>
+            </div>
             <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-blue-500">
               <div className="flex items-center justify-between">
                 <div>
@@ -2245,7 +2359,7 @@ export default function Accounting() {
               </div>
             </div>
 
-         
+
           </div>
 
 
@@ -2256,7 +2370,7 @@ export default function Accounting() {
               <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
               <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">View All</button>
             </div>
-            
+
             <div className="space-y-4">
               {transactions
                 .filter(t => new Date(t.createdAt) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
@@ -2461,12 +2575,12 @@ export default function Accounting() {
         //     </div>
         //   </div>
         // </div>
- 
- 
+
+
 //  )
 }
 
-    
+
       {
       // activeTab === 'supplier-balances' && (
       //   <div className="space-y-6">
@@ -2604,7 +2718,7 @@ export default function Accounting() {
       //         </div>
       //       </div>
 
-          
+
 
       //       <div className="bg-white rounded-lg shadow-sm p-6">
       //         <div className="flex items-center justify-between">
@@ -2647,7 +2761,7 @@ export default function Accounting() {
                   const convertedAmount = getConvertedAmount(t.amount, 'USD'); // amounts stored in USD
                   return sum + convertedAmount;
                 }, 0);
-                
+
                 return (
                   <div key={category.id} className="border border-gray-200 rounded-lg p-4">
                     <h4 className="font-medium text-gray-900">{category.name}</h4>
@@ -3035,17 +3149,7 @@ export default function Accounting() {
 
 
       {activeTab === 'inventory-logs' && (
-
-      <InventoryLogs
-        inventoryLogs={getInventoryTransactionLogs}
-        products={products}
-        suppliers={suppliers}
-        customers={customers}
-        formatCurrency={formatCurrency}
-        showToast={showToast}
-        onEditSale={handleEditSale}
-        onDeleteSale={handleDeleteSale}
-      />
+        <InventoryLogs />
       )}
 
       {activeTab === 'received-bills' && (
@@ -3196,7 +3300,7 @@ export default function Accounting() {
                     <span className="text-green-800 font-medium">Record a payment received from a customer or supplier</span>
                   </div>
                 </div>
-                
+
                 <div className="grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Entity Type *</label>
@@ -3237,7 +3341,7 @@ export default function Accounting() {
                       </label>
                     </div>
                   </div>
-                  
+
                   <div>
                     <SearchableSelect
                       options={
@@ -3267,7 +3371,7 @@ export default function Accounting() {
                       className="w-full"
                     />
                   </div>
-                  
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
                     <input
@@ -3290,7 +3394,7 @@ export default function Accounting() {
                     />
                     <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
                   </div>
-                  
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Currency *</label>
                     <select
@@ -3303,7 +3407,7 @@ export default function Accounting() {
                     </select>
                   </div>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Description (optional)</label>
                   <input
@@ -3314,9 +3418,9 @@ export default function Accounting() {
                     placeholder="e.g., Payment for invoice #123, Cash payment, etc."
                   />
                 </div>
-                
-           
-                
+
+
+
                 {receiveForm.currency !== currency && receiveForm.amount && (
                   <div className="text-sm text-gray-600 bg-blue-50 p-4 rounded-lg border border-blue-200">
                     <div className="flex items-center justify-between">
@@ -3329,7 +3433,7 @@ export default function Accounting() {
                     <div className="text-xs text-gray-500 mt-1">Rate: 1 USD = 89,500 LBP</div>
                   </div>
                 )}
-                
+
                 <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
                   <button
                     type="button"
@@ -3356,7 +3460,7 @@ export default function Accounting() {
                     <span className="text-red-800 font-medium">Record a payment sent to a customer or supplier</span>
                   </div>
                 </div>
-                
+
                 <div className="grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Entity Type *</label>
@@ -3397,7 +3501,7 @@ export default function Accounting() {
                       </label>
                     </div>
                   </div>
-                  
+
                   <div>
                     <SearchableSelect
                       options={
@@ -3427,7 +3531,7 @@ export default function Accounting() {
                       className="w-full"
                     />
                   </div>
-                  
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
                     <input
@@ -3450,7 +3554,7 @@ export default function Accounting() {
                     />
                     <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
                   </div>
-                  
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Currency *</label>
                     <select
@@ -3463,7 +3567,7 @@ export default function Accounting() {
                     </select>
                   </div>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Description (optional)</label>
                   <input
@@ -3474,8 +3578,8 @@ export default function Accounting() {
                     placeholder="e.g., Payment for goods, Commission payment, etc."
                   />
                 </div>
-            
-                
+
+
                 {payForm.currency !== currency && payForm.amount && (
                   <div className="text-sm text-gray-600 bg-blue-50 p-4 rounded-lg border border-blue-200">
                     <div className="flex items-center justify-between">
@@ -3488,7 +3592,7 @@ export default function Accounting() {
                     <div className="text-xs text-gray-500 mt-1">Rate: 1 USD = 89,500 LBP</div>
                   </div>
                 )}
-                
+
                 <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
                   <button
                     type="button"
@@ -3581,7 +3685,7 @@ export default function Accounting() {
                     required
                   />
                 </div>
-             
+
                 <div className="flex justify-end space-x-3 pt-4">
                   <button
                     type="button"
@@ -3651,7 +3755,7 @@ export default function Accounting() {
                     </div>
                   </div>
                 </div>
-                
+
                 <div>
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Quantity & Progress</h3>
                   <div className="space-y-3">
@@ -3754,7 +3858,7 @@ export default function Accounting() {
         </div>
       )}
 
-      
+
 
       {/* Edit Sale Modal */}
       {showEditSaleModal && editingSale && (
@@ -3818,7 +3922,7 @@ export default function Accounting() {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="bg-red-50 border border-red-200 p-4 rounded-lg">
                   <h4 className="text-sm font-medium text-red-800 mb-2">Sale Details</h4>
                   <div className="space-y-1 text-sm text-red-700">
@@ -3829,7 +3933,7 @@ export default function Accounting() {
                   </div>
                 </div>
               </div>
-              
+
               <div className="flex justify-end space-x-3">
                 <button
                   onClick={() => setShowDeleteSaleModal(false)}
@@ -3959,7 +4063,7 @@ export default function Accounting() {
           {/* Product Details Section */}
           <div className="space-y-4">
             <h4 className="text-md font-medium text-gray-800 border-b border-gray-200 pb-2">Product Details</h4>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -4020,7 +4124,7 @@ export default function Accounting() {
           {/* Payment Details Section */}
           <div className="space-y-4">
             <h4 className="text-md font-medium text-gray-800 border-b border-gray-200 pb-2">Payment Details</h4>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Payment Method <span className="text-red-500">*</span>
@@ -4069,7 +4173,7 @@ export default function Accounting() {
                 />
               </div>
               {errors.receivedValue && <p className="text-red-500 text-xs mt-1">{errors.receivedValue}</p>}
-              
+
               {/* Quick amount buttons */}
               {/* <div className="mt-2 flex gap-2">
                 <button
@@ -4115,13 +4219,13 @@ export default function Accounting() {
                   className={errors.customerId ? 'border-red-500' : ''}
                 />
                 {errors.customerId && <p className="text-red-500 text-xs mt-1">{errors.customerId}</p>}
-                
+
                 {isPartialPayment && customerName && (
                   <p className="text-sm text-amber-700 mt-2">
                     {formatCurrency(totalValue - formData.receivedValue)} will be added to {customerName}'s balance.
                   </p>
                 )}
-                
+
                 {isCredit && customerName && (
                   <p className="text-sm text-amber-700 mt-2">
                     Full amount ({formatCurrency(totalValue)}) will be added to {customerName}'s credit balance.
@@ -4134,7 +4238,7 @@ export default function Accounting() {
           {/* Additional Details Section */}
           <div className="space-y-4">
             <h4 className="text-md font-medium text-gray-800 border-b border-gray-200 pb-2">Additional Details</h4>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Notes
@@ -4169,6 +4273,4 @@ export default function Accounting() {
         </form>
       </div>
     );
-  }
-
-}
+  }}

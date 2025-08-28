@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck, DollarSign, CreditCard, TrendingDown } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText } from 'lucide-react';
 import { Customer, Supplier } from '../types';
 import Toast from './common/Toast';
 import SearchableSelect from './common/SearchableSelect';
 import { CurrencyService } from '../services/currencyService';
+import AccountStatementModal from './AccountStatementModal';
+import { createId } from '../lib/db';
+import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 
 export default function Customers() {
   const raw = useOfflineData();
@@ -57,6 +60,10 @@ export default function Customers() {
     reference: ''
   });
 
+  // Account statement modal states
+  const [showAccountStatement, setShowAccountStatement] = useState<'customer' | 'supplier' | null>(null);
+  const [selectedEntity, setSelectedEntity] = useState<Customer | Supplier | null>(null);
+
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type, visible: true });
   };
@@ -103,6 +110,7 @@ export default function Customers() {
       const currentLbBalance = customer.lb_balance || 0;
       const currentUsdBalance = customer.usd_balance || 0;
       
+      // RULE 5 FIX: When receiving payment FROM customer, DECREASE their balance (reduce debt)
       if (paymentForm.currency === 'LBP') {
         await updateCustomer(paymentForm.customerId, { 
           lb_balance: Math.max(0, currentLbBalance - paymentAmount)
@@ -127,8 +135,25 @@ export default function Customers() {
         currency: safeAmount.currency,
         description: `Payment from ${customer.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
         reference: paymentForm.reference,
-        created_by: userProfile?.id || ''
+        created_by: userProfile?.id || '',
+        id: createId()
       });
+
+      // Update cash drawer (increase for received payment)
+      if (userProfile?.store_id) {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'payment',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Payment received from ${customer.name}`,
+          reference: paymentForm.reference || `PAY-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || '',
+          customerId: paymentForm.customerId
+        });
+      } else {
+        console.warn('Missing store_id: cannot update cash drawer');
+      }
       
       showToast(`Payment received! ${customer.name} balance updated`, 'success');
     } catch (err) {
@@ -187,6 +212,7 @@ export default function Customers() {
       const currentLbBalance = supplier.lb_balance || 0;
       const currentUsdBalance = supplier.usd_balance || 0;
       
+      // RULE 5 FIX: When making payment TO supplier, DECREASE their balance (reduce what we owe them)
       if (paymentForm.currency === 'LBP') {
         await updateSupplier(paymentForm.supplierId, { 
           lb_balance: Math.max(0, currentLbBalance - paymentAmount)
@@ -205,6 +231,7 @@ export default function Customers() {
       
       // Add to transaction system
       addTransaction({
+        id:createId(),
         type: 'expense',
         category: 'Supplier Payment',
         amount: safeAmount.amount,
@@ -213,6 +240,22 @@ export default function Customers() {
         reference: paymentForm.reference,
         created_by: userProfile?.id || ''
       });
+
+      // Update cash drawer (decrease for sent payment)
+      if (userProfile?.store_id) {
+        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'expense',
+          amount: safeAmount.amount,
+          currency: safeAmount.currency,
+          description: `Payment sent to ${supplier.name}`,
+          reference: paymentForm.reference || `PAY-${Date.now()}`,
+          storeId: userProfile.store_id,
+          createdBy: userProfile?.id || '',
+          supplierId: paymentForm.supplierId
+        });
+      } else {
+        console.warn('Missing store_id: cannot update cash drawer');
+      }
       
       showToast(`Payment sent! ${supplier.name} payment recorded`, 'success');
     } catch (err) {
@@ -232,6 +275,7 @@ export default function Customers() {
   };
 
   const handleRecordCustomerPayment = (customer: Customer) => {
+    
     setPaymentForm(prev => ({ ...prev, customerId: customer.id }));
     setShowPaymentForm('customer');
   };
@@ -239,6 +283,12 @@ export default function Customers() {
   const handleRecordSupplierPayment = (supplier: Supplier) => {
     setPaymentForm(prev => ({ ...prev, supplierId: supplier.id }));
     setShowPaymentForm('supplier');
+  };
+
+  // Account statement handlers
+  const handleViewAccountStatement = (entity: Customer | Supplier, type: 'customer' | 'supplier') => {
+    setSelectedEntity(entity);
+    setShowAccountStatement(type);
   };
 
   // Customer handlers
@@ -399,7 +449,7 @@ export default function Customers() {
     <div className="p-6">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Customer & Supplier Management</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Customer & Supplier Management</h1>
         <button
           onClick={activeTab === 'customers' ? handleAddCustomerClick : handleAddSupplierClick}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
@@ -522,6 +572,13 @@ export default function Customers() {
                           >
                             <DollarSign className="w-4 h-4" />
                           </button>
+                          <button 
+                            onClick={() => handleViewAccountStatement(customer, 'customer')}
+                            className="text-purple-600 hover:text-purple-800"
+                            title="View Account Statement"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -588,13 +645,20 @@ export default function Customers() {
                            >
                              <Edit className="w-4 h-4" />
                            </button>
-                                                       <button 
+                           <button 
                               onClick={() => handleRecordSupplierPayment(supplier)}
                               className="text-red-600 hover:text-red-800"
                               title="Make payment"
                             >
                               <CreditCard className="w-4 h-4" />
                             </button>
+                           <button 
+                             onClick={() => handleViewAccountStatement(supplier, 'supplier')}
+                             className="text-purple-600 hover:text-purple-800"
+                             title="View Account Statement"
+                           >
+                             <FileText className="w-4 h-4" />
+                           </button>
                          </div>
                        </td>
                      </tr>
@@ -865,6 +929,7 @@ export default function Customers() {
                 >
                   Cancel
                 </button>
+
                 <button
                   type="submit"
                   className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
@@ -977,6 +1042,23 @@ export default function Customers() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Account Statement Modal */}
+      {showAccountStatement && selectedEntity && (
+        <AccountStatementModal
+          isOpen={!!showAccountStatement}
+          onClose={() => {
+            setShowAccountStatement(null);
+            setSelectedEntity(null);
+          }}
+          entity={selectedEntity}
+          entityType={showAccountStatement}
+          sales={raw.sales || []}
+          transactions={raw.transactions || []}
+          products={raw.products || []}
+          inventory={raw.inventory || []}
+        />
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Product, Supplier, Customer, InventoryItem, StockLevel, CashDrawer, Transaction, AccountsReceivable, AccountsPayable, ExpenseCategory, JournalEntry } from '../types';
+import { Product, Supplier, Customer, InventoryItem, StockLevel, CashDrawer, Transaction, AccountsReceivable, AccountsPayable, ExpenseCategory, Sale} from '../types';
 
 interface DataContextType {
   products: Product[];
@@ -13,7 +13,6 @@ interface DataContextType {
   accountsReceivable: AccountsReceivable[];
   accountsPayable: AccountsPayable[];
   expenseCategories: ExpenseCategory[];
-  journalEntries: JournalEntry[];
   isOnline: boolean;
   lowStockAlertsEnabled: boolean;
   lowStockThreshold: number;
@@ -28,7 +27,6 @@ interface DataContextType {
   addAccountsReceivable: (ar: Omit<AccountsReceivable, 'id' | 'createdAt'>) => void;
   addAccountsPayable: (ap: Omit<AccountsPayable, 'id' | 'createdAt'>) => void;
   addExpenseCategory: (category: Omit<ExpenseCategory, 'id' | 'createdAt'>) => void;
-  addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'createdAt'>) => void;
   updateCustomer: (id: string, updates: Partial<Customer>) => void;
   updateAccountsReceivable: (id: string, updates: Partial<AccountsReceivable>) => void;
   updateAccountsPayable: (id: string, updates: Partial<AccountsPayable>) => void;
@@ -45,23 +43,23 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 const initialProducts: Product[] = [
-  { id: '1', name: 'Apples', category: 'Fruits', image: 'https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg', isActive: true, createdAt: '2024-01-01T00:00:00Z' },
-  { id: '2', name: 'Bananas', category: 'Fruits', image: 'https://images.pexels.com/photos/2872755/pexels-photo-2872755.jpeg', isActive: true, createdAt: '2024-01-01T00:00:00Z' },
-  { id: '3', name: 'Carrots', category: 'Vegetables', image: 'https://images.pexels.com/photos/143133/pexels-photo-143133.jpeg', isActive: true, createdAt: '2024-01-01T00:00:00Z' },
-  { id: '4', name: 'Tomatoes', category: 'Vegetables', image: 'https://images.pexels.com/photos/144248/tomatoes-vegetables-food-frisch-144248.jpeg', isActive: true, createdAt: '2024-01-01T00:00:00Z' },
-  { id: '5', name: 'Lettuce', category: 'Vegetables', image: 'https://images.pexels.com/photos/1656663/pexels-photo-1656663.jpeg', isActive: true, createdAt: '2024-01-01T00:00:00Z' }
+  { id: '1', name: 'Apples', category: 'Fruits', image: 'https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg',  createdAt: '2024-01-01T00:00:00Z' },
+  { id: '2', name: 'Bananas', category: 'Fruits', image: 'https://images.pexels.com/photos/2872755/pexels-photo-2872755.jpeg',  createdAt: '2024-01-01T00:00:00Z' },
+  { id: '3', name: 'Carrots', category: 'Vegetables', image: 'https://images.pexels.com/photos/143133/pexels-photo-143133.jpeg',  createdAt: '2024-01-01T00:00:00Z' },
+  { id: '4', name: 'Tomatoes', category: 'Vegetables', image: 'https://images.pexels.com/photos/144248/tomatoes-vegetables-food-frisch-144248.jpeg',  createdAt: '2024-01-01T00:00:00Z' },
+  { id: '5', name: 'Lettuce', category: 'Vegetables', image: 'https://images.pexels.com/photos/1656663/pexels-photo-1656663.jpeg',  createdAt: '2024-01-01T00:00:00Z' }
 ];
 
 const initialSuppliers: Supplier[] = [
-  { id: '1', name: 'Fresh Farm Co.', phone: '+1234567890', email: 'contact@freshfarm.com', address: '123 Farm Road', type: 'commission', isActive: true, createdAt: '2024-01-01T00:00:00Z' },
-  { id: '2', name: 'Green Valley Suppliers', phone: '+1234567891', email: 'info@greenvalley.com', address: '456 Valley Street', type: 'cash', isActive: true, createdAt: '2024-01-01T00:00:00Z' },
-  { id: '3', name: 'Organic Gardens Ltd.', phone: '+1234567892', email: 'sales@organicgardens.com', address: '789 Garden Lane', type: 'commission', isActive: true, createdAt: '2024-01-01T00:00:00Z' }
+  { id: '1', name: 'Fresh Farm Co.', phone: '+1234567890', email: 'contact@freshfarm.com', address: '123 Farm Road',  createdAt: '2024-01-01T00:00:00Z' },
+  { id: '2', name: 'Green Valley Suppliers', phone: '+1234567891', email: 'info@greenvalley.com', address: '456 Valley Street',  createdAt: '2024-01-01T00:00:00Z' },
+  { id: '3', name: 'Organic Gardens Ltd.', phone: '+1234567892', email: 'sales@organicgardens.com', address: '789 Garden Lane',  createdAt: '2024-01-01T00:00:00Z' }
 ];
 
-const initialCustomers: Customer[] = [
-  { id: '1', name: 'Restaurant ABC', phone: '+1234567893', email: 'orders@restaurantabc.com', address: '321 Main Street', balance: 1200, isActive: true, createdAt: '2024-01-01T00:00:00Z' }, // Updated to use balance field
-  { id: '2', name: 'Corner Store', phone: '+1234567894', address: '654 Corner Ave', balance: 0, isActive: true, createdAt: '2024-01-01T00:00:00Z' } // Updated to use balance field
-];
+  const initialCustomers: Customer[] = [
+    { id: '1', name: 'Restaurant ABC', phone: '+1234567893', email: 'orders@restaurantabc.com', address: '321 Main Street', lb_balance: 1000, usd_balance: 1000, isActive: true, createdAt: '2024-01-01T00:00:00Z' }, 
+    { id: '2', name: 'Corner Store', phone: '+1234567894', address: '654 Corner Ave', lb_balance: 0, usd_balance: 0, isActive: true, createdAt: '2024-01-01T00:00:00Z' } 
+  ];
 
 const initialExpenseCategories: ExpenseCategory[] = [
   { id: '1', name: 'Utilities', description: 'Electricity, water, gas', isActive: true, createdAt: '2024-01-01T00:00:00Z' },
@@ -83,7 +81,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [accountsReceivable, setAccountsReceivable] = useState<AccountsReceivable[]>([]);
   const [accountsPayable, setAccountsPayable] = useState<AccountsPayable[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
-  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState(10);
@@ -103,7 +100,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const storedAccountsReceivable = localStorage.getItem('erp_accounts_receivable');
     const storedAccountsPayable = localStorage.getItem('erp_accounts_payable');
 
-    const storedJournalEntries = localStorage.getItem('erp_journal_entries');
     const storedLowStockSettings = localStorage.getItem('erp_low_stock_settings');
     const storedCommissionSettings = localStorage.getItem('erp_commission_settings');
     const storedCurrencySettings = localStorage.getItem('erp_currency_settings');
@@ -117,8 +113,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setTransactions(storedTransactions ? JSON.parse(storedTransactions) : []);
     setAccountsReceivable(storedAccountsReceivable ? JSON.parse(storedAccountsReceivable) : []);
     setAccountsPayable(storedAccountsPayable ? JSON.parse(storedAccountsPayable) : []);
-    setExpenseCategories(storedExpenseCategories ? JSON.parse(storedExpenseCategories) : initialExpenseCategories);
-    setJournalEntries(storedJournalEntries ? JSON.parse(storedJournalEntries) : []);
+    setExpenseCategories(initialExpenseCategories);
 
     if (storedLowStockSettings) {
       const settings = JSON.parse(storedLowStockSettings);
@@ -282,16 +277,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     
   };
 
-  const addJournalEntry = (entry: Omit<JournalEntry, 'id' | 'createdAt'>) => {
-    const newEntry = {
-      ...entry,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString()
-    };
-    const updatedEntries = [...journalEntries, newEntry];
-    setJournalEntries(updatedEntries);
-    localStorage.setItem('erp_journal_entries', JSON.stringify(updatedEntries));
-  };
+
 
   const updateCustomer = (id: string, updates: Partial<Customer>) => {
     const updatedCustomers = customers.map(customer =>
@@ -432,7 +418,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       accountsReceivable,
       accountsPayable,
       expenseCategories,
-      journalEntries,
       isOnline,
       lowStockAlertsEnabled,
       lowStockThreshold,
@@ -447,7 +432,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addAccountsReceivable,
       addAccountsPayable,
       addExpenseCategory,
-      addJournalEntry,
       updateCustomer,
       updateAccountsReceivable,
       updateAccountsPayable,

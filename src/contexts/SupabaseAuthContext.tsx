@@ -5,6 +5,9 @@ import { SupabaseService } from '../services/supabaseService';
 import { supabase } from '../lib/supabase';
 
 interface UserProfile {
+  preferred_currency: 'USD' | 'LBP';
+  preferred_language: 'en' | 'ar' | 'fr';
+  preferred_commission_rate: number;
   id: string;
   email: string;
   name: string;
@@ -42,7 +45,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       if (user) {
         try {
           const profile = await SupabaseService.getUserProfile(user.id);
-          setUserProfile(profile);
+          setUserProfile(profile as any);
         } catch (error) {
           console.error('Error loading user profile:', error);
           setUserProfile(null);

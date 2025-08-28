@@ -30,6 +30,9 @@ interface OfflineDataContextType {
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
   transactions: Tables['transactions']['Row'][];
   expenseCategories: any[]; // Not in current schema
+  bills: any[]; // Bill management data
+  billLineItems: any[]; // Bill line items data
+  billAuditLogs: any[]; // Bill audit logs data
  
 
   // Computed/legacy compatibility - exact match
@@ -41,6 +44,10 @@ interface OfflineDataContextType {
   currency: 'USD' | 'LBP';
   cashDrawer: any;
   openCashDrawer: (amount: number, openedBy: string) => void;
+  closeCashDrawer: (actualAmount: number, closedBy: string, notes?: string) => void;
+  getCashDrawerBalanceReport: (startDate?: string, endDate?: string) => Promise<any>;
+  getCurrentCashDrawerStatus: () => Promise<any>;
+  getCashDrawerSessionDetails: (sessionId: string) => Promise<any>;
   isOnline: boolean;
 
   // Loading states - exact match
@@ -53,6 +60,7 @@ interface OfflineDataContextType {
     inventory: boolean;
     transactions: boolean;
     expenseCategories: boolean;
+    bills: boolean;
   };
 
   // CRUD operations - exact function signatures
@@ -66,18 +74,28 @@ interface OfflineDataContextType {
     supplier_id: string;
     created_by: string;
     status?: string | null;
-    porterage?: number | null;
+    porterage_fee?: number | null;
     transfer_fee?: number | null;
     received_at?: string;
-    items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_by' | 'received_at'>>;
+    commission_rate?:string,
+    type:string,
+    items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
   }) => Promise<{ batchId: string }>;
   addSale: (items: any[]) => Promise<void>;
   updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
   deleteSale: (id: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: any) => Promise<void>;
-  updateInventoryBatch: (id: string, updates: Tables['inventory_batches']['Update']) => Promise<void>;
+  updateInventoryBatch: (id: string, updates: Tables['inventory_bills']['Update']) => Promise<void>;
   applyCommissionRateToBatch: (batchId: string, commissionRate: number) => Promise<void>;
+  
+  // Bill management operations
+  createBill: (billData: any, lineItems: any[]) => Promise<string>;
+  updateBill: (billId: string, updates: any, changedBy: string, changeReason?: string) => Promise<void>;
+  deleteBill: (billId: string, deletedBy: string, deleteReason?: string, softDelete?: boolean) => Promise<void>;
+  getBills: (filters?: any) => Promise<any[]>;
+  getBillDetails: (billId: string) => Promise<any | null>;
+  createBillAuditLog: (auditData: any) => Promise<void>;
   
 
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
@@ -112,6 +130,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const { isOnline, justCameOnline } = useNetworkStatus();
   const storeId = userProfile?.store_id;
 
+  // console.log('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline);
+
   // Data states - matching SupabaseDataContext structure
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
   const [suppliers, setSuppliers] = useState<Tables['suppliers']['Row'][]>([]);
@@ -124,6 +144,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // Raw internal data
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
+  const [bills, setBills] = useState<any[]>([]);
+  const [billLineItems, setBillLineItems] = useState<any[]>([]);
+  const [billAuditLogs, setBillAuditLogs] = useState<any[]>([]);
 
   // Loading states - exact match
   const [loading, setLoading] = useState({
@@ -134,7 +157,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     sales: false,
     inventory: false,
     transactions: false,
-    expenseCategories: false
+    expenseCategories: false,
+    bills: false
   });
 
   // Sync state
@@ -167,6 +191,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const initializeData = async () => {
     if (!storeId) return;
 
+    console.log('🔄 Initializing data for store:', storeId);
+
     try {
       // Clean up any invalid/orphaned data first
       const [invalidCleaned, orphanedCleaned] = await Promise.all([
@@ -178,6 +204,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
       }
 
+      console.log('📊 Loading local data...');
       // Load local data first
       await refreshData();
       await updateUnsyncedCount();
@@ -188,6 +215,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
         db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
       ]);
+
+      console.log(`📈 Local data counts: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
 
       const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
 
@@ -350,6 +379,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const refreshData = async () => {
     if (!storeId) return;
 
+    console.log('🔄 Refreshing data for store:', storeId);
+
     try {
       // Load all data from Dexie
       const [
@@ -361,6 +392,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         saleItemsData,
         transactionsData,
         batchesData,
+        billsData,
+        billLineItemsData,
+        billAuditLogsData,
       ] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
@@ -369,9 +403,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         Promise.resolve([]), // sales not in current schema
         db.sale_items.filter(item => !item._deleted).toArray(),
         db.transactions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.inventory_batches.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.inventory_bills.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.bills.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.bill_line_items.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.bill_audit_logs.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
 
       ]);
+
+      console.log(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${saleItemsData.length} sale items, ${transactionsData.length} transactions, ${billsData.length} bills`);
 
       // Transform data to match SupabaseDataContext structure
       setProducts(productsData as Tables['products']['Row'][]);
@@ -382,6 +421,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Store raw data
       setInventoryItems(inventoryData);
       setSaleItems(saleItemsData);
+      setBills(billsData);
+      setBillLineItems(billLineItemsData);
+      setBillAuditLogs(billAuditLogsData);
 
       // Transform inventory to match expected structure and attach batch info for grouping/export
       const batchById = (batchesData || []).reduce((acc: any, b: any) => {
@@ -393,7 +435,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const batch = item.batch_id ? batchById[item.batch_id] : null;
         return {
           ...item,
-          receivedAt: item.received_at, // Legacy compatibility
+          commission_rate:batch? batch.commission_rate:null,
+          batch_type:batch?batch.type:null,
           batch_porterage: batch ? batch.porterage : null,
           batch_transfer_fee: batch ? batch.transfer_fee : null,
           batch_status: batch ? batch.status : 'Created',
@@ -403,8 +446,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Set sales directly as sale_items (no transformation needed)
       setSales(saleItemsData);
 
+      console.log('✅ Data refresh completed successfully');
+
     } catch (error) {
-      console.error('Error loading data from Dexie:', error);
+      console.error('❌ Error loading data from Dexie:', error);
     }
   };
 
@@ -513,6 +558,378 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setDebouncedSyncTimeout(timeout);
   };
 
+  // Bill management functions
+  const createBill = async (billData: any, lineItems: any[]): Promise<string> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    const billId = createId();
+    const now = new Date().toISOString();
+
+    // Ensure bill data is clean and doesn't contain line item fields
+    const cleanBillData = { ...billData };
+    const lineItemFields = ['inventory_item_id', 'product_id', 'supplier_id', 'quantity', 'unit_price', 'line_total', 'weight', 'line_order'];
+    
+    lineItemFields.forEach(field => {
+      if (cleanBillData[field] !== undefined) {
+        console.warn(`🚫 Removing line item field '${field}' from bill data:`, cleanBillData[field]);
+        delete cleanBillData[field];
+      }
+    });
+
+    const bill = {
+      id: billId,
+      store_id: storeId,
+      created_at: now,
+      updated_at: now,
+      _synced: false,
+      ...cleanBillData
+    };
+
+    const mappedLineItems = lineItems.map(item => ({
+      id: createId(),
+      bill_id: billId,
+      store_id: storeId,
+      created_at: now,
+      _synced: false,
+      ...item
+    }));
+
+    // Try to create in Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        const supabaseBill = await SupabaseService.createBill(bill, mappedLineItems);
+        if (supabaseBill) {
+          // Update local bill with Supabase ID and mark as synced
+          bill.id = supabaseBill.id;
+          bill._synced = true;
+          mappedLineItems.forEach(item => {
+            item._synced = true;
+          });
+        }
+      } catch (error) {
+        console.warn('Failed to create bill in Supabase, falling back to local only:', error);
+      }
+    }
+
+    // Log the final bill data for debugging
+    console.log('📋 Final bill data before storage:', Object.keys(bill));
+    console.log('📋 Final line items data before storage:', mappedLineItems.length, 'items');
+
+    await db.transaction('rw', [db.bills, db.bill_line_items], async () => {
+      await db.bills.add(bill);
+      if (mappedLineItems.length > 0) {
+        await db.bill_line_items.bulkAdd(mappedLineItems);
+      }
+    });
+
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+
+    return billId;
+  };
+
+  const updateBill = async (billId: string, updates: any, changedBy: string, changeReason?: string): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    const now = new Date().toISOString();
+    
+    // Try to update in Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        await SupabaseService.updateBill(billId, updates);
+        
+        // Create audit log in Supabase
+        const auditLog = {
+          bill_id: billId,
+          store_id: storeId,
+          action: 'update',
+          changed_by: changedBy,
+          change_reason: changeReason || null,
+          field_changed: Object.keys(updates).join(', '),
+          old_value: null,
+          new_value: JSON.stringify(updates),
+          created_at: now
+        };
+        
+        await SupabaseService.createBillAuditLog(auditLog);
+      } catch (error) {
+        console.warn('Failed to update bill in Supabase, falling back to local only:', error);
+      }
+    }
+    
+    await db.transaction('rw', [db.bills, db.bill_audit_logs], async () => {
+      await db.bills.update(billId, {
+        ...updates,
+        updated_at: now,
+        _synced: isOnline // Mark as synced if we successfully updated in Supabase
+      });
+
+      // Create audit log
+      const auditLog = {
+        id: createId(),
+        bill_id: billId,
+        store_id: storeId,
+        action: 'update',
+        changed_by: changedBy,
+        change_reason: changeReason || null,
+        changes: JSON.stringify(updates),
+        created_at: now,
+        _synced: isOnline // Mark as synced if we successfully updated in Supabase
+      };
+      
+      await db.bill_audit_logs.add(auditLog);
+    });
+
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+  };
+
+  const deleteBill = async (billId: string, deletedBy: string, deleteReason?: string, softDelete = true): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    const now = new Date().toISOString();
+
+    // Try to delete in Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        await SupabaseService.deleteBill(billId, softDelete);
+        
+        // Create audit log in Supabase
+        const auditLog = {
+          bill_id: billId,
+          store_id: storeId,
+          action: 'delete',
+          changed_by: deletedBy,
+          change_reason: deleteReason || null,
+          field_changed: 'status',
+          old_value: 'active',
+          new_value: softDelete ? 'cancelled' : 'deleted',
+          created_at: now
+        };
+        
+        await SupabaseService.createBillAuditLog(auditLog);
+      } catch (error) {
+        console.warn('Failed to delete bill in Supabase, falling back to local only:', error);
+      }
+    }
+
+    await db.transaction('rw', [db.bills, db.bill_line_items, db.bill_audit_logs], async () => {
+      if (softDelete) {
+        // Soft delete - mark as deleted
+        await db.bills.update(billId, {
+          _deleted: true,
+          updated_at: now,
+          _synced: isOnline // Mark as synced if we successfully deleted in Supabase
+        });
+        
+        // Also soft delete line items
+        const lineItems = await db.bill_line_items.where('bill_id').equals(billId).toArray();
+        for (const item of lineItems) {
+          await db.bill_line_items.update(item.id, {
+            _deleted: true,
+            _synced: isOnline // Mark as synced if we successfully deleted in Supabase
+          });
+        }
+      } else {
+        // Hard delete
+        await db.bills.delete(billId);
+        await db.bill_line_items.where('bill_id').equals(billId).delete();
+      }
+
+      // Create audit log
+      const auditLog = {
+        id: createId(),
+        bill_id: billId,
+        store_id: storeId,
+        action: 'delete',
+        changed_by: deletedBy,
+        change_reason: deleteReason || null,
+        changes: JSON.stringify({ deleted: true, soft_delete: softDelete }),
+        created_at: now,
+        _synced: isOnline // Mark as synced if we successfully deleted in Supabase
+      };
+      
+      await db.bill_audit_logs.add(auditLog);
+    });
+
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+  };
+
+  const getBills = async (filters?: any): Promise<any[]> => {
+    if (!storeId) return [];
+
+    // Try to get bills from Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        const supabaseBills = await SupabaseService.getBills(storeId, filters);
+        
+        if (supabaseBills && supabaseBills.length > 0) {
+          // Store Supabase bills in local database for offline access
+          for (const supabaseBill of supabaseBills) {
+            const existingBill = await db.bills.get(supabaseBill.id);
+            if (!existingBill) {
+              // Add new bill from Supabase
+              await db.bills.add({
+                ...supabaseBill,
+                _synced: true
+              });
+            } else if (existingBill.updated_at !== supabaseBill.updated_at) {
+              // Update existing bill with Supabase data
+              await db.bills.update(supabaseBill.id, {
+                ...supabaseBill,
+                _synced: true
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to get bills from Supabase, using local data:', error);
+      }
+    }
+
+    let query = db.bills.where('store_id').equals(storeId).filter(bill => !bill._deleted);
+    
+    // Apply filters if provided
+    if (filters) {
+      if (filters.status) {
+        query = query.and(bill => bill.status === filters.status);
+      }
+      if (filters.supplier_id) {
+        query = query.and(bill => bill.supplier_id === filters.supplier_id);
+      }
+      if (filters.date_from) {
+        query = query.and(bill => bill.created_at >= filters.date_from);
+      }
+      if (filters.date_to) {
+        query = query.and(bill => bill.created_at <= filters.date_to);
+      }
+    }
+
+    const billsData = await query.toArray();
+    
+    // Attach line items to each bill
+    const billsWithLineItems = await Promise.all(
+      billsData.map(async (bill) => {
+        const lineItems = await db.bill_line_items
+          .where('bill_id')
+          .equals(bill.id)
+          .filter(item => !item._deleted)
+          .toArray();
+        
+        return {
+          ...bill,
+          line_items: lineItems
+        };
+      })
+    );
+
+    return billsWithLineItems;
+  };
+
+  const getBillDetails = async (billId: string): Promise<any | null> => {
+    if (!storeId) return null;
+
+    // Try to get bill details from Supabase first if online
+    if (isOnline) {
+      try {
+        const { SupabaseService } = await import('../services/supabaseService');
+        const supabaseBillDetails = await SupabaseService.getBillDetails(billId);
+        
+        if (supabaseBillDetails) {
+          // Update local bill with Supabase data
+          await db.bills.update(billId, {
+            ...supabaseBillDetails,
+            _synced: true
+          });
+          
+          // Update line items
+          if (supabaseBillDetails.bill_line_items) {
+            for (const lineItem of supabaseBillDetails.bill_line_items) {
+              const existingItem = await db.bill_line_items.get(lineItem.id);
+              if (!existingItem) {
+                await db.bill_line_items.add({
+                  ...lineItem,
+                  _synced: true
+                });
+              } else {
+                await db.bill_line_items.update(lineItem.id, {
+                  ...lineItem,
+                  _synced: true
+                });
+              }
+            }
+          }
+          
+          // Update audit logs
+          if (supabaseBillDetails.bill_audit_logs) {
+            for (const auditLog of supabaseBillDetails.bill_audit_logs) {
+              const existingLog = await db.bill_audit_logs.get(auditLog.id);
+              if (!existingLog) {
+                await db.bill_audit_logs.add({
+                  ...auditLog,
+                  _synced: true
+                });
+              } else {
+                await db.bill_audit_logs.update(auditLog.id, {
+                  ...auditLog,
+                  _synced: true
+                });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to get bill details from Supabase, using local data:', error);
+      }
+    }
+
+    const bill = await db.bills.get(billId);
+    if (!bill || bill._deleted) return null;
+
+    const lineItems = await db.bill_line_items
+      .where('bill_id')
+      .equals(billId)
+      .filter(item => !item._deleted)
+      .toArray();
+
+    const auditLogs = await db.bill_audit_logs
+      .where('bill_id')
+      .equals(billId)
+      .filter(log => !log._deleted)
+      .toArray();
+
+    return {
+      ...bill,
+      line_items: lineItems,
+      audit_logs: auditLogs
+    };
+  };
+
+  const createBillAuditLog = async (auditData: any): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    const auditLog = {
+      id: createId(),
+      store_id: storeId,
+      created_at: new Date().toISOString(),
+      _synced: false,
+      ...auditData
+    };
+
+    await db.bill_audit_logs.add(auditLog);
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+  };
+
   // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
@@ -596,17 +1013,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const item: InventoryItem = {
       id: createId(),
+      product_id: itemData.product_id??'',
+      supplier_id: itemData.supplier_id??'',
+      quantity: itemData.quantity ?? 0,
+      unit: itemData.unit ?? '',
+      received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
       store_id: storeId,
       created_at: new Date().toISOString(),
-      received_at: itemData.received_at || new Date().toISOString(),
       _synced: false,
       ...itemData,
       weight: itemData.weight ?? null,
-      porterage: itemData.porterage ?? null,
-      transfer_fee: itemData.transfer_fee ?? null,
       price: itemData.price ?? null,
-      commission_rate: itemData.commission_rate ?? 0,
-      status: itemData.status ?? 'Created',
       batch_id: itemData.batch_id ?? null
     };
 
@@ -622,9 +1039,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     supplier_id,
     created_by,
     status = 'Created', 
-    porterage = null,
+    porterage_fee = null,
     transfer_fee = null,
     received_at,
+    commission_rate,
+    type,
     items
   }) => {
     if (!storeId) throw new Error('No store ID available');
@@ -635,40 +1054,37 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       id: batchId,
       supplier_id,
       status,
-      porterage,
+      porterage_fee,
       transfer_fee,
       received_at: received_at || new Date().toISOString(),
+      commission_rate:commission_rate,
       store_id: storeId,
       created_by,
+      type,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       _synced: false
     } as any;
 
-    // For now, we just persist batch locally; sync service currently does not upload batches
-    // but storing locally allows future extension and UI references.
-    await db.transaction('rw', [db.inventory_batches, db.inventory_items], async () => {
-      await db.inventory_batches.add(batchRecord);
-
+    // Both batch and items are persisted locally and will be synced to Supabase.
+    // The sync service ensures inventory_bills are uploaded before inventory_items
+    // to maintain foreign key constraints.
+    await db.transaction('rw', [db.inventory_bills, db.inventory_items], async () => {
+      await db.inventory_bills.add(batchRecord);
       const now = new Date().toISOString();
-      const receiveTs = received_at || now;
 
       const mappedItems = items.map((it) => ({
-        id: createId(),
+        id:createId(),
+        product_id:it.product_id??'',
+        quantity:it.quantity??0,
+        unit:it.unit??'',
         store_id: storeId,
         created_at: now,
-        received_at: receiveTs,
         _synced: false,
-        ...it,
         supplier_id,
-        received_by: created_by,
         weight: it.weight ?? null,
-        porterage: it.porterage ?? null,
-        transfer_fee: it.transfer_fee ?? null,
         price: it.price ?? null,
-        commission_rate: it.commission_rate ?? 0,
-        status: it.status ?? 'Created',
-        received_quantity: it.received_quantity ?? it.quantity,
+        received_quantity: it.received_quantity ??0,  
         batch_id: batchId as string | null
       }));
 
@@ -683,10 +1099,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const addSale = async (
-   
     items: any[]
   ): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
+    
+    // Get the current user ID from the auth context
+    const currentUserId = userProfile?.id;
+    if (!currentUserId) {
+      throw new Error('No user ID available - user not authenticated');
+    }
+    
     const saleItemsWithIds = items.map(item => ({
       id: createId(),
       quantity: item.quantity,
@@ -701,10 +1123,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Remove total_price - doesn't exist in Supabase schema, use received_value instead
       received_value: item.received_value || item.total_price || (item.unit_price * item.quantity),
       payment_method: item.payment_method || 'cash', // Add payment method field
-        notes: item.notes ?? null,
+      notes: item.notes ?? null,
       store_id: storeId,
       customer_id: item.customer_id ?? null,
-      created_by: item.created_by || 'system'
+      created_by: item.created_by || currentUserId // Use the created_by from the item or fallback to current user
     }));
 
     // if (items.some(item => item.payment_method === 'credit') ||  items.some(item =>( item.received_value < item.unit_price * item.quantity) && item.payment_method !== 'credit')) {
@@ -883,20 +1305,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return;
   };
 
-  const updateInventoryBatch = async (id: string, updates: Tables['inventory_batches']['Update']): Promise<void> => {
-    await db.inventory_batches.update(id, { ...updates, _synced: false });
+  const updateInventoryBatch = async (id: string, updates: Tables['inventory_bills']['Update']): Promise<void> => {
+    await db.inventory_bills.update(id, { ...updates, _synced: false });
     await refreshData();
     await updateUnsyncedCount();
     debouncedSync();
   };
 
   const applyCommissionRateToBatch = async (batchId: string, commissionRate: number): Promise<void> => {
-    const items = await db.inventory_items.where('batch_id').equals(batchId).toArray();
-    await db.transaction('rw', [db.inventory_items], async () => {
-      for (const it of items) {
-        await db.inventory_items.update(it.id, { commission_rate: commissionRate, _synced: false });
-      }
-    });
+    const bill = await db.inventory_bills.where('batch_id').equals(batchId);
+    // bill is a Collection, not an id or object; need to update by batch_id
+    await db.inventory_bills
+      .where('id')
+      .equals(batchId)
+      .modify({ commission_rate: commissionRate, _synced: false });
+
     await refreshData();
     await updateUnsyncedCount();
     debouncedSync();
@@ -961,17 +1384,75 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     isAutoSyncing
   });
 
-  const openCashDrawer = (amount: number, openedBy: string) => {
-    const drawer = {
-      id: createId(),
-      openingAmount: amount,
-      currentAmount: amount,
-      openedBy,
-      openedAt: new Date().toISOString(),
-      isOpen: true
-    };
-    setCashDrawer(drawer);
-    localStorage.setItem('erp_cash_drawer', JSON.stringify(drawer));
+  const openCashDrawer = async (amount: number, openedBy: string) => {
+    if (!storeId) return;
+    
+    try {
+      // Get or create cash drawer account
+      let account = await db.getCashDrawerAccount(storeId);
+      if (!account) {
+        // Create default account if it doesn't exist
+        account = {
+          id: createId(),
+          store_id: storeId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          _synced: false,
+          accountCode: '1001',
+          name: 'Cash Drawer',
+          current_balance: 0,
+          currency: currency,
+          isActive: true
+        };
+        await db.cash_drawer_accounts.add(account);
+      }
+
+      // Open new session
+      const sessionId = await db.openCashDrawerSession(storeId, account.id, amount, openedBy);
+      
+      // Update local state
+      setCashDrawer({
+        id: sessionId,
+        accountId: account.id,
+        currentBalance: amount,
+        currency: (account as any).currency,
+        lastUpdated: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error opening cash drawer:', error);
+    }
+  };
+
+  const closeCashDrawer = async (actualAmount: number, closedBy: string, notes?: string) => {
+    if (!cashDrawer?.id) return;
+    
+    try {
+      await db.closeCashDrawerSession(cashDrawer.id, actualAmount, closedBy, notes);
+      
+      // Update local state
+      setCashDrawer({
+        ...cashDrawer,
+        currentBalance: 0,
+        lastUpdated: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error closing cash drawer:', error);
+    }
+  };
+
+  const getCashDrawerBalanceReport = async (startDate?: string, endDate?: string) => {
+    if (!storeId) return [];
+    return await db.getCashDrawerBalanceReport(storeId, startDate, endDate);
+  };
+
+  const getCurrentCashDrawerStatus = async () => {
+    if (!storeId) return null;
+    return await db.getCurrentCashDrawerStatus(storeId);
+  };
+
+  const getCashDrawerSessionDetails = async (sessionId: string) => {
+    if (!storeId) return null;
+    return await db.getCashDrawerSessionDetails(sessionId);
   };
 
   const getStockLevels = () => stockLevels;
@@ -1071,17 +1552,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           product_id: productId,
           supplier_id: supplierId,
           quantity: quantity,
-          received_at: new Date().toISOString(),
-          received_by: 'system', // Default user for restored inventory
           _synced: false,
-          type: 'commission',
-          unit: 'kg',
+          unit: 'box',
           weight: null,
-          porterage: null,
-          transfer_fee: null,
           price: null,
-          commission_rate: 0,
-          status  : 'Created',
           received_quantity: quantity,
           created_at: new Date().toISOString(),
           batch_id: null
@@ -1114,6 +1588,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       sales,
       inventory,
       transactions,
+      bills,
+      billLineItems,
+      billAuditLogs,
   
 
       // Computed/legacy compatibility - exact match
@@ -1124,7 +1601,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       defaultCommissionRate,
       currency,
       cashDrawer,
-      openCashDrawer,
+      closeCashDrawer,
+      getCashDrawerBalanceReport,
+      getCurrentCashDrawerStatus,
+      getCashDrawerSessionDetails,
       isOnline,
 
       // Loading states - exact match
@@ -1145,6 +1625,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addExpenseCategory,
       updateInventoryBatch,
       applyCommissionRateToBatch,
+      
+      // Bill management operations
+      createBill,
+      updateBill,
+      deleteBill,
+      getBills,
+      getBillDetails,
+      createBillAuditLog,
   
       deductInventoryQuantity,
       restoreInventoryQuantity,
@@ -1162,7 +1650,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       fullResync,
       debouncedSync,
       getSyncStatus,
-      validateAndCleanData
+      validateAndCleanData,
+      openCashDrawer,
+     
     }}>
       {children}
     </OfflineDataContext.Provider>

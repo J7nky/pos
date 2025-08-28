@@ -7,7 +7,19 @@ export interface User {
   storeId: string;
   createdAt: string;
 }
-
+export interface Sale {
+  id: string;
+  storeId: string;
+  customerId: string;
+  customerName: string;
+  totalAmount: number;
+  paymentMethod: 'cash' | 'card' | 'credit';
+  status: 'pending' | 'paid' | 'cancelled';
+  notes: string;
+  createdBy: string;
+  createdAt: string;
+  amountPaid: number;
+}
 export interface Store {
   id: string;
   name: string;
@@ -40,18 +52,12 @@ export interface InventoryItem {
   id: string;
   productId: string;
   supplierId: string;
-  type: 'commission' | 'cash';
   quantity: number;
   receivedQuantity: number;
   unit: 'kg' | 'piece' | 'box' | 'bag';
   weight?: number;
-  porterage?: number;
-  transferFee?: number;
   price?: number;
-  commissionRate?: number;
-  status?: string;
-  receivedAt: string;
-  receivedBy: string;
+  createdAt: string;
   batchId?: string;
 }
 
@@ -67,14 +73,18 @@ export interface Customer {
   createdAt: string;
 }
 
-export interface inventory_batches { id: string;
+export interface inventory_bills { id: string;
   supplier_id: string;
-  porterage: number ;
-  transfer_fee?: number ;
-  received_at: string; // ISO date string
+  porterage_fee?: number | null;
+  transfer_fee?: number | null;
+  received_at: string;
   store_id: string;
   created_by: string;
-    status: string;}
+  status?: string;
+  created_at:string;
+  notes?:string;
+  commission_rate?:string;
+  }
 
 export interface SaleItem {
   id: string;
