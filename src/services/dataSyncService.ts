@@ -67,7 +67,8 @@ export class DataSyncService {
           phone: c.phone,
           email: c.email,
           address: c.address,
-          balance: c.balance,
+          lb_balance: c.lb_balance,
+          usd_balance: c.usd_balance,
           isActive: c.is_active,
           createdAt: c.created_at
         }));
@@ -84,8 +85,8 @@ export class DataSyncService {
           phone: s.phone,
           email: s.email,
           address: s.address,
-          type: s.type,
-          balance: s.balance,
+          lb_balance: s.lb_balance,
+          usd_balance: s.usd_balance,
           createdAt: s.created_at
         }));
         localStorage.setItem('erp_suppliers', JSON.stringify(mappedSuppliers));
@@ -117,19 +118,15 @@ export class DataSyncService {
           id: item.id,
           productId: item.product_id,
           supplierId: item.supplier_id,
-          type: item.type,
           quantity: item.quantity,
           receivedQuantity: item.received_quantity,
           unit: item.unit,
           weight: item.weight,
-          porterage: item.porterage,
-          transferFee: item.transfer_fee,
           price: item.price,
-          commissionRate: item.commission_rate,
-          status: item.status,
-          receivedAt: item.received_at,
-          receivedBy: item.received_by,
           createdAt: item.created_at
+          ,batchId:item.batch_id,
+          storeId:item.store_id
+
         }));
         localStorage.setItem('erp_inventory', JSON.stringify(mappedInventory));
         return mappedInventory.length;
@@ -158,6 +155,26 @@ export class DataSyncService {
         return mappedSaleItems.length;
       });
 
+      // Sync bills
+      await this.syncTable('bills', storeId, async () => {
+        const bills = await db.bills.where('store_id').equals(storeId).toArray();
+        localStorage.setItem('erp_bills', JSON.stringify(bills));
+        return bills.length;
+      });
+
+      // Sync bill line items
+      await this.syncTable('bill_line_items', storeId, async () => {
+        const billLineItems = await db.bill_line_items.where('store_id').equals(storeId).toArray();
+        localStorage.setItem('erp_bill_line_items', JSON.stringify(billLineItems));
+        return billLineItems.length;
+      });
+
+      // Sync bill audit logs
+      await this.syncTable('bill_audit_logs', storeId, async () => {
+        const billAuditLogs = await db.bill_audit_logs.where('store_id').equals(storeId).toArray();
+        localStorage.setItem('erp_bill_audit_logs', JSON.stringify(billAuditLogs));
+        return billAuditLogs.length;
+      });
       console.log('✅ Data synchronization completed successfully');
 
     } catch (error) {
@@ -216,7 +233,7 @@ export class DataSyncService {
       // Check suppliers
       const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
       const validSuppliers = suppliers.filter(s => 
-        s.name && s.phone && s.type
+        s.name && s.phone 
       );
       checks.push({
         table: 'suppliers',

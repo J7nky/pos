@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
+import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
+import { db } from '../lib/db';
 import { useCurrency } from '../hooks/useCurrency';
 import { useI18n } from '../i18n';
 import { 
@@ -20,10 +22,37 @@ import {
   Zap,
   ChevronUp,
   ChevronDown,
-  EyeOff
+  EyeOff,
+  TrendingDown
 } from 'lucide-react';
+import CashDrawerMonitor from './CashDrawerMonitor';
+interface CashDrawerStatus {
+  currentBalance: number;
+  lastUpdated: string;
+  transactionCount: number;
+  openedAt:string
+}
+const getTransactionIcon = (type: string) => {
+  if (type.includes('sale') || type.includes('payment')) {
+    return <TrendingUp className="w-4 h-4 text-green-600" />;
+  } else if (type.includes('expense') || type.includes('refund')) {
+    return <TrendingDown className="w-4 h-4 text-red-600" />;
+  }
+  return <Clock className="w-4 h-4 text-gray-600" />;
+};
 
+const getTransactionColor = (type: string) => {
+  if (type.includes('sale') || type.includes('payment')) {
+    return 'text-green-600';
+  } else if (type.includes('expense') || type.includes('refund')) {
+    return 'text-red-600';
+  }
+  return 'text-gray-600';
+};
 export default function Home() {
+  const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
+  const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
+
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) : [];
@@ -55,6 +84,62 @@ export default function Home() {
     const convertedAmount = getConvertedAmount(t.amount, t.currency || 'USD');
     return sum + convertedAmount;
   }, 0);
+
+  const loadCashDrawerStatus = async () => {
+    if (!raw.storeId) return;
+    
+    try {
+      const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(raw.storeId);
+      const history = await cashDrawerUpdateService.getCashDrawerTransactionHistory(raw.storeId);
+      const currentSession = await db.getCurrentCashDrawerSession(raw.storeId);
+      
+      setCashDrawerStatus({
+        currentBalance: balance,
+        lastUpdated: new Date().toISOString(),
+        transactionCount: history.length,
+        openedAt: currentSession?.openedAt || ''
+      });
+      
+      setTransactionHistory(history);
+    } catch (error) {
+      console.error('Error loading cash drawer status:', error);
+    } finally {
+    }
+  };
+
+  useEffect(() => {
+    loadCashDrawerStatus();
+
+    // Live update on cash drawer changes
+    const handleCashDrawerUpdated = (e: any) => {
+      // Optional: check store match
+      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
+      loadCashDrawerStatus();
+    };
+    window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+
+    // Refresh every 30 seconds as a fallback
+    const interval = setInterval(loadCashDrawerStatus, 30000);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+    };
+  }, [raw.storeId]);
+
+  // Re-fetch after initial sync completes, to avoid showing 0 before cloud data arrives
+  useEffect(() => {
+    if (!raw.storeId &&!raw.transactions) return;
+    if (!raw.loading?.sync) {
+      loadCashDrawerStatus();
+      
+    }
+  }, [raw.storeId,raw.transactions, raw.loading?.sync]);
+
+  // Re-fetch when transactions change (e.g., after sync brings cash_drawer_* records)
+  useEffect(() => {
+    if (!raw.storeId) return;
+    loadCashDrawerStatus();
+  }, [raw.storeId, transactions.length]);
 
   const lowStockItems = lowStockAlertsEnabled 
     ? stockLevels.filter(item => item.currentStock < lowStockThreshold)
@@ -133,13 +218,13 @@ export default function Home() {
   const stats = [
     {
       title: "Cash in Drawer",
-      value: cashDrawer ? formatCurrency(cashDrawer.currentAmount) : 'Closed',
+      value: cashDrawerStatus ?                formatCurrency(cashDrawerStatus.currentBalance): 'Closed',
       icon: DollarSign,
       color: 'bg-green-500',
-      change: cashDrawer ? `Opened: ${new Date(cashDrawer.openedAt).toLocaleTimeString()}` : 'Not opened today'
+      change: cashDrawerStatus ? `Opened: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}` : 'Not opened today'
     },
     {
-      title: "Today's Expenses", 
+      title: "Today's Expense", 
       value: formatCurrency(todayExpenses),
       icon: Receipt,
       color: 'bg-red-500',
@@ -162,7 +247,7 @@ export default function Home() {
   return (
     <div className="p-6">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">{t('home.welcome', { name: userProfile?.name || '' })}</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('home.welcome', { name: userProfile?.name || '' })}</h1>
         <p className="text-gray-600 mt-2">
           {t('home.subtitle')}
         </p>
@@ -246,7 +331,7 @@ export default function Home() {
                 <stat.icon className="w-6 h-6 text-white" />
               </div>
             </div>
-            {index === 0 && !cashDrawer && (
+            {index === 0 && ! cashDrawer && (
               <button
                 onClick={handleOpenDrawer}
                 className="mt-3 w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm"
@@ -256,6 +341,11 @@ export default function Home() {
             )}
           </div>
         ))}
+      </div>
+
+      {/* Cash Drawer Monitor */}
+      <div className="mb-8">
+        <CashDrawerMonitor />
       </div>
 
       <div className={`grid grid-cols-1 ${lowStockAlertsEnabled ? 'lg:grid-cols-2' : ''} gap-6`}>
@@ -284,36 +374,9 @@ export default function Home() {
             )}
           </div>
         )}
-        {/* Recent Sales */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">{t('home.recentSales')}</h2>
-            <Clock className="w-5 h-5 text-gray-400" />
-          </div>
-          {recentSales.length > 0 ? (
-            <div className="space-y-3">
-              {recentSales.map(sale => (
-                <div key={sale.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg">
-                  <div>
-                    <p className="font-medium text-gray-900">
-                      Sale #{sale.id.slice(-6)}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      {sale.createdAt ? new Date(sale.createdAt).toLocaleTimeString() : 'Unknown time'}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-gray-900">{formatCurrency(sale.received_value)}</p>
-                    <p className="text-sm text-gray-600 capitalize">{sale.payment_method}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500 text-center py-4">{t('home.noRecentSales')}</p>
-          )}
-        </div>
+  
       </div>
     </div>
   );
+  
 }

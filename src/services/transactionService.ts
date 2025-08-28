@@ -1,5 +1,6 @@
 import { currencyService } from './currencyService';
 import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable } from '../types';
+import { cashDrawerUpdateService } from './cashDrawerUpdateService';
 
 export interface TransactionResult {
   success: boolean;
@@ -123,6 +124,28 @@ export class TransactionService {
       const transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
       transactions.push(transaction);
       localStorage.setItem('erp_transactions', JSON.stringify(transactions));
+
+      // Update cash drawer for cash payments
+      if (options.updateCashDrawer !== false) {
+        try {
+          // Get store ID from context or use a default
+          const storeId = 'default-store'; // This should be passed from the calling context
+          const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForCustomerPayment({
+            amount: amountInUSD,
+            currency: 'USD',
+            storeId,
+            createdBy,
+            customerId,
+            description: `Payment for ${description}`
+          });
+
+          if (cashDrawerResult.success) {
+            console.log(`💰 Cash drawer updated for customer payment: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
+          }
+        } catch (error) {
+          console.error('Error updating cash drawer for customer payment:', error);
+        }
+      }
 
       return {
         success: true,
@@ -293,6 +316,26 @@ export class TransactionService {
       const transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
       transactions.push(transaction);
       localStorage.setItem('erp_transactions', JSON.stringify(transactions));
+
+      // Update cash drawer for cash expenses
+      try {
+        // Get store ID from context or use a default
+        const storeId = 'default-store'; // This should be passed from the calling context
+        const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForExpense({
+          amount: amountInUSD,
+          currency: 'USD',
+          storeId,
+          createdBy,
+          description,
+          category
+        });
+
+        if (cashDrawerResult.success) {
+          console.log(`💰 Cash drawer updated for expense: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
+        }
+      } catch (error) {
+        console.error('Error updating cash drawer for expense:', error);
+      }
 
       return {
         success: true,
