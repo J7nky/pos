@@ -203,13 +203,21 @@ export default function POS() {
     return items.reduce((total, item) => total + item.quantity, 0);
   };
 
-  // Get total stock for a product across all suppliers
+  // Get total available stock for a product across all suppliers (subtract reservations across all tabs)
   const getProductStock = (productId: string) => {
-    const items = inventory.filter(item => 
-      item.product_id === productId && 
-      item.quantity > 0
-    );
-    return items.reduce((total, item) => total + item.quantity, 0);
+    const items = inventory.filter(item => item.product_id === productId && item.quantity > 0);
+    const totalStock = items.reduce((total, item) => total + (item.quantity || 0), 0);
+    const reservedAcrossTabs = activeTabs.reduce((sum, tab) => {
+      return (
+        sum + tab.cart
+          .filter(ci => {
+            const inv = inventory.find(inv => inv.id === ci.inventoryItemId);
+            return inv && inv.product_id === productId;
+          })
+          .reduce((s, ci) => s + (ci.quantity || 0), 0)
+      );
+    }, 0);
+    return Math.max(0, totalStock - reservedAcrossTabs);
   };
 
   const filteredProducts = (products || []).filter(product => 
@@ -230,13 +238,27 @@ export default function POS() {
       .filter(item => item.product_id === productId && item.quantity > 0)
       .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime());
     
+    // Helper: reserved qty for a specific inventory item across ALL open tabs
+    const getReservedForInventoryItem = (inventoryItemId: string) => {
+      return activeTabs.reduce((sum, tab) => {
+        return (
+          sum + tab.cart
+            .filter(ci => ci.inventoryItemId === inventoryItemId)
+            .reduce((s, ci) => s + (ci.quantity || 0), 0)
+        );
+      }, 0);
+    };
+
     return productInventoryItems.map(inventoryItem => {
       const supplier = suppliers.find(s => s.id === inventoryItem.supplier_id);
+      const reserved = getReservedForInventoryItem(inventoryItem.id);
+      const available = Math.max(0, (inventoryItem.quantity || 0) - reserved);
       return {
         inventoryItemId: inventoryItem.id,
         supplierId: inventoryItem.supplier_id,
         supplierName: supplier?.name || 'Unknown Supplier',
-        quantity: inventoryItem.quantity,
+        // Reflect temporary reservations in the UI
+        quantity: available,
         receivedQuantity: inventoryItem.received_quantity,
         price: inventoryItem.price || 0,
         type: inventoryItem.type || 'cash',
@@ -245,7 +267,7 @@ export default function POS() {
     });
   };
 
-  // In addToCart, add specific inventory item to cart
+  // In addToCart, add specific inventory item to cart respecting temporary reservations across all tabs
   const addToCart = (productId: string, inventoryItemId: string) => {
     const product = products.find(p => p.id === productId);
     const inventoryItem = inventory.find(item => item.id === inventoryItemId);
@@ -254,23 +276,34 @@ export default function POS() {
     const supplier = suppliers.find(s => s.id === inventoryItem.supplier_id);
     if (!supplier) return;
     
+    // Compute available considering what's already reserved across all tabs for this inventory item
+    const reserved = activeTabs.reduce((sum, tab) => {
+      return (
+        sum + tab.cart
+          .filter(ci => ci.inventoryItemId === inventoryItemId)
+          .reduce((s, ci) => s + (ci.quantity || 0), 0)
+      );
+    }, 0);
+    const available = Math.max(0, (inventoryItem.quantity || 0) - reserved);
+
     // Check if we already have this specific inventory item in the cart
     const existingItem = activeTab.cart.find(item => 
       item.inventoryItemId === inventoryItemId
     );
     
     if (existingItem) {
-      // If this specific inventory item is already in cart, increase quantity
-      if (existingItem.quantity < inventoryItem.quantity) {
+      // If this specific inventory item is already in cart, increase quantity if available
+      if (available > 0) {
         const updatedCart = activeTab.cart.map(item =>
           item.inventoryItemId === inventoryItemId
-            ? { ...item, quantity: item.quantity + 1, totalPrice: (item.quantity + 1) * item.unitPrice }
+            ? { ...item, quantity: item.quantity + 1, totalPrice: Math.round(((item.quantity + 1) * item.unitPrice) * 100) / 100 }
             : item
         );
         updateActiveTab({ cart: updatedCart });
       }
     } else {
-      // Add new item with this specific inventory item
+      // Add new item with this specific inventory item if at least one is available
+      if (available <= 0) return;
       const newItem: SaleItem = {
         id: uuidv4(),
         productId,
@@ -290,7 +323,7 @@ export default function POS() {
     }
   };
 
-  // In updateCartItem, prevent increasing quantity beyond available stock
+  // In updateCartItem, prevent increasing quantity beyond available stock (considering other cart reservations across all tabs)
   const updateCartItem = (itemId: string, field: keyof SaleItem, value: any) => {
     const updatedCart = activeTab.cart.map(item => {
       if (item.id === itemId) {
@@ -301,9 +334,17 @@ export default function POS() {
           if (isNaN(numValue) || numValue < 1) {
             updatedItem.quantity = 1;
           } else {
-            // Get the specific inventory item to check its available quantity
+            // Get available stock for this inventory item minus reservations by other cart lines across ALL tabs
             const inventoryItem = inventory.find(inv => inv.id === item.inventoryItemId);
-            const availableStock = inventoryItem ? inventoryItem.quantity : 0;
+            const baseStock = inventoryItem ? (inventoryItem.quantity || 0) : 0;
+            const reservedByOthers = activeTabs.reduce((sum, tab) => {
+              return (
+                sum + tab.cart
+                  .filter(ci => ci.inventoryItemId === item.inventoryItemId && ci.id !== item.id)
+                  .reduce((s, ci) => s + (ci.quantity || 0), 0)
+              );
+            }, 0);
+            const availableStock = Math.max(0, baseStock - reservedByOthers);
             if (availableStock > 0 && numValue > availableStock) {
               updatedItem.quantity = availableStock;
             } else {
@@ -1015,7 +1056,6 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
           {(filteredProducts || []).map((product: any) => {
             const stock = getProductStock(product.id);
             const productInventoryItems = getProductInventoryItems(product.id) || [];
-            const isLowStock = stock < 5;
 
             return (
               <div key={product.id} className="group border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:border-blue-300 transition-all duration-200 bg-white">
@@ -1026,11 +1066,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                     alt={product.name} 
                     className="w-full h-28 object-cover rounded-lg group-hover:scale-105 transition-transform duration-200" 
                   />
-                  {isLowStock && (
-                    <div className="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full font-bold">
-                      Low Stock
-                    </div>
-                  )}
+                
                 </div>
 
                 {/* Product Info */}
@@ -1039,15 +1075,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                     {product.name}
                   </h3>
                   <div className="flex items-center justify-between">
-                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                      isLowStock 
-                        ? 'bg-red-100 text-red-700' 
-                        : stock < 10 
-                          ? 'bg-yellow-100 text-yellow-700'
-                          : 'bg-green-100 text-green-700'
-                    }`}>
-                      Stock: {stock}
-                    </span>
+                  
                     {product.category && (
                       <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
                         {product.category}
@@ -1218,8 +1246,13 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                         step="0.01"
                         value={item.weight ?? ''}
                         onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
+                        className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
+                          item.productName.toLowerCase().includes('plastic') 
+                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                            : 'bg-white'
+                        }`}
                         placeholder="0.00"
+                        disabled={item.productName.toLowerCase()==='plastic'}
                         tabIndex={200 + index * 4 + 2}
                         aria-label={`Weight for ${item.productName}`}
                       />

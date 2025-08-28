@@ -300,6 +300,7 @@ export interface Database {
       inventory_bills: {
         Row: {
           id: string;
+          plastic_fee?:string;
           supplier_id: string;
           porterage_fee?: number | null;
           transfer_fee?: number | null;
@@ -314,6 +315,7 @@ export interface Database {
         };
         Insert: {
           id: string;
+          plastic_fee?:string;
           supplier_id: string;
           porterage_fee?: number | null;
           transfer_fee?: number | null;
@@ -328,6 +330,7 @@ export interface Database {
         };
         Update: {
           id: string;
+          plastic_fee?:string;
           supplier_id: string;
           porterage_fee?: number | null;
           transfer_fee?: number | null;
