@@ -70,6 +70,7 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
   created_at: string;
   received_quantity: number;
   batch_id: string | null;
+
 }
 
 
@@ -190,12 +191,14 @@ export interface inventory_bills extends BaseEntity {
   supplier_id: string;
   porterage_fee?: number | null;
   transfer_fee?: number | null;
+  commission_rate?:number | null;
   received_at: string;
   store_id: string;
   created_by: string;
   status?: string;
   created_at:string;
-  notes?:string
+  notes?:string;
+  type?:string
 }
 
 class POSDatabase extends Dexie {

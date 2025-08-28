@@ -52,18 +52,12 @@ export interface InventoryItem {
   id: string;
   productId: string;
   supplierId: string;
-  type: 'commission' | 'cash';
   quantity: number;
   receivedQuantity: number;
   unit: 'kg' | 'piece' | 'box' | 'bag';
   weight?: number;
-  porterage?: number;
-  transferFee?: number;
   price?: number;
-  commissionRate?: number;
-  status?: string;
-  receivedAt: string;
-  receivedBy: string;
+  createdAt: string;
   batchId?: string;
 }
 
@@ -88,7 +82,8 @@ export interface inventory_bills { id: string;
   created_by: string;
   status?: string;
   created_at:string;
-  notes?:string
+  notes?:string;
+  commission_rate?:string;
   }
 
 export interface SaleItem {

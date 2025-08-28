@@ -21,17 +21,17 @@ function useDebounce(value: string, delay: number) {
 }
 
 // Enhanced ReceiveFormModal with major improvements
-const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userProfile, defaultCommissionRate, recentProducts, setRecentProducts, recentSuppliers, setRecentSuppliers, form, setForm, errors, setErrors }: any) => {
+const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userProfile, defaultCommissionRate, setRecentProducts, recentSuppliers, setRecentSuppliers, form, setForm, errors, setErrors }: any) => {
   const [loading, setLoading] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
   const [bulkProducts, setBulkProducts] = useState<string[]>([]);
-  const [bulkItems, setBulkItems] = useState<Record<string, { product_id?: string; quantity: string; unit: 'kg'|'piece'|'box'|'bag'|'bundle'|'dozen'; price?: string; weight?: string }>>({});
+  const [bulkItems, setBulkItems] = useState<Record<string, { product_id?: string; quantity: string; unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen'; price?: string; weight?: string }>>({});
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   // Auto-focus first field when modal opens
-  useEffect(() => { 
-    if (open && firstInputRef.current) firstInputRef.current.focus(); 
+  useEffect(() => {
+    if (open && firstInputRef.current) firstInputRef.current.focus();
   }, [open]);
-  
+
   // Add default product row when modal opens
   useEffect(() => {
     if (open && bulkProducts.length === 0) {
@@ -39,11 +39,11 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
       addProductRow();
     }
   }, [open]);
-  
+
   // Keyboard support - Escape to close
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => { 
-      if (e.key === 'Escape' && open) onClose(); 
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && open) onClose();
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
@@ -57,7 +57,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
   // Enhanced validation with comprehensive field checking
   const validate = () => {
     const errors: any = {};
-    
+
     // Always validate bulk mode now
     if (!form.supplier_id) errors.supplier_id = 'Supplier is required.';
     if (!bulkProducts || bulkProducts.length === 0) {
@@ -79,7 +79,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
       }
     }
     // Fees validation applies once per batch
-    if (form.porterage && (isNaN(Number(form.porterage)) || Number(form.porterage) < 0)) errors.porterage = 'Porterage fee must be a valid positive number.';
+    if (form.porterage_fee && (isNaN(Number(form.porterage_fee)) || Number(form.porterage_fee) < 0)) errors.porterage_fee = 'Porterage_fee fee must be a valid positive number.';
     if (form.transfer_fee && (isNaN(Number(form.transfer_fee)) || Number(form.transfer_fee) < 0)) errors.transfer_fee = 'Transfer fee must be a valid positive number.';
     if (form.type === 'commission') {
       if (!form.commission_rate || isNaN(Number(form.commission_rate)) || Number(form.commission_rate) < 0) errors.commission_rate = 'Commission rate must be a valid percentage.';
@@ -92,7 +92,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
     const errs = validate();
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
-    
+
     setLoading(true);
     try {
       // Always use bulk mode now
@@ -107,7 +107,6 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
           unit: bi.unit,
           weight: bi.weight ? parseFloat(bi.weight) : undefined,
           price: form.type === 'cash' && bi.price ? parseFloat(bi.price) : undefined,
-          commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
           status: form.status || undefined,
         };
       });
@@ -116,17 +115,19 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
         batch: {
           supplier_id: form.supplier_id,
           status: form.status || undefined,
-          porterage: form.porterage ? parseFloat(form.porterage) : undefined,
+          porterage_fee: form.porterage_fee ? parseFloat(form.porterage_fee) : undefined,
           transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
+          commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
+          type: form.type,
           items
         }
       });
-      
+
       // Reset form after successful submission
       setForm({
         supplier_id: '',
         type: 'commission',
-        porterage: '',
+        porterage_fee: '',
         transfer_fee: '',
         commission_rate: '',
         status: ''
@@ -135,7 +136,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
       setBulkItems({});
       setErrors({});
       onClose();
-    } catch {
+    } catch (e) {
       setErrors({ form: 'Failed to receive inventory.' });
     }
     setLoading(false);
@@ -160,6 +161,9 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
       return newItems;
     });
   };
+  const selectRef = useRef<HTMLDivElement | null>(null);
+  const [checked, setChecked] = useState(false);
+  const [count, setCount] = useState("");
 
   if (!open) return null;
 
@@ -180,7 +184,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
               <X className="w-6 h-6" />
             </button>
           </div>
-          
+
           {/* Item Context Header */}
           {(selectedSupplier) && (
             <div className="mt-4 p-4 bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800">
@@ -191,15 +195,15 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                     <div>
                       <p className="font-semibold text-gray-900 dark:text-slate-100">{selectedSupplier.name}</p>
                       <span className={`px-2 py-1 text-xs rounded-full bg-green-100 text-green-800    `}>
-                       Commission Rate: {form.type === 'commission' ?  form.commission_rate : 'Cash'}                        
+                        Commission Rate: {form.type === 'commission' ? form.commission_rate : 'Cash'}
                       </span>
                       <span className={`px-2 py-1 text-xs rounded-full bg-green-100 text-green-800    `}>
-                        Porterage: {form.porterage}
+                        Porterage fee: {form.porterage_fee}
                       </span>
                       <span className={`px-2 py-1 text-xs rounded-full bg-green-100 text-green-800    `}>
                         Transfer Fee: {form.transfer_fee}
                       </span>
-                     
+
                     </div>
                   </div>
                 )}
@@ -210,12 +214,12 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
 
         <form onSubmit={handleSubmit} className="p-6">
           {/* Hidden input for auto-focus */}
-          <input 
-            ref={firstInputRef} 
-            style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }} 
-            tabIndex={-1} 
+          <input
+            ref={firstInputRef}
+            style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }}
+            tabIndex={-1}
           />
-          
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Left Column - Basic Information */}
             <div className="space-y-6">
@@ -224,7 +228,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                   <Package className="w-5 h-5 mr-2 text-blue-600" />
                   Supplier Information
                 </h3>
-                
+
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Supplier *</label>
@@ -235,7 +239,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                         value: supplier.id,
                       }))}
                       value={form.supplier_id}
-                      onChange={(value: any) => setForm({ ...form, supplier_id: value })} 
+                      onChange={(value: any) => setForm({ ...form, supplier_id: value })}
                       placeholder="Select Supplier *"
                       searchPlaceholder="Search suppliers..."
                       categories={['Commission', 'Cash']}
@@ -243,8 +247,8 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                       onRecentUpdate={setRecentSuppliers}
                       showAddOption={true}
                       addOptionText="Add New Supplier"
-                       className={`w-full ${errors.supplier_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
-                       portal={true}
+                      className={`w-full ${errors.supplier_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
+                      portal={true}
                     />
                     {errors.supplier_id && <p className="text-xs text-red-600 mt-1">{errors.supplier_id}</p>}
                   </div>
@@ -272,7 +276,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                   <Eye className="w-5 h-5 mr-2 text-purple-600" />
                   Financial Information
                 </h3>
-                
+
                 <div className="space-y-4">
                   {form.type === 'commission' && (
                     <div>
@@ -298,12 +302,12 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                         type="number"
                         step="0.01"
                         min="0"
-                        value={form.porterage}
-                        onChange={(e) => setForm({ ...form, porterage: e.target.value })}
-                        className={`w-full border ${errors.porterage ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                        placeholder="Enter porterage fee"
+                        value={form.porterage_fee}
+                        onChange={(e) => setForm({ ...form, porterage_fee: e.target.value })}
+                        className={`w-full border ${errors.porterage_fee ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                        placeholder="porterage fee"
                       />
-                      {errors.porterage && <p className="text-xs text-red-600 mt-1">{errors.porterage}</p>}
+                      {errors.porterage_fee && <p className="text-xs text-red-600 mt-1">{errors.porterage_fee}</p>}
                     </div>
 
                     <div>
@@ -315,7 +319,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                         value={form.transfer_fee}
                         onChange={(e) => setForm({ ...form, transfer_fee: e.target.value })}
                         className={`w-full border ${errors.transfer_fee ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                        placeholder="Enter transfer fee"
+                        placeholder="transfer fee"
                       />
                       {errors.transfer_fee && <p className="text-xs text-red-600 mt-1">{errors.transfer_fee}</p>}
                     </div>
@@ -331,7 +335,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                   <Upload className="w-5 h-5 mr-2 text-orange-600" />
                   Additional Information
                 </h3>
-                
+
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Notes (optional)</label>
@@ -339,10 +343,40 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                       value={form.status}
                       onChange={(e) => setForm({ ...form, status: e.target.value })}
                       className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
-                      rows={4}
+                      rows={1}
                       placeholder="Add any additional status or comments..."
                     />
                   </div>
+                  <div >
+                    <div className="flex items-center space-x-4 mt-8  ">
+                      {/* Checkbox + label */}
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setChecked(e.target.checked);
+                            if (!e.target.checked) setCount(""); // reset when unchecked
+                          }}
+                          className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">Empty Plastic {!checked? '(optional)':''}</span>
+                      </label>
+
+                      {/* Number input appears when checked */}
+                      {checked && (
+                        <input
+                          type="number"
+                          min="0"
+                          value={count}
+                          onChange={(e) => setCount(e.target.value)}
+                          placeholder="number of plastics"
+                          className={`w-40 border rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                        />
+                      )}
+                    </div>
+                  </div>
+
                 </div>
               </div>
             </div>
@@ -354,186 +388,183 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
               <p className="text-sm text-red-600">{errors.form}</p>
             </div>
           )}
- <div className="space-y-6">
-              <div>
-                                 <h3 className="text-lg font-semibold text-gray-900 mb-4 mt-4 flex items-center justify-between">
-                   <div className="flex items-center">
-                     <Truck className="w-5 h-5 mr-2 text-green-600" />
-                     Products
-                   </div>
-                
-                 </h3>
-                
-                <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-4 border border-gray-200 dark:border-slate-700">
-                     
-                    <div className=" border border-gray-200 dark:border-slate-700 rounded-lg scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 dark:scrollbar-thumb-slate-700 dark:scrollbar-track-slate-800">
-                      <table className="w-full">
-                        <thead className="sticky top-0 bg-gray-50 dark:bg-slate-800 z-10 shadow-sm">
-                          <tr className="border-b border-gray-200">
-                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Product</th>
-                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Qty</th>
-                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Unit</th>
-                            {form.type === 'cash' && (
-                              <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Price</th>
-                            )}
-                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Weight</th>
-                            <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {bulkProducts.map((productId, index) => {
-                            const item = bulkItems[productId] || { product_id: '', quantity: '', unit: 'kg', price: '', weight: '' };
-                            const hasSelectedProduct = !!item.product_id;
-                            
-                            return (
-                              <tr key={productId} className="hover:bg-gray-50 transition-colors duration-150">
-                                <td className="py-3 px-2">
-                                  {!hasSelectedProduct ? (
-                                    <SearchableSelect
-                                      options={products.map((product: any) => ({
-                                        id: product.id,
-                                        label: product.name,
-                                        value: product.id,
-                                        category: product.category
-                                      }))}
-                                      value={item.product_id || ''}
-                                      onChange={(value: any) => {
-                                        const selectedId = value as string;
-                                        setBulkItems(prev => ({
-                                          ...prev,
-                                          [productId]: { ...item, product_id: selectedId, unit: 'kg' }
-                                        }));
-                                      }}
-                                      placeholder="Select Product *"
-                                      searchPlaceholder="Search products..."
-                                      categories={['Fruits', 'Vegetables']}
-                                      recentSelections={recentProducts}
-                                      onRecentUpdate={setRecentProducts}
-                                      showAddOption={true}
-                                      addOptionText="Add New Product"
-                                      className="w-full min-w-[200px]"
-                                      portal={false}
-                                      onOpenChange={(open: boolean) => setIsProductDropdownOpen(open)}
-                                    />
-                                  ) : (
-                                    <div className="flex items-center">
-                                      <img
-                                        src={products.find((p: any) => p.id === item.product_id)?.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
-                                        alt="Product"
-                                        className="w-8 h-8 rounded-lg object-cover mr-2"
-                                        onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
-                                      />
-                                      <span className="font-medium text-gray-900">
-                                        {products.find((p: any) => p.id === item.product_id)?.name}
-                                      </span>
-                                    </div>
-                                  )}
-                                  {errors[`product_${productId}`] && (
-                                    <p className="text-xs text-red-600 mt-1">{errors[`product_${productId}`]}</p>
-                                  )}
-                                </td>
-                                <td className="py-3 px-2">
-                                  <input
-                                    type="number"
-                                    value={item.quantity}
-                                    onChange={(e) => setBulkItems(prev => ({ 
-                                      ...prev, 
-                                      [productId]: { ...item, quantity: e.target.value } 
-                                    }))}
-                                    className={`w-20 border ${errors[`quantity_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                                    min="1"
-                                    step="0.01"
-                                    placeholder="Qty"
-                                  />
-                                  {errors[`quantity_${productId}`] && (
-                                    <p className="text-xs text-red-600 mt-1">{errors[`quantity_${productId}`]}</p>
-                                  )}
-                                </td>
-                                <td className="py-3 px-2">
-                                  <select
-                                    value={item.unit}
-                                    onChange={(e) => setBulkItems(prev => ({ 
-                                      ...prev, 
-                                      [productId]: { ...item, unit: e.target.value as any } 
-                                    }))}
-                                    className="w-24 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
-                                  >
-                                    <option value="kg">kg</option>
-                                    <option value="piece">piece</option>
-                                    <option value="box">box</option>
-                                    <option value="bag">bag</option>
-                                    <option value="bundle">bundle</option>
-                                    <option value="dozen">dozen</option>
-                                  </select>
-                                </td>
-                                {form.type === 'cash' && (
-                                  <td className="py-3 px-2">
-                                    <input
-                                      type="number"
-                                      value={item.price || ''}
-                                      onChange={(e) => setBulkItems(prev => ({ 
-                                        ...prev, 
-                                        [productId]: { ...item, price: e.target.value } 
-                                      }))}
-                                      className={`w-24 border ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                                      min="0"
-                                      step="0.01"
-                                      placeholder="Price"
-                                    />
-                                    {errors[`price_${productId}`] && (
-                                      <p className="text-xs text-red-600 mt-1">{errors[`price_${productId}`]}</p>
-                                    )}
-                                  </td>
-                                )}
-                                <td className="py-3 px-2">
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={item.weight || ''}
-                                    onChange={(e) => setBulkItems(prev => ({ 
-                                      ...prev, 
-                                      [productId]: { ...item, weight: e.target.value } 
-                                    }))}
-                                    className="w-20 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
-                                    placeholder="kg"
-                                  />
-                                </td>
-                                <td className="py-3 px-2 flex items-center gap-2">
-                                {(bulkProducts.length > 1 || !bulkProducts[0])?(
-                                <button
-                                    type="button"
-                                    onClick={() => removeProductRow(productId)}
-                                    className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
-                                    title="Remove product"
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </button>):(
-<div>
-  
-</div>
-                                  )
-                                  }
-                                  <button
-                                    type="button"
-                                    onClick={addProductRow}
-                                    className="border-green-600 text-black text-sm rounded-lg  transition-colors flex items-center"
-                                  >
-                                    <Plus className="w-4 h-4" /> 
-                                  </button>
-                             
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 mt-4 flex items-center justify-between">
+                <div className="flex items-center">
+                  <Truck className="w-5 h-5 mr-2 text-green-600" />
+                  Products
                 </div>
+
+              </h3>
+
+              <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-4 border border-gray-200 dark:border-slate-700">
+
+                <div className=" border border-gray-200 dark:border-slate-700 rounded-lg scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 dark:scrollbar-thumb-slate-700 dark:scrollbar-track-slate-800">
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-gray-50 dark:bg-slate-800 z-10 shadow-sm">
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Product</th>
+                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Qty</th>
+                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Unit</th>
+                        {form.type === 'cash' && (
+                          <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Price</th>
+                        )}
+                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Weight</th>
+                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {bulkProducts.map((productId, index) => {
+                        const item = bulkItems[productId] || { product_id: '', quantity: '', unit: 'kg', price: '', weight: '' };
+                        const hasSelectedProduct = !!item.product_id;
+
+                        return (
+                          <tr key={productId} className="hover:bg-gray-50 transition-colors duration-150">
+                            <td className="py-3 px-2">
+                              {(
+                                <div
+                                  ref={selectRef}
+
+                                >
+
+                                  <SearchableSelect
+                                    options={products.map((product: any) => ({
+                                      id: product.id,
+                                      label: product.name,
+                                      value: product.id,
+                                      category: product.category
+                                    }))}
+                                    value={item.product_id || ''}
+                                    onChange={(value: any) => {
+                                      const selectedId = value as string;
+                                      setBulkItems(prev => ({
+                                        ...prev,
+                                        [productId]: { ...item, product_id: selectedId, unit: 'kg' }
+                                      }));
+                                    }}
+                                    placeholder="Select Product *"
+                                    searchPlaceholder="Search products..."
+                                    categories={['Fruits', 'Vegetables']}
+                                    showAddOption={true}
+                                    addOptionText="Add New Product"
+                                    className="w-full min-w-[200px]"
+                                    portal={false}
+                                    onOpenChange={(open: boolean) => {
+                                      setIsProductDropdownOpen(open);
+                                      if (open && selectRef.current) {
+                                        selectRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              )}
+                              {errors[`product_${productId}`] && (
+                                <p className="text-xs text-red-600 mt-1">{errors[`product_${productId}`]}</p>
+                              )}
+                            </td>
+                            <td className="py-3 px-2">
+                              <input
+                                type="number"
+                                value={item.quantity}
+                                onChange={(e) => setBulkItems(prev => ({
+                                  ...prev,
+                                  [productId]: { ...item, quantity: e.target.value }
+                                }))}
+                                className={`w-20 border ${errors[`quantity_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                                min="1"
+                                step="0.01"
+                                placeholder="Qty"
+                              />
+                              {errors[`quantity_${productId}`] && (
+                                <p className="text-xs text-red-600 mt-1">{errors[`quantity_${productId}`]}</p>
+                              )}
+                            </td>
+                            <td className="py-3 px-2">
+                              <select
+                                value={item.unit}
+                                onChange={(e) => setBulkItems(prev => ({
+                                  ...prev,
+                                  [productId]: { ...item, unit: e.target.value as any }
+                                }))}
+                                className="w-24 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
+                              >
+                                <option value="kg">kg</option>
+                                <option value="piece">piece</option>
+                                <option value="box">box</option>
+                                <option value="bag">bag</option>
+                                <option value="bundle">bundle</option>
+                                <option value="dozen">dozen</option>
+                              </select>
+                            </td>
+                            {form.type === 'cash' && (
+                              <td className="py-3 px-2">
+                                <input
+                                  type="number"
+                                  value={item.price || ''}
+                                  onChange={(e) => setBulkItems(prev => ({
+                                    ...prev,
+                                    [productId]: { ...item, price: e.target.value }
+                                  }))}
+                                  className={`w-24 border ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="Price"
+                                />
+                                {errors[`price_${productId}`] && (
+                                  <p className="text-xs text-red-600 mt-1">{errors[`price_${productId}`]}</p>
+                                )}
+                              </td>
+                            )}
+                            <td className="py-3 px-2">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={item.weight || ''}
+                                onChange={(e) => setBulkItems(prev => ({
+                                  ...prev,
+                                  [productId]: { ...item, weight: e.target.value }
+                                }))}
+                                className="w-20 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
+                                placeholder="kg"
+                              />
+                            </td>
+                            <td className="py-3 px-2 flex items-center gap-2">
+                              {(bulkProducts.length > 1 || !bulkProducts[0]) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => removeProductRow(productId)}
+                                  className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
+                                  title="Remove product"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>) : (
+                                <div>
+
+                                </div>
+                              )
+                              }
+                              <button
+                                type="button"
+                                onClick={addProductRow}
+                                className="border-green-600 text-black text-sm rounded-lg  transition-colors flex items-center"
+                              >
+                                <Plus className="w-4 h-4" />
+                              </button>
+
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
               </div>
             </div>
-              
+          </div>
+
           {/* Action Buttons */}
           <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 dark:border-slate-800">
             <button
@@ -581,14 +612,14 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-focus first field when modal opens
-  useEffect(() => { 
-    if (open && firstInputRef.current) firstInputRef.current.focus(); 
+  useEffect(() => {
+    if (open && firstInputRef.current) firstInputRef.current.focus();
   }, [open]);
 
   // Keyboard support - Escape to close
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => { 
-      if (e.key === 'Escape' && open) onClose(); 
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && open) onClose();
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
@@ -613,7 +644,7 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
     const errs = validate();
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
-    
+
     setLoading(true);
     try {
       await onSuccess({
@@ -634,7 +665,7 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
     const file = e.target.files?.[0];
     if (file) {
       setImageLoading(true);
-      
+
       // Validate file size (5MB limit)
       if (file.size > 5 * 1024 * 1024) {
         setErrors({ image: 'File size too large. Please choose an image under 5MB.' });
@@ -651,10 +682,10 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
 
       const reader = new FileReader();
       reader.onload = (ev) => {
-        setForm((prev: any) => ({ 
-          ...prev, 
-          image: ev.target?.result as string, 
-          capturedPhoto: '' 
+        setForm((prev: any) => ({
+          ...prev,
+          image: ev.target?.result as string,
+          capturedPhoto: ''
         }));
         setErrors((prev: any) => ({ ...prev, image: undefined }));
         setImageLoading(false);
@@ -688,10 +719,10 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
 
         <form onSubmit={handleSubmit} className="p-6">
           {/* Hidden input for auto-focus */}
-          <input 
-            ref={firstInputRef} 
-            style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }} 
-            tabIndex={-1} 
+          <input
+            ref={firstInputRef}
+            style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }}
+            tabIndex={-1}
           />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -702,7 +733,7 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
                   <Package className="w-5 h-5 mr-2 text-green-600" />
                   Product Information
                 </h3>
-                
+
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Product Name *</label>
@@ -743,7 +774,7 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
                   <Camera className="w-5 h-5 mr-2 text-purple-600" />
                   Product Image
                 </h3>
-                
+
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Product Photo (optional)</label>
@@ -755,8 +786,8 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
                         className="hidden"
                         id="product-image-upload"
                       />
-                      <label 
-                        htmlFor="product-image-upload" 
+                      <label
+                        htmlFor="product-image-upload"
                         className="cursor-pointer flex flex-col items-center"
                       >
                         {imageLoading ? (
@@ -800,15 +831,15 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
 
           {/* Action Buttons */}
           <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 dark:border-slate-800">
-            <button 
-              type="button" 
-              onClick={onClose} 
+            <button
+              type="button"
+              onClick={onClose}
               className="px-6 py-2 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
             >
               Cancel
             </button>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center"
               disabled={loading}
             >
@@ -974,9 +1005,9 @@ const DeleteProductConfirm = ({ open, onClose, onDelete, product }: any) => {
 
 export default function Inventory() {
   const raw = useOfflineData();
-  const products = raw.products.map(p => ({...p, createdAt: p.created_at})) as Array<any>;
-  const suppliers = raw.suppliers.map(s => ({...s,  createdAt: s.created_at})) as Array<any>;
-  const inventory = raw.inventory.map(i => ({...i, createdAt: i.created_at, product_id: i.product_id, supplier_id: i.supplier_id, received_at: i.received_at})) as Array<any>;
+  const products = raw.products.map(p => ({ ...p, createdAt: p.created_at })) as Array<any>;
+  const suppliers = raw.suppliers.map(s => ({ ...s, createdAt: s.created_at })) as Array<any>;
+  const inventory = raw.inventory.map(i => ({ ...i, createdAt: i.created_at, product_id: i.product_id, supplier_id: i.supplier_id, received_at: i.received_at })) as Array<any>;
   const stockLevels = raw.stockLevels as Array<any>;
   const addInventoryItem = raw.addInventoryItem;
   const addSupplier = raw.addSupplier;
@@ -1041,14 +1072,14 @@ export default function Inventory() {
     try {
       setCameraError('');
       setImageLoading(true);
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
           width: { ideal: 640 },
           height: { ideal: 480 },
           facingMode: 'environment' // Use back camera on mobile if available
-        } 
+        }
       });
-      
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         streamRef.current = stream;
@@ -1076,34 +1107,34 @@ export default function Inventory() {
       const canvas = canvasRef.current;
       const video = videoRef.current;
       const context = canvas.getContext('2d');
-      
+
       if (context) {
         // Set canvas dimensions to match video
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        
+
         // Draw the video frame to canvas
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
+
         // Convert to base64 data URL (compressed JPEG)
         const dataURL = canvas.toDataURL('image/jpeg', 0.8);
-        
-        setProductForm(prev => ({ 
-          ...prev, 
+
+        setProductForm(prev => ({
+          ...prev,
           image: dataURL,
-          capturedPhoto: dataURL 
+          capturedPhoto: dataURL
         }));
-        
+
         stopCamera();
       }
     }
   };
 
   const retakePhoto = () => {
-    setProductForm(prev => ({ 
-      ...prev, 
+    setProductForm(prev => ({
+      ...prev,
       image: '',
-      capturedPhoto: '' 
+      capturedPhoto: ''
     }));
     startCamera();
   };
@@ -1148,8 +1179,8 @@ export default function Inventory() {
       const reader = new FileReader();
       reader.onload = (e) => {
         const result = e.target?.result as string;
-        setProductForm(prev => ({ 
-          ...prev, 
+        setProductForm(prev => ({
+          ...prev,
           image: result,
           capturedPhoto: '' // Clear captured photo when loading file
         }));
@@ -1162,10 +1193,10 @@ export default function Inventory() {
   };
 
   const clearPhoto = () => {
-    setProductForm(prev => ({ 
-      ...prev, 
+    setProductForm(prev => ({
+      ...prev,
       image: '',
-      capturedPhoto: '' 
+      capturedPhoto: ''
     }));
   };
 
@@ -1180,7 +1211,7 @@ export default function Inventory() {
   const [receiveForm, setReceiveForm] = useState({
     supplier_id: '',
     type: 'commission' as 'commission' | 'cash',
-    porterage: '',
+    porterage_fee: '',
     transfer_fee: '',
     commission_rate: '',
     status: ''
@@ -1297,7 +1328,6 @@ export default function Inventory() {
   const recentReceives = inventory
     .sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())
     .slice(0, 10);
-
   // Auto-focus first input in modals
   const receiveFirstInputRef = useRef<HTMLInputElement>(null);
   const productFirstInputRef = useRef<HTMLInputElement>(null);
@@ -1365,14 +1395,14 @@ export default function Inventory() {
     const firstInputRef = useRef<HTMLInputElement>(null);
 
     // Auto-focus first field when modal opens
-    useEffect(() => { 
-      if (firstInputRef.current) firstInputRef.current.focus(); 
+    useEffect(() => {
+      if (firstInputRef.current) firstInputRef.current.focus();
     }, []);
 
     // Keyboard support - Escape to close
     useEffect(() => {
-      const handleEsc = (e: KeyboardEvent) => { 
-        if (e.key === 'Escape') onClose(); 
+      const handleEsc = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') onClose();
       };
       window.addEventListener('keydown', handleEsc);
       return () => window.removeEventListener('keydown', handleEsc);
@@ -1381,23 +1411,23 @@ export default function Inventory() {
     // Enhanced validation
     const validate = () => {
       const errors: any = {};
-      
+
       if (!form.quantity || isNaN(Number(form.quantity)) || Number(form.quantity) < 0) {
         errors.quantity = 'Quantity must be a valid positive number.';
       }
-      
+
       if (!form.unit || form.unit.trim() === '') {
         errors.unit = 'Unit is required.';
       }
-      
+
       if (form.price && (isNaN(Number(form.price)) || Number(form.price) < 0)) {
         errors.price = 'Price must be a valid positive number.';
       }
-      
+
       if (form.weight && (isNaN(Number(form.weight)) || Number(form.weight) < 0)) {
         errors.weight = 'Weight must be a valid positive number.';
       }
-      
+
       return errors;
     };
 
@@ -1405,9 +1435,9 @@ export default function Inventory() {
       e.preventDefault();
       const validationErrors = validate();
       setErrors(validationErrors);
-      
+
       if (Object.keys(validationErrors).length > 0) return;
-      
+
       setLoading(true);
       setError('');
       try {
@@ -1440,10 +1470,10 @@ export default function Inventory() {
 
           <form onSubmit={handleSubmit} className="p-6">
             {/* Hidden input for auto-focus */}
-            <input 
-              ref={firstInputRef} 
-              style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }} 
-              tabIndex={-1} 
+            <input
+              ref={firstInputRef}
+              style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }}
+              tabIndex={-1}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1454,7 +1484,7 @@ export default function Inventory() {
                     <Package className="w-5 h-5 mr-2 text-blue-600" />
                     Basic Information
                   </h3>
-                  
+
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
@@ -1513,7 +1543,7 @@ export default function Inventory() {
                     <Eye className="w-5 h-5 mr-2 text-purple-600" />
                     Financial & Additional Details
                   </h3>
-                  
+
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Price (optional)</label>
@@ -1553,15 +1583,15 @@ export default function Inventory() {
 
             {/* Action Buttons */}
             <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-              <button 
-                type="button" 
-                onClick={onClose} 
+              <button
+                type="button"
+                onClick={onClose}
                 className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center"
                 disabled={loading}
               >
@@ -1721,18 +1751,17 @@ export default function Inventory() {
                       {item.last_received ? new Date(item.last_received).toLocaleDateString() : 'Never'}
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        item.current_stock === 0 
-                          ? 'bg-red-100 text-red-800'
-                          : lowStockAlertsEnabled && item.current_stock < lowStockThreshold
+                      <span className={`px-2 py-1 text-xs rounded-full ${item.current_stock === 0
+                        ? 'bg-red-100 text-red-800'
+                        : lowStockAlertsEnabled && item.current_stock < lowStockThreshold
                           ? 'bg-amber-100 text-amber-800'
                           : 'bg-green-100 text-green-800'
-                      }`}>
-                        {item.current_stock === 0 
-                          ? 'Out of Stock' 
+                        }`}>
+                        {item.current_stock === 0
+                          ? 'Out of Stock'
                           : lowStockAlertsEnabled && item.current_stock < lowStockThreshold
-                          ? 'Low Stock' 
-                          : 'In Stock'}
+                            ? 'Low Stock'
+                            : 'In Stock'}
                       </span>
                     </td>
                   </tr>
@@ -1762,9 +1791,10 @@ export default function Inventory() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {recentReceives.map((item: any) => {
+            {recentReceives.map((item: any, batch_type: any) => {
               const product = products.find((p: any) => p.id === item.product_id);
               const supplier = suppliers.find((s: any) => s.id === item.supplier_id);
+
               return (
                 <tr key={item.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
@@ -1783,12 +1813,11 @@ export default function Inventory() {
                   </td>
                   <td className="px-6 py-4 text-gray-900 dark:text-slate-100">{supplier?.name}</td>
                   <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      item.type === 'commission' 
-                        ? 'bg-green-100 text-green-800' 
-                        : 'bg-blue-100 text-blue-800'
-                    }`}>
-                      {item.type}
+                    <span className={`px-2 py-1 text-xs rounded-full ${batch_type === 'commission'
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-blue-100 text-blue-800'
+                      }`}>
+                      {item.batch_type}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-gray-900 dark:text-slate-100">
@@ -1887,18 +1916,16 @@ export default function Inventory() {
       <div className="flex space-x-1 mb-6 bg-gray-100 dark:bg-slate-800 p-1 rounded-lg w-fit">
         <button
           onClick={() => setActiveTab('receive')}
-          className={`px-4 py-2 rounded-md transition-colors ${
-            activeTab === 'receive' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' : 'text-gray-600 dark:text-slate-300'
-          }`}
+          className={`px-4 py-2 rounded-md transition-colors ${activeTab === 'receive' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' : 'text-gray-600 dark:text-slate-300'
+            }`}
         >
           <Truck className="w-4 h-4 inline mr-2" />
           Product Reception
         </button>
         <button
           onClick={() => setActiveTab('stock')}
-          className={`px-4 py-2 rounded-md transition-colors ${
-            activeTab === 'stock' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' : 'text-gray-600 dark:text-slate-300'
-          }`}
+          className={`px-4 py-2 rounded-md transition-colors ${activeTab === 'stock' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' : 'text-gray-600 dark:text-slate-300'
+            }`}
         >
           <Package className="w-4 h-4 inline mr-2" />
           Stock Products
@@ -2084,20 +2111,20 @@ export default function Inventory() {
         open={showReceiveForm}
         onClose={() => setShowReceiveForm(false)}
         onSuccess={async (data: any) => {
-          if (data?.mode === 'batch') {
-            console.log('batch123', data);
-            const { batch } = data;
-            await raw.addInventoryBatch({
-              supplier_id: batch.supplier_id,
-              created_by: userProfile?.id || '',
-              status: 'Created',
-              porterage: batch.porterage,
-              transfer_fee: batch.transfer_fee,
-              items: batch.items
-            });
-          } else {
-            await addInventoryItem(data);
-          }
+
+          console.log('batch123', data);
+          const { batch } = data;
+          await raw.addInventoryBatch({
+            type: batch.type,
+            supplier_id: batch.supplier_id,
+            created_by: userProfile?.id || '',
+            status: 'Created',
+            porterage_fee: batch.porterage_fee,
+            transfer_fee: batch.transfer_fee,
+            items: batch.items,
+            commission_rate: batch.commission_rate
+          });
+
           await raw.refreshData();
           showToast('success', 'Inventory received successfully!');
         }}
@@ -2487,10 +2514,10 @@ export default function Inventory() {
           try {
             // Delete from cloud database
             await SupabaseService.deleteProduct(product.id);
-            
+
             // Delete from local IndexedDB
             await db.products.delete(product.id);
-            
+
             // Refresh data to update UI
             await raw.refreshData();
             showToast('success', 'Product deleted successfully!');

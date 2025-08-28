@@ -258,11 +258,7 @@ export class SyncService {
                invalidRecords.push({ record, reason: `invalid supplier_id: ${record.supplier_id}` });
                continue;
              }
-             
-             if (!validUserIds.has(record.received_by)) {
-               invalidRecords.push({ record, reason: `invalid received_by: ${record.received_by}` });
-               continue;
-             }
+        
              
              validRecords.push(record);
            }

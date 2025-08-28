@@ -74,10 +74,12 @@ interface OfflineDataContextType {
     supplier_id: string;
     created_by: string;
     status?: string | null;
-    porterage?: number | null;
+    porterage_fee?: number | null;
     transfer_fee?: number | null;
     received_at?: string;
-    items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_by' >>;
+    commission_rate?:string,
+    type:string,
+    items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
   }) => Promise<{ batchId: string }>;
   addSale: (items: any[]) => Promise<void>;
   updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
@@ -433,6 +435,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const batch = item.batch_id ? batchById[item.batch_id] : null;
         return {
           ...item,
+          commission_rate:batch? batch.commission_rate:null,
+          batch_type:batch?batch.type:null,
           batch_porterage: batch ? batch.porterage : null,
           batch_transfer_fee: batch ? batch.transfer_fee : null,
           batch_status: batch ? batch.status : 'Created',
@@ -1008,11 +1012,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) throw new Error('No store ID available');
 
     const item: InventoryItem = {
-      received_quantity:itemData.received_quantity??0,
-      unit:itemData.unit??'',
-      quantity:itemData.quantity ??0,
-      supplier_id:itemData.supplier_id??'',
-      product_id:itemData.product_id??'',
+      id: createId(),
+      product_id: itemData.product_id??'',
+      supplier_id: itemData.supplier_id??'',
+      quantity: itemData.quantity ?? 0,
+      unit: itemData.unit ?? '',
+      received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
       store_id: storeId,
       created_at: new Date().toISOString(),
       _synced: false,
@@ -1034,9 +1039,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     supplier_id,
     created_by,
     status = 'Created', 
-    porterage = null,
+    porterage_fee = null,
     transfer_fee = null,
     received_at,
+    commission_rate,
+    type,
     items
   }) => {
     if (!storeId) throw new Error('No store ID available');
@@ -1047,11 +1054,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       id: batchId,
       supplier_id,
       status,
-      porterage,
+      porterage_fee,
       transfer_fee,
       received_at: received_at || new Date().toISOString(),
+      commission_rate:commission_rate,
       store_id: storeId,
       created_by,
+      type,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       _synced: false
@@ -1063,24 +1072,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await db.transaction('rw', [db.inventory_bills, db.inventory_items], async () => {
       await db.inventory_bills.add(batchRecord);
       const now = new Date().toISOString();
-      const receiveTs = received_at || now;
 
       const mappedItems = items.map((it) => ({
-        id: createId(),
+        id:createId(),
+        product_id:it.product_id??'',
+        quantity:it.quantity??0,
+        unit:it.unit??'',
         store_id: storeId,
         created_at: now,
-        received_at: receiveTs,
         _synced: false,
-        ...it,
         supplier_id,
-        received_by: created_by,
         weight: it.weight ?? null,
-        porterage: it.porterage ?? null,
-        transfer_fee: it.transfer_fee ?? null,
         price: it.price ?? null,
-        commission_rate: it.commission_rate ?? 0,
-        status: it.status ?? 'Created',
-        received_quantity: it.received_quantity ?? it.quantity,
+        received_quantity: it.received_quantity ??0,  
         batch_id: batchId as string | null
       }));
 
@@ -1309,12 +1313,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const applyCommissionRateToBatch = async (batchId: string, commissionRate: number): Promise<void> => {
-    const items = await db.inventory_items.where('batch_id').equals(batchId).toArray();
-    await db.transaction('rw', [db.inventory_items], async () => {
-      for (const it of items) {
-        await db.inventory_items.update(it.id, { commission_rate: commissionRate, _synced: false });
-      }
-    });
+    const bill = await db.inventory_bills.where('batch_id').equals(batchId);
+    // bill is a Collection, not an id or object; need to update by batch_id
+    await db.inventory_bills
+      .where('id')
+      .equals(batchId)
+      .modify({ commission_rate: commissionRate, _synced: false });
+
     await refreshData();
     await updateUnsyncedCount();
     debouncedSync();
@@ -1553,7 +1558,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           price: null,
           received_quantity: quantity,
           created_at: new Date().toISOString(),
-          batch_id: null,
+          batch_id: null
         };
         
         await db.inventory_items.add(newInventoryItem);

@@ -188,7 +188,7 @@ export class SupabaseService {
           suppliers(name)
         `)
         .eq('store_id', storeId)
-        .order('received_at', { ascending: false });
+        .order('created_at', { ascending: false });
       
       if (error) throw error;
       return data || [];
@@ -497,7 +497,7 @@ export class SupabaseService {
       const cleanLineItems = cleanArrayForSupabase(lineItems);
 
       // Start a transaction
-      const { data: bill, error: billError } = await supabase
+      const { data: bill , error: billError } = await supabase
         .from('bills')
         .insert(cleanBillData)
         .select()
