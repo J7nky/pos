@@ -381,13 +381,10 @@ export default function InventoryLogs() {
       await raw.addInventoryItem({
         product_id: receiveForm.productId,
         supplier_id: receiveForm.supplierId,
-        type: receiveForm.type,
         quantity: parseInt(receiveForm.quantity),
         unit: receiveForm.unit,
         weight: receiveForm.weight ? parseFloat(receiveForm.weight) : null,
         price: receiveForm.price ? parseFloat(receiveForm.price) : null,
-        commission_rate: parseFloat(receiveForm.commissionRate),
-        received_by: userProfile?.id || '',
         received_quantity: parseInt(receiveForm.quantity),
         notes: receiveForm.notes || undefined
       });
