@@ -188,6 +188,7 @@ export interface JournalEntry extends BaseEntity {
 }
 export interface inventory_bills extends BaseEntity {
   id: string;
+  plastic_fee?:string;
   supplier_id: string;
   porterage_fee?: number | null;
   transfer_fee?: number | null;

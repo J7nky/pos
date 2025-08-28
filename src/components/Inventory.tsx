@@ -27,6 +27,10 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
   const [bulkProducts, setBulkProducts] = useState<string[]>([]);
   const [bulkItems, setBulkItems] = useState<Record<string, { product_id?: string; quantity: string; unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen'; price?: string; weight?: string }>>({});
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const selectRef = useRef<HTMLDivElement | null>(null);
+  const [checked, setChecked] = useState(false);
+  const [count, setCount] = useState("");
+  
   // Auto-focus first field when modal opens
   useEffect(() => {
     if (open && firstInputRef.current) firstInputRef.current.focus();
@@ -78,6 +82,17 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
         }
       }
     }
+    if (form.empty_plastic) {
+      if (form.plastic_price === '' || form.plastic_price === undefined || isNaN(Number(form.plastic_price))) {
+        errors.plastic_price = 'Plastic price is required when plastic mortgage is checked.';
+      }
+    }
+    if (form.empty_plastic) {
+      if (form.plastic_count === '' || form.plastic_count === undefined || isNaN(Number(form.plastic_count))) {
+        errors.plastic_count = 'Plastic count is required when plastic mortgage is checked.';
+      }
+    }
+    
     // Fees validation applies once per batch
     if (form.porterage_fee && (isNaN(Number(form.porterage_fee)) || Number(form.porterage_fee) < 0)) errors.porterage_fee = 'Porterage_fee fee must be a valid positive number.';
     if (form.transfer_fee && (isNaN(Number(form.transfer_fee)) || Number(form.transfer_fee) < 0)) errors.transfer_fee = 'Transfer fee must be a valid positive number.';
@@ -161,9 +176,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
       return newItems;
     });
   };
-  const selectRef = useRef<HTMLDivElement | null>(null);
-  const [checked, setChecked] = useState(false);
-  const [count, setCount] = useState("");
+  
 
   if (!open) return null;
 
@@ -348,31 +361,63 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                     />
                   </div>
                   <div >
-                    <div className="flex items-center space-x-4 mt-8  ">
+                    <div className="space-y-3 mt-10">
                       {/* Checkbox + label */}
                       <label className="flex items-center space-x-2 cursor-pointer">
                         <input
+                      value={form.empty_plastic}
                           type="checkbox"
                           checked={checked}
                           onChange={(e) => {
-                            setChecked(e.target.checked);
-                            if (!e.target.checked) setCount(""); // reset when unchecked
+                            const isChecked = e.target.checked;
+                            setChecked(isChecked);
+                            if (!isChecked) {
+                              setCount("");
+                            }
+                            setForm({ ...form, empty_plastic: isChecked, plastic_count: isChecked ? form.plastic_count : '' });
                           }}
                           className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
                         />
-                        <span className="text-sm font-medium text-gray-700">Empty Plastic {!checked? '(optional)':''}</span>
+                        <span className="text-sm font-medium text-gray-700">Plastic Mortgage {!checked? '(optional)':''}</span>
                       </label>
 
-                      {/* Number input appears when checked */}
+                      {/* Inputs appear when checked */}
                       {checked && (
-                        <input
-                          type="number"
-                          min="0"
-                          value={count}
-                          onChange={(e) => setCount(e.target.value)}
-                          placeholder="number of plastics"
-                          className={`w-40 border rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                        />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Plastic Number *</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={form.plastic_count}
+                              onChange={(e) => {
+                                setCount(e.target.value);
+                                setForm({ ...form, plastic_count: e.target.value });
+                              }}
+                              placeholder="number of plastics"
+                              className={`w-full border ${errors.plastic_count ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                            />
+                            {errors.plastic_count && (
+                              <p className="text-xs text-red-600 mt-1">{errors.plastic_count}</p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Plastic Price *</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={form.plastic_price || ''}
+                              onChange={(e) => {
+                                setForm({ ...form, plastic_price: e.target.value });
+                              }}
+                              placeholder="price of plastics"
+                              className={`w-full border ${errors.plastic_price ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                            />
+                              {errors.plastic_price && (
+                              <p className="text-xs text-red-600 mt-1">{errors.plastic_price}</p>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -417,8 +462,10 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                     <tbody className="divide-y divide-gray-200">
                       {bulkProducts.map((productId, index) => {
                         const item = bulkItems[productId] || { product_id: '', quantity: '', unit: 'kg', price: '', weight: '' };
+                        const product = products.find((p: any) => p.id === item.product_id);
+                        const productName = product?.name || '';
                         const hasSelectedProduct = !!item.product_id;
-
+                        
                         return (
                           <tr key={productId} className="hover:bg-gray-50 transition-colors duration-150">
                             <td className="py-3 px-2">
@@ -427,7 +474,6 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                   ref={selectRef}
 
                                 >
-
                                   <SearchableSelect
                                     options={products.map((product: any) => ({
                                       id: product.id,
@@ -452,7 +498,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                     portal={false}
                                     onOpenChange={(open: boolean) => {
                                       setIsProductDropdownOpen(open);
-                                      if (open && selectRef.current) {
+                                      if ( selectRef.current) {
                                         selectRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
                                       }
                                     }}
@@ -521,6 +567,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                 type="number"
                                 step="0.01"
                                 min="0"
+                                disabled={productName.toLowerCase()==='plastic'}
                                 value={item.weight || ''}
                                 onChange={(e) => setBulkItems(prev => ({
                                   ...prev,
@@ -530,7 +577,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                 placeholder="kg"
                               />
                             </td>
-                            <td className="py-3 px-2 flex items-center gap-2">
+                            <td className="py-3 px-2 flex items-center gap-2 mt-2 ">
                               {(bulkProducts.length > 1 || !bulkProducts[0]) ? (
                                 <button
                                   type="button"
@@ -550,7 +597,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                 onClick={addProductRow}
                                 className="border-green-600 text-black text-sm rounded-lg  transition-colors flex items-center"
                               >
-                                <Plus className="w-4 h-4" />
+                                <Plus className="w-5 h-5" />
                               </button>
 
                             </td>
@@ -759,7 +806,8 @@ const AddProductModal = ({ open, onClose, onSuccess }: any) => {
                       <option value="Fruits">Fruits</option>
                       <option value="Vegetables">Vegetables</option>
                       <option value="Herbs">Herbs</option>
-                      <option value="Grains">Grains</option>
+                      <option value="Nuts">Nuts</option>
+                      <option value="Others">Others</option>
                     </select>
                     {errors.category && <p className="text-xs text-red-600 mt-1">{errors.category}</p>}
                   </div>

@@ -84,6 +84,7 @@ export interface inventory_bills { id: string;
   created_at:string;
   notes?:string;
   commission_rate?:string;
+  plastic_fee?:string
   }
 
 export interface SaleItem {
