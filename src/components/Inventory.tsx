@@ -28,8 +28,6 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
   const [bulkItems, setBulkItems] = useState<Record<string, { product_id?: string; quantity: string; unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen'; price?: string; weight?: string }>>({});
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const selectRef = useRef<HTMLDivElement | null>(null);
-  const [checked, setChecked] = useState(false);
-  const [count, setCount] = useState("");
   
   // Auto-focus first field when modal opens
   useEffect(() => {
@@ -83,12 +81,12 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
       }
     }
     if (form.empty_plastic) {
-      if (form.plastic_price === '' || form.plastic_price === undefined || isNaN(Number(form.plastic_price))) {
+      if (form.plastic_price <= 0 || form.plastic_price === undefined || isNaN(Number(form.plastic_price))) {
         errors.plastic_price = 'Plastic price is required when plastic mortgage is checked.';
       }
     }
     if (form.empty_plastic) {
-      if (form.plastic_count === '' || form.plastic_count === undefined || isNaN(Number(form.plastic_count))) {
+      if (form.plastic_count <= 0 || form.plastic_count === undefined || isNaN(Number(form.plastic_count))) {
         errors.plastic_count = 'Plastic count is required when plastic mortgage is checked.';
       }
     }
@@ -125,6 +123,10 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
           status: form.status || undefined,
         };
       });
+      const plasticFee = form.empty_plastic
+        ? Number(form.plastic_count || 0) * Number(form.plastic_price || 0)
+        : undefined;
+        console.log(form.plastic_count, form.plastic_price ,plasticFee);
       await onSuccess({
         mode: 'batch',
         batch: {
@@ -134,6 +136,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
           transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
           commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
           type: form.type,
+          plastic_fee:plasticFee,
           items
         }
       });
@@ -145,7 +148,10 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
         porterage_fee: '',
         transfer_fee: '',
         commission_rate: '',
-        status: ''
+        status: '',
+        empty_plastic: false,
+        plastic_count: '',
+        plastic_price: ''
       });
       setBulkProducts([]);
       setBulkItems({});
@@ -337,6 +343,64 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                       {errors.transfer_fee && <p className="text-xs text-red-600 mt-1">{errors.transfer_fee}</p>}
                     </div>
                   </div>
+                  <div className="space-y-3 mt-10">
+                      {/* Checkbox + label */}
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!form.empty_plastic}
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            setForm({
+                              ...form,
+                              empty_plastic: isChecked,
+                              plastic_count: isChecked ? form.plastic_count : '',
+                              plastic_price: isChecked ? form.plastic_price : ''
+                            });
+                          }}
+                          className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">Plastic Mortgage {!form.empty_plastic ? '(optional)' : ''}</span>
+                      </label>
+
+                      {/* Inputs appear when checked */}
+                      {form.empty_plastic && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Plastic Number *</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={form.plastic_count}
+                              onChange={(e) => {
+                                setForm({ ...form, plastic_count: e.target.value });
+                              }}
+                              placeholder="number of plastics"
+                              className={`w-full border ${errors.plastic_count ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                            />
+                            {errors.plastic_count && (
+                              <p className="text-xs text-red-600 mt-1">{errors.plastic_count}</p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Plastic Price *</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={form.plastic_price}
+                              onChange={(e) => {
+                                setForm({ ...form, plastic_price: e.target.value });
+                              }}
+                              placeholder="price of plastics"
+                              className={`w-full border ${errors.plastic_price ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                            />
+                            {errors.plastic_price && (
+                              <p className="text-xs text-red-600 mt-1">{errors.plastic_price}</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                 </div>
               </div>
             </div>
@@ -356,70 +420,12 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                       value={form.status}
                       onChange={(e) => setForm({ ...form, status: e.target.value })}
                       className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
-                      rows={1}
+                      rows={4}
                       placeholder="Add any additional status or comments..."
                     />
                   </div>
                   <div >
-                    <div className="space-y-3 mt-10">
-                      {/* Checkbox + label */}
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                      value={form.empty_plastic}
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const isChecked = e.target.checked;
-                            setChecked(isChecked);
-                            if (!isChecked) {
-                              setCount("");
-                            }
-                            setForm({ ...form, empty_plastic: isChecked, plastic_count: isChecked ? form.plastic_count : '' });
-                          }}
-                          className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                        />
-                        <span className="text-sm font-medium text-gray-700">Plastic Mortgage {!checked? '(optional)':''}</span>
-                      </label>
-
-                      {/* Inputs appear when checked */}
-                      {checked && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Plastic Number *</label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={form.plastic_count}
-                              onChange={(e) => {
-                                setCount(e.target.value);
-                                setForm({ ...form, plastic_count: e.target.value });
-                              }}
-                              placeholder="number of plastics"
-                              className={`w-full border ${errors.plastic_count ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                            />
-                            {errors.plastic_count && (
-                              <p className="text-xs text-red-600 mt-1">{errors.plastic_count}</p>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Plastic Price *</label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={form.plastic_price || ''}
-                              onChange={(e) => {
-                                setForm({ ...form, plastic_price: e.target.value });
-                              }}
-                              placeholder="price of plastics"
-                              className={`w-full border ${errors.plastic_price ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                            />
-                              {errors.plastic_price && (
-                              <p className="text-xs text-red-600 mt-1">{errors.plastic_price}</p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                   
                   </div>
 
                 </div>
@@ -1055,7 +1061,7 @@ export default function Inventory() {
   const raw = useOfflineData();
   const products = raw.products.map(p => ({ ...p, createdAt: p.created_at })) as Array<any>;
   const suppliers = raw.suppliers.map(s => ({ ...s, createdAt: s.created_at })) as Array<any>;
-  const inventory = raw.inventory.map(i => ({ ...i, createdAt: i.created_at, product_id: i.product_id, supplier_id: i.supplier_id, received_at: i.received_at })) as Array<any>;
+  const inventory = raw.inventory.map(i => ({ ...i, createdAt: i.created_at, product_id: i.product_id, supplier_id: i.supplier_id, created_at: i.created_at })) as Array<any>;
   const stockLevels = raw.stockLevels as Array<any>;
   const addInventoryItem = raw.addInventoryItem;
   const addSupplier = raw.addSupplier;
@@ -1262,7 +1268,10 @@ export default function Inventory() {
     porterage_fee: '',
     transfer_fee: '',
     commission_rate: '',
-    status: ''
+    status: '',
+    empty_plastic: false,
+    plastic_count: '',
+    plastic_price: ''
   });
 
   // Update commission rate when form opens or supplier changes
@@ -1374,7 +1383,7 @@ export default function Inventory() {
   );
 
   const recentReceives = inventory
-    .sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 10);
   // Auto-focus first input in modals
   const receiveFirstInputRef = useRef<HTMLInputElement>(null);
@@ -1741,7 +1750,7 @@ export default function Inventory() {
               {paginated.map((item: any) => {
                 const product = products.find((p: any) => p.id === item.product_id);
                 // For unit price, use the most recent inventory item's price for this product
-                const latestInventory = (product?.inventory || []).sort((a: any, b: any) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())[0];
+                const latestInventory = (product?.inventory || []).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
                 const unitPrice = latestInventory?.price || 0;
                 const totalValue = unitPrice * item.current_stock;
                 return (
@@ -1872,7 +1881,7 @@ export default function Inventory() {
                     {item.quantity} {item.unit}
                   </td>
                   <td className="px-6 py-4 text-gray-500">
-                    {new Date(item.received_at).toLocaleDateString()}
+                    {new Date(item.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4">
                     <button onClick={() => onEdit(item)} className="text-blue-600 hover:underline mr-2">Edit</button>
@@ -2170,6 +2179,7 @@ export default function Inventory() {
             porterage_fee: batch.porterage_fee,
             transfer_fee: batch.transfer_fee,
             items: batch.items,
+            plastic_fee:batch.plastic_fee,
             commission_rate: batch.commission_rate
           });
 

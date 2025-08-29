@@ -35,6 +35,7 @@ export interface SearchableSelectProps {
   clearable?: boolean;
   size?: 'sm' | 'md' | 'lg';
   onOpenChange?: (open: boolean) => void;
+  tabIndex?: number;
 }
 
 export default function SearchableSelect({
@@ -61,7 +62,8 @@ export default function SearchableSelect({
   portal = false,
   clearable = false,
   size = 'md',
-  onOpenChange
+  onOpenChange,
+  tabIndex
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -336,7 +338,7 @@ export default function SearchableSelect({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={placeholder}
-        tabIndex={0}
+        tabIndex={typeof tabIndex === 'number' ? tabIndex : 0}
       >
         <span className={selectedOptions.length === 0 ? 'text-gray-500 dark:text-slate-400' : 'text-gray-900 dark:text-slate-100'}>
           {getDisplayText()}

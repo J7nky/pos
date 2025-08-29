@@ -79,6 +79,7 @@ interface OfflineDataContextType {
     received_at?: string;
     commission_rate?:string,
     type:string,
+    plastic_fee?:number|null;
     items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
   }) => Promise<{ batchId: string }>;
   addSale: (items: any[]) => Promise<void>;
@@ -1021,7 +1022,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       store_id: storeId,
       created_at: new Date().toISOString(),
       _synced: false,
-      ...itemData,
       weight: itemData.weight ?? null,
       price: itemData.price ?? null,
       batch_id: itemData.batch_id ?? null
@@ -1044,6 +1044,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     received_at,
     commission_rate,
     type,
+    plastic_fee,
     items
   }) => {
     if (!storeId) throw new Error('No store ID available');
@@ -1060,6 +1061,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       commission_rate:commission_rate,
       store_id: storeId,
       created_by,
+      plastic_fee,
       type,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -1071,6 +1073,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // to maintain foreign key constraints.
     await db.transaction('rw', [db.inventory_bills, db.inventory_items], async () => {
       await db.inventory_bills.add(batchRecord);
+      console.log(batchRecord,'batchrecord')
       const now = new Date().toISOString();
 
       const mappedItems = items.map((it) => ({
