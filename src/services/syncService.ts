@@ -16,6 +16,8 @@ const SYNC_CONFIG = {
 
 // Table mapping for sync operations
 const SYNC_TABLES = [
+  'stores',
+  'users',
   'products',
   'suppliers', 
   'customers',

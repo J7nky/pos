@@ -105,12 +105,12 @@ export default function POS() {
   usePOSKeyboard({
     onNewBill: createNewTab,
     onCompleteSale: () => {
-      if (!isProcessing && activeTab.cart.length > 0) {
+      if (!isProcessing && activeTab && activeTab.cart.length > 0) {
         handleCheckout();
       }
     },
     onClearCart: () => {
-      if (activeTab.cart.length > 0) {
+      if (activeTab && activeTab.cart.length > 0) {
         updateActiveTab({ cart: [] });
       }
     },
@@ -802,9 +802,9 @@ export default function POS() {
         <div className={`fixed top-4 right-4 px-4 py-2 rounded shadow-lg z-50 text-white ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.message}</div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Product Selection */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-3 space-y-6">
           {/* Search */}
           <div className="bg-white p-4 rounded-lg shadow-sm">
             <div className="relative">
@@ -902,6 +902,7 @@ export default function POS() {
                   addOptionText="Add New Customer"
                   onAddNew={() => setShowAddCustomerForm(true)}
                   className={`w-full ${customerError ? 'border border-red-500' : ''}`}
+                  tabIndex={10000}
                   />
                 </div>
                 {customerError && (
@@ -922,7 +923,7 @@ export default function POS() {
                         ? 'bg-blue-50 border-blue-500 text-blue-700' 
                         : 'bg-gray-50 border-gray-300'
                     }`}
-                    tabIndex={3}
+                    tabIndex={10001}
                     accessKey="1"
                     aria-label="Cash payment (Ctrl+1)"
                   >
@@ -937,7 +938,7 @@ export default function POS() {
                         ? 'bg-blue-50 border-blue-500 text-blue-700' 
                         : 'bg-gray-50 border-gray-300'
                     }`}
-                    tabIndex={4}
+                    tabIndex={10002}
                     aria-label="Card payment"
                   >
                     <CreditCard className="w-4 h-4 mx-auto mb-1" />
@@ -951,7 +952,7 @@ export default function POS() {
                         ? 'bg-blue-50 border-blue-500 text-blue-700' 
                         : 'bg-gray-50 border-gray-300'
                     }`}
-                    tabIndex={5}
+                    tabIndex={10003}
                     accessKey="2"
                     aria-label="Credit payment (Ctrl+2)"
                   >
@@ -974,11 +975,12 @@ export default function POS() {
                       min="0"
                       autoCompleteValue={total}
                       className="focus:ring-2 focus:ring-blue-500"
+                      tabIndex={10004}
                     />
                     <input
                       ref={amountInputRef}
                       type="hidden"
-                      tabIndex={6}
+                      tabIndex={-1}
                       onFocus={() => {
                         // Focus the actual MoneyInput when this hidden input is focused
                         const moneyInput = amountInputRef.current?.parentElement?.querySelector('input[type="text"]') as HTMLInputElement;
@@ -1004,7 +1006,7 @@ export default function POS() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   rows={2}
                   placeholder="Add notes..."
-                  tabIndex={7}
+                  tabIndex={10005}
                 />
               </div>
  {/* Fixed Complete Sale Button at Bottom of Cart */}
@@ -1027,7 +1029,7 @@ export default function POS() {
         loading={isProcessing}
         shortcut="Ctrl+Enter"
         ariaLabel="Complete sale"
-        tabIndex={8}
+        tabIndex={10006}
         className="w-full"
       >
         Complete Sale
@@ -1051,33 +1053,33 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
     
 
       {/* Enhanced Product Grid */}
-      <div className="p-6">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+      <div className="p-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3">
           {(filteredProducts || []).map((product: any) => {
             const stock = getProductStock(product.id);
             const productInventoryItems = getProductInventoryItems(product.id) || [];
 
             return (
-              <div key={product.id} className="group border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:border-blue-300 transition-all duration-200 bg-white">
+              <div key={product.id} className="group border border-gray-200 rounded-xl p-3 hover:shadow-lg hover:border-blue-300 transition-all duration-200 bg-white">
                 {/* Product Image */}
                 <div className="relative mb-3">
                   <img 
                     src={product.image} 
                     alt={product.name} 
-                    className="w-full h-28 object-cover rounded-lg group-hover:scale-105 transition-transform duration-200" 
+                    className="w-full h-20 object-cover rounded-lg group-hover:scale-105 transition-transform duration-200" 
                   />
                 
                 </div>
 
                 {/* Product Info */}
                 <div className="space-y-2 mb-3">
-                  <h3 className="font-semibold text-gray-900 text-sm leading-tight group-hover:text-blue-600 transition-colors duration-200">
+                  <h3 className="font-semibold text-gray-900 text-xs leading-tight group-hover:text-blue-600 transition-colors duration-200">
                     {product.name}
                   </h3>
                   <div className="flex items-center justify-between">
                   
                     {product.category && (
-                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                      <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
                         {product.category}
                       </span>
                     )}
@@ -1095,7 +1097,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                         size="sm"
                         touchOptimized
                         disabled={inventoryItem.quantity === 0}
-                        className={`w-full p-3 rounded-lg border-2 transition-all duration-200 text-left ${
+                        className={`w-full p-2 rounded-lg border transition-all duration-200 text-left ${
                           inventoryItem.quantity === 0
                             ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
                             : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 hover:shadow-md'
@@ -1104,9 +1106,9 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                         tabIndex={100 + index}
                       >
                         <div className="space-y-1">
-                          <div className="font-medium text-sm">{inventoryItem.supplierName}</div>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className={`px-2 py-1 rounded-full ${
+                          <div className="font-medium text-xs">{inventoryItem.supplierName}</div>
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className={`px-1.5 py-0.5 rounded-full ${
                               inventoryItem.quantity === 0 
                                 ? 'bg-red-100 text-red-700' 
                                 : 'bg-green-100 text-green-700'
@@ -1119,7 +1121,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                               </span>
                             )}
                           </div>
-                          <div className="text-xs text-gray-500">
+                          <div className="text-[10px] text-gray-500">
                             Received: {inventoryItem.receivedQuantity}
                           </div>
                         </div>
@@ -1131,7 +1133,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                     <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2">
                       <Package className="w-6 h-6 text-gray-400" />
                     </div>
-                    <p className="text-xs text-gray-500">Out of Stock</p>
+                    <p className="text-[10px] text-gray-500">Out of Stock</p>
                   </div>
                 )}
               </div>
@@ -1198,7 +1200,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     size="sm"
                     className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors duration-150 min-h-[44px]"
                     ariaLabel={`Remove ${item.productName} from cart`}
-                    tabIndex={200 + index * 4 + 4}
+                    tabIndex={-1}
                   >
                     <Trash2 className="w-4 h-4" />
                   </AccessibleButton>
@@ -1243,7 +1245,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     <div className="relative">
                       <input
                         type="number"
-                        step="0.01"
+                        step="0.1"
                         value={item.weight ?? ''}
                         onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
                         className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
@@ -1272,23 +1274,21 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       onChange={(value) => updateCartItem(item.id, 'unitPrice', value ? parseFloat(value) : undefined)}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
                       placeholder="0.00"
-                    />
-                    <input
-                      type="hidden"
                       tabIndex={200 + index * 4 + 3}
-                      onFocus={() => {
-                        const moneyInput = document.querySelector(`input[placeholder="0.00"]`) as HTMLInputElement;
-                        moneyInput?.focus();
-                      }}
-                      aria-label={`Price for ${item.productName}`}
+                      ariaLabel={`Price for ${item.productName}`}
                     />
                   </div>
 
                   {/* Total Price */}
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Total</label>
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 rounded-lg border border-blue-200">
-                      <div className="text-lg font-bold text-blue-700 text-center">
+                    <div
+                      className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 rounded-lg border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      tabIndex={200 + index * 4 + 4}
+                      role="status"
+                      aria-label={`Total for ${item.productName} is ${formatCurrency(item.totalPrice)}`}
+                    >
+                      <div className="text-lg font-bold text-blue-700 text-center" aria-hidden="true">
                         {formatCurrency(item.totalPrice)}
                       </div>
                     </div>

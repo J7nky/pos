@@ -39,25 +39,43 @@ export default function MoneyInput({
   const [hasUsedAutoComplete, setHasUsedAutoComplete] = useState(false);
   const [previousValue, setPreviousValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const hideSuggestionTimeoutRef = useRef<number | null>(null);
+  const SUGGESTION_IDLE_HIDE_MS = 1500; // Hide suggestion shortly after user stops typing
 
   // Convert value to string for consistent handling
   const stringValue = typeof value === 'number' ? value.toString() : value;
 
-  // Calculate recommended value (add 3 zeros) - only if auto-complete hasn't been used
+  // Calculate recommended value (add 3 zeros) when typing; hide after brief idle period
   useEffect(() => {
+    // Clear any pending hide timer
+    if (hideSuggestionTimeoutRef.current) {
+      window.clearTimeout(hideSuggestionTimeoutRef.current);
+      hideSuggestionTimeoutRef.current = null;
+    }
+
     if (stringValue && stringValue.trim() !== '' && !hasUsedAutoComplete) {
       const numericValue = parseFloat(stringValue);
       if (!isNaN(numericValue) && numericValue > 0 && !hasUsedRecommendation) {
-        // Add 3 zeros (multiply by 1000)
         const recommended = (numericValue * 1000).toString();
         setRecommendedValue(recommended);
         setShowRecommendation(true);
+        // Hide the suggestion shortly after the user stops typing
+        hideSuggestionTimeoutRef.current = window.setTimeout(() => {
+          setShowRecommendation(false);
+        }, SUGGESTION_IDLE_HIDE_MS);
       } else {
         setShowRecommendation(false);
       }
     } else {
       setShowRecommendation(false);
     }
+
+    return () => {
+      if (hideSuggestionTimeoutRef.current) {
+        window.clearTimeout(hideSuggestionTimeoutRef.current);
+        hideSuggestionTimeoutRef.current = null;
+      }
+    };
   }, [stringValue, hasUsedRecommendation, hasUsedAutoComplete]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,14 +124,7 @@ export default function MoneyInput({
       setPreviousValue(autoCompleteString);
       setHasUsedAutoComplete(true); // Mark that auto-complete has been used
     }
-    
-    // Show recommendation when input is focused and has a value (only if auto-complete hasn't been used)
-    if (stringValue && stringValue.trim() !== '' && !hasUsedRecommendation && !hasUsedAutoComplete) {
-      const numericValue = parseFloat(stringValue);
-      if (!isNaN(numericValue) && numericValue > 0) {
-        setShowRecommendation(true);
-      }
-    }
+    // Do not show recommendation on focus alone; only while actively typing
   };
 
   const handleInputBlur = () => {

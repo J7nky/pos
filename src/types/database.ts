@@ -92,20 +92,17 @@ export interface Database {
       users: {
         Row: {
           id: string;
-          preferred_currency: 'USD' | 'LBP';
-          preferred_language: 'en' | 'ar'|'fr';
-          preferred_commission_rate: number;
           email: string;
           name: string;
           role: 'admin' | 'manager' | 'cashier';
           store_id: string;
           created_at: string;
           updated_at: string;
+          monthly_salary: string;
         };
         Insert: {
-          preferred_currency: 'USD' | 'LBP';
-          preferred_language: 'en' | 'ar'|'fr';
-          preferred_commission_rate: number;
+          monthly_salary?: string;
+
           id: string;
           email: string;
           name: string;
@@ -116,9 +113,7 @@ export interface Database {
         };
         Update: {
           id?: string;
-          preferred_currency?: 'USD' | 'LBP';
-          preferred_language?: 'en' | 'ar'|'fr';
-          preferred_commission_rate?: number;
+          monthly_salary?: string;
           email?: string;
           name?: string;
           role?: 'admin' | 'manager' | 'cashier';
@@ -129,6 +124,9 @@ export interface Database {
       stores: {
         Row: {
           id: string;
+          preferred_currency: 'USD' | 'LBP';
+          preferred_language: 'en' | 'ar'|'fr';
+          preferred_commission_rate: number;
           name: string;
           address: string;
           phone: string;
@@ -138,6 +136,9 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          preferred_currency?: 'USD' | 'LBP';
+          preferred_language?: 'en' | 'ar'|'fr';
+          preferred_commission_rate?: number;
           name: string;
           address: string;
           phone: string;
@@ -146,6 +147,9 @@ export interface Database {
           updated_at?: string;
         };
         Update: {
+          preferred_currency?: 'USD' | 'LBP';
+          preferred_language?: 'en' | 'ar'|'fr';
+          preferred_commission_rate?: number;
           id?: string;
           name?: string;
           address?: string;
