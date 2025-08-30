@@ -12,7 +12,13 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
 }) => {
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isCashDrawerOpen, setIsCashDrawerOpen] = useState(true);
 
+  const closeCashDrawer = () => {
+    setIsCashDrawerOpen(false);
+    
+    console.log("Cash drawer closed!");
+  };
   useEffect(() => {
     loadStatus();
   }, [storeId]);
@@ -62,7 +68,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
       <h4 className="text-lg font-semibold text-gray-900 mb-4">Current Status</h4>
       
       {status.status === 'active' ? <>
-        (
+        
     
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
       <div className="bg-green-50 p-4 rounded-lg border border-green-200">
@@ -98,7 +104,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
         <div className="text-sm text-purple-600">Time Open</div>
       </div>
     </div>
-    
+{/*     
     <div className="mt-6 p-4 bg-gray-50 rounded-lg">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -118,9 +124,9 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
           </span>
         </div>
       </div>
-    </div>
+    </div> */}
     
-  ) 
+  
       </>: (
         <div className="text-center py-8">
           <div className="mb-4">
@@ -141,15 +147,16 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
       
       <div className="mt-6 flex justify-end">
         <button
-          onClick={loadStatus}
+          onClick={closeCashDrawer}
           className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm"
         >
-          Refresh Status
+          Close Cash Drawer
         </button>
       </div>
     </div>
   );
 };
+
 
 
 

@@ -21,7 +21,6 @@ try {
 
 // Check if we're online
 const isOnline = () => navigator.onLine;
-
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
@@ -30,23 +29,23 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   },
   global: {
     headers: {
-      // Add a custom header to help identify offline scenarios
       'X-Client-Info': `pos-app-${isOnline() ? 'online' : 'offline'}`
     },
-    // Add a fetch wrapper to intercept requests when offline
-    fetch: async (url: string, options: any = {}) => {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       // If offline, prevent auth refresh requests
-      if (!navigator.onLine && url.includes('/auth/v1/token')) {
+      if (!navigator.onLine && typeof input === "string" && input.includes('/auth/v1/token')) {
         console.log('Skipping auth token refresh while offline');
         throw new Error('Offline - skipping auth refresh');
       }
-      return fetch(url, options);
+      return fetch(input, init);
     }
   },
   db: {
     schema: 'public'
   }
 });
+
+
 
 // Helper function to handle Supabase errors
 export const handleSupabaseError = (error: any) => {

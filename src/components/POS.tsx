@@ -1173,7 +1173,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
     <div className="max-h-96 overflow-y-auto">
       {(activeTab?.cart || []).length > 0 ? (
         <div className="divide-y divide-gray-100">
-          {(activeTab?.cart || []).map((item: any, index: number) => {
+          {(activeTab?.cart || []).map((item: any, index: number)  => {
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
 
