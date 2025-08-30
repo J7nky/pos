@@ -370,6 +370,52 @@ export class CashDrawerUpdateService {
       return [];
     }
   }
+
+  /**
+   * Close cash drawer session with actual amount count
+   */
+  public async closeCashDrawer(
+    sessionId: string,
+    actualAmount: number,
+    closedBy: string,
+    notes?: string
+  ): Promise<{
+    success: boolean;
+    sessionId: string;
+    expectedAmount: number;
+    actualAmount: number;
+    variance: number;
+    error?: string;
+  }> {
+    try {
+      // Close the cash drawer session using the database method
+      await db.closeCashDrawerSession(sessionId, actualAmount, closedBy, notes);
+      
+      // Get the updated session to return details
+      const session = await db.cash_drawer_sessions.get(sessionId);
+      if (!session) {
+        throw new Error('Session not found after closing');
+      }
+
+      return {
+        success: true,
+        sessionId,
+        expectedAmount: session.expectedAmount || 0,
+        actualAmount: session.actualAmount || 0,
+        variance: session.variance || 0
+      };
+    } catch (error) {
+      console.error('Error closing cash drawer:', error);
+      return {
+        success: false,
+        sessionId,
+        expectedAmount: 0,
+        actualAmount: 0,
+        variance: 0,
+        error: error instanceof Error ? error.message : 'Unknown error occurred'
+      };
+    }
+  }
 }
 
 export const cashDrawerUpdateService = CashDrawerUpdateService.getInstance();
