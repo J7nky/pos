@@ -350,8 +350,11 @@ class POSDatabase extends Dexie {
       console.error('❌ Failed to register transaction hook:', error);
     }
     
-    try {
-      (this.sale_items as any).hook('creating', this.handleSaleItemCreated);
+    try {(this.sale_items ).hook('updating', (primKey , obj, trans) => {
+      console.log("🔥 Hook triggered raw:", { primKey, obj, trans });
+      return this.handleSaleItemCreated(primKey, obj, trans);
+    });
+    
       console.log('✅ Sale items hook registered');
     } catch (error) {
       console.error('❌ Failed to register sale items hook:', error);
@@ -779,6 +782,7 @@ class POSDatabase extends Dexie {
 
   // Hook for automatic cash drawer updates when sale items are created
   private handleSaleItemCreated = async (primKey: any, obj: any, trans: any) => {
+    
     console.log('🔍 handleSaleItemCreated hook triggered!', { primKey, obj });
     console.log('🔍 Hook method called with:', { primKey, obj, trans });
     

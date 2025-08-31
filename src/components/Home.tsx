@@ -52,6 +52,7 @@ const getTransactionColor = (type: string) => {
 export default function Home() {
   const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
   const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
+  const [storePreferredCurrency, setStorePreferredCurrency] = useState<'USD' | 'LBP'>('USD');
 
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
@@ -89,6 +90,10 @@ export default function Home() {
     if (!raw.storeId) return;
     
     try {
+      // Get store's preferred currency first
+      const storeCurrency = await cashDrawerUpdateService.getStorePreferredCurrency(raw.storeId);
+      setStorePreferredCurrency(storeCurrency);
+      
       const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(raw.storeId);
       const history = await cashDrawerUpdateService.getCashDrawerTransactionHistory(raw.storeId);
       const currentSession = await db.getCurrentCashDrawerSession(raw.storeId);
@@ -97,7 +102,7 @@ export default function Home() {
         currentBalance: balance,
         lastUpdated: new Date().toISOString(),
         transactionCount: history.length,
-        openedAt: currentSession?.openedAt || ''
+        openedAt: currentSession?.opened_at || ''
       });
       
       setTransactionHistory(history);
@@ -105,6 +110,34 @@ export default function Home() {
       console.error('Error loading cash drawer status:', error);
     } finally {
     }
+  };
+
+  // Helper function to normalize cash drawer balance to store's preferred currency
+  const getNormalizedCashDrawerBalance = (balance: number): number => {
+    if (!cashDrawerStatus || !storePreferredCurrency) {
+      return balance
+    }
+    else{
+      const newBalance=cashDrawerUpdateService.normalizeAmountToStoreCurrency(balance, 'LBP', storePreferredCurrency);
+      console.log(123213123,storePreferredCurrency)
+      return newBalance;
+
+    }
+    // Normalize the balance to the store's preferred currency
+    // Assuming the balance is stored in USD (base currency) and needs to be converted
+  };
+
+  // Helper function to format currency based on store's preferred currency
+  const formatCurrencyForStore = (amount: number): string => {
+    if (storePreferredCurrency === 'LBP') {
+      return `${amount.toLocaleString()} ل.ل`;
+    }
+    return `$${amount.toLocaleString()}`;
+  };
+
+  // Helper function to get currency symbol for store's preferred currency
+  const getStoreCurrencySymbol = (): string => {
+    return storePreferredCurrency === 'LBP' ? 'ل.ل' : '$';
   };
 
   useEffect(() => {
@@ -191,7 +224,7 @@ export default function Home() {
       color: 'bg-amber-500',
       hoverColor: 'hover:bg-amber-600',
       action: () => window.dispatchEvent(new CustomEvent('navigate', { detail: 'accounting' })),
-      stats: `${formatCurrency(todayExpenses)} today`
+      stats: `${formatCurrencyForStore(todayExpenses)} today (${storePreferredCurrency})`
     },
     {
       id: 'today-sales',
@@ -217,15 +250,15 @@ export default function Home() {
 
   const stats = [
     {
-      title: "Cash in Drawer",
-      value: cashDrawerStatus ?                formatCurrency(cashDrawerStatus.currentBalance): 'Closed',
+      title: `Cash in Drawer (${storePreferredCurrency})`,
+      value: cashDrawerStatus ? formatCurrencyForStore(getNormalizedCashDrawerBalance(cashDrawerStatus.currentBalance)) : 'Closed',
       icon: DollarSign,
       color: 'bg-green-500',
       change: cashDrawerStatus ? `Opened: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}` : 'Not opened today'
     },
     {
-      title: "Today's Expense", 
-      value: formatCurrency(todayExpenses),
+      title: `Today's Expense (${storePreferredCurrency})`, 
+      value: formatCurrencyForStore(todayExpenses),
       icon: Receipt,
       color: 'bg-red-500',
       change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today).length} transactions`

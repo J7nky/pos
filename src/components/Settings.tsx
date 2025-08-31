@@ -55,9 +55,9 @@ export default function Settings() {
   // Handle language change with database update
   const handleLanguageChange = async (newLanguage: string) => {
     setLanguage(newLanguage);
-    if (userProfile?.id) {
+    if (userProfile?.store_id) {
       try {
-        await supabaseData?.updateUserSettings?.(userProfile.id, {
+        await supabaseData?.updateStoreSettings?.(userProfile.store_id, {
           preferred_language: newLanguage as 'en' | 'ar' | 'fr'
         });
         setShowSaveMessage(true);

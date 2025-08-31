@@ -206,172 +206,119 @@ export class CashDrawerUpdateService {
     transactionData: CashTransactionData
   ): Promise<CashDrawerUpdateResult> {
     
+    // Validate input data
+    if (!this.validateTransactionData(transactionData)) {
+      return {
+        success: false,
+        previousBalance: 0,
+        newBalance: 0,
+        error: 'Invalid transaction data provided'
+      };
+    }
+
     // Use operation lock to prevent race conditions
     return this.acquireOperationLock(transactionData.storeId, async () => {
       try {
-      // Get store's preferred currency from cash drawer account
-      const storeCurrency = await this.getStorePreferredCurrency(transactionData.storeId);
-      
-      // Determine preferred storage currency and normalize amount to it
-      const currency = transactionData.preferredCurrency || storeCurrency || transactionData.currency || 'USD';
-      const normalizedAmount = transactionData.currency === currency
-        ? transactionData.amount
-        : currencyService.convertCurrency(transactionData.amount, transactionData.currency, currency);
+        // Get store's preferred currency from cash drawer account
+        const storeCurrency = await this.getStorePreferredCurrency(transactionData.storeId);
+        
+        // Normalize amount to store's preferred currency
+        const normalizedAmount = this.normalizeAmountToStoreCurrency(
+          transactionData.amount, 
+          storeCurrency, 
+          storeCurrency
+        );
 
-      // Get or create cash drawer account (single consolidated check)
-      let account = await db.getCashDrawerAccount(transactionData.storeId);
-      if (!account) {
-        try {
-          // Get store's preferred currency from context or use default
-          const storeCurrency = await this.getStorePreferredCurrency(transactionData.storeId);
-          
-          account = {
-            id: createId(),
-            store_id: transactionData.storeId,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            _synced: false,
-            accountCode: '1001',
-            name: 'Cash Drawer',
-            current_balance: 0,
-            currency: storeCurrency,
-            isActive: true
-          };
-          await db.cash_drawer_accounts.add(account);
-          console.log(`💰 Created cash drawer account for store: ${transactionData.storeId} with currency: ${storeCurrency}`);
-        } catch (error) {
-          console.error('Error creating a new cash account:', error);
-        }
-      }
-      if (!account) {
-        return {
-          success: false,
-          previousBalance: 0,
-          newBalance: 0,
-          error: 'Cash drawer account not found'
-        };
-      }
-
-      // Get current cash drawer session - REQUIRE explicit session opening (unless auto-open allowed)
-      let session = await db.getCurrentCashDrawerSession(transactionData.storeId);
-      if (!session || session.status !== 'open') {
-        // If auto-open is allowed (for hooks), try to open a session
-        if (transactionData.allowAutoSessionOpen) {
-          console.log('💰 No active session found, auto-opening for transaction hook');
-          
-          const sessionResult = await this.openCashDrawerSession(
-            transactionData.storeId,
-            0, // Start with 0 opening amount
-            transactionData.createdBy,
-            `Auto-opened for ${transactionData.type}`
-          );
-          
-          if (!sessionResult.success) {
-            return {
-              success: false,
-              previousBalance: 0,
-              newBalance: 0,
-              error: `Failed to auto-open session: ${sessionResult.error}`
-            };
-          }
-          
-          // Get the newly opened session
-          session = await db.getCurrentCashDrawerSession(transactionData.storeId);
-        } else {
+        // Get or create cash drawer account
+        const account = await this.getOrCreateCashDrawerAccount(transactionData.storeId, storeCurrency);
+        if (!account) {
           return {
             success: false,
             previousBalance: 0,
             newBalance: 0,
-            error: 'No active cash drawer session. Please open cash drawer session before processing transactions.'
+            error: 'Failed to create or retrieve cash drawer account'
           };
         }
-      }
 
-      const previousBalance = Number((account as any).current_balance ?? 0) || 0;
-      let balanceChange = 0;
+        // Get current cash drawer session
+        const session = await this.getOrCreateCashDrawerSession(transactionData, account);
+        if (!session) {
+          return {
+            success: false,
+            previousBalance: 0,
+            newBalance: 0,
+            error: 'No active cash drawer session and auto-opening not allowed'
+          };
+        }
 
-      // Calculate balance change based on transaction type
-      switch (transactionData.type) {
-        case 'sale':
-          // Cash sales increase cash drawer
-          balanceChange = normalizedAmount;
-          break;
-        case 'payment':
-          // Customer payments increase cash drawer
-          balanceChange = normalizedAmount;
-          break;
-        case 'expense':
-          // Expenses decrease cash drawer
-          balanceChange = -normalizedAmount;
-          break;
-        case 'refund':
-          // Refunds decrease cash drawer
-          balanceChange = -normalizedAmount;
-          break;
-        default:
+        // Get current balance and calculate changes
+        const previousBalance = Number(account.current_balance ?? 0) || 0;
+        const balanceChange = this.calculateBalanceChange(transactionData.type, normalizedAmount);
+        
+        if (balanceChange === null) {
           return {
             success: false,
             previousBalance,
             newBalance: previousBalance,
             error: `Unsupported transaction type: ${transactionData.type}`
           };
-      }
-
-      // Update cash drawer account balance with transaction rollback on failure
-      const newBalance = Number(previousBalance) + Number(balanceChange);
-      const transactionId = createId();
-      
-      try {
-        // Use database transaction to ensure atomicity
-        await db.transaction('rw', [db.cash_drawer_accounts, db.transactions], async () => {
-          // Update cash drawer account balance
-          await db.cash_drawer_accounts.update(account.id, {
-            current_balance: newBalance as any,
-            updated_at: new Date().toISOString(),
-            _synced: false
-          } as any);
-
-          // Create transaction record for cash drawer tracking
-          await db.transactions.add({
-            id: transactionId,
-            type: balanceChange > 0 ? 'income' : 'expense',
-            category: `cash_drawer_${transactionData.type}`,
-            amount: Math.abs(balanceChange),
-            currency: currency,
-            description: `${transactionData.description} - Cash Drawer Update`,
-            reference: transactionData.reference,
-            store_id: transactionData.storeId,
-            created_by: transactionData.createdBy,
-            created_at: new Date().toISOString(),
-            _synced: false
-          });
-        });
-      } catch (dbError) {
-        console.error('Database transaction failed, rolling back cash drawer update:', dbError);
-        throw new Error(`Failed to update cash drawer: ${dbError instanceof Error ? dbError.message : 'Database error'}`);
-      }
-
-      console.log(`💰 Cash drawer updated: ${transactionData.type} - $${balanceChange.toFixed(2)} (Balance: $${previousBalance.toFixed(2)} → $${newBalance.toFixed(2)})`);
-
-      // Notify UI listeners about cash drawer change
-      try {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('cash-drawer-updated', { detail: {
-            storeId: transactionData.storeId,
-            newBalance,
-            transactionId
-          }}));
         }
-      } catch (e) {
-        // no-op in non-browser environments
-      }
 
-      return {
-        success: true,
-        previousBalance,
-        newBalance,
-        transactionId
-      };
+        // Validate balance change
+        if (balanceChange < 0 && Math.abs(balanceChange) > previousBalance) {
+          return {
+            success: false,
+            previousBalance,
+            newBalance: previousBalance,
+            error: `Insufficient funds in cash drawer. Required: $${Math.abs(balanceChange).toFixed(2)}, Available: $${previousBalance.toFixed(2)}`
+          };
+        }
+
+        // Update cash drawer account balance with transaction rollback on failure
+        const newBalance = Number(previousBalance) + Number(balanceChange);
+        const transactionId = createId();
+        
+        try {
+          // Use database transaction to ensure atomicity
+          await db.transaction('rw', [db.cash_drawer_accounts, db.transactions], async () => {
+            // Update cash drawer account balance
+            await db.cash_drawer_accounts.update(account.id, {
+              current_balance: newBalance as any,
+              updated_at: new Date().toISOString(),
+              _synced: false
+            } as any);
+
+            // Create transaction record for cash drawer tracking
+            await db.transactions.add({
+              id: transactionId,
+              type: balanceChange > 0 ? 'income' : 'expense',
+              category: `cash_drawer_${transactionData.type}`,
+              amount: Math.abs(balanceChange),
+              currency: storeCurrency,
+              description: `${transactionData.description} - Cash Drawer Update`,
+              reference: transactionData.reference,
+              store_id: transactionData.storeId,
+              created_by: transactionData.createdBy,
+              created_at: new Date().toISOString(),
+              _synced: false
+            });
+          });
+        } catch (dbError) {
+          console.error('Database transaction failed, rolling back cash drawer update:', dbError);
+          throw new Error(`Failed to update cash drawer: ${dbError instanceof Error ? dbError.message : 'Database error'}`);
+        }
+
+        console.log(`💰 Cash drawer updated: ${transactionData.type} - $${balanceChange.toFixed(2)} (Balance: $${previousBalance.toFixed(2)} → $${newBalance.toFixed(2)})`);
+
+        // Notify UI listeners about cash drawer change
+        this.notifyCashDrawerUpdate(transactionData.storeId, newBalance, transactionId);
+
+        return {
+          success: true,
+          previousBalance,
+          newBalance,
+          transactionId
+        };
 
       } catch (error) {
         console.error('Error updating cash drawer for transaction:', error);
@@ -593,20 +540,25 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Get store's preferred currency from cash drawer account
+   * Get store's preferred currency from stores table
    */
-  private async getStorePreferredCurrency(storeId: string): Promise<'USD' | 'LBP'> {
+  public async getStorePreferredCurrency(storeId: string): Promise<'USD' | 'LBP'> {
     try {
-      const account = await db.getCashDrawerAccount(storeId);
-      if (account && (account as any).currency) {
-        return (account as any).currency;
+      // Import SupabaseService dynamically to avoid circular dependencies
+      const { SupabaseService } = await import('./supabaseService');
+      const store = await SupabaseService.getStore(storeId);
+      
+      if (store && store.preferred_currency) {
+        console.log(`💰 Store ${storeId} preferred currency: ${store.preferred_currency}`);
+        return store.preferred_currency;
       }
       
+      console.warn(`💰 Store ${storeId} has no preferred_currency set, using USD as default`);
       // Fallback to default currency
-      return 'USD';
+      return 'LBP';
     } catch (error) {
-      console.warn('Could not determine store currency, using USD as default:', error);
-      return 'USD';
+      console.warn(`💰 Could not determine store currency from stores table for store ${storeId}, using USD as default:`, error);
+      return 'LBP';
     }
   }
 
@@ -644,6 +596,161 @@ export class CashDrawerUpdateService {
     } catch (error) {
       console.error('Error getting cash drawer transaction history:', error);
       return [];
+    }
+  }
+
+  /**
+   * Validate transaction data before processing
+   */
+  private validateTransactionData(data: CashTransactionData): boolean {
+    if (!data.storeId || !data.createdBy || !data.reference) {
+      console.error('Missing required transaction data:', { storeId: data.storeId, createdBy: data.createdBy, reference: data.reference });
+      return false;
+    }
+
+    if (typeof data.amount !== 'number' || data.amount <= 0) {
+      console.error('Invalid amount:', data.amount);
+      return false;
+    }
+
+    if (!['sale', 'payment', 'expense', 'refund'].includes(data.type)) {
+      console.error('Invalid transaction type:', data.type);
+      return false;
+    }
+
+    if (!data.currency || !['USD', 'LBP'].includes(data.currency)) {
+      console.error('Invalid currency:', data.currency);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Normalize amount to store's preferred currency
+   */
+  public normalizeAmountToStoreCurrency(
+    amount: number, 
+    transactionCurrency: 'USD' | 'LBP', 
+    storeCurrency: 'USD' | 'LBP'
+  ): number {
+    if (transactionCurrency === storeCurrency) {
+      return amount;
+    }
+    
+    try {
+      return currencyService.convertCurrency(amount, transactionCurrency, storeCurrency);
+    } catch (error) {
+      console.error('Currency conversion failed, using original amount:', error);
+      return amount; // Fallback to original amount
+    }
+  }
+
+  /**
+   * Get or create cash drawer account
+   */
+  private async getOrCreateCashDrawerAccount(storeId: string, storeCurrency: 'USD' | 'LBP') {
+    try {
+      let account = await db.getCashDrawerAccount(storeId);
+      if (!account) {
+        // Get the store's preferred currency from the stores table
+        const actualStoreCurrency = await this.getStorePreferredCurrency(storeId);
+        
+        account = {
+          id: createId(),
+          store_id: storeId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          _synced: false,
+          accountCode: '1001',
+          name: 'Cash Drawer',
+          current_balance: 0,
+          currency: actualStoreCurrency,
+          isActive: true
+        };
+        await db.cash_drawer_accounts.add(account);
+        console.log(`💰 Created cash drawer account for store: ${storeId} with currency: ${actualStoreCurrency}`);
+      }
+      return account;
+    } catch (error) {
+      console.error('Error creating/retrieving cash drawer account:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get or create cash drawer session based on transaction requirements
+   */
+  private async getOrCreateCashDrawerSession(
+    transactionData: CashTransactionData, 
+    account: any
+  ): Promise<any> {
+    let session = await db.getCurrentCashDrawerSession(transactionData.storeId);
+    
+    if (!session || session.status !== 'open') {
+      // If auto-open is allowed (for hooks), try to open a session
+      if (transactionData.allowAutoSessionOpen) {
+        console.log('💰 No active session found, auto-opening for transaction hook');
+        
+        const sessionResult = await this.openCashDrawerSession(
+          transactionData.storeId,
+          0, // Start with 0 opening amount
+          transactionData.createdBy,
+          `Auto-opened for ${transactionData.type}`
+        );
+        
+        if (!sessionResult.success) {
+          console.error('Failed to auto-open session:', sessionResult.error);
+          return null;
+        }
+        
+        // Get the newly opened session
+        session = await db.getCurrentCashDrawerSession(transactionData.storeId);
+      } else {
+        console.warn('No active cash drawer session and auto-opening not allowed');
+        return null;
+      }
+    }
+    
+    return session;
+  }
+
+  /**
+   * Calculate balance change based on transaction type
+   */
+  private calculateBalanceChange(transactionType: string, amount: number): number | null {
+    switch (transactionType) {
+      case 'sale':
+      case 'payment':
+        // Cash sales and customer payments increase cash drawer
+        return amount;
+      case 'expense':
+      case 'refund':
+        // Expenses and refunds decrease cash drawer
+        return -amount;
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Notify UI listeners about cash drawer changes
+   */
+  private notifyCashDrawerUpdate(storeId: string, newBalance: number, transactionId: string): void {
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
+          detail: {
+            storeId,
+            newBalance,
+            transactionId,
+            timestamp: new Date().toISOString()
+          }
+        }));
+      }
+    } catch (error) {
+      // Silently fail in non-browser environments or if event dispatch fails
+      console.debug('Could not dispatch cash drawer update event:', error);
     }
   }
 }
