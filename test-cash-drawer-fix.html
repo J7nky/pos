@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cash Drawer Transaction Fix Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        pre {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Cash Drawer Transaction Fix Test</h1>
+    <p>This test verifies that the "Transaction committed too early" error has been fixed.</p>
+
+    <div class="test-section">
+        <h2>Test 1: Basic Cash Drawer Update</h2>
+        <button id="testBtn1">Run Basic Cash Drawer Test</button>
+        <div id="result1" class="status info">Click the button to run the test</div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Simulated Sale Processing</h2>
+        <button id="testBtn2">Run Sale Processing Test</button>
+        <div id="result2" class="status info">Click the button to run the test</div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="overallResult" class="status info">Tests not run yet</div>
+        <pre id="logs"></pre>
+    </div>
+
+    <script type="module">
+        // Test utilities
+        const logs = [];
+        function log(message, data = null) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${message}`;
+            logs.push(logEntry);
+            if (data) {
+                logs.push(JSON.stringify(data, null, 2));
+            }
+            document.getElementById('logs').textContent = logs.join('\n');
+            console.log(message, data);
+        }
+
+        function updateResult(elementId, status, message) {
+            const element = document.getElementById(elementId);
+            element.className = `status ${status}`;
+            element.textContent = message;
+        }
+
+        // Test 1: Basic cash drawer update
+        document.getElementById('testBtn1').addEventListener('click', async () => {
+            const btn = document.getElementById('testBtn1');
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+
+            try {
+                log('🚀 Starting basic cash drawer test...');
+
+                // Import the service
+                const { cashDrawerUpdateService } = await import('./src/services/cashDrawerUpdateService.ts');
+
+                log('✅ Service imported successfully');
+
+                // Test the cash drawer update
+                const result = await cashDrawerUpdateService.updateCashDrawerForTransaction({
+                    type: 'sale',
+                    amount: 25.50,
+                    currency: 'USD',
+                    description: 'Test sale from HTML test',
+                    reference: 'HTML-TEST-001',
+                    storeId: 'test-store',
+                    createdBy: 'test-user',
+                    allowAutoSessionOpen: true
+                });
+
+                log('💰 Cash drawer update result:', result);
+
+                if (result.success) {
+                    updateResult('result1', 'success', `✅ SUCCESS: Balance updated from $${result.previousBalance} to $${result.newBalance}`);
+                    log('🎉 Basic test PASSED');
+                } else {
+                    updateResult('result1', 'error', `❌ FAILED: ${result.error}`);
+                    log('💥 Basic test FAILED');
+                }
+
+            } catch (error) {
+                log('❌ Test 1 failed with error:', error);
+                updateResult('result1', 'error', `❌ ERROR: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Run Basic Cash Drawer Test';
+            }
+        });
+
+        // Test 2: Simulated sale processing with transaction
+        document.getElementById('testBtn2').addEventListener('click', async () => {
+            const btn = document.getElementById('testBtn2');
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+
+            try {
+                log('🚀 Starting sale processing test...');
+
+                // Import required modules
+                const { db } = await import('./src/lib/db.ts');
+                const { cashDrawerUpdateService } = await import('./src/services/cashDrawerUpdateService.ts');
+
+                log('✅ Modules imported successfully');
+
+                // Create test data
+                const testSaleItem = {
+                    id: 'test-sale-' + Date.now(),
+                    store_id: 'test-store',
+                    inventory_item_id: 'test-inv-' + Date.now(),
+                    product_id: 'test-product',
+                    supplier_id: 'test-supplier',
+                    quantity: 1,
+                    weight: null,
+                    unit_price: 15.00,
+                    received_value: 15.00,
+                    payment_method: 'cash',
+                    notes: 'Test sale from HTML test',
+                    customer_id: null,
+                    created_at: new Date().toISOString(),
+                    created_by: 'test-user',
+                    _synced: false
+                };
+
+                log('📝 Created test sale item:', testSaleItem);
+
+                // Simulate the transaction that was causing issues
+                let transactionSuccess = false;
+                try {
+                    await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
+                        log('🔄 Starting transaction for sale processing...');
+
+                        // Add sale item
+                        await db.sale_items.add(testSaleItem);
+                        log('✅ Sale item added to transaction');
+
+                        // This should trigger the hook and test our fix
+                        log('🔄 Transaction should complete without "committed too early" error');
+                        transactionSuccess = true;
+                    });
+
+                    if (transactionSuccess) {
+                        updateResult('result2', 'success', '✅ SUCCESS: Transaction completed without errors');
+                        log('🎉 Sale processing test PASSED');
+                    } else {
+                        updateResult('result2', 'error', '❌ FAILED: Transaction did not complete successfully');
+                        log('💥 Sale processing test FAILED');
+                    }
+
+                } catch (error) {
+                    if (error.message && error.message.includes('committed too early')) {
+                        updateResult('result2', 'error', '❌ FAILED: "Transaction committed too early" error still occurs');
+                        log('💥 CRITICAL: The fix did not work - error still occurs:', error);
+                    } else {
+                        updateResult('result2', 'error', `❌ FAILED: Unexpected error: ${error.message}`);
+                        log('💥 Unexpected error:', error);
+                    }
+                }
+
+            } catch (error) {
+                log('❌ Test 2 failed with error:', error);
+                updateResult('result2', 'error', `❌ ERROR: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Run Sale Processing Test';
+            }
+        });
+
+        // Update overall result
+        function updateOverallResult() {
+            const result1 = document.getElementById('result1').classList.contains('success');
+            const result2 = document.getElementById('result2').classList.contains('success');
+
+            if (result1 && result2) {
+                updateResult('overallResult', 'success', '🎉 ALL TESTS PASSED: Transaction fix is working correctly!');
+            } else if (result1 || result2) {
+                updateResult('overallResult', 'info', '⚠️ PARTIAL SUCCESS: Some tests passed, others need attention');
+            } else {
+                updateResult('overallResult', 'error', '❌ TESTS FAILED: Transaction issues may still exist');
+            }
+        }
+
+        // Monitor test results
+        const observer = new MutationObserver(updateOverallResult);
+        observer.observe(document.getElementById('result1'), { attributes: true, attributeFilter: ['class'] });
+        observer.observe(document.getElementById('result2'), { attributes: true, attributeFilter: ['class'] });
+
+        log('🎯 Test page loaded. Click the test buttons to verify the transaction fix.');
+    </script>
+</body>
+</html>

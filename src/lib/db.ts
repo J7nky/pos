@@ -780,8 +780,7 @@ class POSDatabase extends Dexie {
   // Hook for automatic cash drawer updates when sale items are created
   private handleSaleItemCreated = async (primKey: any, obj: any, trans: any) => {
     console.log('🔍 handleSaleItemCreated hook triggered!', { primKey, obj });
-    console.log('🔍 Hook method called with:', { primKey, obj, trans });
-    
+
     try {
       // Only process cash sales
       if (obj.payment_method !== 'cash') {
@@ -797,13 +796,13 @@ class POSDatabase extends Dexie {
 
       // Import the service dynamically to avoid circular dependencies
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-      
+
       console.log(`💰 Auto-updating cash drawer for cash sale: $${obj.received_value || 0}`);
-      
+
       // Get store's preferred currency
       const account = await this.getCashDrawerAccount(obj.store_id);
       const storeCurrency = account?.currency || 'USD';
-      
+
       // Use the internal transaction update method that can auto-open sessions
       const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
         type: 'sale',
@@ -816,7 +815,7 @@ class POSDatabase extends Dexie {
         customerId: obj.customer_id || undefined,
         allowAutoSessionOpen: true // Allow automatic session opening for hooks
       });
-      
+
       if (!updateResult.success) {
         console.error('Failed to update cash drawer for sale:', updateResult.error);
       } else {

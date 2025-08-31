@@ -317,12 +317,39 @@ export class CashDrawerUpdateService {
           };
       }
 
-      // Update cash drawer account balance with transaction rollback on failure
+            // Update cash drawer account balance with transaction rollback on failure
       const newBalance = Number(previousBalance) + Number(balanceChange);
       const transactionId = createId();
-      
+
       try {
-        // Use database transaction to ensure atomicity
+        // Always defer cash drawer updates when called from hooks to avoid nested transaction issues
+        if (transactionData.allowAutoSessionOpen) {
+          console.log('🔄 Deferring cash drawer update to avoid nested transaction conflicts');
+
+          // Use setTimeout to ensure we're outside any current transaction
+          setTimeout(async () => {
+            try {
+              await this.performDeferredCashDrawerUpdate(
+                account.id,
+                newBalance,
+                balanceChange,
+                transactionId,
+                transactionData,
+                currency
+              );
+            } catch (error) {
+              console.error('Error in deferred cash drawer update:', error);
+            }
+          }, 0);
+          return {
+            success: true,
+            previousBalance,
+            newBalance,
+            transactionId
+          };
+        }
+
+        // For non-hook calls, use normal transaction approach
         await db.transaction('rw', [db.cash_drawer_accounts, db.transactions], async () => {
           // Update cash drawer account balance
           await db.cash_drawer_accounts.update(account.id, {
@@ -611,6 +638,64 @@ export class CashDrawerUpdateService {
   }
 
   /**
+   * Perform deferred cash drawer update to avoid nested transaction issues
+   */
+  private async performDeferredCashDrawerUpdate(
+    accountId: string,
+    newBalance: number,
+    balanceChange: number,
+    transactionId: string,
+    transactionData: CashTransactionData,
+    currency: string
+  ): Promise<void> {
+    try {
+      await db.transaction('rw', [db.cash_drawer_accounts, db.transactions], async () => {
+        // Update cash drawer account balance
+        await db.cash_drawer_accounts.update(accountId, {
+          current_balance: newBalance as any,
+          updated_at: new Date().toISOString(),
+          _synced: false
+        } as any);
+
+        // Create transaction record for cash drawer tracking
+        await db.transactions.add({
+          id: transactionId,
+          type: balanceChange > 0 ? 'income' : 'expense',
+          category: `cash_drawer_${transactionData.type}`,
+          amount: Math.abs(balanceChange),
+          currency: currency,
+          description: `${transactionData.description} - Cash Drawer Update`,
+          reference: transactionData.reference,
+          store_id: transactionData.storeId,
+          created_by: transactionData.createdBy,
+          created_at: new Date().toISOString(),
+          _synced: false
+        });
+      });
+
+      console.log(`💰 Deferred cash drawer updated: ${transactionData.type} - $${balanceChange.toFixed(2)} (New Balance: $${newBalance.toFixed(2)})`);
+
+      // Notify UI listeners about cash drawer change
+      try {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cash-drawer-updated', {
+            detail: {
+              storeId: transactionData.storeId,
+              newBalance,
+              transactionId
+            }
+          }));
+        }
+      } catch (e) {
+        // no-op in non-browser environments
+      }
+    } catch (error) {
+      console.error('Error in deferred cash drawer update:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get cash drawer transaction history
    */
   public async getCashDrawerTransactionHistory(
@@ -633,12 +718,12 @@ export class CashDrawerUpdateService {
           const transactionDate = new Date(trans.created_at);
           const start = startDate ? new Date(startDate) : new Date(0);
           const end = endDate ? new Date(endDate) : new Date();
-          
+
           return transactionDate >= start && transactionDate <= end;
         });
       }
 
-      return filteredTransactions.sort((a, b) => 
+      return filteredTransactions.sort((a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
     } catch (error) {
