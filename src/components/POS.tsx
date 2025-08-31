@@ -444,7 +444,11 @@ export default function POS() {
     setIsProcessing(true);
     try {
       // Auto open cash drawer if not open
-      if (!raw.cashDrawer || raw.cashDrawer.status !== 'open') {
+      const currentCashDrawerStatus = await raw.getCurrentCashDrawerStatus();
+      console.log('Current cash drawer status:', currentCashDrawerStatus);
+      
+      if (!currentCashDrawerStatus || currentCashDrawerStatus.status !== 'active') {
+        console.log('Auto opening cash drawer - no active session found');
         let openingAmount = 0;
         if (activeTab.paymentMethod === 'cash') {
           openingAmount = parseFloat(activeTab.amountReceived) || total;
@@ -452,6 +456,8 @@ export default function POS() {
         if (userProfile?.id) {
           await raw.openCashDrawer(openingAmount, userProfile.id);
         }
+      } else {
+        console.log('Active cash drawer session found:', currentCashDrawerStatus.sessionId);
       }
 
       // Create comprehensive bill record for accounting integration

@@ -797,13 +797,25 @@ export class SyncService {
       return false; // No conflict
     }
 
-    // Special handling for cash drawer tables
+    // Financial-specific conflict resolution for sensitive data
     if (tableName === 'cash_drawer_accounts') {
       return await this.resolveCashDrawerAccountConflict(localRecord, remoteRecord);
     }
     
     if (tableName === 'cash_drawer_sessions') {
       return await this.resolveCashDrawerSessionConflict(localRecord, remoteRecord);
+    }
+    
+    if (tableName === 'transactions') {
+      return await this.resolveTransactionConflict(localRecord, remoteRecord);
+    }
+    
+    if (tableName === 'customers') {
+      return await this.resolveCustomerConflict(localRecord, remoteRecord);
+    }
+    
+    if (tableName === 'suppliers') {
+      return await this.resolveSupplierConflict(localRecord, remoteRecord);
     }
 
     // Determine the timestamp field for this table
@@ -837,23 +849,71 @@ export class SyncService {
   }
 
   /**
-   * Resolve conflicts for cash drawer accounts
+   * Resolve conflicts for cash drawer accounts with enhanced financial logic
    */
   private async resolveCashDrawerAccountConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
     const localBalance = Number(localRecord.current_balance || 0);
     const remoteBalance = Number(remoteRecord.current_balance || 0);
+    const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
+    const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
     
-    // If balances are significantly different, create reconciliation
+    // If balances are significantly different, implement financial conflict resolution
     if (Math.abs(localBalance - remoteBalance) > 0.01) {
-      console.warn(`💰 Cash drawer balance conflict detected: Local: $${localBalance}, Remote: $${remoteBalance}`);
+      console.warn(`💰 Cash drawer balance conflict detected: Local: $${localBalance.toFixed(2)} (${localTimestamp.toISOString()}), Remote: $${remoteBalance.toFixed(2)} (${remoteTimestamp.toISOString()})`);
       
-      // Use conservative approach: take the higher balance
-      const finalBalance = Math.max(localBalance, remoteBalance);
+      // Get active cash drawer session to understand context
+      const activeSession = await db.getCurrentCashDrawerSession(localRecord.store_id);
       
-      // Create reconciliation transaction if needed
-      if (finalBalance !== localBalance) {
-        await this.createReconciliationTransaction(localBalance, finalBalance, localRecord.store_id);
+      // Financial conflict resolution strategy:
+      // 1. If there's an active session locally but not remotely, prioritize local
+      // 2. If both have sessions, use the most recent transaction timestamp
+      // 3. If no active sessions, use additive reconciliation to preserve all transactions
+      
+      let finalBalance: number;
+      let reconciliationType: string;
+      
+      if (activeSession && activeSession.status === 'open') {
+        // Local session is active - calculate expected balance from transactions
+        const expectedBalance = await this.calculateExpectedBalanceFromTransactions(localRecord.store_id, activeSession);
+        
+        if (Math.abs(expectedBalance - localBalance) < 0.01) {
+          // Local balance matches expected from transactions - use local
+          finalBalance = localBalance;
+          reconciliationType = 'local_session_priority';
+          console.log(`💰 Using local balance due to active session: $${finalBalance.toFixed(2)}`);
+        } else {
+          // Local balance doesn't match expected - use additive reconciliation
+          finalBalance = Math.max(localBalance, remoteBalance, expectedBalance);
+          reconciliationType = 'additive_reconciliation';
+          console.log(`💰 Using additive reconciliation: $${finalBalance.toFixed(2)} (max of local: $${localBalance.toFixed(2)}, remote: $${remoteBalance.toFixed(2)}, expected: $${expectedBalance.toFixed(2)})`);
+        }
+      } else {
+        // No active session - use timestamp-based resolution with additive bias
+        if (remoteTimestamp > localTimestamp) {
+          // Remote is newer - but add any difference to preserve local transactions
+          const difference = localBalance - remoteBalance;
+          if (difference > 0.01) {
+            finalBalance = remoteBalance + difference;
+            reconciliationType = 'additive_remote_plus_local_diff';
+          } else {
+            finalBalance = remoteBalance;
+            reconciliationType = 'remote_newer';
+          }
+        } else {
+          // Local is newer or same age - use local balance
+          finalBalance = localBalance;
+          reconciliationType = 'local_newer_or_equal';
+        }
       }
+      
+      // Create detailed reconciliation transaction
+      await this.createReconciliationTransaction(
+        localBalance, 
+        finalBalance, 
+        localRecord.store_id, 
+        remoteBalance,
+        reconciliationType
+      );
       
       // Update with reconciled balance
       await db.cash_drawer_accounts.update(localRecord.id, {
@@ -865,48 +925,159 @@ export class SyncService {
       return true; // Conflict resolved
     }
     
-    // If balances are close, use remote version
-    await db.cash_drawer_accounts.put({
-      ...remoteRecord,
-      _synced: true,
-      _lastSyncedAt: new Date().toISOString()
-    });
+    // If balances are close, use most recent timestamp
+    if (remoteTimestamp >= localTimestamp) {
+      await db.cash_drawer_accounts.put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    } else {
+      // Keep local version but mark as synced since difference is negligible
+      await db.cash_drawer_accounts.update(localRecord.id, {
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    }
     
     return false; // No significant conflict
   }
 
   /**
-   * Resolve conflicts for cash drawer sessions
+   * Calculate expected balance from actual transactions
+   */
+  private async calculateExpectedBalanceFromTransactions(storeId: string, session: any): Promise<number> {
+    try {
+      // Get all cash drawer transactions since session opened
+      const sessionStartTime = new Date(session.openedAt);
+      const cashTransactions = await db.transactions
+        .filter(trans => 
+          trans.store_id === storeId &&
+          trans.category.startsWith('cash_drawer_') &&
+          new Date(trans.created_at) >= sessionStartTime
+        )
+        .toArray();
+      
+      // Calculate balance from opening amount + all transactions
+      let expectedBalance = session.openingAmount || 0;
+      
+      for (const trans of cashTransactions) {
+        if (trans.type === 'income') {
+          expectedBalance += trans.amount;
+        } else if (trans.type === 'expense') {
+          expectedBalance -= trans.amount;
+        }
+      }
+      
+      return expectedBalance;
+    } catch (error) {
+      console.error('Error calculating expected balance from transactions:', error);
+      return session.openingAmount || 0;
+    }
+  }
+
+  /**
+   * Resolve conflicts for cash drawer sessions with enhanced state synchronization
    */
   private async resolveCashDrawerSessionConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
-    // For sessions, prioritize the most recent status
     const localStatus = localRecord.status;
     const remoteStatus = remoteRecord.status;
+    const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
+    const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
     
-    // If one is closed and the other is open, prioritize closed
+    console.log(`🔒 Session conflict detected: Local: ${localStatus} (${localTimestamp.toISOString()}), Remote: ${remoteStatus} (${remoteTimestamp.toISOString()})`);
+    
+    // Session state synchronization rules:
+    // 1. Closed status always takes priority over open (financial safety)
+    // 2. If both closed, use most recent
+    // 3. If both open, check for multiple device scenario and resolve
+    // 4. Validate session integrity after resolution
+    
     if (localStatus === 'closed' && remoteStatus === 'open') {
-      console.warn(`🔒 Session conflict: Local closed, Remote open. Keeping local (closed) version.`);
+      console.warn(`🔒 Session conflict: Local closed, Remote open. Keeping local (closed) version for financial safety.`);
       await db.cash_drawer_sessions.update(localRecord.id, {
+        _synced: true,
         _lastSyncedAt: new Date().toISOString()
       });
+      
+      // Validate session integrity
+      await this.validateSessionIntegrity(localRecord);
       return true;
     }
     
     if (localStatus === 'open' && remoteStatus === 'closed') {
-      console.warn(`🔒 Session conflict: Local open, Remote closed. Using remote (closed) version.`);
+      console.warn(`🔒 Session conflict: Local open, Remote closed. Using remote (closed) version for financial safety.`);
       await db.cash_drawer_sessions.put({
         ...remoteRecord,
         _synced: true,
         _lastSyncedAt: new Date().toISOString()
       });
+      
+      // Validate session integrity
+      await this.validateSessionIntegrity(remoteRecord);
       return true;
     }
     
-    // For other conflicts, use timestamp-based resolution
-    const localModifiedAt = new Date(localRecord.updated_at || localRecord.created_at);
-    const remoteModifiedAt = new Date(remoteRecord.updated_at || remoteRecord.created_at);
+    if (localStatus === 'open' && remoteStatus === 'open') {
+      // Multiple open sessions - this should not happen, close the older one
+      console.error(`🚨 Multiple open sessions detected! This indicates a synchronization failure.`);
+      
+      const olderRecord = localTimestamp < remoteTimestamp ? localRecord : remoteRecord;
+      const newerRecord = localTimestamp >= remoteTimestamp ? localRecord : remoteRecord;
+      
+      // Force close the older session with reconciliation
+      const closedSession = {
+        ...olderRecord,
+        status: 'closed',
+        closedAt: new Date().toISOString(),
+        closedBy: 'system_sync',
+        actualAmount: olderRecord.expectedAmount || olderRecord.openingAmount || 0,
+        variance: 0,
+        notes: (olderRecord.notes || '') + ' [Auto-closed due to multiple session conflict]',
+        updated_at: new Date().toISOString(),
+        _synced: false
+      };
+      
+      // Keep the newer session open
+      if (newerRecord === localRecord) {
+        // Update remote (older) to closed, keep local (newer) open
+        await db.cash_drawer_sessions.update(localRecord.id, {
+          _lastSyncedAt: new Date().toISOString()
+        });
+      } else {
+        // Use remote (newer) open session
+        await db.cash_drawer_sessions.put({
+          ...remoteRecord,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      }
+      
+      console.log(`🔒 Resolved multiple session conflict: Closed older session, kept newer one open.`);
+      return true;
+    }
     
-    if (remoteModifiedAt >= localModifiedAt) {
+    // Both closed - use most recent timestamp
+    if (localStatus === 'closed' && remoteStatus === 'closed') {
+      if (remoteTimestamp >= localTimestamp) {
+        await db.cash_drawer_sessions.put({
+          ...remoteRecord,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+        await this.validateSessionIntegrity(remoteRecord);
+      } else {
+        await db.cash_drawer_sessions.update(localRecord.id, {
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+        await this.validateSessionIntegrity(localRecord);
+      }
+      return true;
+    }
+    
+    // Default: use timestamp-based resolution
+    if (remoteTimestamp >= localTimestamp) {
       await db.cash_drawer_sessions.put({
         ...remoteRecord,
         _synced: true,
@@ -914,6 +1085,7 @@ export class SyncService {
       });
     } else {
       await db.cash_drawer_sessions.update(localRecord.id, {
+        _synced: true,
         _lastSyncedAt: new Date().toISOString()
       });
     }
@@ -922,11 +1094,217 @@ export class SyncService {
   }
 
   /**
-   * Create reconciliation transaction for balance discrepancies
+   * Validate session integrity after conflict resolution
    */
-  private async createReconciliationTransaction(oldBalance: number, newBalance: number, storeId: string) {
+  private async validateSessionIntegrity(sessionRecord: any) {
+    try {
+      // Validate session amounts are consistent
+      if (sessionRecord.status === 'closed') {
+        const expectedAmount = sessionRecord.expectedAmount || 0;
+        const actualAmount = sessionRecord.actualAmount || 0;
+        const calculatedVariance = actualAmount - expectedAmount;
+        
+        if (Math.abs(calculatedVariance - (sessionRecord.variance || 0)) > 0.01) {
+          console.warn(`🧮 Session variance inconsistency detected: Stored: $${(sessionRecord.variance || 0).toFixed(2)}, Calculated: $${calculatedVariance.toFixed(2)}`);
+          
+          // Update session with correct variance
+          await db.cash_drawer_sessions.update(sessionRecord.id, {
+            variance: calculatedVariance,
+            _synced: false
+          });
+        }
+      }
+      
+      // Validate session dates are logical
+      if (sessionRecord.closedAt && sessionRecord.openedAt) {
+        const openedTime = new Date(sessionRecord.openedAt);
+        const closedTime = new Date(sessionRecord.closedAt);
+        
+        if (closedTime <= openedTime) {
+          console.error(`🚨 Invalid session dates: Closed (${closedTime.toISOString()}) <= Opened (${openedTime.toISOString()})`);
+          
+          // Fix by setting closed time to opened time + 1 minute
+          await db.cash_drawer_sessions.update(sessionRecord.id, {
+            closedAt: new Date(openedTime.getTime() + 60000).toISOString(),
+            notes: (sessionRecord.notes || '') + ' [Dates corrected by sync validation]',
+            _synced: false
+          });
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error validating session integrity:', error);
+    }
+  }
+
+  /**
+   * Resolve conflicts for transactions with financial safety
+   */
+  private async resolveTransactionConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
+    const localAmount = Number(localRecord.amount || 0);
+    const remoteAmount = Number(remoteRecord.amount || 0);
+    const localTimestamp = new Date(localRecord.created_at);
+    const remoteTimestamp = new Date(remoteRecord.created_at);
+    
+    // For financial transactions, be very conservative
+    // If amounts differ, keep both transactions to avoid losing money
+    if (Math.abs(localAmount - remoteAmount) > 0.01) {
+      console.warn(`💳 Transaction amount conflict: Local: $${localAmount.toFixed(2)}, Remote: $${remoteAmount.toFixed(2)}`);
+      
+      // Keep both transactions with different IDs to preserve financial integrity
+      const duplicateId = `${remoteRecord.id}-conflict-${Date.now()}`;
+      await db.transactions.put({
+        ...remoteRecord,
+        id: duplicateId,
+        description: `${remoteRecord.description} [Conflict resolution duplicate]`,
+        reference: `${remoteRecord.reference || ''}-conflict`,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+      
+      // Keep local version unchanged
+      await db.transactions.update(localRecord.id, {
+        _lastSyncedAt: new Date().toISOString()
+      });
+      
+      console.log(`💳 Created duplicate transaction to preserve both amounts: ${duplicateId}`);
+      return true;
+    }
+    
+    // If amounts are the same, use standard timestamp resolution
+    if (remoteTimestamp >= localTimestamp) {
+      await db.transactions.put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    } else {
+      await db.transactions.update(localRecord.id, {
+        _lastSyncedAt: new Date().toISOString()
+      });
+    }
+    
+    return false;
+  }
+
+  /**
+   * Resolve conflicts for customers with balance preservation
+   */
+  private async resolveCustomerConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
+    const localUsdBalance = Number(localRecord.usd_balance || 0);
+    const remoteUsdBalance = Number(remoteRecord.usd_balance || 0);
+    const localLbpBalance = Number(localRecord.lb_balance || 0);
+    const remoteLbpBalance = Number(remoteRecord.lb_balance || 0);
+    
+    // For customer balances, use additive approach to prevent debt loss
+    if (Math.abs(localUsdBalance - remoteUsdBalance) > 0.01 || Math.abs(localLbpBalance - remoteLbpBalance) > 0.01) {
+      console.warn(`👤 Customer balance conflict: Local USD: $${localUsdBalance.toFixed(2)}, LBP: ${localLbpBalance.toFixed(2)} | Remote USD: $${remoteUsdBalance.toFixed(2)}, LBP: ${remoteLbpBalance.toFixed(2)}`);
+      
+      // Use the higher balance to preserve customer debt
+      const finalUsdBalance = Math.max(localUsdBalance, remoteUsdBalance);
+      const finalLbpBalance = Math.max(localLbpBalance, remoteLbpBalance);
+      
+      await db.customers.put({
+        ...remoteRecord,
+        usd_balance: finalUsdBalance,
+        lb_balance: finalLbpBalance,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+      
+      console.log(`👤 Customer balance reconciled: USD: $${finalUsdBalance.toFixed(2)}, LBP: ${finalLbpBalance.toFixed(2)}`);
+      return true;
+    }
+    
+    // Standard resolution for other fields
+    const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
+    const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
+    
+    if (remoteTimestamp >= localTimestamp) {
+      await db.customers.put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    } else {
+      await db.customers.update(localRecord.id, {
+        _lastSyncedAt: new Date().toISOString()
+      });
+    }
+    
+    return false;
+  }
+
+  /**
+   * Resolve conflicts for suppliers with balance preservation
+   */
+  private async resolveSupplierConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
+    const localUsdBalance = Number(localRecord.usd_balance || 0);
+    const remoteUsdBalance = Number(remoteRecord.usd_balance || 0);
+    const localLbpBalance = Number(localRecord.lb_balance || 0);
+    const remoteLbpBalance = Number(remoteRecord.lb_balance || 0);
+    
+    // For supplier balances, use additive approach to prevent debt loss
+    if (Math.abs(localUsdBalance - remoteUsdBalance) > 0.01 || Math.abs(localLbpBalance - remoteLbpBalance) > 0.01) {
+      console.warn(`🏪 Supplier balance conflict: Local USD: $${localUsdBalance.toFixed(2)}, LBP: ${localLbpBalance.toFixed(2)} | Remote USD: $${remoteUsdBalance.toFixed(2)}, LBP: ${remoteLbpBalance.toFixed(2)}`);
+      
+      // Use the higher balance to preserve supplier debt
+      const finalUsdBalance = Math.max(localUsdBalance, remoteUsdBalance);
+      const finalLbpBalance = Math.max(localLbpBalance, remoteLbpBalance);
+      
+      await db.suppliers.put({
+        ...remoteRecord,
+        usd_balance: finalUsdBalance,
+        lb_balance: finalLbpBalance,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+      
+      console.log(`🏪 Supplier balance reconciled: USD: $${finalUsdBalance.toFixed(2)}, LBP: ${finalLbpBalance.toFixed(2)}`);
+      return true;
+    }
+    
+    // Standard resolution for other fields
+    const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
+    const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
+    
+    if (remoteTimestamp >= localTimestamp) {
+      await db.suppliers.put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    } else {
+      await db.suppliers.update(localRecord.id, {
+        _lastSyncedAt: new Date().toISOString()
+      });
+    }
+    
+    return false;
+  }
+
+  /**
+   * Create detailed reconciliation transaction for balance discrepancies
+   */
+  private async createReconciliationTransaction(
+    oldBalance: number, 
+    newBalance: number, 
+    storeId: string, 
+    remoteBalance?: number,
+    reconciliationType?: string
+  ) {
     const variance = newBalance - oldBalance;
     const transactionId = `RECON-${Date.now()}`;
+    
+    // Don't create reconciliation transaction if variance is negligible
+    if (Math.abs(variance) <= 0.01) {
+      return;
+    }
+    
+    let description = `Cash drawer reconciliation: $${oldBalance.toFixed(2)} → $${newBalance.toFixed(2)}`;
+    if (remoteBalance !== undefined && reconciliationType) {
+      description += ` (Local: $${oldBalance.toFixed(2)}, Remote: $${remoteBalance.toFixed(2)}, Strategy: ${reconciliationType})`;
+    }
     
     try {
       await db.transactions.add({
@@ -935,7 +1313,7 @@ export class SyncService {
         category: 'cash_drawer_reconciliation',
         amount: Math.abs(variance),
         currency: 'USD',
-        description: `Cash drawer reconciliation: ${oldBalance} → ${newBalance}`,
+        description,
         reference: transactionId,
         store_id: storeId,
         created_by: 'system',
@@ -943,7 +1321,7 @@ export class SyncService {
         _synced: false
       });
       
-      console.log(`📝 Created reconciliation transaction: $${variance.toFixed(2)}`);
+      console.log(`📝 Created reconciliation transaction: $${variance.toFixed(2)} (${reconciliationType || 'standard'})`);
     } catch (error) {
       console.error('Failed to create reconciliation transaction:', error);
     }

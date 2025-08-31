@@ -490,7 +490,6 @@ export class SupabaseService {
 
   static async createBill(billData: any, lineItems: any) {
     try {
-    console.log('helloooo',billData);
 
       // Filter out local-only fields that shouldn't be sent to Supabase
       const cleanBillData = cleanDataForSupabase(billData);

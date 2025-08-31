@@ -48,6 +48,7 @@ interface OfflineDataContextType {
   getCashDrawerBalanceReport: (startDate?: string, endDate?: string) => Promise<any>;
   getCurrentCashDrawerStatus: () => Promise<any>;
   getCashDrawerSessionDetails: (sessionId: string) => Promise<any>;
+  refreshCashDrawerStatus: () => Promise<void>;
   isOnline: boolean;
 
   // Loading states - exact match
@@ -447,6 +448,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Set sales directly as sale_items (no transformation needed)
       setSales(saleItemsData);
 
+      // Refresh cash drawer status
+      await refreshCashDrawerStatus();
+
       console.log('✅ Data refresh completed successfully');
 
     } catch (error) {
@@ -614,7 +618,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
 
     // Log the final bill data for debugging
-    console.log('📋 Final bill data before storage:', Object.keys(bill));
     console.log('📋 Final line items data before storage:', mappedLineItems.length, 'items');
 
     await db.transaction('rw', [db.bills, db.bill_line_items], async () => {
@@ -1413,14 +1416,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Open new session
       const sessionId = await db.openCashDrawerSession(storeId, account.id, amount, openedBy);
       
-      // Update local state
+      // Update local state with proper status
       setCashDrawer({
         id: sessionId,
         accountId: account.id,
+        status: 'open',
         currentBalance: amount,
         currency: (account as any).currency,
         lastUpdated: new Date().toISOString()
       });
+      
+      // Store in localStorage for persistence
+      localStorage.setItem('erp_cash_drawer', JSON.stringify({
+        id: sessionId,
+        accountId: account.id,
+        status: 'open',
+        currentBalance: amount,
+        currency: (account as any).currency,
+        lastUpdated: new Date().toISOString()
+      }));
     } catch (error) {
       console.error('Error opening cash drawer:', error);
     }
@@ -1435,9 +1449,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Update local state
       setCashDrawer({
         ...cashDrawer,
+        status: 'closed',
         currentBalance: 0,
         lastUpdated: new Date().toISOString()
       });
+      
+      // Update localStorage
+      localStorage.setItem('erp_cash_drawer', JSON.stringify({
+        ...cashDrawer,
+        status: 'closed',
+        currentBalance: 0,
+        lastUpdated: new Date().toISOString()
+      }));
     } catch (error) {
       console.error('Error closing cash drawer:', error);
     }
@@ -1451,6 +1474,41 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const getCurrentCashDrawerStatus = async () => {
     if (!storeId) return null;
     return await db.getCurrentCashDrawerStatus(storeId);
+  };
+
+  const refreshCashDrawerStatus = async () => {
+    if (!storeId) return;
+    
+    try {
+      const status = await db.getCurrentCashDrawerStatus(storeId);
+      if (status && status.status === 'active') {
+        // Update local state with current session info
+        setCashDrawer({
+          id: status.sessionId,
+          accountId: status.accountId,
+          status: 'open',
+          currentBalance: status.currentBalance,
+          currency: currency,
+          lastUpdated: new Date().toISOString()
+        });
+        
+        // Update localStorage
+        localStorage.setItem('erp_cash_drawer', JSON.stringify({
+          id: status.sessionId,
+          accountId: status.accountId,
+          status: 'open',
+          currentBalance: status.currentBalance,
+          currency: currency,
+          lastUpdated: new Date().toISOString()
+        }));
+      } else {
+        // No active session
+        setCashDrawer(null);
+        localStorage.removeItem('erp_cash_drawer');
+      }
+    } catch (error) {
+      console.error('Error refreshing cash drawer status:', error);
+    }
   };
 
   const getCashDrawerSessionDetails = async (sessionId: string) => {
@@ -1608,6 +1666,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       getCashDrawerBalanceReport,
       getCurrentCashDrawerStatus,
       getCashDrawerSessionDetails,
+      refreshCashDrawerStatus,
       isOnline,
 
       // Loading states - exact match
