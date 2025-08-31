@@ -331,8 +331,8 @@ class POSDatabase extends Dexie {
     this.cash_drawer_accounts.hook('updating', this.addUpdateFields);
 
     // Add hooks for automatic cash drawer updates
-    this.transactions.hook('updating', this.handleTransactionCreated);
-    this.sale_items.hook('updating', this.handleSaleItemCreated);
+    this.transactions.hook('creating', this.handleTransactionCreated);
+    this.sale_items.hook('creating', this.handleSaleItemCreated);
     // Add hooks for automatic timestamping and ID generation
     // Tables WITH updated_at: products, suppliers, customers
     this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
@@ -760,7 +760,8 @@ class POSDatabase extends Dexie {
           storeId: obj.store_id,
           createdBy: obj.created_by,
           customerId: obj.reference?.replace('PAY-', '') || '',
-          description: obj.description
+          description: obj.description,
+          allowAutoSessionOpen: true // Allow automatic session opening for hooks
         });
       } else if (obj.type === 'expense') {
         await cashDrawerUpdateService.updateCashDrawerForExpense({
@@ -769,7 +770,8 @@ class POSDatabase extends Dexie {
           storeId: obj.store_id,
           createdBy: obj.created_by,
           description: obj.description,
-          category: obj.category
+          category: obj.category,
+          allowAutoSessionOpen: true // Allow automatic session opening for hooks
         });
       }
     } catch (error) {
@@ -800,15 +802,22 @@ class POSDatabase extends Dexie {
       const account = await this.getCashDrawerAccount(obj.store_id);
       const storeCurrency = account?.currency || 'USD';
       
-      await cashDrawerUpdateService.updateCashDrawerForSale({
+      // Use the internal transaction update method that can auto-open sessions
+      const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
+        type: 'sale',
         amount: obj.received_value || 0,
         currency: storeCurrency,
-        paymentMethod: obj.payment_method,
+        description: `Cash sale${obj.customer_id ? ' to customer' : ''}`,
+        reference: `SALE-${obj.id || Date.now()}`,
         storeId: obj.store_id,
         createdBy: obj.created_by,
         customerId: obj.customer_id || undefined,
-        billNumber: `SALE-${obj.id || Date.now()}`
+        allowAutoSessionOpen: true // Allow automatic session opening for hooks
       });
+      
+      if (!updateResult.success) {
+        console.error('Failed to update cash drawer for sale:', updateResult.error);
+      }
     } catch (error) {
       console.error('Error in sale item created hook:', error);
     }

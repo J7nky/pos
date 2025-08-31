@@ -15,6 +15,7 @@ export interface CashTransactionData {
   customerId?: string;
   supplierId?: string;
   preferredCurrency?: 'USD' | 'LBP';
+  allowAutoSessionOpen?: boolean; // Allow automatic session opening for hooks
 }
 
 
@@ -250,15 +251,39 @@ export class CashDrawerUpdateService {
         };
       }
 
-      // Get current cash drawer session - REQUIRE explicit session opening
-      const session = await db.getCurrentCashDrawerSession(transactionData.storeId);
+      // Get current cash drawer session - REQUIRE explicit session opening (unless auto-open allowed)
+      let session = await db.getCurrentCashDrawerSession(transactionData.storeId);
       if (!session || session.status !== 'open') {
-        return {
-          success: false,
-          previousBalance: 0,
-          newBalance: 0,
-          error: 'No active cash drawer session. Please open cash drawer session before processing transactions.'
-        };
+        // If auto-open is allowed (for hooks), try to open a session
+        if (transactionData.allowAutoSessionOpen) {
+          console.log('💰 No active session found, auto-opening for transaction hook');
+          
+          const sessionResult = await this.openCashDrawerSession(
+            transactionData.storeId,
+            0, // Start with 0 opening amount
+            transactionData.createdBy,
+            `Auto-opened for ${transactionData.type}`
+          );
+          
+          if (!sessionResult.success) {
+            return {
+              success: false,
+              previousBalance: 0,
+              newBalance: 0,
+              error: `Failed to auto-open session: ${sessionResult.error}`
+            };
+          }
+          
+          // Get the newly opened session
+          session = await db.getCurrentCashDrawerSession(transactionData.storeId);
+        } else {
+          return {
+            success: false,
+            previousBalance: 0,
+            newBalance: 0,
+            error: 'No active cash drawer session. Please open cash drawer session before processing transactions.'
+          };
+        }
       }
 
       const previousBalance = Number((account as any).current_balance ?? 0) || 0;
@@ -407,6 +432,7 @@ export class CashDrawerUpdateService {
       createdBy: string;
       customerId: string;
       description?: string;
+      allowAutoSessionOpen?: boolean;
     }
   ): Promise<CashDrawerUpdateResult> {
     return this.updateCashDrawerForTransaction({
@@ -417,7 +443,8 @@ export class CashDrawerUpdateService {
       reference: `PAY-${Date.now()}`,
       storeId: paymentData.storeId,
       createdBy: paymentData.createdBy,
-      customerId: paymentData.customerId
+      customerId: paymentData.customerId,
+      allowAutoSessionOpen: paymentData.allowAutoSessionOpen
     });
   }
 
@@ -432,6 +459,7 @@ export class CashDrawerUpdateService {
       createdBy: string;
       description: string;
       category: string;
+      allowAutoSessionOpen?: boolean;
     }
   ): Promise<CashDrawerUpdateResult> {
     return this.updateCashDrawerForTransaction({
@@ -441,7 +469,8 @@ export class CashDrawerUpdateService {
       description: `${expenseData.category}: ${expenseData.description}`,
       reference: `EXP-${Date.now()}`,
       storeId: expenseData.storeId,
-      createdBy: expenseData.createdBy
+      createdBy: expenseData.createdBy,
+      allowAutoSessionOpen: expenseData.allowAutoSessionOpen
     });
   }
 
