@@ -713,8 +713,8 @@ export class SupabaseService {
     }
   }
 
-  static async updateUserSettings(
-    userId: any, 
+  static async updateStoreSettings(
+    storeId: any, 
     updates: {
       preferred_currency?: 'USD' | 'LBP';
       preferred_language?: 'en' | 'ar' | 'fr';
@@ -722,15 +722,15 @@ export class SupabaseService {
     }
   ) {
     try {
-      console.log('SupabaseService: updateUserSettings called with userId:', userId, 'updates:', updates);
+      console.log('SupabaseService: updateStoreSettings called with storeId:', storeId, 'updates:', updates);
       const cleanUpdates = cleanDataForSupabase(updates);
       const { data, error } = await supabase
-        .from('users')
+        .from('stores')
         .update({
           ...cleanUpdates,
           updated_at: new Date().toISOString(),
         } as any)
-        .eq('id', userId)
+        .eq('id', storeId)
         .select()
         .single();
       
@@ -739,10 +739,10 @@ export class SupabaseService {
         throw error;
       }
       
-      console.log('SupabaseService: updateUserSettings successful, returned data:', data);
+      console.log('SupabaseService: updateStoreSettings successful, returned data:', data);
       return data;
     } catch (error) {
-      console.error('SupabaseService: Exception in updateUserSettings:', error);
+      console.error('SupabaseService: Exception in updateStoreSettings:', error);
       handleSupabaseError(error);
     }
   }
@@ -756,6 +756,20 @@ export class SupabaseService {
         .order('name');
       if (error) throw error;
       return data || [];
+    } catch (error) {
+      handleSupabaseError(error);
+    }
+  }
+
+  static async getStore(storeId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('stores')
+        .select('*')
+        .eq('id', storeId)
+        .single();
+      if (error) throw error;
+      return data;
     } catch (error) {
       handleSupabaseError(error);
     }

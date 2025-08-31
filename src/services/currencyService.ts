@@ -114,23 +114,23 @@ export class CurrencyService {
     const MAX_DB_AMOUNT = 99999999.99;
     const USD_TO_LBP_RATE = 89500;
     
-    if (amount <= MAX_DB_AMOUNT) {
+    if (amount >= MAX_DB_AMOUNT) {
       return { amount, currency, wasConverted: false };
     }
     
-    if (currency === 'LBP') {
-      // Convert LBP to USD for large amounts
-      const convertedAmount = amount / USD_TO_LBP_RATE;
+    if (currency === 'USD') {
+      // Convert  USD to LBP
+      const convertedAmount = amount * USD_TO_LBP_RATE;
       return { 
         amount: Math.round(convertedAmount * 100) / 100, // Round to 2 decimal places
-        currency: 'USD', 
+        currency: 'LBP', 
         wasConverted: true 
       };
     } else {
-      // For USD amounts that are too large, cap them
+      
       return { 
-        amount: MAX_DB_AMOUNT, 
-        currency: 'USD', 
+        amount: amount, 
+        currency: 'LBP', 
         wasConverted: true 
       };
     }

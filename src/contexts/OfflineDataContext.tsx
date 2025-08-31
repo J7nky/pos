@@ -989,7 +989,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await db.customers.add(customer);
     await refreshData();
     await updateUnsyncedCount();
-
     // Use debounced sync to batch rapid changes
     debouncedSync();
   };
@@ -1146,8 +1145,42 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Use transaction to ensure atomicity
     await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
 
-      
+
       await db.sale_items.bulkAdd(saleItemsWithIds);
+
+      // Manually trigger cash drawer update for cash sales since bulkAdd doesn't trigger hooks
+      const cashSaleItems = saleItemsWithIds.filter(item => item.payment_method === 'cash');
+      if (cashSaleItems.length > 0) {
+        // Import the service dynamically to avoid circular dependencies
+        const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+
+        // Calculate total cash sale amount
+        const totalCashAmount = cashSaleItems.reduce((sum, item) => sum + (item.received_value || 0), 0);
+
+        console.log(`💰 Manually updating cash drawer for ${cashSaleItems.length} cash sale items: $${totalCashAmount.toFixed(2)}`);
+
+        // Get store's preferred currency
+        const account = await db.getCashDrawerAccount(storeId);
+        const storeCurrency = account?.currency || 'USD';
+
+        // Update cash drawer for the total cash sale amount
+        const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'sale',
+          amount: totalCashAmount,
+          currency: storeCurrency,
+          description: `Cash sale${cashSaleItems.length > 1 ? ` (${cashSaleItems.length} items)` : ''}`,
+          reference: `SALE-${Date.now()}`,
+          storeId: storeId,
+          createdBy: currentUserId,
+          allowAutoSessionOpen: true
+        });
+
+        if (!updateResult.success) {
+          console.error('Failed to update cash drawer for cash sale:', updateResult.error);
+        } else {
+          console.log('✅ Cash drawer updated successfully for cash sale');
+        }
+      }
       
       // Add the value of the sale to the supplier's balance
       // Add the value of the credit to the customer's balance
@@ -1407,7 +1440,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           accountCode: '1001',
           name: 'Cash Drawer',
           current_balance: 0,
-          currency: currency,
+          currency: 'USD', // Default to USD
           isActive: true
         };
         await db.cash_drawer_accounts.add(account);

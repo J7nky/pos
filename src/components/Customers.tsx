@@ -69,98 +69,56 @@ export default function Customers() {
   };
   const hideToast = () => setToast(t => ({ ...t, visible: false }));
 
-  // Payment handlers
-  const handleCustomerPaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
-      showToast('Please enter a valid amount', 'error');
-      return;
+  // Helper functions for payment processing
+  const validatePaymentForm = (amount: string, entityId: string, entityType: 'customer' | 'supplier'): { isValid: boolean; entity?: Customer | Supplier } => {
+    // Validate amount
+    if (!amount || amount.trim() === '') {
+      showToast('Please enter a payment amount', 'error');
+      return { isValid: false };
     }
-    
-    if (!paymentForm.customerId) {
-      showToast('Please select a customer', 'error');
-      return;
-    }
-    
-    const customer = customers.find(c => c.id === paymentForm.customerId);
-    if (!customer) {
-      showToast('Customer not found', 'error');
-      return;
-    }
-    
-    try {
-      // Use the ERP Financial Service to process the payment
-      const { erpFinancialService } = await import('../services/erpFinancialService');
-      
-      // Sync current customers to ERP service
-      localStorage.setItem('erp_customers', JSON.stringify(customers));
-      erpFinancialService.reloadData();
-      
-      const result = erpFinancialService.processCustomerPayment(
-        paymentForm.customerId,
-        parseFloat(paymentForm.amount),
-        paymentForm.currency,
-        `Payment from ${customer.name}${paymentForm.description ? ': ' + paymentForm.description : ''}`,
-        userProfile?.id || ''
-      );
-      
-      // Update customer balance
-      const paymentAmount = parseFloat(paymentForm.amount);
-      const currentLbBalance = customer.lb_balance || 0;
-      const currentUsdBalance = customer.usd_balance || 0;
-      
-      // RULE 5 FIX: When receiving payment FROM customer, DECREASE their balance (reduce debt)
-      if (paymentForm.currency === 'LBP') {
-        await updateCustomer(paymentForm.customerId, { 
-          lb_balance: Math.max(0, currentLbBalance - paymentAmount)
-        });
-      } else {
-        await updateCustomer(paymentForm.customerId, { 
-          usd_balance: Math.max(0, currentUsdBalance - paymentAmount)
-        });
-      }
-      
-      // Safely convert amount for database storage
-      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
-        parseFloat(paymentForm.amount), 
-        paymentForm.currency
-      );
-      
-      // Add to transaction system
-      addTransaction({
-        type: 'income',
-        category: 'Customer Payment',
-        amount: safeAmount.amount,
-        currency: safeAmount.currency,
-        description: `Payment from ${customer.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
-        reference: paymentForm.reference,
-        created_by: userProfile?.id || '',
-        id: createId()
-      });
 
-      // Update cash drawer (increase for received payment)
-      if (userProfile?.store_id) {
-        await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: 'payment',
-          amount: safeAmount.amount,
-          currency: safeAmount.currency,
-          description: `Payment received from ${customer.name}`,
-          reference: paymentForm.reference || `PAY-${Date.now()}`,
-          storeId: userProfile.store_id,
-          createdBy: userProfile?.id || '',
-          customerId: paymentForm.customerId
-        });
-      } else {
-        console.warn('Missing store_id: cannot update cash drawer');
-      }
-      
-      showToast(`Payment received! ${customer.name} balance updated`, 'success');
-    } catch (err) {
-      console.log(err);
-      showToast('Failed to record payment.', 'error');
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      showToast('Please enter a valid positive amount', 'error');
+      return { isValid: false };
     }
-    
+
+    if (numAmount > 99999999.99) {
+      showToast('Amount exceeds maximum allowed value (99,999,999.99)', 'error');
+      return { isValid: false };
+    }
+
+    // Validate entity selection
+    if (!entityId || entityId.trim() === '') {
+      showToast(`Please select a ${entityType}`, 'error');
+      return { isValid: false };
+    }
+
+    // Find entity
+    const entity = entityType === 'customer'
+      ? customers.find(c => c.id === entityId)
+      : suppliers.find(s => s.id === entityId);
+
+    if (!entity) {
+      showToast(`${entityType.charAt(0).toUpperCase() + entityType.slice(1)} not found. Please refresh and try again.`, 'error');
+      return { isValid: false };
+    }
+
+    // Check if entity is active (for customers)
+    if (entityType === 'customer' && !(entity as Customer).isActive) {
+      showToast('Cannot process payment for inactive customer', 'error');
+      return { isValid: false };
+    }
+
+    return { isValid: true, entity  };
+  };
+
+  const getSafeAmount = (amount: string, currency: 'USD' | 'LBP') => {
+    const newAmount=CurrencyService.getInstance().safeConvertForDatabase(parseFloat(amount), currency);
+    return newAmount;
+  };
+
+  const resetPaymentForm = () => {
     setPaymentForm({
       customerId: '',
       supplierId: '',
@@ -172,106 +130,190 @@ export default function Customers() {
     setShowPaymentForm(null);
   };
 
-  const handleSupplierPaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
-      showToast('Please enter a valid amount', 'error');
+  const updateEntityBalance = async (
+    entity: Customer | Supplier,
+    entityId: string,
+    paymentAmount: number,
+    currency: 'USD' | 'LBP',
+    isCustomer: boolean
+  ) => {
+    const currentLbBalance = entity.lb_balance || 0;
+    const currentUsdBalance = entity.usd_balance || 0;
+
+    if (currency === 'LBP') {
+      const updateData = { lb_balance: Math.max(0, currentLbBalance - paymentAmount) };
+      if (isCustomer) {
+        await updateCustomer(entityId, updateData);
+      } else {
+        await updateSupplier(entityId, updateData);
+      }
+    } else {
+      const updateData = { usd_balance: Math.max(0, currentUsdBalance - paymentAmount) };
+      if (isCustomer) {
+        await updateCustomer(entityId, updateData);
+      } else {
+        await updateSupplier(entityId, updateData);
+      }
+    }
+  };
+
+  const recordTransaction = (
+    entity: Customer | Supplier,
+    safeAmount: any,
+    paymentForm: any,
+    transactionType: 'income' | 'expense',
+    category: string,
+    isCustomer: boolean
+  ) => {
+    const direction = isCustomer ? 'from' : 'to';
+    addTransaction({
+      type: transactionType,
+      category,
+      amount: safeAmount.amount,
+      currency: safeAmount.currency,
+      description: `Payment ${direction} ${entity.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
+      reference: paymentForm.reference,
+      created_by: userProfile?.id || '',
+      id: createId()
+    });
+  };
+
+  const updateCashDrawer = async (
+    entity: Customer | Supplier,
+    safeAmount: any,
+    paymentForm: any,
+    transactionType: 'payment' | 'expense',
+    isCustomer: boolean
+  ) => {
+    if (!userProfile?.store_id) {
+      console.warn('Missing store_id: cannot update cash drawer');
       return;
     }
-    
-    if (!paymentForm.supplierId) {
-      showToast('Please select a supplier', 'error');
-      return;
-    }
-    
-    const supplier = suppliers.find(s => s.id === paymentForm.supplierId);
-    if (!supplier) {
-      showToast('Supplier not found', 'error');
-      return;
-    }
-    
+
+    const direction = isCustomer ? 'received from' : 'sent to';
+    await cashDrawerUpdateService.updateCashDrawerForTransaction({
+      type: transactionType,
+      amount: safeAmount.amount,
+      currency: safeAmount.currency,
+      description: `Payment ${direction} ${entity.name}`,
+      reference: paymentForm.reference || `PAY-${Date.now()}`,
+      storeId: userProfile.store_id,
+      createdBy: userProfile?.id || '',
+      ...(isCustomer ? { customerId: paymentForm.customerId } : { supplierId: paymentForm.supplierId })
+    });
+  };
+
+  // Unified payment handler
+  const processPayment = async (
+    entityType: 'customer' | 'supplier',
+    entityId: string,
+    amount: string,
+    currency: 'USD' | 'LBP',
+    description: string,
+    reference: string
+  ) => {
+    // Validate payment form
+    const validation = validatePaymentForm(amount, entityId, entityType);
+    if (!validation.isValid || !validation.entity) return false;
+
+    const entity = validation.entity;
+    const isCustomer = entityType === 'customer';
+
     try {
       // Use the ERP Financial Service to process the payment
       const { erpFinancialService } = await import('../services/erpFinancialService');
-      
-      // Sync current suppliers to ERP service
-      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
+
+      // Sync data to ERP service
+      const storageKey = isCustomer ? 'erp_customers' : 'erp_suppliers';
+      const dataToSync = isCustomer ? customers : suppliers;
+      localStorage.setItem(storageKey, JSON.stringify(dataToSync));
       erpFinancialService.reloadData();
-      
-      const result = erpFinancialService.processSupplierPayment(
-        paymentForm.supplierId,
-        parseFloat(paymentForm.amount),
-        paymentForm.currency,
-        `Payment to ${supplier.name}${paymentForm.description ? ': ' + paymentForm.description : ''}`,
+
+      // Process payment through ERP service
+      const erpMethod = isCustomer ? 'processCustomerPayment' : 'processSupplierPayment';
+      const safeAmount = getSafeAmount(amount, currency);
+
+      const result = erpFinancialService[erpMethod](
+        entityId,
+        safeAmount.amount,
+        currency,
+        `${isCustomer ? 'Payment from' : 'Payment to'} ${entity.name}${description ? ': ' + description : ''}`,
         userProfile?.id || ''
       );
-      
-      // Update supplier balance (reduce debt)
-      const paymentAmount = parseFloat(paymentForm.amount);
-      const currentLbBalance = supplier.lb_balance || 0;
-      const currentUsdBalance = supplier.usd_balance || 0;
-      
-      // RULE 5 FIX: When making payment TO supplier, DECREASE their balance (reduce what we owe them)
-      if (paymentForm.currency === 'LBP') {
-        await updateSupplier(paymentForm.supplierId, { 
-          lb_balance: Math.max(0, currentLbBalance - paymentAmount)
-        });
-      } else {
-        await updateSupplier(paymentForm.supplierId, { 
-          usd_balance: Math.max(0, currentUsdBalance - paymentAmount)
-        });
-      }
-      
-      // Safely convert amount for database storage
-      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
-        parseFloat(paymentForm.amount), 
-        paymentForm.currency
-      );
-      
-      // Add to transaction system
-      addTransaction({
-        id:createId(),
-        type: 'expense',
-        category: 'Supplier Payment',
-        amount: safeAmount.amount,
-        currency: safeAmount.currency,
-        description: `Payment to ${supplier.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
-        reference: paymentForm.reference,
-        created_by: userProfile?.id || ''
-      });
+      // Update entity balance
+      await updateEntityBalance(entity, entityId, safeAmount.amount, currency, isCustomer);
 
-      // Update cash drawer (decrease for sent payment)
-      if (userProfile?.store_id) {
-        await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: 'expense',
-          amount: safeAmount.amount,
-          currency: safeAmount.currency,
-          description: `Payment sent to ${supplier.name}`,
-          reference: paymentForm.reference || `PAY-${Date.now()}`,
-          storeId: userProfile.store_id,
-          createdBy: userProfile?.id || '',
-          supplierId: paymentForm.supplierId
-        });
-      } else {
-        console.warn('Missing store_id: cannot update cash drawer');
-      }
-      
-      showToast(`Payment sent! ${supplier.name} payment recorded`, 'success');
+      // Get safe amount for database storage
+
+      // Record transaction
+      const transactionType = isCustomer ? 'income' : 'expense';
+      const category = isCustomer ? 'Customer Payment' : 'Supplier Payment';
+      recordTransaction(entity, safeAmount, { amount, currency, description, reference }, transactionType, category, isCustomer);
+
+      // Update cash drawer
+      const cashDrawerType = isCustomer ? 'payment' : 'expense';
+      await updateCashDrawer(entity, safeAmount, { amount, currency, description, reference, customerId: isCustomer ? entityId : '', supplierId: isCustomer ? '' : entityId }, cashDrawerType, isCustomer);
+
+      // Show success message
+      const action = isCustomer ? 'received' : 'sent';
+      showToast(`Payment ${action}! ${entity.name} balance updated`, 'success');
+
+      return true;
     } catch (err) {
-      console.log(err);
-      showToast('Failed to record payment.', 'error');
+      console.error('Payment processing error:', err);
+
+      // Provide more specific error messages based on error type
+      let errorMessage = 'Failed to record payment.';
+      if (err instanceof Error) {
+        if (err.message.includes('network') || err.message.includes('fetch')) {
+          errorMessage = 'Network error. Please check your connection and try again.';
+        } else if (err.message.includes('permission') || err.message.includes('unauthorized')) {
+          errorMessage = 'You do not have permission to process this payment.';
+        } else if (err.message.includes('balance') || err.message.includes('insufficient')) {
+          errorMessage = 'Insufficient funds or balance error.';
+        } else if (err.message.includes('currency')) {
+          errorMessage = 'Currency conversion error. Please try again.';
+        }
+      }
+
+      showToast(errorMessage, 'error');
+      return false;
     }
-    
-    setPaymentForm({
-      customerId: '',
-      supplierId: '',
-      amount: '',
-      currency: 'USD',
-      description: '',
-      reference: ''
-    });
-    setShowPaymentForm(null);
+  };
+
+  // Payment handlers
+  const handleCustomerPaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const success = await processPayment(
+      'customer',
+      paymentForm.customerId,
+      paymentForm.amount,
+      paymentForm.currency,
+      paymentForm.description,
+      paymentForm.reference
+    );
+
+    if (success) {
+      resetPaymentForm();
+    }
+  };
+
+  const handleSupplierPaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const success = await processPayment(
+      'supplier',
+      paymentForm.supplierId,
+      paymentForm.amount,
+      paymentForm.currency,
+      paymentForm.description,
+      paymentForm.reference
+    );
+
+    if (success) {
+      resetPaymentForm();
+    }
   };
 
   const handleRecordCustomerPayment = (customer: Customer) => {
