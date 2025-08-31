@@ -15,6 +15,7 @@ export interface CashTransactionData {
   customerId?: string;
   supplierId?: string;
   preferredCurrency?: 'USD' | 'LBP';
+  allowAutoSessionOpen?: boolean; // Allow automatic session opening for hooks
 }
 
 
@@ -29,6 +30,7 @@ export interface CashDrawerUpdateResult {
 export class CashDrawerUpdateService {
   
   private static instance: CashDrawerUpdateService;
+  private operationLocks: Map<string, Promise<any>> = new Map();
 
   private constructor() {}
 
@@ -37,6 +39,100 @@ export class CashDrawerUpdateService {
       CashDrawerUpdateService.instance = new CashDrawerUpdateService();
     }
     return CashDrawerUpdateService.instance;
+  }
+
+  /**
+   * Acquire lock for store operations to prevent race conditions
+   */
+  private async acquireOperationLock<T>(storeId: string, operation: () => Promise<T>): Promise<T> {
+    const lockKey = `cash_drawer_${storeId}`;
+    
+    // Wait for any existing operation on this store to complete
+    if (this.operationLocks.has(lockKey)) {
+      try {
+        await this.operationLocks.get(lockKey);
+      } catch (error) {
+        // Previous operation failed, but we can proceed
+        console.warn('Previous operation failed, proceeding with new operation:', error);
+      }
+    }
+    
+    // Create new operation promise
+    const operationPromise = operation();
+    this.operationLocks.set(lockKey, operationPromise);
+    
+    try {
+      const result = await operationPromise;
+      return result;
+    } finally {
+      // Clean up lock after operation completes
+      this.operationLocks.delete(lockKey);
+    }
+  }
+
+  /**
+   * Open cash drawer session explicitly
+   */
+  public async openCashDrawerSession(
+    storeId: string,
+    openingAmount: number,
+    openedBy: string,
+    notes?: string
+  ): Promise<{
+    success: boolean;
+    sessionId?: string;
+    error?: string;
+  }> {
+    console.log('Opening cash drawer session');
+    
+    // Use operation lock to prevent concurrent session operations
+    return this.acquireOperationLock(storeId, async () => {
+      try {
+      // Check if there's already an active session
+      const existingSession = await db.getCurrentCashDrawerSession(storeId);
+      if (existingSession && existingSession.status === 'open') {
+        return {
+          success: false,
+          error: `Cash drawer session already open (opened by ${existingSession.openedBy} at ${new Date(existingSession.openedAt).toLocaleString()})`
+        };
+      }
+
+      // Get or create cash drawer account
+      let account = await db.getCashDrawerAccount(storeId);
+      if (!account) {
+        const storeCurrency = await this.getStorePreferredCurrency(storeId);
+        account = {
+          id: createId(),
+          store_id: storeId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          _synced: false,
+          accountCode: '1001',
+          name: 'Cash Drawer',
+          current_balance: 0,
+          currency: storeCurrency,
+          isActive: true
+        };
+        await db.cash_drawer_accounts.add(account);
+      }
+
+      // Open new session using database method
+      const sessionId = await db.openCashDrawerSession(storeId, account.id, openingAmount, openedBy);
+      
+      console.log(`💰 Cash drawer session opened: ${sessionId} with opening amount: $${openingAmount.toFixed(2)}`);
+      
+      return {
+        success: true,
+        sessionId
+      };
+      } catch (error) {
+        console.error('Error opening cash drawer session:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error occurred'
+        };
+      }
+    });
   }
 
   /**
@@ -55,7 +151,23 @@ export class CashDrawerUpdateService {
     variance: number;
     error?: string;
   }> {
-    try {
+    
+    // Get session to determine store ID for locking
+    const session = await db.cash_drawer_sessions.get(sessionId);
+    if (!session) {
+      return {
+        success: false,
+        sessionId,
+        expectedAmount: 0,
+        actualAmount: 0,
+        variance: 0,
+        error: 'Session not found'
+      };
+    }
+    
+    // Use operation lock to prevent concurrent session operations
+    return this.acquireOperationLock(session.store_id, async () => {
+      try {
       // Close the cash drawer session using the database method
       await db.closeCashDrawerSession(sessionId, actualAmount, closedBy, notes);
       
@@ -72,27 +184,31 @@ export class CashDrawerUpdateService {
         actualAmount: session.actualAmount || 0,
         variance: session.variance || 0
       };
-    } catch (error) {
-      console.error('Error closing cash drawer:', error);
-      return {
-        success: false,
-        sessionId,
-        expectedAmount: 0,
-        actualAmount: 0,
-        variance: 0,
-        error: error instanceof Error ? error.message : 'Unknown error occurred'
-      };
-    }
+      } catch (error) {
+        console.error('Error closing cash drawer:', error);
+        return {
+          success: false,
+          sessionId,
+          expectedAmount: 0,
+          actualAmount: 0,
+          variance: 0,
+          error: error instanceof Error ? error.message : 'Unknown error occurred'
+        };
+      }
+    });
   }
 
   /**
    * Automatically update cash drawer when a cash transaction occurs
+   * Protected against race conditions with operation locking
    */
   public async updateCashDrawerForTransaction(
     transactionData: CashTransactionData
   ): Promise<CashDrawerUpdateResult> {
-
-    try {
+    
+    // Use operation lock to prevent race conditions
+    return this.acquireOperationLock(transactionData.storeId, async () => {
+      try {
       // Get store's preferred currency from cash drawer account
       const storeCurrency = await this.getStorePreferredCurrency(transactionData.storeId);
       
@@ -136,27 +252,39 @@ export class CashDrawerUpdateService {
         };
       }
 
-      // Get current cash drawer session
+      // Get current cash drawer session - REQUIRE explicit session opening (unless auto-open allowed)
       let session = await db.getCurrentCashDrawerSession(transactionData.storeId);
-      if (!session) {
-       session={
-        id: createId(),
-        store_id: transactionData.storeId,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        _synced: false,
-        accountId: account?.id||'',
-        openedBy: transactionData.createdBy || '',
-        openedAt: new Date().toISOString(),
-        openingAmount: 0,
-        expectedAmount: 0,
-        actualAmount: 0,
-        variance: 0,
-        status: 'open' ,
-        notes: ''
-       }
-       await db.cash_drawer_sessions.add(session);
-       console.log('💰 Created cash drawer session for store:', transactionData.storeId);
+      if (!session || session.status !== 'open') {
+        // If auto-open is allowed (for hooks), try to open a session
+        if (transactionData.allowAutoSessionOpen) {
+          console.log('💰 No active session found, auto-opening for transaction hook');
+          
+          const sessionResult = await this.openCashDrawerSession(
+            transactionData.storeId,
+            0, // Start with 0 opening amount
+            transactionData.createdBy,
+            `Auto-opened for ${transactionData.type}`
+          );
+          
+          if (!sessionResult.success) {
+            return {
+              success: false,
+              previousBalance: 0,
+              newBalance: 0,
+              error: `Failed to auto-open session: ${sessionResult.error}`
+            };
+          }
+          
+          // Get the newly opened session
+          session = await db.getCurrentCashDrawerSession(transactionData.storeId);
+        } else {
+          return {
+            success: false,
+            previousBalance: 0,
+            newBalance: 0,
+            error: 'No active cash drawer session. Please open cash drawer session before processing transactions.'
+          };
+        }
       }
 
       const previousBalance = Number((account as any).current_balance ?? 0) || 0;
@@ -189,29 +317,39 @@ export class CashDrawerUpdateService {
           };
       }
 
-      // Update cash drawer account balance
+      // Update cash drawer account balance with transaction rollback on failure
       const newBalance = Number(previousBalance) + Number(balanceChange);
-      await db.cash_drawer_accounts.update(account.id, {
-        current_balance: newBalance as any,
-        updated_at: new Date().toISOString(),
-        _synced: false
-      } as any);
-
-      // Create transaction record for cash drawer tracking
       const transactionId = createId();
-      await db.transactions.add({
-        id: transactionId,
-        type: balanceChange > 0 ? 'income' : 'expense',
-        category: `cash_drawer_${transactionData.type}`,
-        amount: Math.abs(balanceChange),
-        currency: currency,
-        description: `${transactionData.description} - Cash Drawer Update`,
-        reference: transactionData.reference,
-        store_id: transactionData.storeId,
-        created_by: transactionData.createdBy,
-        created_at: new Date().toISOString(),
-        _synced: false
-      });
+      
+      try {
+        // Use database transaction to ensure atomicity
+        await db.transaction('rw', [db.cash_drawer_accounts, db.transactions], async () => {
+          // Update cash drawer account balance
+          await db.cash_drawer_accounts.update(account.id, {
+            current_balance: newBalance as any,
+            updated_at: new Date().toISOString(),
+            _synced: false
+          } as any);
+
+          // Create transaction record for cash drawer tracking
+          await db.transactions.add({
+            id: transactionId,
+            type: balanceChange > 0 ? 'income' : 'expense',
+            category: `cash_drawer_${transactionData.type}`,
+            amount: Math.abs(balanceChange),
+            currency: currency,
+            description: `${transactionData.description} - Cash Drawer Update`,
+            reference: transactionData.reference,
+            store_id: transactionData.storeId,
+            created_by: transactionData.createdBy,
+            created_at: new Date().toISOString(),
+            _synced: false
+          });
+        });
+      } catch (dbError) {
+        console.error('Database transaction failed, rolling back cash drawer update:', dbError);
+        throw new Error(`Failed to update cash drawer: ${dbError instanceof Error ? dbError.message : 'Database error'}`);
+      }
 
       console.log(`💰 Cash drawer updated: ${transactionData.type} - $${balanceChange.toFixed(2)} (Balance: $${previousBalance.toFixed(2)} → $${newBalance.toFixed(2)})`);
 
@@ -235,15 +373,16 @@ export class CashDrawerUpdateService {
         transactionId
       };
 
-    } catch (error) {
-      console.error('Error updating cash drawer for transaction:', error);
-      return {
-        success: false,
-        previousBalance: 0,
-        newBalance: 0,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-    }
+      } catch (error) {
+        console.error('Error updating cash drawer for transaction:', error);
+        return {
+          success: false,
+          previousBalance: 0,
+          newBalance: 0,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        };
+      }
+    });
   }
 
   /**
@@ -294,6 +433,7 @@ export class CashDrawerUpdateService {
       createdBy: string;
       customerId: string;
       description?: string;
+      allowAutoSessionOpen?: boolean;
     }
   ): Promise<CashDrawerUpdateResult> {
     return this.updateCashDrawerForTransaction({
@@ -304,7 +444,8 @@ export class CashDrawerUpdateService {
       reference: `PAY-${Date.now()}`,
       storeId: paymentData.storeId,
       createdBy: paymentData.createdBy,
-      customerId: paymentData.customerId
+      customerId: paymentData.customerId,
+      allowAutoSessionOpen: paymentData.allowAutoSessionOpen
     });
   }
 
@@ -319,6 +460,7 @@ export class CashDrawerUpdateService {
       createdBy: string;
       description: string;
       category: string;
+      allowAutoSessionOpen?: boolean;
     }
   ): Promise<CashDrawerUpdateResult> {
     return this.updateCashDrawerForTransaction({
@@ -328,7 +470,8 @@ export class CashDrawerUpdateService {
       description: `${expenseData.category}: ${expenseData.description}`,
       reference: `EXP-${Date.now()}`,
       storeId: expenseData.storeId,
-      createdBy: expenseData.createdBy
+      createdBy: expenseData.createdBy,
+      allowAutoSessionOpen: expenseData.allowAutoSessionOpen
     });
   }
 
@@ -357,7 +500,8 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Get current cash drawer balance
+   * Get current cash drawer balance - SINGLE SOURCE OF TRUTH
+   * This method calculates balance from transactions to ensure accuracy
    */
   public async getCurrentCashDrawerBalance(storeId: string): Promise<number> {
     try {
@@ -381,10 +525,69 @@ export class CashDrawerUpdateService {
         };
         await db.cash_drawer_accounts.add(account);
         console.log(`💰 Created default cash drawer account for store: ${storeId} with currency: ${storeCurrency}`);
+        return 0;
       }
-      return (account as any)?.current_balance || 0;
+
+      // SINGLE SOURCE OF TRUTH: Calculate balance from transactions
+      const calculatedBalance = await this.calculateBalanceFromTransactions(storeId);
+      const storedBalance = Number((account as any)?.current_balance || 0);
+
+      // If calculated balance differs from stored balance, reconcile
+      if (Math.abs(calculatedBalance - storedBalance) > 0.01) {
+        console.warn(`💰 Balance discrepancy detected: Stored: $${storedBalance.toFixed(2)}, Calculated: $${calculatedBalance.toFixed(2)}`);
+        
+        // Update stored balance to match calculated balance
+        await db.cash_drawer_accounts.update(account.id, {
+          current_balance: calculatedBalance as any,
+          updated_at: new Date().toISOString(),
+          _synced: false
+        });
+        
+        console.log(`💰 Balance reconciled: $${storedBalance.toFixed(2)} → $${calculatedBalance.toFixed(2)}`);
+        return calculatedBalance;
+      }
+
+      return calculatedBalance;
     } catch (error) {
       console.error('Error getting cash drawer balance:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Calculate balance from all cash drawer transactions - AUTHORITATIVE SOURCE
+   */
+  private async calculateBalanceFromTransactions(storeId: string): Promise<number> {
+    try {
+      // Get all cash drawer transactions
+      const cashTransactions = await db.transactions
+        .filter(trans => 
+          trans.store_id === storeId &&
+          trans.category.startsWith('cash_drawer_')
+        )
+        .toArray();
+
+      // Get all cash drawer sessions to get opening amounts
+      const sessions = await db.cash_drawer_sessions
+        .where('store_id')
+        .equals(storeId)
+        .toArray();
+
+      // Start with all session opening amounts
+      let totalBalance = sessions.reduce((sum, session) => sum + (session.openingAmount || 0), 0);
+
+      // Add all income transactions and subtract all expense transactions
+      for (const trans of cashTransactions) {
+        if (trans.type === 'income') {
+          totalBalance += trans.amount;
+        } else if (trans.type === 'expense') {
+          totalBalance -= trans.amount;
+        }
+      }
+
+      return totalBalance;
+    } catch (error) {
+      console.error('Error calculating balance from transactions:', error);
       return 0;
     }
   }

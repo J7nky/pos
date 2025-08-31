@@ -27,14 +27,14 @@ export interface CashDrawerAccount extends BaseEntity {
 }
 
 export interface CashDrawerSession extends BaseEntity {
-  accountId: string;
-  openedBy: string;
-  openedAt: string;
-  closedAt?: string;
-  closedBy?: string;
-  openingAmount: number;
-  expectedAmount?: number;
-  actualAmount?: number;
+  account_id: string;
+  opened_by: string;
+  opened_at: string;
+  closed_at?: string;
+  closed_by?: string;
+  opening_amount: number;
+  expected_amount?: number;
+  actual_amount?: number;
   variance?: number;
   status: 'open' | 'closed';
   notes?: string;
@@ -226,7 +226,7 @@ class POSDatabase extends Dexie {
     
     console.log('🔧 Initializing POSDatabase...');
     
-    this.version(12).stores({
+    this.version(13).stores({
       // Cash drawer tables
       cash_drawer_accounts: 'id, store_id, account_code, updated_at',
       cash_drawer_sessions: 'id, store_id, account_id, status, created_at',
@@ -330,20 +330,33 @@ class POSDatabase extends Dexie {
     this.cash_drawer_sessions.hook('creating', this.addCreateFields);
     this.cash_drawer_accounts.hook('updating', this.addUpdateFields);
 
-    // Add hooks for automatic cash drawer updates
-    this.transactions.hook('updating', this.handleTransactionCreated);
-    this.sale_items.hook('updating', this.handleSaleItemCreated);
     // Add hooks for automatic timestamping and ID generation
     // Tables WITH updated_at: products, suppliers, customers
     this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
 
-    // Tables WITHOUT updated_at: inventory_items, sale_items, transactions, inventory_bills
+    // Tables WITHOUT updated_at: inventory_items, sale_items, inventory_bills
     this.inventory_items.hook('creating', this.addCreateFields);
-    this.sale_items.hook('creating', this.addCreateFields);
-    this.transactions.hook('creating', this.addCreateFields);
+    (this.sale_items as any).hook('creating', this.addCreateFields);
     this.inventory_bills.hook('creating', this.addCreateFields);
+
+    // Add hooks for automatic cash drawer updates (after basic field hooks)
+    console.log('🔧 Registering cash drawer hooks...');
+    try {
+      (this.transactions as any).hook('creating', this.handleTransactionCreated);
+      console.log('✅ Transaction hook registered');
+    } catch (error) {
+      console.error('❌ Failed to register transaction hook:', error);
+    }
+    
+    try {
+      (this.sale_items as any).hook('creating', this.handleSaleItemCreated);
+      console.log('✅ Sale items hook registered');
+    } catch (error) {
+      console.error('❌ Failed to register sale items hook:', error);
+    }
+    console.log('✅ Cash drawer hooks registration completed');
 
     // Only add update hooks for tables that have updated_at
     this.products.hook('updating', this.addUpdateFields);
@@ -379,6 +392,12 @@ class POSDatabase extends Dexie {
     this.version(12).upgrade(trans => {
       console.log('🔄 Running migration v12: Adding created_by index to sale_items');
       console.log('✅ Migration v12 completed - created_by index added to sale_items');
+    });
+
+    // Migration for version 13 - ensure hooks are properly registered
+    this.version(13).upgrade(trans => {
+      console.log('🔄 Running migration v13: Ensuring hooks are properly registered');
+      console.log('✅ Migration v13 completed - hooks should be active');
     });
     
     console.log('✅ POSDatabase initialization completed');
@@ -427,10 +446,10 @@ class POSDatabase extends Dexie {
       created_at: now,
       updated_at: now,
       _synced: false,
-      accountId,
-      openedBy,
-      openedAt: now,
-      openingAmount,
+      account_id: accountId,
+      opened_by: openedBy,
+      opened_at: now,
+      opening_amount: openingAmount,
       status: 'open'
     };
 
@@ -452,16 +471,16 @@ class POSDatabase extends Dexie {
     if (!session || session.status !== 'open') return;
 
     // Calculate expected amount from transactions
-    const expectedAmount = await this.calculateExpectedCashDrawerAmount(sessionId, session.openingAmount);
+    const expectedAmount = await this.calculateExpectedCashDrawerAmount(sessionId, session.opening_amount);
     const variance = actualAmount - expectedAmount;
     const now = new Date().toISOString();
 
     // Update session
     await this.cash_drawer_sessions.update(sessionId, {
-      closedAt: now,
-      closedBy,
-      expectedAmount,
-      actualAmount,
+      closed_at: now,
+      closed_by: closedBy,
+      expected_amount: expectedAmount,
+      actual_amount: actualAmount,
       variance,
       status: 'closed',
       notes,
@@ -469,8 +488,8 @@ class POSDatabase extends Dexie {
     });
 
     // Update account balance
-    await this.updateCashDrawerBalance(session.accountId, expectedAmount, false); // Remove expected
-    await this.updateCashDrawerBalance(session.accountId, actualAmount, true); // Add actual
+    await this.updateCashDrawerBalance(session.account_id, expectedAmount, false); // Remove expected
+    await this.updateCashDrawerBalance(session.account_id, actualAmount, true); // Add actual
   }
 
   /**
@@ -487,8 +506,8 @@ class POSDatabase extends Dexie {
         return openingAmount;
       }
 
-      const sessionStartTime = new Date(session.openedAt);
-      const sessionEndTime = session.closedAt ? new Date(session.closedAt) : new Date();
+      const sessionStartTime = new Date(session.opened_at);
+      const sessionEndTime = session.closed_at ? new Date(session.closed_at) : new Date();
       
       // Get cash sales during this session period
       const cashSales = await this.sale_items
@@ -581,11 +600,11 @@ class POSDatabase extends Dexie {
       return {
         status: 'active',
         sessionId: currentSession.id,
-        openedBy: currentSession.openedBy,
-        openedAt: currentSession.openedAt,
-        openingAmount: currentSession.openingAmount,
+        openedBy: currentSession.opened_by,
+        openedAt: currentSession.opened_at,
+        openingAmount: currentSession.opening_amount,
         currentBalance: account.current_balance || 0,
-        sessionDuration: Date.now() - new Date(currentSession.openedAt).getTime()
+        sessionDuration: Date.now() - new Date(currentSession.opened_at).getTime()
       };
     } catch (error) {
       console.error('Error getting current cash drawer status:', error);
@@ -653,64 +672,42 @@ class POSDatabase extends Dexie {
         .filter(sess => sess.status === 'closed')
         .toArray();
 
-      // Apply date filters
+      // Filter by date range if provided
       if (startDate) {
-        sessions = sessions.filter(sess => sess.closedAt! >= startDate);
+        sessions = sessions.filter(sess => sess.closed_at! >= startDate);
       }
       if (endDate) {
-        sessions = sessions.filter(sess => sess.closedAt! <= endDate);
+        sessions = sessions.filter(sess => sess.closed_at! <= endDate);
       }
 
-      // Sort by date (most recent first)
-      sessions.sort((a, b) => new Date(b.closedAt!).getTime() - new Date(a.closedAt!).getTime());
+      // Sort by closing date (most recent first)
+      sessions.sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime());
 
-      // Transform sessions to report format
       const reportData = sessions.map(session => ({
-        sessionId: session.id,
-        employeeName: session.closedBy || 'Unknown',
-        date: session.closedAt!,
-        openingAmount: session.openingAmount || 0,
-        expectedAmount: session.expectedAmount || 0,
-        actualAmount: session.actualAmount || 0,
+        id: session.id,
+        date: session.closed_at!,
+        openingAmount: session.opening_amount || 0,
+        expectedAmount: session.expected_amount || 0,
+        actualAmount: session.actual_amount || 0,
         variance: session.variance || 0,
-        status: Math.abs(session.variance || 0) < 0.01 ? 'balanced' : 'unbalanced',
-        variancePercentage: session.expectedAmount ? 
-          (Math.abs(session.variance || 0) / session.expectedAmount) * 100 : 0,
-        notes: session.notes || ''
+        closedBy: session.closed_by || 'Unknown',
+        notes: session.notes || null
       }));
 
-      // Add summary statistics
-      if (reportData.length > 0) {
-        const summary = {
-          totalSessions: reportData.length,
-          totalOpening: reportData.reduce((sum, session) => sum + session.openingAmount, 0),
-          totalExpected: reportData.reduce((sum, session) => sum + session.expectedAmount, 0),
-          totalActual: reportData.reduce((sum, session) => sum + session.actualAmount, 0),
-          totalVariance: reportData.reduce((sum, session) => sum + session.variance, 0),
-          balancedSessions: reportData.filter(session => session.status === 'balanced').length,
-          unbalancedSessions: reportData.filter(session => session.status === 'unbalanced').length,
-          averageVariance: reportData.reduce((sum, session) => sum + Math.abs(session.variance), 0) / reportData.length
-        };
-
-        return {
-          sessions: reportData,
-          summary,
-          generatedAt: new Date().toISOString()
-        };
-      }
+      const summary = {
+        totalSessions: reportData.length,
+        totalOpening: reportData.reduce((sum, session) => sum + session.openingAmount, 0),
+        totalExpected: reportData.reduce((sum, session) => sum + session.expectedAmount, 0),
+        totalActual: reportData.reduce((sum, session) => sum + session.actualAmount, 0),
+        totalVariance: reportData.reduce((sum, session) => sum + session.variance, 0),
+        balancedSessions: reportData.filter(session => session.variance === 0).length,
+        unbalancedSessions: reportData.filter(session => session.variance !== 0).length,
+        averageVariance: reportData.reduce((sum, session) => sum + session.variance, 0) / reportData.length
+      };
 
       return {
-        sessions: [],
-        summary: {
-          totalSessions: 0,
-          totalOpening: 0,
-          totalExpected: 0,
-          totalActual: 0,
-          totalVariance: 0,
-          balancedSessions: 0,
-          unbalancedSessions: 0,
-          averageVariance: 0
-        },
+        sessions: reportData,
+        summary,
         generatedAt: new Date().toISOString()
       };
 
@@ -722,6 +719,7 @@ class POSDatabase extends Dexie {
   }
 
   private addCreateFields = (primKey: any, obj: any, trans: any) => {
+    console.log('🔧 addCreateFields hook triggered for:', obj);
     const now = new Date().toISOString();
     if (!obj.id) obj.id = uuidv4();
     if (!obj.created_at) obj.created_at = now;
@@ -760,7 +758,8 @@ class POSDatabase extends Dexie {
           storeId: obj.store_id,
           createdBy: obj.created_by,
           customerId: obj.reference?.replace('PAY-', '') || '',
-          description: obj.description
+          description: obj.description,
+          allowAutoSessionOpen: true // Allow automatic session opening for hooks
         });
       } else if (obj.type === 'expense') {
         await cashDrawerUpdateService.updateCashDrawerForExpense({
@@ -769,7 +768,8 @@ class POSDatabase extends Dexie {
           storeId: obj.store_id,
           createdBy: obj.created_by,
           description: obj.description,
-          category: obj.category
+          category: obj.category,
+          allowAutoSessionOpen: true // Allow automatic session opening for hooks
         });
       }
     } catch (error) {
@@ -779,9 +779,13 @@ class POSDatabase extends Dexie {
 
   // Hook for automatic cash drawer updates when sale items are created
   private handleSaleItemCreated = async (primKey: any, obj: any, trans: any) => {
+    console.log('🔍 handleSaleItemCreated hook triggered!', { primKey, obj });
+    console.log('🔍 Hook method called with:', { primKey, obj, trans });
+    
     try {
       // Only process cash sales
       if (obj.payment_method !== 'cash') {
+        console.log('⏭️ Skipping non-cash sale:', obj.payment_method);
         return;
       }
 
@@ -800,15 +804,24 @@ class POSDatabase extends Dexie {
       const account = await this.getCashDrawerAccount(obj.store_id);
       const storeCurrency = account?.currency || 'USD';
       
-      await cashDrawerUpdateService.updateCashDrawerForSale({
+      // Use the internal transaction update method that can auto-open sessions
+      const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
+        type: 'sale',
         amount: obj.received_value || 0,
         currency: storeCurrency,
-        paymentMethod: obj.payment_method,
+        description: `Cash sale${obj.customer_id ? ' to customer' : ''}`,
+        reference: `SALE-${obj.id || Date.now()}`,
         storeId: obj.store_id,
         createdBy: obj.created_by,
         customerId: obj.customer_id || undefined,
-        billNumber: `SALE-${obj.id || Date.now()}`
+        allowAutoSessionOpen: true // Allow automatic session opening for hooks
       });
+      
+      if (!updateResult.success) {
+        console.error('Failed to update cash drawer for sale:', updateResult.error);
+      } else {
+        console.log('✅ Cash drawer updated successfully for sale');
+      }
     } catch (error) {
       console.error('Error in sale item created hook:', error);
     }
@@ -1617,6 +1630,38 @@ class POSDatabase extends Dexie {
 
 
 export const db = new POSDatabase();
+
+// Add test function to window for debugging
+if (typeof window !== 'undefined') {
+  (window as any).testSaleItemHook = async () => {
+    console.log('🧪 Testing sale item hook...');
+    try {
+      const testItem = {
+        id: 'test-' + Date.now(),
+        store_id: 'test-store',
+        inventory_item_id: 'test-inv',
+        product_id: 'test-product',
+        supplier_id: 'test-supplier',
+        quantity: 1,
+        weight: null,
+        unit_price: 100,
+        received_value: 100,
+        payment_method: 'cash',
+        notes: 'Test item',
+        customer_id: null,
+        created_at: new Date().toISOString(),
+        created_by: 'test-user',
+        _synced: false
+      };
+      
+      console.log('📝 Adding test sale item:', testItem);
+      await db.sale_items.add(testItem);
+      console.log('✅ Test sale item added successfully');
+    } catch (error) {
+      console.error('❌ Test failed:', error);
+    }
+  };
+}
 
 // Export utility functions
 export const createId = () => uuidv4();
