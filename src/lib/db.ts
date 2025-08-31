@@ -226,7 +226,7 @@ class POSDatabase extends Dexie {
     
     console.log('🔧 Initializing POSDatabase...');
     
-    this.version(10).stores({
+    this.version(12).stores({
       // Cash drawer tables
       cash_drawer_accounts: 'id, store_id, account_code, updated_at',
       cash_drawer_sessions: 'id, store_id, account_id, status, created_at',
@@ -239,7 +239,7 @@ class POSDatabase extends Dexie {
 
       // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
-      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at', // Added payment_method and customer_id indexes
+      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id, and created_by indexes
       transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
       inventory_bills: 'id, store_id, supplier_id, received_at, created_by',
   
@@ -374,6 +374,12 @@ class POSDatabase extends Dexie {
       
       console.log('✅ Migration v11 completed');
     });
+
+    // Migration for version 12 - add created_by index to sale_items
+    this.version(12).upgrade(trans => {
+      console.log('🔄 Running migration v12: Adding created_by index to sale_items');
+      console.log('✅ Migration v12 completed - created_by index added to sale_items');
+    });
     
     console.log('✅ POSDatabase initialization completed');
   }
@@ -397,13 +403,13 @@ class POSDatabase extends Dexie {
   }
 
   async getCurrentCashDrawerSession(storeId: string): Promise<CashDrawerSession | null> {
-    const sessions = await this.cash_drawer_sessions
-      .where('store_id')
-      .equals(storeId)
-      .filter(sess => sess.status === 'open')
-      .first();
-    
-    return sessions || null;
+    // Fetch all sessions for the store
+    const all = await this.cash_drawer_sessions.where('store_id').equals(storeId).toArray();
+    console.log('DEBUG: All sessions for store', storeId, all);
+    // Find open sessions, robust to whitespace/case issues
+    const open = all.filter(sess => String(sess.status).trim().toLowerCase() === 'open');
+    console.log('DEBUG: Open sessions for store', storeId, open);
+    return open[0] || null;
   }
 
   async openCashDrawerSession(
@@ -412,7 +418,7 @@ class POSDatabase extends Dexie {
     openingAmount: number,
     openedBy: string
   ): Promise<string> {
-    const sessionId = createId();
+    const sessionId = uuidv4();
     const now = new Date().toISOString();
     
     const session: CashDrawerSession = {
@@ -467,35 +473,74 @@ class POSDatabase extends Dexie {
     await this.updateCashDrawerBalance(session.accountId, actualAmount, true); // Add actual
   }
 
+  /**
+   * Calculate expected cash drawer amount based on actual transactions during the session
+   */
   private async calculateExpectedCashDrawerAmount(sessionId: string, openingAmount: number): Promise<number> {
-    // Get all cash transactions for this session
-    const cashSales = await this.sale_items
-      .where('created_by')
-      .equals(sessionId)
-      .filter(item => item.payment_method === 'cash')
-      .toArray();
-    
-    const cashPayments = await this.transactions
-      .filter(trans => 
-        trans.type === 'income' && 
-        trans.category === 'cash_payment' &&
-        trans.created_by === sessionId
-      )
-      .toArray();
-    
-    const cashExpenses = await this.transactions
-      .filter(trans => 
-        trans.type === 'expense' && 
-        trans.category === 'cash_expense' &&
-        trans.created_by === sessionId
-      )
-      .toArray();
+    try {
+      console.log(`Calculating expected amount for session ${sessionId} with opening amount ${openingAmount}`);
+      
+      // Get all cash transactions that occurred during this session
+      const session = await this.cash_drawer_sessions.get(sessionId);
+      if (!session) {
+        console.warn('Session not found for expected amount calculation');
+        return openingAmount;
+      }
 
-    const totalSales = cashSales.reduce((sum, item) => sum + item.received_value, 0);
-    const totalPayments = cashPayments.reduce((sum, trans) => sum + trans.amount, 0);
-    const totalExpenses = cashExpenses.reduce((sum, trans) => sum + trans.amount, 0);
+      const sessionStartTime = new Date(session.openedAt);
+      const sessionEndTime = session.closedAt ? new Date(session.closedAt) : new Date();
+      
+      // Get cash sales during this session period
+      const cashSales = await this.sale_items
+        .filter(item => 
+          item.payment_method === 'cash' &&
+          new Date(item.created_at) >= sessionStartTime &&
+          new Date(item.created_at) <= sessionEndTime
+        )
+        .toArray();
+      
+      // Get cash payments during this session period
+      const cashPayments = await this.transactions
+        .filter(trans => 
+          trans.type === 'income' && 
+          trans.category === 'cash_payment' &&
+          new Date(trans.created_at) >= sessionStartTime &&
+          new Date(trans.created_at) <= sessionEndTime
+        )
+        .toArray();
+      
+      // Get cash expenses during this session period
+      const cashExpenses = await this.transactions
+        .filter(trans => 
+          trans.type === 'expense' && 
+          trans.category === 'cash_expense' &&
+          new Date(trans.created_at) >= sessionStartTime &&
+          new Date(trans.created_at) <= sessionEndTime
+        )
+        .toArray();
 
-    return openingAmount + totalSales + totalPayments - totalExpenses;
+      // Calculate totals
+      const totalSales = cashSales.reduce((sum, item) => sum + (item.received_value || 0), 0);
+      const totalPayments = cashPayments.reduce((sum, trans) => sum + trans.amount, 0);
+      const totalExpenses = cashExpenses.reduce((sum, trans) => sum + trans.amount, 0);
+      
+      // Expected amount = Opening + Sales + Payments - Expenses
+      const expectedAmount = openingAmount + totalSales + totalPayments - totalExpenses;
+      
+      console.log(`Cash flow calculation:`, {
+        openingAmount,
+        totalSales,
+        totalPayments,
+        totalExpenses,
+        expectedAmount
+      });
+      
+      return expectedAmount;
+    } catch (error) {
+      console.error('Error calculating expected cash drawer amount:', error);
+      // Return opening amount as fallback
+      return openingAmount;
+    }
   }
 
   private async updateCashDrawerBalance(accountId: string, amount: number, isDebit: boolean): Promise<void> {
@@ -512,6 +557,7 @@ class POSDatabase extends Dexie {
   async getCurrentCashDrawerStatus(storeId: string): Promise<any> {
     try {
       const currentSession = await this.getCurrentCashDrawerSession(storeId);
+
       if (!currentSession) {
         return {
           status: 'no_session',
@@ -670,7 +716,8 @@ class POSDatabase extends Dexie {
 
     } catch (error) {
       console.error('Error generating cash drawer balance report:', error);
-      throw new Error(`Failed to generate cash drawer balance report: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      throw new Error(`Failed to generate cash drawer balance report: ${errorMessage}`);
     }
   }
 
@@ -738,17 +785,29 @@ class POSDatabase extends Dexie {
         return;
       }
 
+      // Skip if this is a cash drawer transaction to prevent infinite loops
+      if (obj.category && obj.category.startsWith('cash_drawer_')) {
+        console.log('🔄 Skipping cash drawer update for cash drawer transaction to prevent loop');
+        return;
+      }
+
       // Import the service dynamically to avoid circular dependencies
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
       
+      console.log(`💰 Auto-updating cash drawer for cash sale: $${obj.received_value || 0}`);
+      
+      // Get store's preferred currency
+      const account = await this.getCashDrawerAccount(obj.store_id);
+      const storeCurrency = account?.currency || 'USD';
+      
       await cashDrawerUpdateService.updateCashDrawerForSale({
         amount: obj.received_value || 0,
-        currency: 'USD', // Assuming USD for now
+        currency: storeCurrency,
         paymentMethod: obj.payment_method,
         storeId: obj.store_id,
         createdBy: obj.created_by,
         customerId: obj.customer_id || undefined,
-        billNumber: `SALE-${Date.now()}`
+        billNumber: `SALE-${obj.id || Date.now()}`
       });
     } catch (error) {
       console.error('Error in sale item created hook:', error);
@@ -907,7 +966,7 @@ class POSDatabase extends Dexie {
     }
 
     // Fallback to local database creation
-    const billId = createId();
+    const billId = uuidv4();
     const now = new Date().toISOString();
     
     return await this.transaction('rw', [this.bills, this.bill_line_items, this.bill_audit_logs], async () => {
@@ -939,7 +998,7 @@ class POSDatabase extends Dexie {
       
       // Create bill line items from sale items
       const lineItems: BillLineItem[] = saleItems.map((saleItem, index) => ({
-        id: createId(),
+        id: uuidv4(),
         store_id: billData.store_id!,
         created_at: now,
         updated_at: now,
@@ -962,7 +1021,7 @@ class POSDatabase extends Dexie {
       
       // Create audit log entry
       await this.bill_audit_logs.add({
-        id: createId(),
+        id: uuidv4(),
         store_id: billData.store_id!,
         created_at: now,
         updated_at: now,
@@ -1002,7 +1061,7 @@ class POSDatabase extends Dexie {
           const oldValue = (originalBill as any)[field];
           if (oldValue !== newValue) {
             await this.bill_audit_logs.add({
-              id: createId(),
+              id: uuidv4(),
               store_id: originalBill.store_id,
               created_at: now,
               updated_at: now,
@@ -1060,7 +1119,7 @@ class POSDatabase extends Dexie {
       
       // Create audit log entry
       await this.bill_audit_logs.add({
-        id: createId(),
+        id: uuidv4(),
         store_id: bill.store_id,
         created_at: now,
         updated_at: now,
@@ -1104,7 +1163,7 @@ class POSDatabase extends Dexie {
     
     return await this.transaction('rw', [this.bill_line_items, this.bills, this.bill_audit_logs], async () => {
       const now = new Date().toISOString();
-      const lineItemId = createId();
+      const lineItemId = uuidv4();
       
       // Get next line order
       const existingItems = await this.bill_line_items.where('bill_id').equals(billId).toArray();
@@ -1128,7 +1187,7 @@ class POSDatabase extends Dexie {
       
       // Create audit log
       await this.bill_audit_logs.add({
-        id: createId(),
+        id: uuidv4(),
         store_id: bill.store_id,
         created_at: now,
         updated_at: now,
@@ -1167,7 +1226,7 @@ class POSDatabase extends Dexie {
           const oldValue = (originalItem as any)[field];
           if (oldValue !== newValue) {
             await this.bill_audit_logs.add({
-              id: createId(),
+              id: uuidv4(),
               store_id: originalItem.store_id,
               created_at: now,
               updated_at: now,
@@ -1213,7 +1272,7 @@ class POSDatabase extends Dexie {
       
       // Create audit log
       await this.bill_audit_logs.add({
-        id: createId(),
+        id: uuidv4(),
         store_id: lineItem.store_id,
         created_at: now,
         updated_at: now,
@@ -1309,7 +1368,7 @@ class POSDatabase extends Dexie {
     billData: any,
     lineItems: Omit<BillLineItem, 'id' | 'bill_id' | keyof BaseEntity>[]
   ): Promise<string> {
-    const billId = createId();
+    const billId = uuidv4();
     const now = new Date().toISOString();
     
     return await this.transaction('rw', [this.bills, this.bill_line_items, this.bill_audit_logs], async () => {
@@ -1327,7 +1386,7 @@ class POSDatabase extends Dexie {
       
       // Create bill line items
       const billLineItems: BillLineItem[] = lineItems.map((item, index) => ({
-        id: createId(),
+        id: uuidv4(),
         store_id: billData.store_id,
         created_at: now,
         updated_at: now,
@@ -1342,7 +1401,7 @@ class POSDatabase extends Dexie {
       
       // Create audit log entry
       await this.bill_audit_logs.add({
-        id: createId(),
+        id: uuidv4(),
         store_id: billData.store_id,
         created_at: now,
         updated_at: now,
@@ -1474,7 +1533,7 @@ class POSDatabase extends Dexie {
           const oldValue = (originalBill as any)[field];
           if (oldValue !== newValue) {
             await this.bill_audit_logs.add({
-              id: createId(),
+              id: uuidv4(),
               store_id: originalBill.store_id,
               created_at: now,
               updated_at: now,
@@ -1538,7 +1597,7 @@ class POSDatabase extends Dexie {
       
       // Create audit log entry
       await this.bill_audit_logs.add({
-        id: createId(),
+        id: uuidv4(),
         store_id: bill.store_id,
         created_at: now,
         updated_at: now,

@@ -64,7 +64,10 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
 
   // Define shortcuts based on current page
   const getShortcutsForPage = () => {
-    const baseShortcuts = [
+    const baseShortcuts: Array<{
+      title: string;
+      shortcuts: Record<string, string>;
+    }> = [
       {
         title: 'Navigation',
         shortcuts: {

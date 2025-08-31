@@ -276,6 +276,85 @@ export class SyncService {
            }
          }
 
+         // Additional validation for cash drawer tables
+         if (tableName === 'cash_drawer_accounts' || tableName === 'cash_drawer_sessions') {
+           const validRecords = [];
+           const invalidRecords = [];
+           
+           for (const record of activeRecordsFiltered) {
+             // Validate cash drawer account records
+             if (tableName === 'cash_drawer_accounts') {
+               // Check required fields
+               if (!record.store_id || !record.account_code || !record.name) {
+                 invalidRecords.push({ record, reason: 'missing required fields (store_id, account_code, name)' });
+                 continue;
+               }
+               
+               // Validate currency
+               if (record.currency && !['USD', 'LBP'].includes(record.currency)) {
+                 invalidRecords.push({ record, reason: `invalid currency: ${record.currency}` });
+                 continue;
+               }
+               
+               // Validate balance is numeric
+               if (record.current_balance !== undefined && isNaN(Number(record.current_balance))) {
+                 invalidRecords.push({ record, reason: `invalid current_balance: ${record.current_balance}` });
+                 continue;
+               }
+             }
+             
+             // Validate cash drawer session records
+             if (tableName === 'cash_drawer_sessions') {
+               // Check required fields
+               if (!record.store_id || !record.account_id || !record.opened_by || !record.opened_at) {
+                 invalidRecords.push({ record, reason: 'missing required fields (store_id, account_id, opened_by, opened_at)' });
+                 continue;
+               }
+               
+               // Validate status
+               if (record.status && !['open', 'closed'].includes(record.status)) {
+                 invalidRecords.push({ record, reason: `invalid status: ${record.status}` });
+                 continue;
+               }
+               
+               // Validate amounts are numeric
+               if (record.opening_amount !== undefined && isNaN(Number(record.opening_amount))) {
+                 invalidRecords.push({ record, reason: `invalid opening_amount: ${record.opening_amount}` });
+                 continue;
+               }
+               
+               if (record.expected_amount !== undefined && isNaN(Number(record.expected_amount))) {
+                 invalidRecords.push({ record, reason: `invalid expected_amount: ${record.expected_amount}` });
+                 continue;
+               }
+               
+               if (record.actual_amount !== undefined && isNaN(Number(record.actual_amount))) {
+                 invalidRecords.push({ record, reason: `invalid actual_amount: ${record.actual_amount}` });
+                 continue;
+               }
+               
+               if (record.variance !== undefined && isNaN(Number(record.variance))) {
+                 invalidRecords.push({ record, reason: `invalid variance: ${record.variance}` });
+                 continue;
+               }
+             }
+             
+             validRecords.push(record);
+           }
+           
+           // Remove invalid cash drawer records from sync queue
+           for (const invalid of invalidRecords) {
+             console.warn(`🚫 Removing invalid ${tableName} record: ${invalid.reason}`, invalid.record);
+             await db.markAsSynced(tableName, invalid.record.id);
+           }
+           
+           activeRecordsFiltered = validRecords;
+           
+           if (invalidRecords.length > 0) {
+             console.log(`🧹 Cleaned ${invalidRecords.length} invalid ${tableName} records`);
+           }
+         }
+
          // Additional validation for bills
          if (tableName === 'bills') {
            const validRecords = [];
@@ -718,6 +797,15 @@ export class SyncService {
       return false; // No conflict
     }
 
+    // Special handling for cash drawer tables
+    if (tableName === 'cash_drawer_accounts') {
+      return await this.resolveCashDrawerAccountConflict(localRecord, remoteRecord);
+    }
+    
+    if (tableName === 'cash_drawer_sessions') {
+      return await this.resolveCashDrawerSessionConflict(localRecord, remoteRecord);
+    }
+
     // Determine the timestamp field for this table
     // Only these tables have updated_at: products, suppliers, customers
     const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
@@ -746,6 +834,119 @@ export class SyncService {
     }
 
     return true; // Conflict occurred
+  }
+
+  /**
+   * Resolve conflicts for cash drawer accounts
+   */
+  private async resolveCashDrawerAccountConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
+    const localBalance = Number(localRecord.current_balance || 0);
+    const remoteBalance = Number(remoteRecord.current_balance || 0);
+    
+    // If balances are significantly different, create reconciliation
+    if (Math.abs(localBalance - remoteBalance) > 0.01) {
+      console.warn(`💰 Cash drawer balance conflict detected: Local: $${localBalance}, Remote: $${remoteBalance}`);
+      
+      // Use conservative approach: take the higher balance
+      const finalBalance = Math.max(localBalance, remoteBalance);
+      
+      // Create reconciliation transaction if needed
+      if (finalBalance !== localBalance) {
+        await this.createReconciliationTransaction(localBalance, finalBalance, localRecord.store_id);
+      }
+      
+      // Update with reconciled balance
+      await db.cash_drawer_accounts.update(localRecord.id, {
+        current_balance: finalBalance,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+      
+      return true; // Conflict resolved
+    }
+    
+    // If balances are close, use remote version
+    await db.cash_drawer_accounts.put({
+      ...remoteRecord,
+      _synced: true,
+      _lastSyncedAt: new Date().toISOString()
+    });
+    
+    return false; // No significant conflict
+  }
+
+  /**
+   * Resolve conflicts for cash drawer sessions
+   */
+  private async resolveCashDrawerSessionConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
+    // For sessions, prioritize the most recent status
+    const localStatus = localRecord.status;
+    const remoteStatus = remoteRecord.status;
+    
+    // If one is closed and the other is open, prioritize closed
+    if (localStatus === 'closed' && remoteStatus === 'open') {
+      console.warn(`🔒 Session conflict: Local closed, Remote open. Keeping local (closed) version.`);
+      await db.cash_drawer_sessions.update(localRecord.id, {
+        _lastSyncedAt: new Date().toISOString()
+      });
+      return true;
+    }
+    
+    if (localStatus === 'open' && remoteStatus === 'closed') {
+      console.warn(`🔒 Session conflict: Local open, Remote closed. Using remote (closed) version.`);
+      await db.cash_drawer_sessions.put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+      return true;
+    }
+    
+    // For other conflicts, use timestamp-based resolution
+    const localModifiedAt = new Date(localRecord.updated_at || localRecord.created_at);
+    const remoteModifiedAt = new Date(remoteRecord.updated_at || remoteRecord.created_at);
+    
+    if (remoteModifiedAt >= localModifiedAt) {
+      await db.cash_drawer_sessions.put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    } else {
+      await db.cash_drawer_sessions.update(localRecord.id, {
+        _lastSyncedAt: new Date().toISOString()
+      });
+    }
+    
+    return true; // Conflict occurred
+  }
+
+  /**
+   * Create reconciliation transaction for balance discrepancies
+   */
+  private async createReconciliationTransaction(oldBalance: number, newBalance: number, storeId: string) {
+    const variance = newBalance - oldBalance;
+    const transactionId = `RECON-${Date.now()}`;
+    
+    try {
+      await db.transactions.add({
+        id: transactionId,
+        type: variance > 0 ? 'income' : 'expense',
+        category: 'cash_drawer_reconciliation',
+        amount: Math.abs(variance),
+        currency: 'USD',
+        description: `Cash drawer reconciliation: ${oldBalance} → ${newBalance}`,
+        reference: transactionId,
+        store_id: storeId,
+        created_by: 'system',
+        created_at: new Date().toISOString(),
+        _synced: false
+      });
+      
+      console.log(`📝 Created reconciliation transaction: $${variance.toFixed(2)}`);
+    } catch (error) {
+      console.error('Failed to create reconciliation transaction:', error);
+    }
   }
 
   /**

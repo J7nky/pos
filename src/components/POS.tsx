@@ -25,7 +25,7 @@ import {
 import { SaleItem, Customer } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
-import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
+
 
 interface BillTab {
   id: string;
@@ -531,29 +531,8 @@ export default function POS() {
         saleItemsData
       );
       
-      // Update cash drawer for cash sales
-      if (activeTab.paymentMethod === 'cash') {
-        try {
-          console.log(total,'total cash')
-          const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForSale({
-            amount: total,
-            currency: 'LBP', // Assuming LBP for now, can be made dynamic
-            paymentMethod: activeTab.paymentMethod,
-            storeId: raw.storeId,
-            createdBy: userProfile?.id || '',
-            customerId: activeTab.selectedCustomer || undefined,
-            billNumber: billData.bill_number
-          });
-
-          if (cashDrawerResult.success) {
-            console.log(`💰 Cash drawer updated: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
-          } else {
-            console.warn('⚠️ Cash drawer update failed:', cashDrawerResult.error);
-          }
-        } catch (error) {
-          console.error('Error updating cash drawer:', error);
-        }
-      }
+      // Cash drawer update is handled automatically by database hook when sale items are created
+      // No need for manual cash drawer update here to prevent double processing
       
       await raw.refreshData(); // Ensure UI is in sync with backend
       

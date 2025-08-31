@@ -40,6 +40,52 @@ export class CashDrawerUpdateService {
   }
 
   /**
+   * Close cash drawer session with actual amount count
+   */
+  public async closeCashDrawer(
+    sessionId: string,
+    actualAmount: number,
+    closedBy: string,
+    notes?: string
+  ): Promise<{
+    success: boolean;
+    sessionId: string;
+    expectedAmount: number;
+    actualAmount: number;
+    variance: number;
+    error?: string;
+  }> {
+    try {
+      // Close the cash drawer session using the database method
+      await db.closeCashDrawerSession(sessionId, actualAmount, closedBy, notes);
+      
+      // Get the updated session to return details
+      const session = await db.cash_drawer_sessions.get(sessionId);
+      if (!session) {
+        throw new Error('Session not found after closing');
+      }
+
+      return {
+        success: true,
+        sessionId,
+        expectedAmount: session.expectedAmount || 0,
+        actualAmount: session.actualAmount || 0,
+        variance: session.variance || 0
+      };
+    } catch (error) {
+      console.error('Error closing cash drawer:', error);
+      return {
+        success: false,
+        sessionId,
+        expectedAmount: 0,
+        actualAmount: 0,
+        variance: 0,
+        error: error instanceof Error ? error.message : 'Unknown error occurred'
+      };
+    }
+  }
+
+  /**
    * Automatically update cash drawer when a cash transaction occurs
    */
   public async updateCashDrawerForTransaction(
@@ -47,8 +93,11 @@ export class CashDrawerUpdateService {
   ): Promise<CashDrawerUpdateResult> {
 
     try {
+      // Get store's preferred currency from cash drawer account
+      const storeCurrency = await this.getStorePreferredCurrency(transactionData.storeId);
+      
       // Determine preferred storage currency and normalize amount to it
-      const currency = transactionData.preferredCurrency || transactionData.currency || 'LBP';
+      const currency = transactionData.preferredCurrency || storeCurrency || transactionData.currency || 'USD';
       const normalizedAmount = transactionData.currency === currency
         ? transactionData.amount
         : currencyService.convertCurrency(transactionData.amount, transactionData.currency, currency);
@@ -57,6 +106,9 @@ export class CashDrawerUpdateService {
       let account = await db.getCashDrawerAccount(transactionData.storeId);
       if (!account) {
         try {
+          // Get store's preferred currency from context or use default
+          const storeCurrency = await this.getStorePreferredCurrency(transactionData.storeId);
+          
           account = {
             id: createId(),
             store_id: transactionData.storeId,
@@ -66,11 +118,11 @@ export class CashDrawerUpdateService {
             accountCode: '1001',
             name: 'Cash Drawer',
             current_balance: 0,
-            currency: currency,
+            currency: storeCurrency,
             isActive: true
           };
           await db.cash_drawer_accounts.add(account);
-          console.log('💰 Created cash drawer account for store:', transactionData.storeId);
+          console.log(`💰 Created cash drawer account for store: ${transactionData.storeId} with currency: ${storeCurrency}`);
         } catch (error) {
           console.error('Error creating a new cash account:', error);
         }
@@ -311,6 +363,9 @@ export class CashDrawerUpdateService {
     try {
       let account = await db.getCashDrawerAccount(storeId);
       if (!account) {
+        // Get store's preferred currency
+        const storeCurrency = await this.getStorePreferredCurrency(storeId);
+        
         // Create default account if it doesn't exist
         account = {
           id: createId(),
@@ -321,16 +376,34 @@ export class CashDrawerUpdateService {
           accountCode: '1001',
           name: 'Cash Drawer',
           current_balance: 0,
-          currency: 'USD',
+          currency: storeCurrency,
           isActive: true
         };
         await db.cash_drawer_accounts.add(account);
-        console.log('💰 Created default cash drawer account for store:', storeId);
+        console.log(`💰 Created default cash drawer account for store: ${storeId} with currency: ${storeCurrency}`);
       }
       return (account as any)?.current_balance || 0;
     } catch (error) {
       console.error('Error getting cash drawer balance:', error);
       return 0;
+    }
+  }
+
+  /**
+   * Get store's preferred currency from cash drawer account
+   */
+  private async getStorePreferredCurrency(storeId: string): Promise<'USD' | 'LBP'> {
+    try {
+      const account = await db.getCashDrawerAccount(storeId);
+      if (account && (account as any).currency) {
+        return (account as any).currency;
+      }
+      
+      // Fallback to default currency
+      return 'USD';
+    } catch (error) {
+      console.warn('Could not determine store currency, using USD as default:', error);
+      return 'USD';
     }
   }
 
