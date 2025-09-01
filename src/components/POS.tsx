@@ -559,7 +559,33 @@ export default function POS() {
       showToast('success', `Sale completed successfully! Bill created.`);
     } catch (error) {
       console.error('Sale processing error:', error);
-      showToast('error', `Sale failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Handle specific error types
+      let errorMessage = 'Unknown error occurred';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('PrematureCommitError') || error.message.includes('Transaction committed too early')) {
+          errorMessage = 'Database transaction error. Please try again.';
+        } else if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+          errorMessage = 'Network error. Please check your connection and try again.';
+        } else if (error.message.includes('CORS')) {
+          errorMessage = 'Connection error. Please try again.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      showToast('error', `Sale failed: ${errorMessage}`);
+      
+      // Log additional error details for debugging
+      if (error && typeof error === 'object') {
+        console.error('Error details:', {
+          name: (error as any).name,
+          message: (error as any).message,
+          stack: (error as any).stack,
+          inner: (error as any).inner
+        });
+      }
     }
     setIsProcessing(false);
   };

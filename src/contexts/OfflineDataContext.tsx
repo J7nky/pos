@@ -1142,105 +1142,131 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     
     // }
 
-    // Use transaction to ensure atomicity
-    await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
-
-
-      await db.sale_items.bulkAdd(saleItemsWithIds);
-
-      // Manually trigger cash drawer update for cash sales since bulkAdd doesn't trigger hooks
-      const cashSaleItems = saleItemsWithIds.filter(item => item.payment_method === 'cash');
-      if (cashSaleItems.length > 0) {
-        // Import the service dynamically to avoid circular dependencies
-        const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-
-        // Calculate total cash sale amount
-        const totalCashAmount = cashSaleItems.reduce((sum, item) => sum + (item.received_value || 0), 0);
-
-        console.log(`💰 Manually updating cash drawer for ${cashSaleItems.length} cash sale items: $${totalCashAmount.toFixed(2)}`);
-
-        // Get store's preferred currency
-        const account = await db.getCashDrawerAccount(storeId);
-        const storeCurrency = account?.currency || 'USD';
-
-        // Update cash drawer for the total cash sale amount
-        const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: 'sale',
-          amount: totalCashAmount,
-          currency: storeCurrency,
-          description: `Cash sale${cashSaleItems.length > 1 ? ` (${cashSaleItems.length} items)` : ''}`,
-          reference: `SALE-${Date.now()}`,
-          storeId: storeId,
-          createdBy: currentUserId,
-          allowAutoSessionOpen: true
-        });
-
-        if (!updateResult.success) {
-          console.error('Failed to update cash drawer for cash sale:', updateResult.error);
-        } else {
-          console.log('✅ Cash drawer updated successfully for cash sale');
-        }
-      }
+    // Use transaction to ensure atomicity with retry logic
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
+        await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
+          await db.sale_items.bulkAdd(saleItemsWithIds);
+          
+          // Add the value of the sale to the supplier's balance
+          // Add the value of the credit to the customer's balance
       
-      // Add the value of the sale to the supplier's balance
-      // Add the value of the credit to the customer's balance
-  
-      // Deduct from specific inventory items
-  for (const item of items) {
-        if (item.inventory_item_id) {
-          // Use the specific inventory item ID if provided
-          const inventoryItem = await db.inventory_items.get(item.inventory_item_id);
-          if (inventoryItem && inventoryItem.quantity >= item.quantity) {
-            const newQuantity = inventoryItem.quantity - item.quantity;
-            
-            if (newQuantity <= 0) {
-              // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(item.inventory_item_id, { 
-                quantity: 0,
-                _synced: false
-              });
+          // Deduct from specific inventory items
+          for (const item of items) {
+            if (item.inventory_item_id) {
+              // Use the specific inventory item ID if provided
+              const inventoryItem = await db.inventory_items.get(item.inventory_item_id);
+              if (inventoryItem && inventoryItem.quantity >= item.quantity) {
+                const newQuantity = inventoryItem.quantity - item.quantity;
+                
+                if (newQuantity <= 0) {
+                  // Keep inventory item with quantity = 0 for received bills review instead of deleting
+                  await db.inventory_items.update(item.inventory_item_id, { 
+                    quantity: 0,
+                    _synced: false
+                  });
+                } else {
+                  // Update with new quantity
+                  await db.inventory_items.update(item.inventory_item_id, { 
+                    quantity: newQuantity,
+                    _synced: false
+                  });
+                }
+              }
             } else {
-              // Update with new quantity
-              await db.inventory_items.update(item.inventory_item_id, { 
-                quantity: newQuantity,
-                _synced: false
-              });
+              // Fallback to FIFO if no specific inventory item ID (legacy support)
+              const inventoryRecords = await db.inventory_items
+                .where('product_id')
+                .equals(item.product_id)
+                .and(inv => inv.supplier_id === item.supplier_id && inv.quantity > 0)
+                .sortBy('received_at');
+
+              let qtyToDeduct = item.quantity || 1; // Default to 1 if not specified
+              for (const inv of inventoryRecords) {
+                if (qtyToDeduct <= 0) break;
+                
+                const deduct = Math.min(inv.quantity, qtyToDeduct);
+                const newQuantity = inv.quantity - deduct;
+                
+                if (newQuantity <= 0) {
+                  // Keep inventory item with quantity = 0 for received bills review instead of deleting
+                  await db.inventory_items.update(inv.id, { 
+                    quantity: 0,
+                    _synced: false
+                  });
+                } else {
+                  // Update with new quantity
+                  await db.inventory_items.update(inv.id, { 
+                    quantity: newQuantity,
+                    _synced: false
+                  });
+                }
+                qtyToDeduct -= deduct;
+              }
             }
           }
-        } else {
+                 });
+         
+         // Manually trigger cash drawer update for cash sales after successful transaction
+         const cashSaleItems = saleItemsWithIds.filter(item => item.payment_method === 'cash');
+         if (cashSaleItems.length > 0) {
+           try {
+             // Import the service dynamically to avoid circular dependencies
+             const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
 
-          // Fallback to FIFO if no specific inventory item ID (legacy support)
-          const inventoryRecords = await db.inventory_items
-            .where('product_id')
-            .equals(item.product_id)
-            .and(inv => inv.supplier_id === item.supplier_id && inv.quantity > 0)
-            .sortBy('received_at');
+             // Calculate total cash sale amount
+             const totalCashAmount = cashSaleItems.reduce((sum, item) => sum + (item.received_value || 0), 0);
 
-          let qtyToDeduct = item.quantity || 1; // Default to 1 if not specified
-          for (const inv of inventoryRecords) {
-            if (qtyToDeduct <= 0) break;
-            
-            const deduct = Math.min(inv.quantity, qtyToDeduct);
-            const newQuantity = inv.quantity - deduct;
-            
-            if (newQuantity <= 0) {
-              // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(inv.id, { 
-                quantity: 0,
-                _synced: false
-              });
-            } else {
-              // Update with new quantity
-              await db.inventory_items.update(inv.id, { 
-                quantity: newQuantity,
-                _synced: false
-              });
-            }
-            qtyToDeduct -= deduct;
-          }
+             console.log(`💰 Manually updating cash drawer for ${cashSaleItems.length} cash sale items: $${totalCashAmount.toFixed(2)}`);
+
+             // Get store's preferred currency
+             const account = await db.getCashDrawerAccount(storeId);
+             const storeCurrency = account?.currency || 'USD';
+
+             // Update cash drawer for the total cash sale amount
+             const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
+               type: 'sale',
+               amount: totalCashAmount,
+               currency: storeCurrency,
+               description: `Cash sale${cashSaleItems.length > 1 ? ` (${cashSaleItems.length} items)` : ''}`,
+               reference: `SALE-${Date.now()}`,
+               storeId: storeId,
+               createdBy: currentUserId,
+               allowAutoSessionOpen: true
+             });
+
+             if (!updateResult.success) {
+               console.error('Failed to update cash drawer for cash sale:', updateResult.error);
+             } else {
+               console.log('✅ Cash drawer updated successfully for cash sale');
+             }
+           } catch (cashDrawerError) {
+             console.error('Cash drawer update failed, but sale was successful:', cashDrawerError);
+             // Don't fail the entire sale if cash drawer update fails
+           }
+         }
+         
+         // If we get here, the transaction was successful
+         break;
+        
+      } catch (error) {
+        retryCount++;
+        console.warn(`Transaction attempt ${retryCount} failed:`, error);
+        
+        if (retryCount >= maxRetries) {
+          console.error(`All ${maxRetries} transaction attempts failed. Final error:`, error);
+          throw new Error(`Failed to complete sale after ${maxRetries} attempts: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
+        
+        // Wait a bit before retrying (exponential backoff)
+        const delay = Math.min(100 * Math.pow(2, retryCount - 1), 1000);
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-    });
+    }
 
     await refreshData();
     await updateUnsyncedCount();
