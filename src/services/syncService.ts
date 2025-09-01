@@ -720,8 +720,8 @@ export class SyncService {
         }
 
         // Determine the timestamp field for each table
-            // Only these tables have updated_at: products, suppliers, customers
-    const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
+            // Only these tables have updated_at: products, suppliers, customers, cash_drawer_accounts
+    const hasUpdatedAt = ['products', 'suppliers', 'customers', 'cash_drawer_accounts'].includes(tableName);
         const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
 
         // Get remote changes since last sync
@@ -749,6 +749,17 @@ export class SyncService {
             const localRecord = await (db as any)[tableName].get(remoteRecord.id);
             
             if (!localRecord) {
+              // Special handling for cash_drawer_accounts to prevent duplicates
+              if (tableName === 'cash_drawer_accounts') {
+                // Check if an account already exists for this store
+                const existingAccount = await db.getCashDrawerAccount(remoteRecord.store_id);
+                if (existingAccount && existingAccount.id !== remoteRecord.id) {
+                  console.warn(`🚫 Skipping duplicate cash_drawer_account for store ${remoteRecord.store_id}. Existing: ${existingAccount.id}, Remote: ${remoteRecord.id}`);
+                  // Mark the remote record as processed but don't insert it
+                  continue;
+                }
+              }
+              
               // New record - just insert
               await (db as any)[tableName].put({
                 ...remoteRecord,
@@ -1714,14 +1725,36 @@ export class SyncService {
         if (error) {
           result.errors.push(`Download failed for ${tableName}: ${error.message}`);
         } else if (remoteRecords) {
-          const recordsWithSync = remoteRecords.map(record => ({
-            ...record,
-            _synced: true,
-            _lastSyncedAt: new Date().toISOString()
-          }));
-          
-          await (db as any)[tableName].bulkPut(recordsWithSync);
-          result.synced.downloaded += remoteRecords.length;
+          // Special handling for cash_drawer_accounts to prevent duplicates during full resync
+          if (tableName === 'cash_drawer_accounts') {
+            // For cash drawer accounts, only keep one per store (the first one)
+            const uniqueRecords = new Map();
+            for (const record of remoteRecords) {
+              if (!uniqueRecords.has(record.store_id)) {
+                uniqueRecords.set(record.store_id, record);
+              } else {
+                console.warn(`🚫 Skipping duplicate cash_drawer_account during full resync for store ${record.store_id}. ID: ${record.id}`);
+              }
+            }
+            
+            const recordsWithSync = Array.from(uniqueRecords.values()).map(record => ({
+              ...record,
+              _synced: true,
+              _lastSyncedAt: new Date().toISOString()
+            }));
+            
+            await (db as any)[tableName].bulkPut(recordsWithSync);
+            result.synced.downloaded += recordsWithSync.length;
+          } else {
+            const recordsWithSync = remoteRecords.map(record => ({
+              ...record,
+              _synced: true,
+              _lastSyncedAt: new Date().toISOString()
+            }));
+            
+            await (db as any)[tableName].bulkPut(recordsWithSync);
+            result.synced.downloaded += remoteRecords.length;
+          }
         }
       }
 

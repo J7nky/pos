@@ -97,23 +97,13 @@ export class CashDrawerUpdateService {
         };
       }
 
-      // Get or create cash drawer account
-      let account = await db.getCashDrawerAccount(storeId);
+      // Get or create cash drawer account (use the private method for proper duplicate prevention)
+      const account = await this.getOrCreateCashDrawerAccount(storeId, 'USD');
       if (!account) {
-        const storeCurrency = await this.getStorePreferredCurrency(storeId);
-        account = {
-          id: createId(),
-          store_id: storeId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          accountCode: '1001',
-          name: 'Cash Drawer',
-          current_balance: 0,
-          currency: storeCurrency,
-          isActive: true
+        return {
+          success: false,
+          error: 'Failed to create or retrieve cash drawer account'
         };
-        await db.cash_drawer_accounts.add(account);
       }
 
       // Open new session using database method
@@ -454,24 +444,12 @@ export class CashDrawerUpdateService {
     try {
       let account = await db.getCashDrawerAccount(storeId);
       if (!account) {
-        // Get store's preferred currency
-        const storeCurrency = await this.getStorePreferredCurrency(storeId);
-        
-        // Create default account if it doesn't exist
-        account = {
-          id: createId(),
-          store_id: storeId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          accountCode: '1001',
-          name: 'Cash Drawer',
-          current_balance: 0,
-          currency: storeCurrency,
-          isActive: true
-        };
-        await db.cash_drawer_accounts.add(account);
-        console.log(`💰 Created default cash drawer account for store: ${storeId} with currency: ${storeCurrency}`);
+        // Use the private method for proper duplicate prevention
+        account = await this.getOrCreateCashDrawerAccount(storeId, 'USD');
+        if (!account) {
+          console.error(`💰 Failed to create cash drawer account for store: ${storeId}`);
+          return 0;
+        }
         return 0;
       }
 
@@ -647,12 +625,19 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Get or create cash drawer account
+   * Get or create cash drawer account with proper duplicate prevention
    */
   private async getOrCreateCashDrawerAccount(storeId: string, storeCurrency: 'USD' | 'LBP') {
     try {
       let account = await db.getCashDrawerAccount(storeId);
       if (!account) {
+        // Double-check for race conditions - another process might have created an account
+        account = await db.getCashDrawerAccount(storeId);
+        if (account) {
+          console.log(`💰 Found existing cash drawer account after race condition check: ${account.id}`);
+          return account;
+        }
+        
         // Get the store's preferred currency from the stores table
         const actualStoreCurrency = await this.getStorePreferredCurrency(storeId);
         
@@ -668,8 +653,20 @@ export class CashDrawerUpdateService {
           currency: actualStoreCurrency,
           isActive: true
         };
-        await db.cash_drawer_accounts.add(account);
-        console.log(`💰 Created cash drawer account for store: ${storeId} with currency: ${actualStoreCurrency}`);
+        
+        try {
+          await db.cash_drawer_accounts.add(account);
+          console.log(`💰 Created cash drawer account for store: ${storeId} with currency: ${actualStoreCurrency}`);
+        } catch (addError) {
+          // If add fails due to duplicate key, try to get the existing account
+          console.warn('Account creation failed, checking for existing account:', addError);
+          const existingAccount = await db.getCashDrawerAccount(storeId);
+          if (existingAccount) {
+            console.log(`💰 Using existing account found after creation failure: ${existingAccount.id}`);
+            return existingAccount;
+          }
+          throw addError;
+        }
       }
       return account;
     } catch (error) {

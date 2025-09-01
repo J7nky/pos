@@ -197,13 +197,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       // Clean up any invalid/orphaned data first
-      const [invalidCleaned, orphanedCleaned] = await Promise.all([
+      const [invalidCleaned, orphanedCleaned, duplicateCashDrawerCleaned] = await Promise.all([
         db.cleanupInvalidInventoryItems(),
-        db.cleanupOrphanedRecords(storeId)
+        db.cleanupOrphanedRecords(storeId),
+        db.cleanupDuplicateCashDrawerAccounts(storeId)
       ]);
 
-      if (invalidCleaned > 0 || orphanedCleaned > 0) {
-        console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
+      if (invalidCleaned > 0 || orphanedCleaned > 0 || duplicateCashDrawerCleaned > 0) {
+        console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned + duplicateCashDrawerCleaned} records removed (${duplicateCashDrawerCleaned} duplicate cash drawer accounts)`);
       }
 
       console.log('📊 Loading local data...');
@@ -1401,14 +1402,20 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       const report = await db.validateDataIntegrity(storeId);
-      const cleaned = await db.cleanupOrphanedRecords(storeId);
+      const [orphanedCleaned, duplicateCashDrawerCleaned] = await Promise.all([
+        db.cleanupOrphanedRecords(storeId),
+        db.cleanupDuplicateCashDrawerAccounts(storeId)
+      ]);
       
-      if (cleaned > 0) {
+      const totalCleaned = orphanedCleaned + duplicateCashDrawerCleaned;
+      
+      if (totalCleaned > 0) {
         await refreshData();
         await updateUnsyncedCount();
+        console.log(`🧹 Data cleanup completed: ${orphanedCleaned} orphaned records, ${duplicateCashDrawerCleaned} duplicate cash drawer accounts`);
       }
       
-      return { cleaned, report };
+      return { cleaned: totalCleaned, report };
     } catch (error) {
       console.error('Data validation/cleanup failed:', error);
       throw error;
@@ -1427,23 +1434,41 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return;
     
     try {
-      // Get or create cash drawer account
+      // Get or create cash drawer account with proper duplicate prevention
       let account = await db.getCashDrawerAccount(storeId);
       if (!account) {
-        // Create default account if it doesn't exist
-        account = {
-          id: createId(),
-          store_id: storeId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          accountCode: '1001',
-          name: 'Cash Drawer',
-          current_balance: 0,
-          currency: 'USD', // Default to USD
-          isActive: true
-        };
-        await db.cash_drawer_accounts.add(account);
+        // Double-check for race conditions before creating
+        account = await db.getCashDrawerAccount(storeId);
+        if (!account) {
+          // Create default account if it doesn't exist
+          account = {
+            id: createId(),
+            store_id: storeId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            _synced: false,
+            accountCode: '1001',
+            name: 'Cash Drawer',
+            current_balance: 0,
+            currency: 'USD', // Default to USD
+            isActive: true
+          };
+          
+          try {
+            await db.cash_drawer_accounts.add(account);
+            console.log(`💰 Created cash drawer account for store: ${storeId}`);
+          } catch (addError) {
+            // If add fails due to duplicate, get the existing account
+            console.warn('Account creation failed, checking for existing account:', addError);
+            const existingAccount = await db.getCashDrawerAccount(storeId);
+            if (existingAccount) {
+              console.log(`💰 Using existing account found after creation failure: ${existingAccount.id}`);
+              account = existingAccount;
+            } else {
+              throw addError;
+            }
+          }
+        }
       }
 
       // Open new session

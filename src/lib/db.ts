@@ -226,7 +226,7 @@ class POSDatabase extends Dexie {
     
     console.log('🔧 Initializing POSDatabase...');
     
-    this.version(13).stores({
+    this.version(14).stores({
       // Cash drawer tables
       cash_drawer_accounts: 'id, store_id, account_code, updated_at',
       cash_drawer_sessions: 'id, store_id, account_id, status, created_at',
@@ -402,6 +402,66 @@ class POSDatabase extends Dexie {
       console.log('🔄 Running migration v13: Ensuring hooks are properly registered');
       console.log('✅ Migration v13 completed - hooks should be active');
     });
+
+    // Migration for version 14 - clean up duplicate cash drawer accounts
+    this.version(14).upgrade(async trans => {
+      console.log('🔄 Running migration v14: Cleaning up duplicate cash drawer accounts');
+      
+      try {
+        // Get all cash drawer accounts grouped by store_id
+        const allAccounts = await trans.table('cash_drawer_accounts').toArray();
+        const accountsByStore = new Map<string, any[]>();
+        
+        for (const account of allAccounts) {
+          if (!accountsByStore.has(account.store_id)) {
+            accountsByStore.set(account.store_id, []);
+          }
+          accountsByStore.get(account.store_id)!.push(account);
+        }
+        
+        let totalCleaned = 0;
+        
+        // Clean up duplicates for each store
+        for (const [storeId, accounts] of accountsByStore) {
+          if (accounts.length > 1) {
+            console.log(`🧹 Found ${accounts.length} cash drawer accounts for store ${storeId}, cleaning duplicates...`);
+            
+            // Sort by created_at to keep the oldest one (most likely the original)
+            accounts.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+            
+            // Keep the first account (oldest), delete others
+            const accountToKeep = accounts[0];
+            const accountsToDelete = accounts.slice(1);
+            
+            console.log(`💰 Keeping account: ${accountToKeep.id} (created: ${accountToKeep.created_at})`);
+            
+            // Update all cash drawer sessions to use the kept account
+            for (const accountToDelete of accountsToDelete) {
+              const sessions = await trans.table('cash_drawer_sessions')
+                .where('account_id')
+                .equals(accountToDelete.id)
+                .toArray();
+              
+              for (const session of sessions) {
+                await trans.table('cash_drawer_sessions').update(session.id, {
+                  account_id: accountToKeep.id
+                });
+                console.log(`🔗 Updated session ${session.id} to use kept account ${accountToKeep.id}`);
+              }
+              
+              // Delete the duplicate account
+              await trans.table('cash_drawer_accounts').delete(accountToDelete.id);
+              console.log(`🗑️ Deleted duplicate account: ${accountToDelete.id}`);
+              totalCleaned++;
+            }
+          }
+        }
+        
+        console.log(`✅ Migration v14 completed - cleaned up ${totalCleaned} duplicate cash drawer accounts`);
+      } catch (error) {
+        console.error('❌ Migration v14 failed:', error);
+      }
+    });
     
     console.log('✅ POSDatabase initialization completed');
   }
@@ -422,6 +482,59 @@ class POSDatabase extends Dexie {
       .first();
 
     return account || null;
+  }
+
+  /**
+   * Clean up duplicate cash drawer accounts for a store, keeping only the most recent one
+   */
+  async cleanupDuplicateCashDrawerAccounts(storeId: string): Promise<number> {
+    try {
+      const accounts = await this.cash_drawer_accounts
+        .where('store_id')
+        .equals(storeId)
+        .toArray();
+
+      if (accounts.length <= 1) {
+        return 0; // No duplicates to clean
+      }
+
+      console.log(`🧹 Found ${accounts.length} cash drawer accounts for store ${storeId}, cleaning duplicates...`);
+
+      // Sort by created_at to keep the oldest one (most likely the original)
+      accounts.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+      // Keep the first account (oldest), mark others for deletion
+      const accountToKeep = accounts[0];
+      const accountsToDelete = accounts.slice(1);
+
+      console.log(`💰 Keeping account: ${accountToKeep.id} (created: ${accountToKeep.created_at})`);
+
+      // Update all cash drawer sessions to use the kept account
+      for (const accountToDelete of accountsToDelete) {
+        const sessions = await this.cash_drawer_sessions
+          .where('account_id')
+          .equals(accountToDelete.id)
+          .toArray();
+
+        for (const session of sessions) {
+          await this.cash_drawer_sessions.update(session.id, {
+            account_id: accountToKeep.id,
+            _synced: false
+          });
+          console.log(`🔗 Updated session ${session.id} to use kept account ${accountToKeep.id}`);
+        }
+
+        // Delete the duplicate account
+        await this.cash_drawer_accounts.delete(accountToDelete.id);
+        console.log(`🗑️ Deleted duplicate account: ${accountToDelete.id}`);
+      }
+
+      console.log(`✅ Cleaned up ${accountsToDelete.length} duplicate cash drawer accounts for store ${storeId}`);
+      return accountsToDelete.length;
+    } catch (error) {
+      console.error('Error cleaning up duplicate cash drawer accounts:', error);
+      return 0;
+    }
   }
 
   async getCurrentCashDrawerSession(storeId: string): Promise<CashDrawerSession | null> {
