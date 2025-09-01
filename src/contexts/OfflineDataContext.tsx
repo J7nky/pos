@@ -620,11 +620,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Log the final bill data for debugging
     console.log('📋 Final line items data before storage:', mappedLineItems.length, 'items');
 
-    await db.transaction('rw', [db.bills, db.bill_line_items], async () => {
-      await db.bills.add(bill);
+    await db.transaction('rw', [db.bills, db.bill_line_items], () => {
+      const billAdd = db.bills.add(bill);
+      let lineItemsAdd = Promise.resolve();
       if (mappedLineItems.length > 0) {
-        await db.bill_line_items.bulkAdd(mappedLineItems);
+        lineItemsAdd = db.bill_line_items.bulkAdd(mappedLineItems);
       }
+      return Promise.all([billAdd, lineItemsAdd]);
     });
 
     await refreshData();

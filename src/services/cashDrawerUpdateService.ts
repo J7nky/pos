@@ -100,6 +100,8 @@ export class CashDrawerUpdateService {
       // Get or create cash drawer account
       let account = await db.getCashDrawerAccount(storeId);
       if (!account) {
+        // Deactivate all other accounts for this store
+        await db.cash_drawer_accounts.where('store_id').equals(storeId).modify({ isActive: false });
         const storeCurrency = await this.getStorePreferredCurrency(storeId);
         account = {
           id: createId(),
