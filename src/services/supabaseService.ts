@@ -489,38 +489,63 @@ export class SupabaseService {
   }
 
   static async createBill(billData: any, lineItems: any) {
+    const cleanBillData = cleanDataForSupabase(billData);
+    const cleanLineItems = cleanArrayForSupabase(lineItems);
     try {
-
       // Filter out local-only fields that shouldn't be sent to Supabase
-      const cleanBillData = cleanDataForSupabase(billData);
-      const cleanLineItems = cleanArrayForSupabase(lineItems);
 
-      // Start a transaction
-      const { data: bill , error: billError } = await supabase
-        .from('bills')
-        .insert(cleanBillData)
-        .select()
-        .single();
+      // Use a proper transaction to ensure atomicity
+      const { data: bill, error: billError } = await supabase
+        .rpc('create_bill_with_line_items', {
+          bill_data: cleanBillData,
+          line_items_data: cleanLineItems
+        }as any);
 
       if (billError) throw billError;
 
-      if (cleanLineItems.length > 0) {
-        // Add line items with the bill ID
-        const lineItemsWithBillId = cleanLineItems.map((item: any) => ({
-          ...item,
-          bill_id: bill.id
-        }));
-
-        const { error: lineItemsError } = await supabase
-          .from('bill_line_items')
-          .insert(lineItemsWithBillId);
-
-        if (lineItemsError) throw lineItemsError;
-      }
-
       return bill;
     } catch (error) {
-      handleSupabaseError(error);
+      // If the RPC function doesn't exist, fall back to manual transaction
+      console.warn('RPC function not available, falling back to manual transaction:', error);
+      
+      try {
+        // Start a transaction manually
+        const { data: bill, error: billError } = await supabase
+          .from('bills')
+          .insert(cleanBillData)
+          .select()
+          .single();
+
+        if (billError) throw billError;
+
+        if (cleanLineItems.length > 0) {
+          // Add line items with the bill ID
+          const lineItemsWithBillId = cleanLineItems.map((item: any) => ({
+            ...item,
+            bill_id: bill.id
+          }));
+
+          const { error: lineItemsError } = await supabase
+            .from('bill_line_items')
+            .insert(lineItemsWithBillId as any);
+
+          if (lineItemsError) {
+            // If line items fail, we should rollback the bill creation
+            // However, Supabase doesn't support rollbacks in this context
+            // So we'll delete the bill and throw an error
+            await supabase
+              .from('bills')
+              .delete()
+              .eq('id', bill.id);
+            throw lineItemsError;
+          }
+        }
+
+        return bill;
+      } catch (fallbackError) {
+        console.error('Fallback transaction also failed:', fallbackError);
+        throw fallbackError;
+      }
     }
   }
 

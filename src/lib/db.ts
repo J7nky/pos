@@ -19,11 +19,11 @@ export interface Product extends BaseEntity {
   image: string;
 }
 export interface CashDrawerAccount extends BaseEntity {
-  accountCode: string;
-  name: string;
-  current_balance: number;
-  currency: 'USD' | 'LBP';
-  isActive: boolean;
+  account_code: string; // character varying(10) not null
+  name: string; // character varying(100) not null
+  currency: string; // character varying(3) not null default 'USD'
+  is_active: boolean; // boolean not null default true
+  current_balance: number | null; // numeric null
 }
 
 export interface CashDrawerSession extends BaseEntity {
@@ -350,11 +350,8 @@ class POSDatabase extends Dexie {
       console.error('❌ Failed to register transaction hook:', error);
     }
     
-    try {(this.sale_items ).hook('updating', (primKey , obj, trans) => {
-      console.log("🔥 Hook triggered raw:", { primKey, obj, trans });
-      return this.handleSaleItemCreated(primKey, obj, trans);
-    });
-    
+    try {
+      (this.sale_items as any).hook('creating', this.handleSaleItemCreated);
       console.log('✅ Sale items hook registered');
     } catch (error) {
       console.error('❌ Failed to register sale items hook:', error);
@@ -406,22 +403,83 @@ class POSDatabase extends Dexie {
     console.log('✅ POSDatabase initialization completed');
   }
   async getCashDrawerAccount(storeId: string): Promise<CashDrawerAccount | null> {
+    console.log('🔍 getCashDrawerAccount called with storeId:', storeId);
+    console.log('🔍 StoreId type:', typeof storeId);
+    console.log('🔍 StoreId length:', storeId?.length);
+    
+    // Enhanced debugging - check all accounts including deleted ones
+    const allAccountsRaw = await this.cash_drawer_accounts.toArray();
+    console.log('🔍 All cash drawer accounts in DB (raw):', allAccountsRaw);
+    console.log('🔍 Total accounts count:', allAccountsRaw.length);
+    
+    // Check if the passed storeId matches any account's store_id
+    const matchingByStoreId = allAccountsRaw.filter(acc => acc.store_id === storeId);
+    console.log('🔍 Accounts matching storeId:', matchingByStoreId);
+    
+    if (matchingByStoreId.length === 0) {
+      console.log('⚠️ No accounts found for storeId:', storeId);
+      console.log('⚠️ Available store_ids:', allAccountsRaw.map(acc => acc.store_id));
+    }
+    
+    // Check if the specific account exists
+    const specificAccount = await this.cash_drawer_accounts.get('9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8');
+    console.log('🔍 Specific account 9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8:', specificAccount);
+    
+    // Check accounts for this store including deleted ones
+    const storeAccountsAll = await this.cash_drawer_accounts
+      .where('store_id')
+      .equals(storeId)
+      .toArray();
+    console.log('🔍 All accounts for store (including deleted):', storeAccountsAll);
+    
+    // Filter out deleted accounts for normal operation
+    const storeAccountsActive = storeAccountsAll.filter(acc => !acc._deleted);
+    console.log('🔍 Active accounts for store:', storeAccountsActive);
+    
     // Prefer an explicitly active account; treat undefined as active to support older records
     let account = await this.cash_drawer_accounts
       .where('store_id')
       .equals(storeId)
-      .filter(acc => acc.isActive !== false)
+      .filter(acc => {
+        // Don't include deleted accounts
+        if (acc._deleted) return false;
+        
+        // Check is_active field (primary field in interface)
+        if ((acc as any).is_active === false) return false;
+        
+        // Also check legacy isActive field for backward compatibility
+        if ((acc as any).isActive === false) return false;
+        
+        // If neither field is explicitly false, consider it active
+        return true;
+      })
       .first();
-
+    console.log('🔍 Active account found:', account);
+    
     if (account) return account;
 
-    // Fallback: reuse any existing account for this store (prevents duplicates)
+    // Fallback: reuse any existing non-deleted account for this store (prevents duplicates)
     account = await this.cash_drawer_accounts
       .where('store_id')
       .equals(storeId)
+      .filter(acc => !acc._deleted)
       .first();
+    console.log('🔍 Any non-deleted account found for store:', account);
 
-    return account || null;
+    if (account) {
+      // If we found an inactive account, activate it
+      console.log('🔄 Found inactive account, activating it...');
+      await this.cash_drawer_accounts.update(account.id, {  
+        is_active: true,
+        updated_at: new Date().toISOString(),
+        _synced: false 
+      });
+      // Return the updated account
+      return { ...account, is_active: true };
+    }
+
+    console.log('❌ No cash drawer account found for store:', storeId);
+    return null;
   }
 
   async getCurrentCashDrawerSession(storeId: string): Promise<CashDrawerSession | null> {
@@ -730,6 +788,7 @@ class POSDatabase extends Dexie {
   };
 
   private addCreateFieldsWithUpdatedAt = (primKey: any, obj: any, trans: any) => {
+    console.log('add create fields with updated at hook triggered for2:', obj);
     const now = new Date().toISOString();
     if (!obj.id) obj.id = uuidv4();
     if (!obj.created_at) obj.created_at = now;
@@ -738,6 +797,7 @@ class POSDatabase extends Dexie {
   };
 
   private addUpdateFields = (modifications: any, primKey: any, obj: any, trans: any) => {
+    console.log('add update fields hook triggered for:', obj);
     modifications.updated_at = new Date().toISOString();
     if (modifications._synced === undefined) modifications._synced = false;
   };
@@ -1664,6 +1724,53 @@ if (typeof window !== 'undefined') {
     } catch (error) {
       console.error('❌ Test failed:', error);
     }
+  };
+
+  // Add cash drawer debugging function
+  (window as any).debugCashDrawer = async (storeId?: string) => {
+    console.log('🔍 === CASH DRAWER DEBUG REPORT ===');
+    
+    try {
+      // Get all cash drawer accounts
+      const allAccounts = await db.cash_drawer_accounts.toArray();
+      console.log('📊 Total cash drawer accounts:', allAccounts.length);
+      console.log('📊 All accounts:', allAccounts);
+      
+      // Check specific account if provided
+      if (storeId) {
+        console.log(`\n🏪 Accounts for store ${storeId}:`);
+        const storeAccounts = await db.cash_drawer_accounts
+          .where('store_id')
+          .equals(storeId)
+          .toArray();
+        console.log('📊 Store accounts (all):', storeAccounts);
+        
+        const activeAccounts = storeAccounts.filter(acc => !acc._deleted);
+        console.log('📊 Store accounts (active):', activeAccounts);
+        
+        // Get sessions for this store
+        const sessions = await db.cash_drawer_sessions
+          .where('store_id')
+          .equals(storeId)
+          .toArray();
+        console.log('📊 Cash drawer sessions:', sessions);
+      }
+      
+      // Check the specific account mentioned by user
+      const specificAccount = await db.cash_drawer_accounts.get('9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8');
+      console.log('\n🎯 Specific account 9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8:', specificAccount);
+      
+      // Database info
+      console.log('\n💾 Database info:');
+      console.log('Database name:', db.name);
+      console.log('Database version:', db.verno);
+      console.log('Is open:', db.isOpen());
+      
+    } catch (error) {
+      console.error('❌ Debug failed:', error);
+    }
+    
+    console.log('🔍 === END DEBUG REPORT ===');
   };
 }
 

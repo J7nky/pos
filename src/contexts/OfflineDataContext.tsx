@@ -206,6 +206,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
       }
 
+      // Clean up duplicate cash drawer accounts
+      try {
+        const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+        const cleanupResult = await cashDrawerUpdateService.cleanupDuplicateAccounts(storeId);
+        if (cleanupResult.success && cleanupResult.duplicatesRemoved > 0) {
+          console.log(`🧹 Cleaned up ${cleanupResult.duplicatesRemoved} duplicate cash drawer accounts`);
+        }
+      } catch (cleanupError) {
+        console.warn('Failed to cleanup duplicate cash drawer accounts:', cleanupError);
+      }
+
       console.log('📊 Loading local data...');
       // Load local data first
       await refreshData();
@@ -397,6 +408,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         billsData,
         billLineItemsData,
         billAuditLogsData,
+        cashDrawerAccountsData,
+        cashDrawerSessionsData,
       ] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
@@ -409,10 +422,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         db.bills.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.bill_line_items.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
         db.bill_audit_logs.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.cash_drawer_accounts.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+        db.cash_drawer_sessions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
 
       ]);
 
-      console.log(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${saleItemsData.length} sale items, ${transactionsData.length} transactions, ${billsData.length} bills`);
+      console.log(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${saleItemsData.length} sale items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
 
       // Transform data to match SupabaseDataContext structure
       setProducts(productsData as Tables['products']['Row'][]);
@@ -1142,51 +1157,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     
     // }
 
-    // Use transaction to ensure atomicity
+    // Use transaction to ensure atomicity for database operations only
     await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
-
-
+      // Add sale items
       await db.sale_items.bulkAdd(saleItemsWithIds);
 
-      // Manually trigger cash drawer update for cash sales since bulkAdd doesn't trigger hooks
-      const cashSaleItems = saleItemsWithIds.filter(item => item.payment_method === 'cash');
-      if (cashSaleItems.length > 0) {
-        // Import the service dynamically to avoid circular dependencies
-        const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-
-        // Calculate total cash sale amount
-        const totalCashAmount = cashSaleItems.reduce((sum, item) => sum + (item.received_value || 0), 0);
-
-        console.log(`💰 Manually updating cash drawer for ${cashSaleItems.length} cash sale items: $${totalCashAmount.toFixed(2)}`);
-
-        // Get store's preferred currency
-        const account = await db.getCashDrawerAccount(storeId);
-        const storeCurrency = account?.currency || 'USD';
-
-        // Update cash drawer for the total cash sale amount
-        const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: 'sale',
-          amount: totalCashAmount,
-          currency: storeCurrency,
-          description: `Cash sale${cashSaleItems.length > 1 ? ` (${cashSaleItems.length} items)` : ''}`,
-          reference: `SALE-${Date.now()}`,
-          storeId: storeId,
-          createdBy: currentUserId,
-          allowAutoSessionOpen: true
-        });
-
-        if (!updateResult.success) {
-          console.error('Failed to update cash drawer for cash sale:', updateResult.error);
-        } else {
-          console.log('✅ Cash drawer updated successfully for cash sale');
-        }
-      }
-      
-      // Add the value of the sale to the supplier's balance
-      // Add the value of the credit to the customer's balance
-  
       // Deduct from specific inventory items
-  for (const item of items) {
+      for (const item of items) {
         if (item.inventory_item_id) {
           // Use the specific inventory item ID if provided
           const inventoryItem = await db.inventory_items.get(item.inventory_item_id);
@@ -1208,7 +1185,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             }
           }
         } else {
-
           // Fallback to FIFO if no specific inventory item ID (legacy support)
           const inventoryRecords = await db.inventory_items
             .where('product_id')
@@ -1242,6 +1218,40 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    // Handle cash drawer updates outside the transaction
+    const cashSaleItems = saleItemsWithIds.filter(item => item.payment_method === 'cash');
+    if (cashSaleItems.length > 0) {
+      // Import the service dynamically to avoid circular dependencies
+      const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+
+      // Calculate total cash sale amount
+      const totalCashAmount = cashSaleItems.reduce((sum, item) => sum + (item.received_value || 0), 0);
+
+      console.log(`💰 Manually updating cash drawer for ${cashSaleItems.length} cash sale items: $${totalCashAmount.toFixed(2)}`);
+
+      // Get store's preferred currency
+      const account = await db.getCashDrawerAccount(storeId);
+      const storeCurrency = account?.currency || 'USD';
+
+      // Update cash drawer for the total cash sale amount
+      const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
+        type: 'sale',
+        amount: totalCashAmount,
+        currency: storeCurrency,
+        description: `Cash sale${cashSaleItems.length > 1 ? ` (${cashSaleItems.length} items)` : ''}`,
+        reference: `SALE-${Date.now()}`,
+        storeId: storeId,
+        createdBy: currentUserId,
+        allowAutoSessionOpen: true
+      });
+
+      if (!updateResult.success) {
+        console.error('Failed to update cash drawer for cash sale:', updateResult.error);
+      } else {
+        console.log('✅ Cash drawer updated successfully for cash sale');
+      }
+    }
+
     await refreshData();
     await updateUnsyncedCount();
 
@@ -1260,26 +1270,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const quantityChanged = updates.quantity !== undefined && updates.quantity !== originalSale.quantity;
     const quantityDifference = quantityChanged ? (updates.quantity || 0) - (originalSale.quantity || 0) : 0;
 
-    // Use transaction to ensure atomicity
-    await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
+    // Use transaction to ensure atomicity for the sale update only
+    await db.transaction('rw', [db.sale_items], async () => {
       // Update the sale item
       const updateData = {
         ...updates,
         _synced: false
       };
       await db.sale_items.update(id, updateData);
-
-      // Handle inventory adjustments if quantity changed
-      if (quantityChanged && originalSale.product_id && originalSale.supplier_id) {
-        if (quantityDifference > 0) {
-          // Quantity increased - deduct additional inventory
-          await deductInventoryQuantity(originalSale.product_id, originalSale.supplier_id, quantityDifference);
-        } else if (quantityDifference < 0) {
-          // Quantity decreased - restore inventory
-          await restoreInventoryQuantity(originalSale.product_id, originalSale.supplier_id, Math.abs(quantityDifference));
-        }
-      }
     });
+
+    // Handle inventory adjustments outside the transaction if quantity changed
+    if (quantityChanged && originalSale.product_id && originalSale.supplier_id) {
+      if (quantityDifference > 0) {
+        // Quantity increased - deduct additional inventory
+        await deductInventoryQuantity(originalSale.product_id, originalSale.supplier_id, quantityDifference);
+      } else if (quantityDifference < 0) {
+        // Quantity decreased - restore inventory
+        await restoreInventoryQuantity(originalSale.product_id, originalSale.supplier_id, Math.abs(quantityDifference));
+      } 
+    }
 
     await refreshData();
     await updateUnsyncedCount();
@@ -1295,16 +1305,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const saleItem = await db.sale_items.get(id);
     if (!saleItem) throw new Error('Sale item not found');
 
-    // Use transaction to ensure atomicity
-    await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
+    // Use transaction to ensure atomicity for the sale deletion only
+    await db.transaction('rw', [db.sale_items], async () => {
       // Delete the sale item
       await db.sale_items.delete(id);
-      
-      // Restore inventory quantities
-      if (saleItem.quantity && saleItem.quantity > 0) {
-        await restoreInventoryQuantity(saleItem.product_id, saleItem.supplier_id, saleItem.quantity);
-      }
     });
+    
+    // Restore inventory quantities outside the transaction
+    if (saleItem.quantity && saleItem.quantity > 0) {
+      await restoreInventoryQuantity(saleItem.product_id, saleItem.supplier_id, saleItem.quantity);
+    }
 
     await refreshData();
     await updateUnsyncedCount();
@@ -1427,31 +1437,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return;
     
     try {
-      // Get or create cash drawer account
-      let account = await db.getCashDrawerAccount(storeId);
-      if (!account) {
-        // Create default account if it doesn't exist
-        account = {
-          id: createId(),
-          store_id: storeId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          accountCode: '1001',
-          name: 'Cash Drawer',
-          current_balance: 0,
-          currency: 'USD', // Default to USD
-          isActive: true
-        };
-        await db.cash_drawer_accounts.add(account);
+      // Use the cash drawer service to open session (handles account creation thread-safely)
+      const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+      const result = await cashDrawerUpdateService.openCashDrawerSession(storeId, amount, openedBy);
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to open cash drawer session');
       }
 
-      // Open new session
-      const sessionId = await db.openCashDrawerSession(storeId, account.id, amount, openedBy);
+      // Get the account for local state
+      const account = await db.getCashDrawerAccount(storeId);
+      if (!account) {
+        throw new Error('Failed to retrieve cash drawer account after opening session');
+      }
       
       // Update local state with proper status
       setCashDrawer({
-        id: sessionId,
+        id: result.sessionId!,
         accountId: account.id,
         status: 'open',
         currentBalance: amount,
@@ -1461,7 +1463,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       
       // Store in localStorage for persistence
       localStorage.setItem('erp_cash_drawer', JSON.stringify({
-        id: sessionId,
+        id: result.sessionId,
         accountId: account.id,
         status: 'open',
         currentBalance: amount,
