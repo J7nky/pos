@@ -119,7 +119,6 @@ export default function Home() {
     }
     else{
       const newBalance=cashDrawerUpdateService.normalizeAmountToStoreCurrency(balance, 'LBP', storePreferredCurrency);
-      console.log(123213123,storePreferredCurrency)
       return newBalance;
 
     }

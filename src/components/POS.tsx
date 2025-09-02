@@ -445,6 +445,7 @@ export default function POS() {
     try {
       // Auto open cash drawer if not open
       const currentCashDrawerStatus = await raw.getCurrentCashDrawerStatus();
+      console.log(currentCashDrawerStatus,'currentCashDrawerStatus')
       console.log('Current cash drawer status:', currentCashDrawerStatus);
       
       if (!currentCashDrawerStatus || currentCashDrawerStatus.status !== 'active') {

@@ -97,23 +97,13 @@ export class CashDrawerUpdateService {
         };
       }
 
-      // Get or create cash drawer account
-      let account = await db.getCashDrawerAccount(storeId);
+      // Get or create cash drawer account using the centralized method
+      const account = await this.getOrCreateCashDrawerAccount(storeId);
       if (!account) {
-        const storeCurrency = await this.getStorePreferredCurrency(storeId);
-        account = {
-          id: createId(),
-          store_id: storeId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          accountCode: '1001',
-          name: 'Cash Drawer',
-          current_balance: 0,
-          currency: storeCurrency,
-          isActive: true
+        return {
+          success: false,
+          error: 'Failed to create or retrieve cash drawer account'
         };
-        await db.cash_drawer_accounts.add(account);
       }
 
       // Open new session using database method
@@ -452,26 +442,10 @@ export class CashDrawerUpdateService {
    */
   public async getCurrentCashDrawerBalance(storeId: string): Promise<number> {
     try {
-      let account = await db.getCashDrawerAccount(storeId);
+      // Use the centralized method to get or create account
+      const account = await this.getOrCreateCashDrawerAccount(storeId);
       if (!account) {
-        // Get store's preferred currency
-        const storeCurrency = await this.getStorePreferredCurrency(storeId);
-        
-        // Create default account if it doesn't exist
-        account = {
-          id: createId(),
-          store_id: storeId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          accountCode: '1001',
-          name: 'Cash Drawer',
-          current_balance: 0,
-          currency: storeCurrency,
-          isActive: true
-        };
-        await db.cash_drawer_accounts.add(account);
-        console.log(`💰 Created default cash drawer account for store: ${storeId} with currency: ${storeCurrency}`);
+        console.error('Failed to create or retrieve cash drawer account');
         return 0;
       }
 
@@ -647,35 +621,42 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Get or create cash drawer account
+   * Get or create cash drawer account - THREAD SAFE VERSION
+   * This is the single source of truth for account creation
    */
-  private async getOrCreateCashDrawerAccount(storeId: string, storeCurrency: 'USD' | 'LBP') {
-    try {
-      let account = await db.getCashDrawerAccount(storeId);
-      if (!account) {
-        // Get the store's preferred currency from the stores table
-        const actualStoreCurrency = await this.getStorePreferredCurrency(storeId);
-        
-        account = {
-          id: createId(),
-          store_id: storeId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          accountCode: '1001',
-          name: 'Cash Drawer',
-          current_balance: 0,
-          currency: actualStoreCurrency,
-          isActive: true
-        };
-        await db.cash_drawer_accounts.add(account);
-        console.log(`💰 Created cash drawer account for store: ${storeId} with currency: ${actualStoreCurrency}`);
+  private async getOrCreateCashDrawerAccount(storeId: string, storeCurrency?: 'USD' | 'LBP') {
+    // Use operation lock to prevent race conditions during account creation
+    return this.acquireOperationLock(`account_${storeId}`, async () => {
+      try {
+        // Check again inside the lock to prevent race conditions
+        let account = await db.getCashDrawerAccount(storeId);
+        if (!account) {
+          console.log(`💰 Creating new cash drawer account for store: ${storeId}`);
+          
+          // Get the store's preferred currency from the stores table
+          const actualStoreCurrency = storeCurrency || await this.getStorePreferredCurrency(storeId);
+          
+          account = {
+            id: createId(),
+            store_id: storeId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            _synced: false,
+            account_code: '1001',
+            name: 'Cash Drawer',
+            current_balance: 0,
+            currency: actualStoreCurrency,
+            is_active: true
+          };
+          await db.cash_drawer_accounts.add(account);
+          console.log(`✅ Created cash drawer account for store: ${storeId} with currency: ${actualStoreCurrency}`);
+        }
+        return account;
+      } catch (error) {
+        console.error('Error creating/retrieving cash drawer account:', error);
+        return null;
       }
-      return account;
-    } catch (error) {
-      console.error('Error creating/retrieving cash drawer account:', error);
-      return null;
-    }
+    });
   }
 
   /**
@@ -731,6 +712,98 @@ export class CashDrawerUpdateService {
       default:
         return null;
     }
+  }
+
+  /**
+   * Clean up duplicate cash drawer accounts for a store
+   * This method should be called during app initialization to fix existing duplicates
+   */
+  public async cleanupDuplicateAccounts(storeId: string): Promise<{
+    success: boolean;
+    duplicatesRemoved: number;
+    error?: string;
+  }> {
+    return this.acquireOperationLock(`cleanup_${storeId}`, async () => {
+      try {
+        // Get all accounts for this store
+        const allAccounts = await db.cash_drawer_accounts
+          .where('store_id')
+          .equals(storeId)
+          .toArray();
+
+        if (allAccounts.length <= 1) {
+          return {
+            success: true,
+            duplicatesRemoved: 0
+          };
+        }
+
+        console.log(`🧹 Found ${allAccounts.length} cash drawer accounts for store ${storeId}, cleaning up duplicates...`);
+
+        // Find the best account to keep (most recent, active, with transactions)
+        let accountToKeep = allAccounts[0];
+        
+        // Prefer active accounts
+        const activeAccounts = allAccounts.filter(acc => (acc as any).is_active !== false);
+        if (activeAccounts.length > 0) {
+          accountToKeep = activeAccounts[0];
+        }
+
+        // Prefer accounts with the most recent activity
+        accountToKeep = allAccounts.reduce((best, current) => {
+          return new Date(current.updated_at) > new Date(best.updated_at) ? current : best;
+        });
+
+        // Get all sessions that reference the duplicate accounts
+        const duplicateAccountIds = allAccounts
+          .filter(acc => acc.id !== accountToKeep.id)
+          .map(acc => acc.id);
+
+        // Update all sessions to reference the account we're keeping
+        for (const duplicateId of duplicateAccountIds) {
+          await db.cash_drawer_sessions
+            .where('account_id')
+            .equals(duplicateId)
+            .modify({
+              account_id: accountToKeep.id,
+              _synced: false
+            });
+        }
+
+        // Calculate the combined balance from all accounts
+        const totalBalance = allAccounts.reduce((sum, acc) => sum + (acc.current_balance || 0), 0);
+
+        // Update the kept account with the combined balance
+        await db.cash_drawer_accounts.update(accountToKeep.id, {
+          current_balance: totalBalance,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+          _synced: false
+        });
+
+        // Delete the duplicate accounts
+        for (const duplicateId of duplicateAccountIds) {
+          await db.cash_drawer_accounts.delete(duplicateId);
+        }
+
+        const duplicatesRemoved = duplicateAccountIds.length;
+        console.log(`✅ Cleaned up ${duplicatesRemoved} duplicate cash drawer accounts for store ${storeId}`);
+        console.log(`💰 Consolidated balance: $${totalBalance.toFixed(2)} in account ${accountToKeep.id}`);
+
+        return {
+          success: true,
+          duplicatesRemoved
+        };
+
+      } catch (error) {
+        console.error('Error cleaning up duplicate accounts:', error);
+        return {
+          success: false,
+          duplicatesRemoved: 0,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        };
+      }
+    });
   }
 
   /**
