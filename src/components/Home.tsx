@@ -98,6 +98,9 @@ export default function Home() {
       const history = await cashDrawerUpdateService.getCashDrawerTransactionHistory(raw.storeId);
       const currentSession = await db.getCurrentCashDrawerSession(raw.storeId);
       
+      console.log('🔍 loadCashDrawerStatus - currentSession:', currentSession);
+      console.log('🔍 loadCashDrawerStatus - openedAt:', currentSession?.opened_at);
+      
       setCashDrawerStatus({
         currentBalance: balance,
         lastUpdated: new Date().toISOString(),
@@ -177,10 +180,31 @@ export default function Home() {
     ? stockLevels.filter(item => item.currentStock < lowStockThreshold)
     : [];
 
-  const handleOpenDrawer = () => {
+  const handleOpenDrawer = async () => {
     const openingAmount = prompt('Enter opening cash amount:');
     if (openingAmount && userProfile) {
-      openCashDrawer(parseFloat(openingAmount), userProfile.id);
+      try {
+        console.log('🔍 Opening cash drawer with amount:', openingAmount);
+        await openCashDrawer(parseFloat(openingAmount), userProfile.id);
+        console.log('🔍 Cash drawer opened successfully');
+        
+        // Wait a moment for the database to be updated
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Immediately refresh local status
+        console.log('🔍 Refreshing cash drawer status...');
+        await loadCashDrawerStatus();
+        console.log('🔍 Cash drawer status refreshed');
+        
+        // Notify any listeners
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
+            detail: { storeId: raw.storeId, event: 'opened' }
+          }));
+        }
+      } catch (e: any) {
+        console.error('Failed to open cash drawer:', e);
+      }
     }
   };
 
@@ -363,7 +387,16 @@ export default function Home() {
                 <stat.icon className="w-6 h-6 text-white" />
               </div>
             </div>
-            {index === 0 && ! cashDrawer && (
+            {index === 0 && (() => {
+              const shouldShowButton = (!cashDrawerStatus || !cashDrawerStatus.openedAt);
+              console.log('🔍 Button visibility check:', {
+                index,
+                cashDrawerStatus,
+                openedAt: cashDrawerStatus?.openedAt,
+                shouldShowButton
+              });
+              return shouldShowButton;
+            })() && (
               <button
                 onClick={handleOpenDrawer}
                 className="mt-3 w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm"

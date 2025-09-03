@@ -228,7 +228,7 @@ class POSDatabase extends Dexie {
     
     this.version(13).stores({
       // Cash drawer tables
-      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_accounts: 'id, &store_id, account_code, updated_at',
       cash_drawer_sessions: 'id, store_id, account_id, status, created_at',
       
       // Core tables with enhanced indexing to match database schema
@@ -403,39 +403,9 @@ class POSDatabase extends Dexie {
     console.log('✅ POSDatabase initialization completed');
   }
   async getCashDrawerAccount(storeId: string): Promise<CashDrawerAccount | null> {
-    console.log('🔍 getCashDrawerAccount called with storeId:', storeId);
-    console.log('🔍 StoreId type:', typeof storeId);
-    console.log('🔍 StoreId length:', storeId?.length);
+  
     
-    // Enhanced debugging - check all accounts including deleted ones
-    const allAccountsRaw = await this.cash_drawer_accounts.toArray();
-    console.log('🔍 All cash drawer accounts in DB (raw):', allAccountsRaw);
-    console.log('🔍 Total accounts count:', allAccountsRaw.length);
-    
-    // Check if the passed storeId matches any account's store_id
-    const matchingByStoreId = allAccountsRaw.filter(acc => acc.store_id === storeId);
-    console.log('🔍 Accounts matching storeId:', matchingByStoreId);
-    
-    if (matchingByStoreId.length === 0) {
-      console.log('⚠️ No accounts found for storeId:', storeId);
-      console.log('⚠️ Available store_ids:', allAccountsRaw.map(acc => acc.store_id));
-    }
-    
-    // Check if the specific account exists
-    const specificAccount = await this.cash_drawer_accounts.get('9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8');
-    console.log('🔍 Specific account 9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8:', specificAccount);
-    
-    // Check accounts for this store including deleted ones
-    const storeAccountsAll = await this.cash_drawer_accounts
-      .where('store_id')
-      .equals(storeId)
-      .toArray();
-    console.log('🔍 All accounts for store (including deleted):', storeAccountsAll);
-    
-    // Filter out deleted accounts for normal operation
-    const storeAccountsActive = storeAccountsAll.filter(acc => !acc._deleted);
-    console.log('🔍 Active accounts for store:', storeAccountsActive);
-    
+ 
     // Prefer an explicitly active account; treat undefined as active to support older records
     let account = await this.cash_drawer_accounts
       .where('store_id')
@@ -454,29 +424,11 @@ class POSDatabase extends Dexie {
         return true;
       })
       .first();
-    console.log('🔍 Active account found:', account);
+   
     
     if (account) return account;
 
-    // Fallback: reuse any existing non-deleted account for this store (prevents duplicates)
-    account = await this.cash_drawer_accounts
-      .where('store_id')
-      .equals(storeId)
-      .filter(acc => !acc._deleted)
-      .first();
-    console.log('🔍 Any non-deleted account found for store:', account);
 
-    if (account) {
-      // If we found an inactive account, activate it
-      console.log('🔄 Found inactive account, activating it...');
-      await this.cash_drawer_accounts.update(account.id, {  
-        is_active: true,
-        updated_at: new Date().toISOString(),
-        _synced: false 
-      });
-      // Return the updated account
-      return { ...account, is_active: true };
-    }
 
     console.log('❌ No cash drawer account found for store:', storeId);
     return null;

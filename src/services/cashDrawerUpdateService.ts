@@ -93,16 +93,16 @@ export class CashDrawerUpdateService {
       if (existingSession && existingSession.status === 'open') {
         return {
           success: false,
-          error: `Cash drawer session already open (opened by ${existingSession.openedBy} at ${new Date(existingSession.openedAt).toLocaleString()})`
+          error: `Cash drawer session already open (opened by ${existingSession.opened_by} at ${new Date(existingSession.opened_at).toLocaleString()})`
         };
       }
 
-      // Get or create cash drawer account using the centralized method
+      // Get cash drawer account (no auto-create)
       const account = await this.getOrCreateCashDrawerAccount(storeId);
       if (!account) {
         return {
           success: false,
-          error: 'Failed to create or retrieve cash drawer account'
+          error: 'No cash drawer account exists. Please create one before opening a session.'
         };
       }
 
@@ -170,8 +170,8 @@ export class CashDrawerUpdateService {
       return {
         success: true,
         sessionId,
-        expectedAmount: session.expectedAmount || 0,
-        actualAmount: session.actualAmount || 0,
+        expectedAmount: session.expected_amount || 0,
+        actualAmount: session.actual_amount || 0,
         variance: session.variance || 0
       };
       } catch (error) {
@@ -219,14 +219,14 @@ export class CashDrawerUpdateService {
           storeCurrency
         );
 
-        // Get or create cash drawer account
+        // Get cash drawer account (no auto-create)
         const account = await this.getOrCreateCashDrawerAccount(transactionData.storeId, storeCurrency);
         if (!account) {
           return {
             success: false,
             previousBalance: 0,
             newBalance: 0,
-            error: 'Failed to create or retrieve cash drawer account'
+            error: 'No cash drawer account exists. Please create one before processing cash transactions.'
           };
         }
 
@@ -444,10 +444,11 @@ export class CashDrawerUpdateService {
     try {
       // Use the centralized method to get or create account
       const account = await this.getOrCreateCashDrawerAccount(storeId);
-      if (!account) {
-        console.error('Failed to create or retrieve cash drawer account');
-        return 0;
-      }
+      // if (!account) {
+        
+      //   console.error('Failed to create or retrieve cash drawer account');
+      //   return 0;
+      // }
 
       // SINGLE SOURCE OF TRUTH: Calculate balance from transactions
       const calculatedBalance = await this.calculateBalanceFromTransactions(storeId);
@@ -495,7 +496,7 @@ export class CashDrawerUpdateService {
         .toArray();
 
       // Start with all session opening amounts
-      let totalBalance = sessions.reduce((sum, session) => sum + (session.openingAmount || 0), 0);
+      let totalBalance = sessions.reduce((sum, session) => sum + (session.opening_amount || 0), 0);
 
       // Add all income transactions and subtract all expense transactions
       for (const trans of cashTransactions) {
@@ -520,7 +521,7 @@ export class CashDrawerUpdateService {
     try {
       // Import SupabaseService dynamically to avoid circular dependencies
       const { SupabaseService } = await import('./supabaseService');
-      const store = await SupabaseService.getStore(storeId);
+      const store: any = await SupabaseService.getStore(storeId);
       
       if (store && store.preferred_currency) {
         console.log(`💰 Store ${storeId} preferred currency: ${store.preferred_currency}`);
@@ -621,42 +622,20 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Get or create cash drawer account - THREAD SAFE VERSION
-   * This is the single source of truth for account creation
+   * Get cash drawer account without creating a new one. Returns null if none exists.
    */
   private async getOrCreateCashDrawerAccount(storeId: string, storeCurrency?: 'USD' | 'LBP') {
-    // Use operation lock to prevent race conditions during account creation
-    return this.acquireOperationLock(`account_${storeId}`, async () => {
-      try {
-        // Check again inside the lock to prevent race conditions
-        let account = await db.getCashDrawerAccount(storeId);
-        if (!account) {
-          console.log(`💰 Creating new cash drawer account for store: ${storeId}`);
-          
-          // Get the store's preferred currency from the stores table
-          const actualStoreCurrency = storeCurrency || await this.getStorePreferredCurrency(storeId);
-          
-          account = {
-            id: createId(),
-            store_id: storeId,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            _synced: false,
-            account_code: '1001',
-            name: 'Cash Drawer',
-            current_balance: 0,
-            currency: actualStoreCurrency,
-            is_active: true
-          };
-          await db.cash_drawer_accounts.add(account);
-          console.log(`✅ Created cash drawer account for store: ${storeId} with currency: ${actualStoreCurrency}`);
-        }
-        return account;
-      } catch (error) {
-        console.error('Error creating/retrieving cash drawer account:', error);
+    try {
+      const account = await db.getCashDrawerAccount(storeId);
+      if (!account) {
+        console.warn(`❌ No cash drawer account exists for store ${storeId}`);
         return null;
       }
-    });
+      return account;
+    } catch (error) {
+      console.error('Error retrieving cash drawer account:', error);
+      return null;
+    }
   }
 
   /**

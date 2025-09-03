@@ -455,7 +455,14 @@ export default function POS() {
           openingAmount = parseFloat(activeTab.amountReceived) || total;
         }
         if (userProfile?.id) {
-          await raw.openCashDrawer(openingAmount, userProfile.id);
+          try {
+            await raw.openCashDrawer(openingAmount, userProfile.id);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Failed to open cash drawer session';
+            showToast('error', msg);
+            setIsProcessing(false);
+            return;
+          }
         }
       } else {
         console.log('Active cash drawer session found:', currentCashDrawerStatus.sessionId);
