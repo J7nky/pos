@@ -693,7 +693,7 @@ export default function Accounting() {
       if (!userProfile?.store_id) {
         console.warn('Missing store_id: cannot update cash drawer');
       } else {
-        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+        const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
           type: 'expense',
           amount: safeAmount.amount,
           currency: safeAmount.currency,
@@ -702,6 +702,10 @@ export default function Accounting() {
           storeId: userProfile.store_id,
           createdBy: userProfile?.id || ''
         });
+        if (!updateResult.success && updateResult.error?.includes('No cash drawer account exists')) {
+          showToast('A cash drawer account has not been created yet. Please create it to track cash expenses.', 'error');
+          return;
+        }
       }
 
       await refreshCashDrawerBalance();

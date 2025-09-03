@@ -1470,8 +1470,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         currency: (account as any).currency,
         lastUpdated: new Date().toISOString()
       }));
+      
+      // Dispatch event to notify components
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
+          detail: { storeId, event: 'opened' }
+        }));
+      }
     } catch (error) {
-      console.error('Error opening cash drawer:', error);
+      const message = error instanceof Error ? error.message : 'Failed to open cash drawer session';
+      console.error('Error opening cash drawer:', message);
+      throw new Error(message);
     }
   };
 
