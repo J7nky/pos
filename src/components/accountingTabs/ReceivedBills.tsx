@@ -637,8 +637,8 @@ export default function ReceivedBills({
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {paginatedGroups.map((group: any) => (
-                <>
-                  <tr key={`group-${group.groupId}`} className="hover:bg-gray-50">
+                <React.Fragment key={`group-${group.groupId}`}>
+                  <tr className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         {group.isBatch && (
@@ -749,7 +749,7 @@ export default function ReceivedBills({
                     </td>
                   </tr>
                   {group.isBatch && expandedGroups.has(group.groupId) && (
-                    <tr key={`group-${group.groupId}-details`} className="bg-gray-50">
+                    <tr className="bg-gray-50">
                       <td colSpan={9} className="px-6 py-4">
                         <div className="border rounded-lg overflow-hidden">
                           <div className="bg-gray-100 px-4 py-2 text-sm text-gray-700 flex items-center justify-between">
@@ -820,7 +820,7 @@ export default function ReceivedBills({
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>

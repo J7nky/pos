@@ -285,8 +285,8 @@ export class CashDrawerUpdateService {
               category: `cash_drawer_${transactionData.type}`,
               amount: Math.abs(balanceChange),
               currency: storeCurrency,
-              description: `${transactionData.description} - Cash Drawer Update`,
-              reference: transactionData.reference,
+              description: `${transactionData.description} - Cash Drawer Update (Session: ${session?.id || 'N/A'})`,
+              reference: `${transactionData.reference}_SESSION_${session?.id || 'N/A'}`,
               store_id: transactionData.storeId,
               created_by: transactionData.createdBy,
               created_at: new Date().toISOString(),
@@ -477,36 +477,46 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Calculate balance from all cash drawer transactions - AUTHORITATIVE SOURCE
+   * Calculate balance from current session and transactions - AUTHORITATIVE SOURCE
    */
   private async calculateBalanceFromTransactions(storeId: string): Promise<number> {
     try {
-      // Get all cash drawer transactions
+      // Get the current active session
+      const currentSession = await db.getCurrentCashDrawerSession(storeId);
+      
+      if (!currentSession) {
+        console.log('💰 No active session found, balance is 0');
+        return 0;
+      }
+
+      // Start with the current session's opening amount
+      let totalBalance = currentSession.opening_amount || 0;
+      console.log(`💰 Starting balance from current session: ${totalBalance}`);
+
+      // Get all cash drawer transactions for this specific session
       const cashTransactions = await db.transactions
         .filter(trans => 
           trans.store_id === storeId &&
-          trans.category.startsWith('cash_drawer_')
+          trans.category.startsWith('cash_drawer_') &&
+          (trans.reference?.includes(`_SESSION_${currentSession.id}`) || 
+           new Date(trans.created_at) >= new Date(currentSession.opened_at))
         )
         .toArray();
 
-      // Get all cash drawer sessions to get opening amounts
-      const sessions = await db.cash_drawer_sessions
-        .where('store_id')
-        .equals(storeId)
-        .toArray();
-
-      // Start with all session opening amounts
-      let totalBalance = sessions.reduce((sum, session) => sum + (session.opening_amount || 0), 0);
+      console.log(`💰 Found ${cashTransactions.length} cash drawer transactions since session start`);
 
       // Add all income transactions and subtract all expense transactions
       for (const trans of cashTransactions) {
         if (trans.type === 'income') {
           totalBalance += trans.amount;
+          console.log(`💰 Added income: ${trans.amount}, new balance: ${totalBalance}`);
         } else if (trans.type === 'expense') {
           totalBalance -= trans.amount;
+          console.log(`💰 Subtracted expense: ${trans.amount}, new balance: ${totalBalance}`);
         }
       }
 
+      console.log(`💰 Final calculated balance: ${totalBalance}`);
       return totalBalance;
     } catch (error) {
       console.error('Error calculating balance from transactions:', error);

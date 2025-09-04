@@ -685,7 +685,9 @@ export default function InventoryLogs() {
                     </td>
                   </tr>
                 ) : (
-                  bills.map((bill) => (
+                  bills
+                  .sort((a, b) => new Date(b.bill_date).getTime() - new Date(a.bill_date).getTime()). // newest first
+                  map((bill) => (
                     <tr key={bill.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div>
@@ -713,7 +715,7 @@ export default function InventoryLogs() {
                           </div>
                           {bill.total_amount - bill.amount_paid > 0 && (
                             <div className="text-xs text-red-600">
-                              Due: {formatCurrency(bill.total_amount - bill.amount_paid)}
+                              Due: {formatCurrency(bill.amount_paid - bill.amount_paid)}
                             </div>
                           )}
                         </div>
