@@ -141,14 +141,14 @@ export default function Customers() {
     const currentUsdBalance = entity.usd_balance || 0;
 
     if (currency === 'LBP') {
-      const updateData = { lb_balance: Math.max(0, currentLbBalance - paymentAmount) };
+      const updateData = { lb_balance: Math.max( currentLbBalance - paymentAmount) };
       if (isCustomer) {
         await updateCustomer(entityId, updateData);
       } else {
         await updateSupplier(entityId, updateData);
       }
     } else {
-      const updateData = { usd_balance: Math.max(0, currentUsdBalance - paymentAmount) };
+      const updateData = { usd_balance: Math.max( currentUsdBalance - paymentAmount) };
       if (isCustomer) {
         await updateCustomer(entityId, updateData);
       } else {
@@ -241,7 +241,7 @@ export default function Customers() {
         userProfile?.id || ''
       );
       // Update entity balance
-      await updateEntityBalance(entity, entityId, safeAmount.amount, currency, isCustomer);
+      await updateEntityBalance(entity, entityId, Number(amount), currency, isCustomer);
 
       // Get safe amount for database storage
 

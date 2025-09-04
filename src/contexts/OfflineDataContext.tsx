@@ -48,6 +48,12 @@ interface OfflineDataContextType {
   getCashDrawerBalanceReport: (startDate?: string, endDate?: string) => Promise<any>;
   getCurrentCashDrawerStatus: () => Promise<any>;
   getCashDrawerSessionDetails: (sessionId: string) => Promise<any>;
+  getRecommendedOpeningAmount: () => Promise<{
+    amount: number;
+    source: 'previous_session' | 'default';
+    previousSessionId?: string;
+    previousEmployee?: string;
+  }>;
   refreshCashDrawerStatus: () => Promise<void>;
   isOnline: boolean;
 
@@ -483,6 +489,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         Promise.resolve(0), // sales not in current schema
         db.sale_items.filter(item => !item._synced).count(),
         db.transactions.filter(item => !item._synced).count(),
+        db.cash_drawer_accounts.filter(item => !item._synced).count(),
+        db.cash_drawer_sessions.filter(item => !item._synced).count(),
 
       ]);
       setUnsyncedCount(counts.reduce((sum, count) => sum + count, 0));
@@ -1477,6 +1485,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           detail: { storeId, event: 'opened' }
         }));
       }
+
+      // Update unsynced count and trigger sync for cash drawer data
+      await updateUnsyncedCount();
+      debouncedSync();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to open cash drawer session';
       console.error('Error opening cash drawer:', message);
@@ -1505,6 +1517,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         currentBalance: 0,
         lastUpdated: new Date().toISOString()
       }));
+
+      // Update unsynced count and trigger sync for cash drawer data
+      await updateUnsyncedCount();
+      debouncedSync();
     } catch (error) {
       console.error('Error closing cash drawer:', error);
     }
@@ -1558,6 +1574,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const getCashDrawerSessionDetails = async (sessionId: string) => {
     if (!storeId) return null;
     return await db.getCashDrawerSessionDetails(sessionId);
+  };
+
+  const getRecommendedOpeningAmount = async () => {
+    if (!storeId) return { amount: 0, source: 'default' as const };
+    return await db.getRecommendedOpeningAmount(storeId);
   };
 
   const getStockLevels = () => stockLevels;
@@ -1710,6 +1731,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       getCashDrawerBalanceReport,
       getCurrentCashDrawerStatus,
       getCashDrawerSessionDetails,
+      getRecommendedOpeningAmount,
       refreshCashDrawerStatus,
       isOnline,
 
