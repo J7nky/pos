@@ -25,6 +25,7 @@ import {
 import { SaleItem, Customer } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
+import UndoToastManager from './common/UndoToastManager';
 
 
 interface BillTab {
@@ -627,7 +628,7 @@ export default function POS() {
   };
 
   return (
-    <div className="p-6 pt-3">
+    <>
       {/* <h1 className="text-2xl font-bold text-gray-900 mb-6">{t('pos.header')}</h1> */}
 
       {/* Bill Tabs */}
@@ -1033,7 +1034,9 @@ export default function POS() {
           )}
         </div>
       </div>
-    </div>
+      {/* Undo Toast for all undoable actions */}
+      <UndoToastManager />
+    </>
   );
 }
 
