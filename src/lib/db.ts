@@ -202,6 +202,20 @@ export interface inventory_bills extends BaseEntity {
   type?:string
 }
 
+/**
+ * Undo stack interface for user actions
+ * Each undoable action is recorded here with all data needed to revert it.
+ * Extendable for any user operation that should be undoable before sync.
+ */
+export interface UndoAction {
+  id: string;
+  user_id: string;
+  store_id: string;
+  action_type: string; // e.g. 'open_cash_drawer', 'delete_inventory', etc.
+  payload: any;        // All data needed to revert
+  created_at: string;
+}
+
 class POSDatabase extends Dexie {
   // Core tables
   products!: Table<Product, string>;
@@ -211,6 +225,7 @@ class POSDatabase extends Dexie {
   sale_items!: Table<SaleItem, string>;
   transactions!: Table<Transaction, string>;
   inventory_bills!: Table<inventory_bills, string>;
+  undo_stack!: Table<UndoAction, string>; // Table for undoable actions
 
   // Bill management tables
   bills!: Table<Bill, string>;
@@ -226,7 +241,7 @@ class POSDatabase extends Dexie {
     
     console.log('🔧 Initializing POSDatabase...');
     
-    this.version(13).stores({
+    this.version(14).stores({
       // Cash drawer tables
       cash_drawer_accounts: 'id, &store_id, account_code, updated_at',
       cash_drawer_sessions: 'id, store_id, account_id, status, created_at',
@@ -250,7 +265,8 @@ class POSDatabase extends Dexie {
 
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
-      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count'
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      undo_stack: 'id, user_id, store_id, action_type, created_at',
     });
 
     // Migration for version 5 - update existing records to match new schema
@@ -452,7 +468,11 @@ class POSDatabase extends Dexie {
   ): Promise<string> {
     const sessionId = uuidv4();
     const now = new Date().toISOString();
-    
+
+    // Get previous account balance for undo
+    const account = await this.cash_drawer_accounts.get(accountId);
+    const previousBalance = account?.current_balance || 0;
+
     const session: CashDrawerSession = {
       id: sessionId,
       store_id: storeId,
@@ -467,10 +487,23 @@ class POSDatabase extends Dexie {
     };
 
     await this.cash_drawer_sessions.add(session);
-    
     // Update account balance
     await this.updateCashDrawerBalance(accountId, openingAmount, true);
-    
+
+    // Record undo action for this operation
+    await this.addUndoAction(
+      openedBy,
+      storeId,
+      'open_cash_drawer',
+      {
+        sessionId,
+        accountId,
+        openingAmount,
+        previousBalance,
+        _synced: false // Always false at creation
+      }
+    );
+
     return sessionId;
   }
 
@@ -1641,6 +1674,110 @@ class POSDatabase extends Dexie {
         ip_address: null,
       });
     });
+  }
+
+  /**
+   * Add an undo action to the stack.
+   * Call this after any undoable operation, passing all info needed to revert.
+   * @param userId - The user performing the action
+   * @param storeId - The store context
+   * @param actionType - The type of action (e.g., 'open_cash_drawer')
+   * @param payload - All data needed to revert the action
+   */
+  async addUndoAction(userId: string, storeId: string, actionType: string, payload: any): Promise<string> {
+    const undoAction: UndoAction = {
+      id: uuidv4(),
+      user_id: userId,
+      store_id: storeId,
+      action_type: actionType,
+      payload,
+      created_at: new Date().toISOString(),
+    };
+    await this.undo_stack.add(undoAction);
+    return undoAction.id;
+  }
+
+  /**
+   * Get the last undo action for a user and store (if any, and not yet synced)
+   * Used to display "Undo" option in UI.
+   */
+  async getLastUndoAction(userId: string, storeId: string): Promise<UndoAction | null> {
+    const actions = await this.undo_stack
+      .where({ user_id: userId, store_id: storeId })
+      .reverse()
+      .sortBy('created_at');
+    return actions.length > 0 ? actions[0] : null;
+  }
+
+  /**
+   * Check if the last action can be undone (e.g., _synced: false in payload)
+   * Returns true if undo is possible, false otherwise.
+   */
+  async canUndoAction(userId: string, storeId: string): Promise<boolean> {
+    const last = await this.getLastUndoAction(userId, storeId);
+    if (!last) return false;
+    // Convention: payload must contain enough info to check _synced
+    if (last.payload && typeof last.payload._synced === 'boolean') {
+      return last.payload._synced === false;
+    }
+    return true; // fallback: allow undo if unsure
+  }
+
+  /**
+   * Undo the last action for a user and store. This is a dispatcher; actual logic is per action_type.
+   * Removes the undo action if successful.
+   * Returns true if undo succeeded, false otherwise.
+   *
+   * To add new undoable actions, add a new case in the switch statement below
+   * and implement a corresponding _undo<ActionType> method.
+   */
+  async undoLastAction(userId: string, storeId: string): Promise<boolean> {
+    const last = await this.getLastUndoAction(userId, storeId);
+    if (!last) return false;
+    let success = false;
+    try {
+      switch (last.action_type) {
+        case 'open_cash_drawer':
+          success = await this._undoOpenCashDrawer(last.payload);
+          break;
+        // Add more cases for other action types here
+        // case 'delete_inventory':
+        //   success = await this._undoDeleteInventory(last.payload);
+        //   break;
+        default:
+          console.warn('No undo logic for action type:', last.action_type);
+          success = false;
+      }
+      if (success) {
+        await this.undo_stack.delete(last.id);
+      }
+      return success;
+    } catch (err) {
+      console.error('Undo failed:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Undo logic for open_cash_drawer: delete the session and revert account balance if _synced=false
+   * This is a template for other undo operations.
+   */
+  private async _undoOpenCashDrawer(payload: any): Promise<boolean> {
+    if (!payload || payload._synced !== false) return false;
+    const { sessionId, accountId, previousBalance } = payload;
+    // Get the session
+    const session = await this.cash_drawer_sessions.get(sessionId);
+    if (!session) return false;
+    // Only allow undo if session is still open and unsynced
+    if (session.status !== 'open' || session._synced !== false) return false;
+    // Delete the session
+    await this.cash_drawer_sessions.delete(sessionId);
+    // Revert account balance
+    await this.cash_drawer_accounts.update(accountId, {
+      current_balance: previousBalance,
+      _synced: false
+    } as any);
+    return true;
   }
 }
 
