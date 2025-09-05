@@ -15,18 +15,30 @@ const SYNC_CONFIG = {
 };
 
 // Table mapping for sync operations
+// CRITICAL: Order matters for foreign key dependencies
 const SYNC_TABLES = [
+  // Core entities (no dependencies)
   'products',
   'suppliers', 
   'customers',
+  'cash_drawer_accounts',
+  
+  // Inventory (depends on products, suppliers)
   'inventory_bills',
   'inventory_items',
+  
+  // Sales (depends on products, suppliers, customers)
   'sale_items',
   'transactions',
+  
+  // Bills (depends on customers, users)
   'bills',
-  'bill_line_items',
-  'bill_audit_logs',
-  'cash_drawer_accounts',
+  
+  // Bill dependencies (MUST come after bills)
+  'bill_line_items',    // depends on bills, products, suppliers
+  'bill_audit_logs',    // depends on bills, users
+  
+  // Cash drawer sessions (depends on accounts)
   'cash_drawer_sessions'
 ] as const;
 
@@ -491,13 +503,12 @@ export class SyncService {
            
            // Remove invalid bill line items from sync queue
            for (const invalid of invalidRecords) {
-             console.warn(`🚫 Removing invalid bill line item from sync: ${invalid.reason}`, invalid.record);
-             
              // If the record was skipped due to missing bill dependency, mark it for retry
              if (invalid.reason.includes('does not exist in Supabase')) {
-               console.log(`🔄 Marking bill line item for retry due to missing bill dependency: ${invalid.record.id}`);
+               console.log(`⏳ Bill line item ${invalid.record.id} will retry - parent bill not yet synced: ${invalid.record.bill_id}`);
                // Don't mark as synced - let it be retried in the next sync cycle
              } else {
+               console.warn(`🚫 Removing invalid bill line item from sync: ${invalid.reason}`, invalid.record);
                // Mark as synced only for truly invalid records
                await db.markAsSynced(tableName, invalid.record.id);
              }
@@ -579,13 +590,12 @@ export class SyncService {
            
            // Remove invalid bill audit logs from sync queue
            for (const invalid of invalidRecords) {
-             console.warn(`🚫 Removing invalid bill audit log from sync: ${invalid.reason}`, invalid.record);
-             
              // If the record was skipped due to missing bill dependency, mark it for retry
              if (invalid.reason.includes('does not exist in Supabase')) {
-               console.log(`🔄 Marking bill audit log for retry due to missing bill dependency: ${invalid.record.id}`);
+               console.log(`⏳ Bill audit log ${invalid.record.id} will retry - parent bill not yet synced: ${invalid.record.bill_id}`);
                // Don't mark as synced - let it be retried in the next sync cycle
              } else {
+               console.warn(`🚫 Removing invalid bill audit log from sync: ${invalid.reason}`, invalid.record);
                // Mark as synced only for truly invalid records
                await db.markAsSynced(tableName, invalid.record.id);
              }

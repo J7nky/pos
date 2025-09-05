@@ -715,7 +715,7 @@ export default function InventoryLogs() {
                           </div>
                           {bill.total_amount - bill.amount_paid > 0 && (
                             <div className="text-xs text-red-600">
-                              Due: {formatCurrency(bill.amount_paid - bill.amount_paid)}
+                              Due: {formatCurrency(bill.total_amount - bill.amount_paid)}
                             </div>
                           )}
                         </div>

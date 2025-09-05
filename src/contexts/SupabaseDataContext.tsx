@@ -308,6 +308,9 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       const quantityChanged = updates.quantity !== undefined && updates.quantity !== originalSale.quantity;
       const quantityDifference = quantityChanged ? (updates.quantity || 0) - (originalSale.quantity || 0) : 0;
 
+      // Check if price-related fields have changed (these affect bill totals)
+      const priceChanged = updates.unit_price !== undefined || updates.received_value !== undefined || updates.weight !== undefined;
+
       // Update the sale item
       const updatedSale = await SupabaseService.updateSaleItem(id, updates);
       
@@ -319,6 +322,17 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
         } else if (quantityDifference < 0) {
           // Quantity decreased - restore inventory
           await restoreInventoryQuantity(originalSale.product_id, originalSale.supplier_id, Math.abs(quantityDifference));
+        }
+      }
+
+      // Update related bills if price-related fields changed
+      if (priceChanged) {
+        // For Supabase context, we need to update bills in Supabase as well
+        try {
+          await SupabaseService.updateBillsForSaleItem(id);
+        } catch (error) {
+          console.warn('Failed to update bills in Supabase:', error);
+          // Continue execution as this is not critical for the sale update
         }
       }
 

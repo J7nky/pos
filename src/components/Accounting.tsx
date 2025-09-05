@@ -828,6 +828,15 @@ export default function Accounting() {
         received_value: updated.unitPrice * updated.quantity
       });
 
+      // The updateSale function now automatically handles bill updates
+      // But we can also explicitly trigger it here for immediate feedback
+      try {
+        await raw.updateBillsForSaleItem?.(updated.id);
+      } catch (billError) {
+        console.warn('Failed to update bills immediately:', billError);
+        // Don't show error to user as the sale was updated successfully
+      }
+
       setShowEditNonPriced(null);
       showToast('Item updated successfully', 'success');
     } catch (error) {
@@ -854,6 +863,7 @@ export default function Accounting() {
       // Update the sale record to mark it as priced
       await updateSale(item.id, {
         unit_price: updatedItem.unit_price,
+        
         quantity: updatedItem.quantity,
         weight: updatedItem.weight || null,
         received_value: updatedItem.unit_price * updatedItem.quantity
