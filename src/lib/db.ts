@@ -1749,6 +1749,9 @@ class POSDatabase extends Dexie {
         case 'customer_payment':
           success = await this._undoCustomerPayment(last.payload);
           break;
+        case 'accounting_payment_expense':
+          success = await this._undoAccountingTransaction(last.payload);
+          break;
         // Add more cases for other action types here
         default:
           console.warn('No undo logic for action type:', last.action_type);
@@ -1944,6 +1947,60 @@ class POSDatabase extends Dexie {
     // Revert customer balance
     await this.customers.update(customerId, {
       lb_balance: previousBalance,
+      _synced: false
+    } as any);
+    return true;
+  }
+
+  /**
+   * Add an accounting payment/expense transaction and record undo action (for undo before sync).
+   * Call this instead of direct add for undoable accounting transactions.
+   * @param transaction - The payment/expense transaction to add
+   * @param accountId - The cash drawer account affected
+   * @param previousBalance - The account balance before transaction
+   * @param newBalance - The account balance after transaction
+   * @param userId - The user performing the transaction
+   * @param storeId - The store context
+   */
+  async addAccountingTransactionWithUndo(
+    transaction: Transaction,
+    accountId: string,
+    previousBalance: number,
+    newBalance: number,
+    userId: string,
+    storeId: string
+  ): Promise<void> {
+    await this.transactions.add(transaction);
+    await this.cash_drawer_accounts.update(accountId, {
+      current_balance: newBalance,
+      _synced: false
+    } as any);
+    // Record undo action if transaction is unsynced
+    if (transaction._synced === false) {
+      await this.addUndoAction(userId, storeId, 'accounting_payment_expense', {
+        transactionId: transaction.id,
+        accountId,
+        previousBalance,
+        newBalance,
+        _synced: false
+      });
+    }
+  }
+
+  /**
+   * Undo logic for accounting_payment_expense: delete transaction, revert cash drawer balance if _synced=false
+   */
+  private async _undoAccountingTransaction(payload: any): Promise<boolean> {
+    if (!payload || payload._synced !== false) return false;
+    const { transactionId, accountId, previousBalance } = payload;
+    // Check if transaction is still unsynced
+    const transaction = await this.transactions.get(transactionId);
+    if (!transaction || transaction._synced !== false) return false;
+    // Delete transaction
+    await this.transactions.delete(transactionId);
+    // Revert cash drawer balance
+    await this.cash_drawer_accounts.update(accountId, {
+      current_balance: previousBalance,
       _synced: false
     } as any);
     return true;
