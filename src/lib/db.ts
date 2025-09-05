@@ -507,7 +507,15 @@ class POSDatabase extends Dexie {
     return sessionId;
   }
 
-  async closeCashDrawerSession(
+  /**
+   * Close a cash drawer session and record undo action (for undo before sync).
+   * Call this instead of direct update for undoable session closures.
+   * @param sessionId - The session being closed
+   * @param actualAmount - The actual cash counted
+   * @param closedBy - The user closing the session
+   * @param notes - Optional notes
+   */
+  async closeCashDrawerSessionWithUndo(
     sessionId: string,
     actualAmount: number,
     closedBy: string,
@@ -515,13 +523,15 @@ class POSDatabase extends Dexie {
   ): Promise<void> {
     const session = await this.cash_drawer_sessions.get(sessionId);
     if (!session || session.status !== 'open') return;
-
-    // Calculate expected amount from transactions
+    // Save previous session data for undo
+    const previousSession = { ...session };
+    // Get previous account balance
+    const account = await this.cash_drawer_accounts.get(session.account_id);
+    const previousBalance = account?.current_balance || 0;
+    // Proceed with close logic
     const expectedAmount = await this.calculateExpectedCashDrawerAmount(sessionId, session.opening_amount);
     const variance = actualAmount - expectedAmount;
     const now = new Date().toISOString();
-
-    // Update session
     await this.cash_drawer_sessions.update(sessionId, {
       closed_at: now,
       closed_by: closedBy,
@@ -532,10 +542,48 @@ class POSDatabase extends Dexie {
       notes,
       _synced: false
     });
-
     // Update account balance
     await this.updateCashDrawerBalance(session.account_id, expectedAmount, false); // Remove expected
     await this.updateCashDrawerBalance(session.account_id, actualAmount, true); // Add actual
+    // Record undo action if session is unsynced
+    const updatedSession = await this.cash_drawer_sessions.get(sessionId);
+    if (updatedSession && updatedSession._synced === false) {
+      await this.addUndoAction(closedBy, session.store_id, 'close_cash_drawer', {
+        sessionId,
+        previousSession,
+        previousBalance,
+        _synced: false
+      });
+    }
+  }
+
+  /**
+   * Undo logic for close_cash_drawer: reopen session and revert account balance if _synced=false
+   */
+  private async _undoCloseCashDrawer(payload: any): Promise<boolean> {
+    if (!payload || payload._synced !== false) return false;
+    const { sessionId, previousSession, previousBalance } = payload;
+    // Check if session is still closed and unsynced
+    const session = await this.cash_drawer_sessions.get(sessionId);
+    if (!session || session.status !== 'closed' || session._synced !== false) return false;
+    // Restore previous session data
+    await this.cash_drawer_sessions.update(sessionId, {
+      ...previousSession,
+      status: 'open',
+      closed_at: undefined,
+      closed_by: undefined,
+      expected_amount: undefined,
+      actual_amount: undefined,
+      variance: undefined,
+      notes: undefined,
+      _synced: false
+    });
+    // Revert account balance
+    await this.cash_drawer_accounts.update(previousSession.account_id, {
+      current_balance: previousBalance,
+      _synced: false
+    } as any);
+    return true;
   }
 
   /**
@@ -1751,6 +1799,9 @@ class POSDatabase extends Dexie {
           break;
         case 'accounting_payment_expense':
           success = await this._undoAccountingTransaction(last.payload);
+          break;
+        case 'close_cash_drawer':
+          success = await this._undoCloseCashDrawer(last.payload);
           break;
         // Add more cases for other action types here
         default:
