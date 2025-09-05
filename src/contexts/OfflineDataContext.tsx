@@ -129,6 +129,8 @@ interface OfflineDataContextType {
     isAutoSyncing: boolean;
   };
   validateAndCleanData: () => Promise<{ cleaned: number; report: any }>;
+  canUndo: boolean;
+  undoLastAction: () => Promise<boolean>;
 }
 
 const OfflineDataContext = createContext<OfflineDataContextType | undefined>(undefined);
@@ -188,6 +190,33 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return stored ? JSON.parse(stored) : null;
   });
   const [stockLevels, setStockLevels] = useState<any[]>([]);
+
+  // --- Undo System Integration ---
+  const [canUndo, setCanUndo] = useState(false);
+  // Check for undo availability whenever user or store changes
+  useEffect(() => {
+    const checkUndo = async () => {
+      if (userProfile?.id && storeId) {
+        const available = await db.canUndoAction(userProfile.id, storeId);
+        setCanUndo(available);
+      } else {
+        setCanUndo(false);
+      }
+    };
+    checkUndo();
+  }, [userProfile?.id, storeId, sales, inventory, transactions]);
+
+  // Undo the last action for the current user/store
+  const undoLastAction = async () => {
+    if (!userProfile?.id || !storeId) return false;
+    const result = await db.undoLastAction(userProfile.id, storeId);
+    if (result) {
+      await refreshData();
+      await updateUnsyncedCount();
+      setCanUndo(false);
+    }
+    return result;
+  };
 
   // Initialize data when store is available
   useEffect(() => {
@@ -1780,6 +1809,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       getSyncStatus,
       validateAndCleanData,
       openCashDrawer,
+      canUndo,
+      undoLastAction,
      
     }}>
       {children}
