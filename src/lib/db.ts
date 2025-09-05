@@ -1335,6 +1335,46 @@ class POSDatabase extends Dexie {
     }
   }
 
+  // New method to find and update bills related to a sale item
+  async updateBillsForSaleItem(saleItemId: string): Promise<void> {
+    try {
+      // Find all bill line items that reference this sale item
+      // We need to match by product_id, supplier_id, and inventory_item_id
+      const saleItem = await this.sale_items.get(saleItemId);
+      if (!saleItem) {
+        console.warn('Sale item not found for bill update:', saleItemId);
+        return;
+      }
+
+      // Find bill line items that match this sale item
+      const relatedLineItems = await this.bill_line_items
+        .filter(item => 
+          item.product_id === saleItem.product_id &&
+          item.supplier_id === saleItem.supplier_id &&
+          item.inventory_item_id === saleItem.inventory_item_id
+        )
+        .toArray();
+
+      // Update each related bill line item with new values
+      for (const lineItem of relatedLineItems) {
+        await this.bill_line_items.update(lineItem.id, {
+          quantity: saleItem.quantity,
+          unit_price: saleItem.unit_price,
+          line_total: saleItem.received_value,
+          weight: saleItem.weight,
+          _synced: false
+        });
+
+        // Recalculate the bill totals
+        await this.recalculateBillTotals(lineItem.bill_id);
+      }
+
+      console.log(`Updated ${relatedLineItems.length} bill line items for sale item ${saleItemId}`);
+    } catch (error) {
+      console.error('Error updating bills for sale item:', error);
+    }
+  }
+
   async getBillAuditTrail(billId: string): Promise<BillAuditLog[]> {
     return await this.bill_audit_logs
       .where('bill_id')

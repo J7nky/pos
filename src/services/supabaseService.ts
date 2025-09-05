@@ -411,11 +411,12 @@ export class SupabaseService {
     offset?: number;
   }) {
     try {
+      // First try with joins, fallback to simple query if foreign keys don't work
       let query = supabase
         .from('bills')
         .select(`
           *,
-          customers(name),
+          customers!bills_customer_id_fkey(name),
           users!bills_created_by_fkey(name)
         `)
         .eq('store_id', storeId);
@@ -451,7 +452,51 @@ export class SupabaseService {
 
       const { data, error } = await query;
       
-      if (error) throw error;
+      if (error) {
+        // If foreign key joins fail, try a simple query without joins
+        if (error.message.includes('customers') || error.message.includes('schema cache')) {
+          console.warn('Foreign key joins failed, falling back to simple query:', error.message);
+          
+          const simpleQuery = supabase
+            .from('bills')
+            .select('*')
+            .eq('store_id', storeId);
+          
+          // Apply the same filters to the simple query
+          if (filters?.searchTerm) {
+            simpleQuery.or(`bill_number.ilike.%${filters.searchTerm}%,customer_name.ilike.%${filters.searchTerm}%,notes.ilike.%${filters.searchTerm}%`);
+          }
+          if (filters?.dateFrom) {
+            simpleQuery.gte('bill_date', filters.dateFrom);
+          }
+          if (filters?.dateTo) {
+            simpleQuery.lte('bill_date', filters.dateTo);
+          }
+          if (filters?.paymentStatus) {
+            simpleQuery.eq('payment_status', filters.paymentStatus as any);
+          }
+          if (filters?.customerId) {
+            simpleQuery.eq('customer_id', filters.customerId as any);
+          }
+          if (filters?.status) {
+            simpleQuery.eq('status', filters.status as any);
+          }
+          
+          simpleQuery.order('bill_date', { ascending: false });
+          
+          if (filters?.limit) {
+            simpleQuery.limit(filters.limit);
+          }
+          if (filters?.offset) {
+            simpleQuery.range(filters.offset, (filters.offset || 0) + (filters.limit || 50) - 1);
+          }
+          
+          const { data: simpleData, error: simpleError } = await simpleQuery;
+          if (simpleError) throw simpleError;
+          return simpleData || [];
+        }
+        throw error;
+      }
       return data || [];
     } catch (error) {
       handleSupabaseError(error);
@@ -466,7 +511,7 @@ export class SupabaseService {
         .from('bills')
         .select(`
           *,
-          customers(name, phone, email),
+          customers!bills_customer_id_fkey(name, phone, email),
           users!bills_created_by_fkey(name),
           bill_line_items(
             *,
@@ -481,7 +526,22 @@ export class SupabaseService {
         .eq('id', billId)
         .single();
       
-      if (error) throw error;
+      if (error) {
+        // If foreign key joins fail, try a simple query without joins
+        if (error.message.includes('customers') || error.message.includes('schema cache')) {
+          console.warn('Foreign key joins failed for bill details, falling back to simple query:', error.message);
+          
+          const { data: simpleData, error: simpleError } = await supabase
+            .from('bills')
+            .select('*')
+            .eq('id', billId)
+            .single();
+          
+          if (simpleError) throw simpleError;
+          return simpleData;
+        }
+        throw error;
+      }
       return data;
     } catch (error) {
       handleSupabaseError(error);
@@ -681,6 +741,96 @@ export class SupabaseService {
       return true;
     } catch (error) {
       handleSupabaseError(error);
+    }
+  }
+
+  // New method to update bills when sale items are modified
+  static async updateBillsForSaleItem(saleItemId: string) {
+    try {
+      // Get the sale item details
+      const { data: saleItem, error: saleError } = await supabase
+        .from('sale_items')
+        .select('*')
+        .eq('id', saleItemId)
+        .single();
+
+      if (saleError) throw saleError;
+      if (!saleItem) {
+        console.warn('Sale item not found for bill update:', saleItemId);
+        return;
+      }
+
+      // Find bill line items that match this sale item
+      const { data: relatedLineItems, error: lineItemsError } = await supabase
+        .from('bill_line_items')
+        .select('*')
+        .eq('product_id', saleItem.product_id)
+        .eq('supplier_id', saleItem.supplier_id)
+        .eq('inventory_item_id', saleItem.inventory_item_id);
+
+      if (lineItemsError) throw lineItemsError;
+
+      // Update each related bill line item with new values
+      for (const lineItem of relatedLineItems || []) {
+        await this.updateBillLineItem(lineItem.id, {
+          quantity: saleItem.quantity,
+          unit_price: saleItem.unit_price,
+          line_total: saleItem.received_value,
+          weight: saleItem.weight
+        });
+
+        // Recalculate the bill totals
+        await this.recalculateBillTotals(lineItem.bill_id);
+      }
+
+      console.log(`Updated ${relatedLineItems?.length || 0} bill line items for sale item ${saleItemId}`);
+    } catch (error) {
+      console.error('Error updating bills for sale item:', error);
+      throw error;
+    }
+  }
+
+  // Helper method to recalculate bill totals in Supabase
+  static async recalculateBillTotals(billId: string) {
+    try {
+      // Get all line items for this bill
+      const { data: lineItems, error: lineItemsError } = await supabase
+        .from('bill_line_items')
+        .select('line_total')
+        .eq('bill_id', billId);
+
+      if (lineItemsError) throw lineItemsError;
+
+      // Calculate new subtotal
+      const subtotal = lineItems?.reduce((sum, item) => sum + (item.line_total || 0), 0) || 0;
+
+      // Get current bill to calculate amount_due
+      const { data: bill, error: billError } = await supabase
+        .from('bills')
+        .select('amount_paid')
+        .eq('id', billId)
+        .single();
+
+      if (billError) throw billError;
+
+      const totalAmount = subtotal;
+      const amountDue = totalAmount - (bill.amount_paid || 0);
+
+      // Update the bill totals
+      const { error: updateError } = await supabase
+        .from('bills')
+        .update({
+          subtotal,
+          total_amount: totalAmount,
+          amount_due: amountDue,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', billId);
+
+      if (updateError) throw updateError;
+    } catch (error) {
+      console.error('Error recalculating bill totals:', error);
+      throw error;
     }
   }
 

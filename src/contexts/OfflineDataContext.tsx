@@ -92,6 +92,7 @@ interface OfflineDataContextType {
   addSale: (items: any[]) => Promise<void>;
   updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
   deleteSale: (id: string) => Promise<void>;
+  updateBillsForSaleItem: (saleItemId: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: any) => Promise<void>;
   updateInventoryBatch: (id: string, updates: Tables['inventory_bills']['Update']) => Promise<void>;
@@ -797,7 +798,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       try {
         const { SupabaseService } = await import('../services/supabaseService');
         const supabaseBills = await SupabaseService.getBills(storeId, filters);
-        
+        console.log('supabaseBills', supabaseBills);
         if (supabaseBills && supabaseBills.length > 0) {
           // Store Supabase bills in local database for offline access
           for (const supabaseBill of supabaseBills) {
@@ -1278,6 +1279,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const quantityChanged = updates.quantity !== undefined && updates.quantity !== originalSale.quantity;
     const quantityDifference = quantityChanged ? (updates.quantity || 0) - (originalSale.quantity || 0) : 0;
 
+    // Check if price-related fields have changed (these affect bill totals)
+    const priceChanged = updates.unit_price !== undefined || updates.received_value !== undefined || updates.weight !== undefined;
     // Use transaction to ensure atomicity for the sale update only
     await db.transaction('rw', [db.sale_items], async () => {
       // Update the sale item
@@ -1297,6 +1300,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Quantity decreased - restore inventory
         await restoreInventoryQuantity(originalSale.product_id, originalSale.supplier_id, Math.abs(quantityDifference));
       } 
+    }
+
+    // Update related bills if price-related fields changed
+    if (priceChanged) {
+      await db.updateBillsForSaleItem(id);
     }
 
     await refreshData();
@@ -1380,6 +1388,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
     debouncedSync();
+  };
+
+  // Expose the updateBillsForSaleItem method for direct access
+  const updateBillsForSaleItem = async (saleItemId: string): Promise<void> => {
+    await db.updateBillsForSaleItem(saleItemId);
   };
 
   const fullResync = async (): Promise<SyncResult> => {
@@ -1749,6 +1762,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addSale,
       updateSale,
       deleteSale,
+      updateBillsForSaleItem,
       addTransaction,
       addExpenseCategory,
       updateInventoryBatch,
