@@ -1740,10 +1740,10 @@ class POSDatabase extends Dexie {
         case 'open_cash_drawer':
           success = await this._undoOpenCashDrawer(last.payload);
           break;
+        case 'delete_inventory':
+          success = await this._undoDeleteInventory(last.payload);
+          break;
         // Add more cases for other action types here
-        // case 'delete_inventory':
-        //   success = await this._undoDeleteInventory(last.payload);
-        //   break;
         default:
           console.warn('No undo logic for action type:', last.action_type);
           success = false;
@@ -1777,6 +1777,44 @@ class POSDatabase extends Dexie {
       current_balance: previousBalance,
       _synced: false
     } as any);
+    return true;
+  }
+
+  /**
+   * Soft delete an inventory item and record undo action if _synced=false.
+   * Use this method instead of direct table update for undoable deletes.
+   */
+  async deleteInventoryItem(itemId: string, userId: string, storeId: string): Promise<void> {
+    const item = await this.inventory_items.get(itemId);
+    if (!item) return;
+    // Soft delete the item
+    await this.inventory_items.update(itemId, {
+      _deleted: true,
+      _synced: false,
+      updated_at: new Date().toISOString()
+    });
+    // Record undo action if item is unsynced
+    if (item._synced === false) {
+      await this.addUndoAction(userId, storeId, 'delete_inventory', { ...item, _synced: false });
+    }
+  }
+
+  /**
+   * Undo logic for delete_inventory: restore the deleted item if _synced=false
+   */
+  private async _undoDeleteInventory(payload: any): Promise<boolean> {
+    if (!payload || payload._synced !== false) return false;
+    const { id, store_id } = payload;
+    // Check if item is still deleted and unsynced
+    const item = await this.inventory_items.get(id);
+    if (!item || item._deleted !== true || item._synced !== false) return false;
+    // Restore the item
+    await this.inventory_items.update(id, {
+      ...payload,
+      _deleted: false,
+      updated_at: new Date().toISOString(),
+      _synced: false
+    });
     return true;
   }
 }
