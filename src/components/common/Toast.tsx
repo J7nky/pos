@@ -5,9 +5,12 @@ interface ToastProps {
   type: 'success' | 'error';
   visible: boolean;
   onClose: () => void;
+  // Optional Undo button support
+  onAction?: () => void;
+  actionLabel?: string;
 }
 
-const Toast: React.FC<ToastProps> = ({ message, type, visible, onClose }) => {
+const Toast: React.FC<ToastProps> = ({ message, type, visible, onClose, onAction, actionLabel }) => {
   useEffect(() => {
     if (visible) {
       const timer = setTimeout(() => {
@@ -26,7 +29,16 @@ const Toast: React.FC<ToastProps> = ({ message, type, visible, onClose }) => {
       }`}
       role="alert"
     >
-      {message}
+      <span>{message}</span>
+      {onAction && actionLabel && (
+        <button
+          onClick={onAction}
+          className="ml-4 px-3 py-1 bg-white text-black rounded hover:bg-gray-200 transition"
+          style={{ fontWeight: 600 }}
+        >
+          {actionLabel}
+        </button>
+      )}
     </div>
   );
 };
