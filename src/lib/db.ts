@@ -1743,6 +1743,9 @@ class POSDatabase extends Dexie {
         case 'delete_inventory':
           success = await this._undoDeleteInventory(last.payload);
           break;
+        case 'complete_sale':
+          success = await this._undoCompleteSale(last.payload);
+          break;
         // Add more cases for other action types here
         default:
           console.warn('No undo logic for action type:', last.action_type);
@@ -1815,6 +1818,77 @@ class POSDatabase extends Dexie {
       updated_at: new Date().toISOString(),
       _synced: false
     });
+    return true;
+  }
+
+  /**
+   * Add sale items and record undo action for the entire sale (for undo before sync).
+   * Call this instead of direct bulkAdd for undoable sales.
+   * @param saleItems - Array of SaleItem objects to add
+   * @param inventoryChanges - Array of {inventory_item_id, previous_quantity, new_quantity}
+   * @param cashDrawerChange - {accountId, previousBalance, newBalance} | null
+   * @param userId - The user performing the sale
+   * @param storeId - The store context
+   */
+  async addSaleWithUndo(
+    saleItems: SaleItem[],
+    inventoryChanges: Array<{inventory_item_id: string, previous_quantity: number, new_quantity: number}>,
+    cashDrawerChange: {accountId: string, previousBalance: number, newBalance: number} | null,
+    userId: string,
+    storeId: string
+  ): Promise<void> {
+    // Add sale items
+    await this.sale_items.bulkAdd(saleItems);
+    // Update inventory
+    for (const change of inventoryChanges) {
+      await this.inventory_items.update(change.inventory_item_id, {
+        quantity: change.new_quantity,
+        _synced: false
+      });
+    }
+    // Update cash drawer if needed
+    if (cashDrawerChange) {
+      await this.cash_drawer_accounts.update(cashDrawerChange.accountId, {
+        current_balance: cashDrawerChange.newBalance,
+        _synced: false
+      } as any);
+    }
+    // Record undo action if all sale items are unsynced
+    if (saleItems.every(item => item._synced === false)) {
+      await this.addUndoAction(userId, storeId, 'complete_sale', {
+        saleItemIds: saleItems.map(item => item.id),
+        inventoryChanges,
+        cashDrawerChange,
+        _synced: false
+      });
+    }
+  }
+
+  /**
+   * Undo logic for complete_sale: delete sale items, revert inventory, revert cash drawer if _synced=false
+   */
+  private async _undoCompleteSale(payload: any): Promise<boolean> {
+    if (!payload || payload._synced !== false) return false;
+    const { saleItemIds, inventoryChanges, cashDrawerChange } = payload;
+    // Check if all sale items are still unsynced
+    const saleItems = await this.sale_items.bulkGet(saleItemIds);
+    if (!saleItems.every(item => item && item._synced === false)) return false;
+    // Delete sale items
+    await this.sale_items.bulkDelete(saleItemIds);
+    // Revert inventory
+    for (const change of inventoryChanges) {
+      await this.inventory_items.update(change.inventory_item_id, {
+        quantity: change.previous_quantity,
+        _synced: false
+      });
+    }
+    // Revert cash drawer if needed
+    if (cashDrawerChange) {
+      await this.cash_drawer_accounts.update(cashDrawerChange.accountId, {
+        current_balance: cashDrawerChange.previousBalance,
+        _synced: false
+      } as any);
+    }
     return true;
   }
 }
