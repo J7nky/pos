@@ -5,9 +5,11 @@ interface ToastProps {
   type: 'success' | 'error';
   visible: boolean;
   onClose: () => void;
+  onAction?: () => void;
+  actionLabel?: string;
 }
 
-const Toast: React.FC<ToastProps> = ({ message, type, visible, onClose }) => {
+const Toast: React.FC<ToastProps> = ({ message, type, visible, onClose, onAction, actionLabel }) => {
   useEffect(() => {
     if (visible) {
       const timer = setTimeout(() => {
@@ -21,12 +23,20 @@ const Toast: React.FC<ToastProps> = ({ message, type, visible, onClose }) => {
 
   return (
     <div
-      className={`fixed top-6 right-6 z-50 px-6 py-3 rounded shadow-lg text-white transition-all duration-300 ${
+      className={`fixed top-6 right-6 z-50 px-6 py-3 rounded shadow-lg text-white transition-all duration-300 flex items-center gap-4 ${
         type === 'success' ? 'bg-green-600' : 'bg-red-600'
       }`}
       role="alert"
     >
-      {message}
+      <span>{message}</span>
+      {onAction && actionLabel && (
+        <button
+          onClick={onAction}
+          className="px-3 py-1 bg-white text-gray-800 rounded hover:bg-gray-100 transition-colors font-medium"
+        >
+          {actionLabel}
+        </button>
+      )}
     </div>
   );
 };
