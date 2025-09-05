@@ -1746,6 +1746,9 @@ class POSDatabase extends Dexie {
         case 'complete_sale':
           success = await this._undoCompleteSale(last.payload);
           break;
+        case 'customer_payment':
+          success = await this._undoCustomerPayment(last.payload);
+          break;
         // Add more cases for other action types here
         default:
           console.warn('No undo logic for action type:', last.action_type);
@@ -1889,6 +1892,60 @@ class POSDatabase extends Dexie {
         _synced: false
       } as any);
     }
+    return true;
+  }
+
+  /**
+   * Add a customer payment transaction and record undo action (for undo before sync).
+   * Call this instead of direct add for undoable customer payments.
+   * @param transaction - The payment transaction to add
+   * @param customerId - The customer receiving the payment
+   * @param previousBalance - The customer's balance before payment
+   * @param newBalance - The customer's balance after payment
+   * @param userId - The user performing the payment
+   * @param storeId - The store context
+   */
+  async addCustomerPaymentWithUndo(
+    transaction: Transaction,
+    customerId: string,
+    previousBalance: number,
+    newBalance: number,
+    userId: string,
+    storeId: string
+  ): Promise<void> {
+    await this.transactions.add(transaction);
+    await this.customers.update(customerId, {
+      lb_balance: newBalance,
+      _synced: false
+    } as any);
+    // Record undo action if transaction is unsynced
+    if (transaction._synced === false) {
+      await this.addUndoAction(userId, storeId, 'customer_payment', {
+        transactionId: transaction.id,
+        customerId,
+        previousBalance,
+        newBalance,
+        _synced: false
+      });
+    }
+  }
+
+  /**
+   * Undo logic for customer_payment: delete transaction, revert customer balance if _synced=false
+   */
+  private async _undoCustomerPayment(payload: any): Promise<boolean> {
+    if (!payload || payload._synced !== false) return false;
+    const { transactionId, customerId, previousBalance } = payload;
+    // Check if transaction is still unsynced
+    const transaction = await this.transactions.get(transactionId);
+    if (!transaction || transaction._synced !== false) return false;
+    // Delete transaction
+    await this.transactions.delete(transactionId);
+    // Revert customer balance
+    await this.customers.update(customerId, {
+      lb_balance: previousBalance,
+      _synced: false
+    } as any);
     return true;
   }
 }
