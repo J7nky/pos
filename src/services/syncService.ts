@@ -8,10 +8,10 @@ type Tables = Database['public']['Tables'];
 
 // Sync configuration
 const SYNC_CONFIG = {
-  batchSize: 100, // Increased from 50 for fewer round trips
+  batchSize: 10, // Increased from 50 for fewer round trips
   maxRetries: 3,
   retryDelay: 1000, // ms
-  syncInterval: 30000, // 30 seconds
+  syncInterval: 1000, // 30 seconds
 };
 
 // Table mapping for sync operations
@@ -916,14 +916,9 @@ export class SyncService {
         }
       }
       
-      // Create detailed reconciliation transaction
-      await this.createReconciliationTransaction(
-        localBalance, 
-        finalBalance, 
-        localRecord.store_id, 
-        remoteBalance,
-        reconciliationType
-      );
+      // Skip reconciliation transaction creation to prevent duplicates
+      // The cash drawer service already handles transaction creation
+      console.log(`💰 Cash drawer balance reconciled: $${localBalance.toFixed(2)} → $${finalBalance.toFixed(2)} (${reconciliationType})`);
       
       // Update with reconciled balance
       await db.cash_drawer_accounts.update(localRecord.id, {
@@ -1295,6 +1290,8 @@ export class SyncService {
 
   /**
    * Create detailed reconciliation transaction for balance discrepancies
+   * DISABLED: This was causing duplicate transactions during sync
+   * Cash drawer operations are already handled by the cash drawer service
    */
   private async createReconciliationTransaction(
     oldBalance: number, 
@@ -1303,38 +1300,10 @@ export class SyncService {
     remoteBalance?: number,
     reconciliationType?: string
   ) {
-    const variance = newBalance - oldBalance;
-    const transactionId = `RECON-${Date.now()}`;
-    
-    // Don't create reconciliation transaction if variance is negligible
-    if (Math.abs(variance) <= 0.01) {
-      return;
-    }
-    
-    let description = `Cash drawer reconciliation: $${oldBalance.toFixed(2)} → $${newBalance.toFixed(2)}`;
-    if (remoteBalance !== undefined && reconciliationType) {
-      description += ` (Local: $${oldBalance.toFixed(2)}, Remote: $${remoteBalance.toFixed(2)}, Strategy: ${reconciliationType})`;
-    }
-    
-    try {
-      await db.transactions.add({
-        id: transactionId,
-        type: variance > 0 ? 'income' : 'expense',
-        category: 'cash_drawer_reconciliation',
-        amount: Math.abs(variance),
-        currency: 'USD',
-        description,
-        reference: transactionId,
-        store_id: storeId,
-        created_by: 'system',
-        created_at: new Date().toISOString(),
-        _synced: false
-      });
-      
-      console.log(`📝 Created reconciliation transaction: $${variance.toFixed(2)} (${reconciliationType || 'standard'})`);
-    } catch (error) {
-      console.error('Failed to create reconciliation transaction:', error);
-    }
+    // DISABLED: This was creating duplicate transactions during sync
+    // The cash drawer service already handles transaction creation
+    console.log(`💰 Balance reconciliation skipped to prevent duplicate transactions: $${oldBalance.toFixed(2)} → $${newBalance.toFixed(2)} (${reconciliationType || 'standard'})`);
+    return;
   }
 
   /**

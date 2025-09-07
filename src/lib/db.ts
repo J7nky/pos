@@ -173,21 +173,6 @@ export interface PendingSync {
   last_error?: string;
 }
 
-// Undo action for local operations
-export type UndoStep =
-  | { table: string; op: 'add'; id: string } // undo by deleting id
-  | { table: string; op: 'delete'; record: any } // undo by re-adding record
-  | { table: string; op: 'update'; id: string; prev: Partial<any> } // undo by restoring prev fields
-  | { op: 'custom'; run: (db: any) => Promise<void> }; // for complex flows
-
-export interface UndoAction {
-  id: string;
-  label: string; // e.g., "Completed sale"
-  created_at: string;
-  affected: Array<{ table: string; id: string }>;
-  steps: UndoStep[]; // inverse steps to run
-}
-
 export interface JournalEntry extends BaseEntity {
   date: string;
   reference: string;
@@ -234,7 +219,6 @@ class POSDatabase extends Dexie {
   // Sync management tables
   sync_metadata!: Table<SyncMetadata, string>;
   pending_syncs!: Table<PendingSync, string>;
-  undo_actions!: Table<UndoAction, string>;
   cash_drawer_accounts!: Table<CashDrawerAccount, string>;
   cash_drawer_sessions!: Table<CashDrawerSession, string>;
   constructor() {
@@ -266,10 +250,7 @@ class POSDatabase extends Dexie {
 
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
-      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
-
-      // Undo system
-      undo_actions: 'id, created_at'
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count'
     });
 
     // Migration for version 5 - update existing records to match new schema
@@ -786,15 +767,15 @@ class POSDatabase extends Dexie {
       
       // Determine transaction type and update cash drawer accordingly
       if (obj.type === 'income' && obj.category === 'Customer Payment') {
-        await cashDrawerUpdateService.updateCashDrawerForCustomerPayment({
-          amount: obj.amount,
-          currency: obj.currency,
-          storeId: obj.store_id,
-          createdBy: obj.created_by,
-          customerId: obj.reference?.replace('PAY-', '') || '',
-          description: obj.description,
-          allowAutoSessionOpen: true // Allow automatic session opening for hooks
-        });
+        // await cashDrawerUpdateService.updateCashDrawerForCustomerPayment({
+        //   amount: obj.amount,
+        //   currency: obj.currency,
+        //   storeId: obj.store_id,
+        //   createdBy: obj.created_by,
+        //   customerId: obj.reference?.replace('PAY-', '') || '',
+        //   description: obj.description,
+        //   allowAutoSessionOpen: true // Allow automatic session opening for hooks
+        // });
       } else if (obj.type === 'expense') {
         await cashDrawerUpdateService.updateCashDrawerForExpense({
           amount: obj.amount,

@@ -126,26 +126,26 @@ export class TransactionService {
       localStorage.setItem('erp_transactions', JSON.stringify(transactions));
 
       // Update cash drawer for cash payments
-      if (options.updateCashDrawer !== false) {
-        try {
-          // Get store ID from context or use a default
-          const storeId = 'default-store'; // This should be passed from the calling context
-          const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForCustomerPayment({
-            amount: amountInUSD,
-            currency: 'USD',
-            storeId,
-            createdBy,
-            customerId,
-            description: `Payment for ${description}`
-          });
+      // if (options.updateCashDrawer !== false) {
+      //   try {
+      //     // Get store ID from context or use a default
+      //     const storeId = 'default-store'; // This should be passed from the calling context
+      //     const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForCustomerPayment({
+      //       amount: amountInUSD,
+      //       currency: 'USD',
+      //       storeId,
+      //       createdBy,
+      //       customerId,
+      //       description: `Payment for ${description}`
+      //     });
 
-          if (cashDrawerResult.success) {
-            console.log(`💰 Cash drawer updated for customer payment: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
-          }
-        } catch (error) {
-          console.error('Error updating cash drawer for customer payment:', error);
-        }
-      }
+      //     if (cashDrawerResult.success) {
+      //       console.log(`💰 Cash drawer updated for customer payment: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
+      //     }
+      //   } catch (error) {
+      //     console.error('Error updating cash drawer for customer payment:', error);
+      //   }
+      // }
 
       return {
         success: true,

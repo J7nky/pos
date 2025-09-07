@@ -12,6 +12,7 @@ import Reports from './components/Reports';
 import Customers from './components/Customers';
 import Accounting from './components/Accounting';
 import Settings from './components/Settings';
+import UndoToastManager from './components/common/UndoToastManager';
 import { I18nProvider, useI18n } from './i18n';
 
 function AuthenticatedApp() {
@@ -43,6 +44,7 @@ function AuthenticatedApp() {
   return (
     <Layout currentPage={currentPage} onPageChange={setCurrentPage}>
       {renderPage()}
+      <UndoToastManager />
     </Layout>
   );
 }
