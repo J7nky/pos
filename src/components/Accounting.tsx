@@ -400,7 +400,7 @@ export default function Accounting() {
 
 
   // Form handlers
-  const handleReceiveSubmit = async (e: React.FormEvent) => {
+  const handleReceiveSubmit = async (e: React.FormEvent) => { 
     e.preventDefault();
 
     // Validate required fields
@@ -476,27 +476,21 @@ export default function Accounting() {
         receiveForm.currency as 'USD' | 'LBP'
       );
 
-      // Also add to legacy transaction system for compatibility
-      addTransaction({
-        id: createId(),
-        type: 'income',
-        category: receiveForm.entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
-        amount: safeAmount.amount,
-        currency: safeAmount.currency,
-        description: `Payment from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${receiveForm.amount} ${receiveForm.currency})` : ''}`,
-        reference: receiveForm.reference,
-        created_by: userProfile?.id || ''
-      });
+      // Generate transaction ID for consistency
+      const transactionId = createId();
 
-      // Update cash drawer (increase for received payment)
+      // Update cash drawer (increase for received payment) - this will create the transaction record
+      let cashDrawerResult: any = null;
       if (!userProfile?.store_id) {
         console.warn('Missing store_id: cannot update cash drawer');
       } else {
-        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+        console.log('Updating cash drawer for transaction:', 'payment');
+
+        cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
           type: 'payment',
           amount: safeAmount.amount,
           currency: safeAmount.currency,
-          description: `Payment received from ${entity.name}`,
+          description: `Payment received from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${receiveForm.amount} ${receiveForm.currency})` : ''}`,
           reference: receiveForm.reference || `PAY-${Date.now()}`,
           storeId: userProfile.store_id,
           createdBy: userProfile?.id || '',
@@ -505,8 +499,65 @@ export default function Accounting() {
         });
       }
 
+      // Use the transaction ID from cash drawer service if available, otherwise create one
+      const finalTransactionId = cashDrawerResult?.transactionId || transactionId;
+
+      // Store undo data for received payment
+      // Calculate original balance before payment was made
+      const originalLbBalance = (entity.lb_balance || 0) + paymentAmount;
+      const originalUsdBalance = (entity.usd_balance || 0) + paymentAmount;
+      
+      const paymentUndoData = {
+        type: 'accounting_receive_payment',
+        affected: [
+          { table: receiveForm.entityType === 'customer' ? 'customers' : 'suppliers', id: receiveForm.entityId },
+          { table: 'transactions', id: finalTransactionId }
+        ],
+        steps: [
+          // Restore entity balance to original value before payment
+          {
+            op: 'update',
+            table: receiveForm.entityType === 'customer' ? 'customers' : 'suppliers',
+            id: receiveForm.entityId,
+            changes: receiveForm.currency === 'LBP'
+              ? { lb_balance: originalLbBalance, _synced: false }
+              : { usd_balance: originalUsdBalance, _synced: false }
+          },
+          // Delete transaction
+          {
+            op: 'delete',
+            table: 'transactions',
+            id: finalTransactionId
+          }
+        ]
+      };
+
+      // Add cash drawer restoration if transaction was created
+      if (cashDrawerResult?.success && cashDrawerResult.transactionId) {
+        const { db } = await import('../lib/db');
+        const account = await db.getCashDrawerAccount(userProfile?.store_id || '');
+        if (account) {
+          paymentUndoData.steps.push({
+            op: 'update',
+            table: 'cash_drawer_accounts',
+            id: account.id,
+            changes: {
+              current_balance: (account.current_balance || 0) - safeAmount.amount,
+              _synced: false
+            } as any
+          });
+          paymentUndoData.affected.push({ table: 'cash_drawer_accounts', id: account.id });
+        }
+      }
+
+      raw.pushUndo(paymentUndoData);
+
       await refreshCashDrawerBalance();
 
+      // Refresh data to show new transaction in Recent Activity
+      await raw.refreshData();
+
+      showToast(`Payment received! ${formatCurrencyWithSymbol(parseFloat(receiveForm.amount), receiveForm.currency)} received from ${entity.name}`, 'success');
     } catch (err) {
     console.log(err);
       showToast('Failed to record payment.', 'error');
@@ -601,27 +652,19 @@ export default function Accounting() {
         payForm.currency as 'USD' | 'LBP'
       );
 
-      // Also add to legacy transaction system for compatibility
-      addTransaction({
-        id: createId(),
-        type: 'expense',
-        category: payForm.entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
-        amount: safeAmount.amount,
-        currency: safeAmount.currency,
-        description: `Payment to ${entity.name}${payForm.description ? ': ' + payForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${payForm.amount} ${payForm.currency})` : ''}`,
-        reference: payForm.reference,
-        created_by: userProfile?.id || ''
-      });
+      // Generate transaction ID for consistency
+      const payTransactionId = createId();
 
-      // Update cash drawer (decrease for sent payment)
+      // Update cash drawer (decrease for sent payment) - this will create the transaction record
+      let payCashDrawerResult: any = null;
       if (!userProfile?.store_id) {
         console.warn('Missing store_id: cannot update cash drawer');
       } else {
-        await cashDrawerUpdateService.updateCashDrawerForTransaction({
+        payCashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
           type: 'expense',
           amount: safeAmount.amount,
           currency: safeAmount.currency,
-          description: `Payment sent to ${entity.name}`,
+          description: `Payment sent to ${entity.name}${payForm.description ? ': ' + payForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${payForm.amount} ${payForm.currency})` : ''}`,
           reference: payForm.reference || `PAY-${Date.now()}`,
           storeId: userProfile.store_id,
           createdBy: userProfile?.id || '',
@@ -630,7 +673,63 @@ export default function Accounting() {
         });
       }
 
+      // Use the transaction ID from cash drawer service if available, otherwise create one
+      const finalPayTransactionId = payCashDrawerResult?.transactionId || payTransactionId;
+
+      // Store undo data for sent payment
+      // Calculate original balance before payment was made
+      const originalLbBalance = (entity.lb_balance || 0) + paymentAmount;
+      const originalUsdBalance = (entity.usd_balance || 0) + paymentAmount;
+      
+      const payUndoData = {
+        type: 'accounting_pay_payment',
+        affected: [
+          { table: payForm.entityType === 'customer' ? 'customers' : 'suppliers', id: payForm.entityId },
+          { table: 'transactions', id: finalPayTransactionId }
+        ],
+        steps: [
+          // Restore entity balance to original value before payment
+          {
+            op: 'update',
+            table: payForm.entityType === 'customer' ? 'customers' : 'suppliers',
+            id: payForm.entityId,
+            changes: payForm.currency === 'LBP'
+              ? { lb_balance: originalLbBalance, _synced: false }
+              : { usd_balance: originalUsdBalance, _synced: false }
+          },
+          // Delete transaction
+          {
+            op: 'delete',
+            table: 'transactions',
+            id: finalPayTransactionId
+          }
+        ]
+      };
+
+      // Add cash drawer restoration if transaction was created
+      if (payCashDrawerResult?.success && payCashDrawerResult.transactionId) {
+        const { db } = await import('../lib/db');
+        const account = await db.getCashDrawerAccount(userProfile?.store_id || '');
+        if (account) {
+          payUndoData.steps.push({
+            op: 'update',
+            table: 'cash_drawer_accounts',
+            id: account.id,
+            changes: {
+              current_balance: (account.current_balance || 0) + safeAmount.amount,
+              _synced: false
+            } as any
+          });
+          payUndoData.affected.push({ table: 'cash_drawer_accounts', id: account.id });
+        }
+      }
+
+      raw.pushUndo(payUndoData);
+
       await refreshCashDrawerBalance();
+
+      // Refresh data to show new transaction in Recent Activity
+      await raw.refreshData();
 
       showToast(`Payment sent! ${formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency)} paid to ${entity.name}`, 'success');
     } catch (err) {
@@ -677,19 +776,7 @@ export default function Accounting() {
         expenseForm.currency as 'USD' | 'LBP'
       );
 
-      // Also add to legacy transaction system for compatibility
-      addTransaction({
-        id: createId(),
-        type: 'expense',
-        category: category.name,
-        amount: safeAmount.amount,
-        currency: safeAmount.currency,
-        description: `${expenseForm.description}${safeAmount.wasConverted ? ` (Originally ${expenseForm.amount} ${expenseForm.currency})` : ''}`,
-        reference: expenseForm.reference,
-        created_by: userProfile?.id || ''
-      });
-
-      // Update cash drawer (decrease for expense)
+      // Update cash drawer (decrease for expense) - this will create the transaction record
       if (!userProfile?.store_id) {
         console.warn('Missing store_id: cannot update cash drawer');
       } else {
@@ -697,7 +784,7 @@ export default function Accounting() {
           type: 'expense',
           amount: safeAmount.amount,
           currency: safeAmount.currency,
-          description: `Expense: ${category.name} - ${expenseForm.description}`,
+          description: `Expense: ${category.name} - ${expenseForm.description}${safeAmount.wasConverted ? ` (Originally ${expenseForm.amount} ${expenseForm.currency})` : ''}`,
           reference: expenseForm.reference || `EXP-${Date.now()}`,
           storeId: userProfile.store_id,
           createdBy: userProfile?.id || ''
@@ -709,6 +796,9 @@ export default function Accounting() {
       }
 
       await refreshCashDrawerBalance();
+
+      // Refresh data to show new transaction in Recent Activity
+      await raw.refreshData();
 
       showToast(`Expense recorded! Cash drawer updated: ${result.balanceBefore.toFixed(2)} → ${result.balanceAfter.toFixed(2)}`, 'success');
     } catch (err) {

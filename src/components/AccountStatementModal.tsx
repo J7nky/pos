@@ -35,6 +35,7 @@ interface AccountStatementModalProps {
   transactions: Transaction[];
   products: Product[];
   inventory: InventoryItem[];
+  inventoryBills: any[];
 }
 
 export default function AccountStatementModal({
@@ -45,8 +46,10 @@ export default function AccountStatementModal({
   sales,
   transactions,
   products,
-  inventory
+  inventory,
+  inventoryBills
 }: AccountStatementModalProps) {
+  
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
@@ -90,13 +93,14 @@ export default function AccountStatementModal({
           dateRange,
           viewMode
         );
+
       } else {
         newStatement = accountStatementService.generateSupplierStatement(
           entity as Supplier,
           sales,
           transactions,
           products,
-          inventory,
+          inventoryBills,
           dateRange,
           viewMode
         );
@@ -357,7 +361,7 @@ export default function AccountStatementModal({
                             <CreditCard className="w-4 h-4 text-red-400" />
                           </div>
                           <div className="text-2xl font-bold text-red-600">
-                            {formatCurrency(statement.financialSummary.totalSales.USD, 'USD')}
+                            {formatCurrency(statement.financialSummary.totalSales.LBP, 'LBP')}
                           </div>
                         </div>
 
@@ -367,7 +371,7 @@ export default function AccountStatementModal({
                             <TrendingDown className="w-4 h-4 text-green-400" />
                           </div>
                           <div className="text-2xl font-bold text-green-600">
-                            {formatCurrency(statement.financialSummary.totalPayments.USD, 'USD')}
+                            {formatCurrency(statement.financialSummary.totalPayments.LBP, 'USD')}
                           </div>
                         </div>
                       </>
@@ -471,7 +475,7 @@ export default function AccountStatementModal({
                                    <div className="text-sm font-medium text-gray-900">
                                   {transaction.description}
                                 </div>
-                                  {/* {transaction.productDetails && transaction.productDetails.length > 0 ? (
+                                  {transaction.productDetails && transaction.productDetails.length > 0 ? (
                                     <div className="space-y-2">
 
                                       {transaction.productDetails.map((detail, index) => (
@@ -517,12 +521,12 @@ export default function AccountStatementModal({
                                               {detail.notes}
                                             </div>
                                           )}
-                                        </div> */}
-                                      {/* ))}
+                                        </div>
+                                      ))}
                                     </div>
                                   ) : (
                                     <span className="text-sm text-gray-400">No product details</span>
-                                  )} */}
+                                  )}
                                 </td>
                               )}
                               {/* credit */}

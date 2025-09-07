@@ -102,6 +102,7 @@ export interface SaleItem {
   receivedValue?: number; // Matches received_value in database, optional for cart items
   paymentMethod?: 'cash' | 'card' | 'credit'; // Added payment method field
   notes?: string;
+  created_at: string;
   createdBy?: string; // Added to match Supabase schema
   inventoryType?: 'commission' | 'cash'; // Added for inventory tracking
 }
@@ -159,15 +160,19 @@ export interface Payment {
 }
 
 export interface Transaction {
+  
   id: string;
   type: 'income' | 'expense';
   category: string;
   amount: number;
   currency: 'USD' | 'LBP';
   description: string;
-  reference?: string;
-  createdAt: string;
-  createdBy: string;
+  reference: string | null;
+  store_id: string;
+  created_by: string;
+  created_at: string;
+  supplier_id: string | null;
+  customer_id: string | null;
 }
 
 export interface CashDrawer {
@@ -204,4 +209,30 @@ export interface StockLevel {
     supplierName: string;
     quantity: number;
   }>;
+}
+
+export interface StatementTransaction {
+  id: string;
+  date: string;
+  type: 'sale' | 'payment'|'income'|'expense';
+  description: string;
+  amount: number;
+  currency: 'USD' | 'LBP';
+  balanceAfter: number;
+  paymentMethod?: string;
+  productDetails?: StatementProductDetail[];
+  reference?: string;
+}
+
+export interface StatementProductDetail {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  totalPrice: number;
+  weight?: number;
+  commissionRate?: number;
+  commissionAmount?: number;
+  notes?: string;
 }

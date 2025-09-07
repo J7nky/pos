@@ -1,6 +1,5 @@
 import React, { ReactNode } from 'react';
 import KeyboardShortcutsHelp from './common/KeyboardShortcutsHelp';
-import UndoToastManager from './common/UndoToastManager';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useI18n } from '../i18n';
@@ -178,7 +177,6 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
       {/* Main Content */}
       <div className="flex-1 overflow-auto">
         {children}
-        <UndoToastManager />
       </div>
     </div>
   );

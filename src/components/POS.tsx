@@ -40,17 +40,7 @@ interface BillTab {
 
 export default function POS() {
   const raw = useOfflineData();
-  const { canUndo, undoLastAction } = raw;
-
-  console.log('🧪 POS Debug: canUndo =', canUndo);
-
-  // Test undo functionality
-  const testUndo = async () => {
-    console.log('🧪 Testing undo functionality...');
-    const result = await undoLastAction();
-    console.log('🧪 Undo result:', result);
-  };
-
+  
   // Refs for keyboard navigation
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const customerSelectRef = React.useRef<HTMLDivElement>(null);
@@ -1012,21 +1002,6 @@ export default function POS() {
                   tabIndex={10005}
                 />
               </div>
- {/* Test Undo Button */}
- {canUndo && (
-   <div className="sticky bottom-16 bg-white p-4 shadow-md">
-     <AccessibleButton
-       onClick={testUndo}
-       variant="warning"
-       size="lg"
-       touchOptimized
-       className="w-full mb-2"
-     >
-       🧪 Test Undo (Debug)
-     </AccessibleButton>
-   </div>
- )}
-
  {/* Fixed Complete Sale Button at Bottom of Cart */}
  <div className="sticky bottom-0 bg-white p-4 shadow-md">
       <AccessibleButton

@@ -742,7 +742,7 @@ export class EnhancedTransactionService {
   private generateActivitySummary(action: string, data: any): string {
     switch (action) {
       case 'customer_payment':
-        return `Payment received from ${data.customerName}: ${data.currency} ${data.amount}${data.paymentMethod ? ` via ${data.paymentMethod}` : ''}. Balance: ${currencyService.formatCurrency(data.balanceBefore, data.currency)} → ${currencyService.formatCurrency(data.balanceAfter, data.currency)}`;
+        return `Payment received  ${data.customerName}: ${data.currency} ${data.amount}${data.paymentMethod ? ` via ${data.paymentMethod}` : ''}. Balance: ${currencyService.formatCurrency(data.balanceBefore, data.currency)} → ${currencyService.formatCurrency(data.balanceAfter, data.currency)}`;
       
       case 'supplier_payment':
         return `Payment sent to ${data.supplierName}: ${data.currency} ${data.amount}${data.paymentMethod ? ` via ${data.paymentMethod}` : ''}. Balance: ${currencyService.formatCurrency(data.balanceBefore, data.currency)} → ${currencyService.formatCurrency(data.balanceAfter, data.currency)}`;

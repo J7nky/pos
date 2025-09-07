@@ -1,4 +1,4 @@
-import { Customer, Supplier, Transaction, SaleItem, InventoryItem, Product } from '../types';
+import { Customer, Supplier, Transaction, SaleItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
 
 export interface AccountStatement {
@@ -79,6 +79,7 @@ export class AccountStatementService {
     dateRange?: { start: string; end: string },
     viewMode: 'summary' | 'detailed' = 'detailed'
   ): AccountStatement {
+    console.log('transactions131231', transactions);
     const now = new Date();
     const startDate = dateRange?.start || new Date(now.getFullYear(), 0, 1).toISOString(); // Start of year
     const endDate = dateRange?.end || now.toISOString();
@@ -92,8 +93,8 @@ export class AccountStatementService {
 
     const filteredTransactions = transactions.filter(transaction => 
       transaction.description.includes(customer.name) &&
-      new Date(transaction.createdAt) >= new Date(startDate) &&
-      new Date(transaction.createdAt) <= new Date(endDate)
+      new Date(transaction.created_at) >= new Date(startDate) &&
+      new Date(transaction.created_at) <= new Date(endDate)
     );
 
     // Build transaction history
@@ -149,11 +150,11 @@ export class AccountStatementService {
 
     // Add payment transactions
     filteredTransactions.forEach(transaction => {
-      if (transaction.type === 'income' && transaction.category === 'Customer Payment') {
+      if ((transaction.type === 'income'||transaction.type ==="expense") || transaction.category === 'Customer Payment') {
         const transactionRecord: StatementTransaction = {
           id: transaction.id,
-          date: transaction.createdAt,
-          type: 'payment',
+          date: transaction.created_at,
+          type: transaction.type === 'income' ? 'payment' : 'expense',
           description: viewMode === 'summary' 
             ? 'Payment Received'
             : transaction.description,
@@ -238,7 +239,7 @@ export class AccountStatementService {
     sales: SaleItem[],
     transactions: Transaction[],
     products: Product[],
-    inventory: InventoryItem[],
+    inventoryBills: inventory_bills[],
     dateRange?: { start: string; end: string },
     viewMode: 'summary' | 'detailed' = 'detailed'
   ): AccountStatement {
@@ -252,11 +253,10 @@ export class AccountStatementService {
       sale.created_at && new Date(sale.created_at) >= new Date(startDate) &&
       sale.created_at && new Date(sale.created_at) <= new Date(endDate)
     );
-
     const filteredTransactions = transactions.filter(transaction => 
       transaction.description.includes(supplier.name) &&
-      new Date(transaction.createdAt) >= new Date(startDate) &&
-      new Date(transaction.createdAt) <= new Date(endDate)
+      new Date(transaction.created_at) >= new Date(startDate) &&
+      new Date(transaction.created_at) <= new Date(endDate)
     );
 
     // Build transaction history
@@ -269,22 +269,22 @@ export class AccountStatementService {
     // Add commission transactions (sales generate commission for suppliers)
     filteredSales.forEach(sale => {
       const product = products.find(p => p.id === sale.productId);
-      const inventoryItem = inventory.find(i => i.id === sale.inventoryItemId);
+      const inventoryBill = inventoryBills.find(i => i.id === sale.inventoryItemId);
 
-      if (product && inventoryItem) {
-        const commissionRate = inventoryItem.commissionRate || 0.1;
-        const commissionAmount = (sale.totalPrice * commissionRate) / 100;
+      if (product && inventoryBill) {
+        const  commissionRate = inventoryBill?.commission_rate || 0.1;
+        const commissionAmount = (sale.totalPrice * Number(commissionRate)) / 100;
 
         // Create product details for detailed view
         const productDetails: StatementProductDetail[] = viewMode === 'detailed' ? [{
           productId: product.id,
           productName: product.name,
           quantity: sale.quantity,
-          unit: inventoryItem.unit || 'piece',
+          unit: 'piece',
           unitPrice: sale.unitPrice,
           totalPrice: sale.totalPrice,
           weight: sale.weight || undefined,
-          commissionRate,
+          commissionRate: Number(commissionRate),
           commissionAmount,
           notes: sale.notes || undefined
         }] : [];
@@ -314,7 +314,7 @@ export class AccountStatementService {
       if (transaction.type === 'expense' && transaction.category === 'Supplier Payment') {
         const transactionRecord: StatementTransaction = {
           id: transaction.id,
-          date: transaction.createdAt,
+          date: transaction.created_at,
           type: 'payment',
           description: viewMode === 'summary'
             ? 'Payment Sent'
@@ -344,9 +344,9 @@ export class AccountStatementService {
 
     // Calculate financial summary
     const totalCommissions = filteredSales.reduce((sum, sale) => {
-      const inventoryItem = inventory.find(i => i.id === sale.inventoryItemId);
-      const commissionRate = inventoryItem?.commissionRate || 0.1;
-      return sum + ((sale.totalPrice * commissionRate) / 100);
+      const inventoryItem = inventoryBills.find(i => i.id === sale.inventoryItemId);
+      const commissionRate = inventoryItem?.commission_rate || 0.1;
+      return sum + ((sale.totalPrice * Number(commissionRate)) / 100);
     }, 0);
 
     const totalPaymentsUSD = filteredTransactions
