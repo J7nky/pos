@@ -280,6 +280,8 @@ export class CashDrawerUpdateService {
 
             // Create transaction record for cash drawer tracking
             await db.transactions.add({
+              supplier_id:transactionData.supplierId ?? null,
+              customer_id:transactionData.customerId ?? null,
               id: transactionId,
               type: balanceChange > 0 ? 'income' : 'expense',
               category: `cash_drawer_${transactionData.type}`,
@@ -427,6 +429,7 @@ export class CashDrawerUpdateService {
   ): Promise<CashDrawerUpdateResult> {
     return this.updateCashDrawerForTransaction({
       type: 'refund',
+      
       amount: refundData.amount,
       currency: refundData.currency,
       description: `Refund: ${refundData.description}`,
