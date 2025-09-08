@@ -79,23 +79,25 @@ export class AccountStatementService {
     dateRange?: { start: string; end: string },
     viewMode: 'summary' | 'detailed' = 'detailed'
   ): AccountStatement {
-    console.log('transactions131231', transactions);
     const now = new Date();
     const startDate = dateRange?.start || new Date(now.getFullYear(), 0, 1).toISOString(); // Start of year
     const endDate = dateRange?.end || now.toISOString();
 
     // Filter transactions within date range
-    const filteredSales = sales.filter(sale => 
-      sale.customerId === customer.id && 
+    const filteredSales = sales.filter(sale => {
+      console.log('sale131231', sale.customer_id, customer.id);
+      sale.customer_id === customer.id && 
       sale.created_at && new Date(sale.created_at) >= new Date(startDate) &&
-      sale.created_at && new Date(sale.created_at) <= new Date(endDate)
-    );
+      sale.created_at && new Date(sale.created_at) <= new Date(endDate)});
+    
+
 
     const filteredTransactions = transactions.filter(transaction => 
-      transaction.description.includes(customer.name) &&
+      transaction.customer_id === customer.id &&
       new Date(transaction.created_at) >= new Date(startDate) &&
       new Date(transaction.created_at) <= new Date(endDate)
     );
+    console.log('transactions filtered 131231', filteredTransactions);
 
     // Build transaction history
     const statementTransactions: StatementTransaction[] = [];

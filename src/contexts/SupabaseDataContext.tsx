@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { SupabaseService } from '../services/supabaseService';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { Database } from '../types/database';
+import { SaleItem, SaleItemDbUpdate, SaleItemTransforms } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { supabase } from '../lib/supabase';
 
@@ -49,7 +50,7 @@ interface SupabaseDataContextType {
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
   addSale: (items: any[]) => Promise<void>;
-  updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
+  updateSale: (id: string, updates: Partial<SaleItem>) => Promise<void>;
   deleteSale: (id: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
 
@@ -295,7 +296,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateSale = async (id: string, updates: Partial<Tables['sale_items']['Update']>) => {
+  const updateSale = async (id: string, updates: Partial<SaleItem>) => {
     if (!storeId) return;
     
     setLoading(prev => ({ ...prev, sales: true }));
@@ -309,19 +310,22 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
       const quantityDifference = quantityChanged ? (updates.quantity || 0) - (originalSale.quantity || 0) : 0;
 
       // Check if price-related fields have changed (these affect bill totals)
-      const priceChanged = updates.unit_price !== undefined || updates.received_value !== undefined || updates.weight !== undefined;
+      const priceChanged = updates.unitPrice !== undefined || updates.receivedValue !== undefined || updates.weight !== undefined;
+
+      // Transform updates to database format
+      const dbUpdates = SaleItemTransforms.toDbUpdate(updates);
 
       // Update the sale item
-      const updatedSale = await SupabaseService.updateSaleItem(id, updates);
+      const updatedSale = await SupabaseService.updateSaleItem(id, dbUpdates);
       
       // Handle inventory adjustments if quantity changed
-      if (quantityChanged && originalSale.product_id && originalSale.supplier_id) {
+      if (quantityChanged && originalSale.productId && originalSale.supplierId) {
         if (quantityDifference > 0) {
           // Quantity increased - deduct additional inventory
-          await deductInventoryQuantity(originalSale.product_id, originalSale.supplier_id, quantityDifference);
+          await deductInventoryQuantity(originalSale.productId, originalSale.supplierId, quantityDifference);
         } else if (quantityDifference < 0) {
           // Quantity decreased - restore inventory
-          await restoreInventoryQuantity(originalSale.product_id, originalSale.supplier_id, Math.abs(quantityDifference));
+          await restoreInventoryQuantity(originalSale.productId, originalSale.supplierId, Math.abs(quantityDifference));
         }
       }
 
@@ -378,7 +382,7 @@ export function SupabaseDataProvider({ children }: { children: ReactNode }) {
     
     setLoading(prev => ({ ...prev, transactions: true }));
     try {
-      const newTransaction = await SupabaseService.createTransaction({ ...transaction, store_id: storeId });
+      const newTransaction = await SupabaseService.createTransaction({ ...transaction, store_id: storeId ,customer_id: transaction.customer_id ?? null,supplier_id: transaction.supplier_id ?? null});
       if (newTransaction) {
         setTransactions(prev => [newTransaction as any, ...prev]);
       }
