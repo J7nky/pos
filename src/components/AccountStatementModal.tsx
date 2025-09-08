@@ -93,7 +93,7 @@ export default function AccountStatementModal({
           dateRange,
           viewMode
         );
-
+console.log('newStatement131231', newStatement);
       } else {
         newStatement = accountStatementService.generateSupplierStatement(
           entity as Supplier,

@@ -3,13 +3,14 @@ import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { Database } from '../types/database';
+import { SaleItem, SaleItemDbUpdate, SaleItemTransforms } from '../types';
 import { 
   db, 
   Product, 
   Supplier, 
   Customer, 
   InventoryItem, 
-  SaleItem, 
+  LocalSaleItem, 
   Transaction, 
   ExpenseCategory,
   createBaseEntity,
@@ -26,7 +27,7 @@ interface OfflineDataContextType {
   products: Tables['products']['Row'][];
   suppliers: Tables['suppliers']['Row'][];
   customers: Tables['customers']['Row'][];
-  sales: Tables['sale_items']['Row'][]; // Direct sale_items data
+  sales: SaleItem[]; // Unified SaleItem interface
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
   inventoryBills: any[]; // Inventory bills data
   transactions: Tables['transactions']['Row'][];
@@ -91,7 +92,7 @@ interface OfflineDataContextType {
     items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
   }) => Promise<{ batchId: string }>;
   addSale: (items: any[]) => Promise<void>;
-  updateSale: (id: string, updates: Partial<Tables['sale_items']['Update']>) => Promise<void>;
+  updateSale: (id: string, updates: Partial<SaleItem>) => Promise<void>;
   deleteSale: (id: string) => Promise<void>;
   updateBillsForSaleItem: (saleItemId: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
@@ -152,7 +153,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
   const [suppliers, setSuppliers] = useState<Tables['suppliers']['Row'][]>([]);
   const [customers, setCustomers] = useState<Tables['customers']['Row'][]>([]);
-  const [sales, setSales] = useState<any[]>([]);
+  const [sales, setSales] = useState<SaleItem[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<Tables['transactions']['Row'][]>([]);
   const [expenseCategories, setExpenseCategories] = useState<any[]>([]);
@@ -449,7 +450,36 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Store raw data
       setInventoryItems(inventoryData);
       setInventoryBills(batchesData);
-      setSaleItems(saleItemsData);
+      
+      // Transform sale items to unified interface
+      const transformedSaleItems: SaleItem[] = await Promise.all(
+        saleItemsData.map(async (item: LocalSaleItem) => {
+          // Get product and supplier names
+
+          
+          return SaleItemTransforms.fromDbRow(
+            {
+              id: item.id,
+              store_id: item.store_id,
+              inventory_item_id: item.inventory_item_id,
+              product_id: item.product_id,
+              supplier_id: item.supplier_id,
+              customer_id: item.customer_id,
+              quantity: item.quantity,
+              weight: item.weight,
+              unit_price: item.unit_price,
+              received_value: item.received_value,
+              payment_method: item.payment_method as 'cash' | 'card' | 'credit',
+              notes: item.notes,
+              created_at: item.created_at,
+              created_by: item.created_by,
+            } 
+          );
+        })
+      );
+      
+      setSaleItems(transformedSaleItems);
+      setSales(transformedSaleItems); // Update the main sales state as well
       setBills(billsData);
       setBillLineItems(billLineItemsData);
       setBillAuditLogs(billAuditLogsData);
@@ -1387,24 +1417,28 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     debouncedSync();
   };
 
-  const updateSale = async (id: string, updates: Partial<Tables['sale_items']['Update']>): Promise<void> => {
+  const updateSale = async (id: string, updates: Partial<SaleItem>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
     // Get the original sale item to compare quantities
     const originalSale = await db.sale_items.get(id);
     if (!originalSale) throw new Error('Sale item not found');
 
+    // Transform updates to database format
+    const dbUpdates = SaleItemTransforms.toDbUpdate(updates);
+
     // Check if quantity has changed
     const quantityChanged = updates.quantity !== undefined && updates.quantity !== originalSale.quantity;
     const quantityDifference = quantityChanged ? (updates.quantity || 0) - (originalSale.quantity || 0) : 0;
 
     // Check if price-related fields have changed (these affect bill totals)
-    const priceChanged = updates.unit_price !== undefined || updates.received_value !== undefined || updates.weight !== undefined;
+    const priceChanged = updates.unitPrice !== undefined || updates.receivedValue !== undefined || updates.weight !== undefined;
+    
     // Use transaction to ensure atomicity for the sale update only
     await db.transaction('rw', [db.sale_items], async () => {
       // Update the sale item
       const updateData = {
-        ...updates,
+        ...dbUpdates,
         _synced: false
       };
       await db.sale_items.update(id, updateData);
@@ -1470,7 +1504,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Store amounts as-is in their original currency
     // We'll handle database precision issues only during sync to Supabase
     const transaction: Transaction = {
-      id: createId(),
+      customer_id: transactionData.customer_id ?? null,
+      supplier_id: transactionData.supplier_id ?? null,
       store_id: storeId,
       created_at: new Date().toISOString(),
       _synced: false,

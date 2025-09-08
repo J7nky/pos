@@ -87,25 +87,142 @@ export interface inventory_bills { id: string;
   plastic_fee?:string
   }
 
+// Unified SaleItem interface - single source of truth
 export interface SaleItem {
+  // Core identifiers
   id: string;
-  inventoryItemId?: string; // Added to match Supabase schema
+  storeId: string;
+  inventoryItemId: string;
   productId: string;
-  productName: string; // Required for validation
   supplierId: string;
-  supplierName: string; // Required for validation
-  customerId?: string; // Made optional to match Supabase schema
-  quantity: number; // Added quantity field for cart items
+  customerId?: string;
+  
+  // Quantity and pricing
+  quantity: number;
   weight?: number;
   unitPrice: number;
-  totalPrice: number; // Required for validation
-  receivedValue?: number; // Matches received_value in database, optional for cart items
-  paymentMethod?: 'cash' | 'card' | 'credit'; // Added payment method field
+  totalPrice: number; // Calculated field for UI
+  receivedValue: number; // Amount actually received
+  
+  // Transaction details
+  paymentMethod: 'cash' | 'card' | 'credit';
   notes?: string;
-  created_at: string;
-  createdBy?: string; // Added to match Supabase schema
-  inventoryType?: 'commission' | 'cash'; // Added for inventory tracking
+  
+  // Metadata
+  createdAt: string;
+  createdBy: string;
+  
+  // Local state (for cart items, optional fields)
+  inventoryType?: 'commission' | 'cash';
+  
+  // Sync state (for offline functionality)
+  synced?: boolean;
+  deleted?: boolean;
 }
+
+// Cart item - partial SaleItem for items being added to cart
+export interface CartItem extends Omit<SaleItem, 'id' | 'createdAt' | 'createdBy' | 'receivedValue'> {
+  id?: string; // Optional for new cart items
+  receivedValue?: number; // Optional until checkout
+  createdAt?: string;
+  createdBy?: string;
+}
+
+// Database transformation types for Supabase integration
+export type SaleItemDbRow = {
+  id: string;
+  store_id: string;
+  inventory_item_id: string;
+  product_id: string;
+  supplier_id: string;
+  customer_id: string | null;
+  quantity: number;
+  weight: number | null;
+  unit_price: number;
+  received_value: number;
+  payment_method: 'cash' | 'card' | 'credit';
+  notes: string | null;
+  created_at: string;
+  created_by: string;
+};
+
+export type SaleItemDbInsert = Omit<SaleItemDbRow, 'id' | 'created_at'> & {
+  id?: string;
+  created_at?: string;
+};
+
+export type SaleItemDbUpdate = Partial<Omit<SaleItemDbRow, 'id' | 'created_at' | 'store_id' | 'created_by'>>;
+
+// Type transformation utilities
+export const SaleItemTransforms = {
+  // Convert from database row to frontend SaleItem
+  fromDbRow: (dbRow: SaleItemDbRow): SaleItem => ({
+    id: dbRow.id,
+    storeId: dbRow.store_id,
+    inventoryItemId: dbRow.inventory_item_id,
+    productId: dbRow.product_id,
+    supplierId: dbRow.supplier_id,
+    customerId: dbRow.customer_id || undefined,
+    quantity: dbRow.quantity,
+    weight: dbRow.weight || undefined,
+    unitPrice: dbRow.unit_price,
+    totalPrice: dbRow.quantity * dbRow.unit_price, // Calculate total
+    receivedValue: dbRow.received_value,
+    paymentMethod: dbRow.payment_method,
+    notes: dbRow.notes || undefined,
+    createdAt: dbRow.created_at,
+    createdBy: dbRow.created_by,
+    synced: true,
+    deleted: false,
+  }),
+
+  // Convert from frontend SaleItem to database insert
+  toDbInsert: (saleItem: SaleItem): SaleItemDbInsert => ({
+    id: saleItem.id,
+    store_id: saleItem.storeId,
+    inventory_item_id: saleItem.inventoryItemId,
+    product_id: saleItem.productId,
+    supplier_id: saleItem.supplierId,
+    customer_id: saleItem.customerId || null,
+    quantity: saleItem.quantity,
+    weight: saleItem.weight || null,
+    unit_price: saleItem.unitPrice,
+    received_value: saleItem.receivedValue,
+    payment_method: saleItem.paymentMethod,
+    notes: saleItem.notes || null,
+    created_at: saleItem.createdAt,
+    created_by: saleItem.createdBy,
+  }),
+
+  // Convert from frontend SaleItem to database update
+  toDbUpdate: (updates: Partial<SaleItem>): SaleItemDbUpdate => {
+    const dbUpdate: SaleItemDbUpdate = {};
+    
+    if (updates.inventoryItemId !== undefined) dbUpdate.inventory_item_id = updates.inventoryItemId;
+    if (updates.productId !== undefined) dbUpdate.product_id = updates.productId;
+    if (updates.supplierId !== undefined) dbUpdate.supplier_id = updates.supplierId;
+    if (updates.customerId !== undefined) dbUpdate.customer_id = updates.customerId || null;
+    if (updates.quantity !== undefined) dbUpdate.quantity = updates.quantity;
+    if (updates.weight !== undefined) dbUpdate.weight = updates.weight || null;
+    if (updates.unitPrice !== undefined) dbUpdate.unit_price = updates.unitPrice;
+    if (updates.receivedValue !== undefined) dbUpdate.received_value = updates.receivedValue;
+    if (updates.paymentMethod !== undefined) dbUpdate.payment_method = updates.paymentMethod;
+    if (updates.notes !== undefined) dbUpdate.notes = updates.notes || null;
+    
+    return dbUpdate;
+  },
+
+  // Convert CartItem to SaleItem (for checkout)
+  fromCartItem: (cartItem: CartItem, id: string, createdAt: string, createdBy: string): SaleItem => ({
+    ...cartItem,
+    id,
+    createdAt,
+    createdBy,
+    receivedValue: cartItem.receivedValue || cartItem.totalPrice, // Default to totalPrice if not set
+    synced: false,
+    deleted: false,
+  }),
+};
 
 // Added missing interfaces to match database schema
 

@@ -75,18 +75,20 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
 
 
 
-export interface SaleItem extends Omit<BaseEntity, 'updated_at'> {
-  inventory_item_id: string; // Added to match Supabase schema
+// SaleItem interface moved to src/types/index.ts for consistency
+// Use SaleItemDbRow type for database operations and transform with SaleItemTransforms
+export interface LocalSaleItem extends Omit<BaseEntity, 'updated_at'> {
+  inventory_item_id: string;
   product_id: string;
   supplier_id: string;
   quantity: number;
   weight: number | null;
   unit_price: number;
-  received_value: number; // Added to match Supabase schema
-  payment_method: string; // Added payment method field
+  received_value: number;
+  payment_method: string;
   notes: string | null;
-  customer_id: string | null; // Added to match Supabase schema
-  created_by: string; // Added to match Supabase schema
+  customer_id: string | null;
+  created_by: string;
 }
 
 // Bill management interface for comprehensive bill operations
@@ -145,6 +147,8 @@ export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
   reference: string | null;
   store_id: string;
   created_by: string;
+  supplier_id: string | null;
+  customer_id: string | null;
 }
 
 export interface ExpenseCategory extends BaseEntity {
@@ -208,7 +212,7 @@ class POSDatabase extends Dexie {
   suppliers!: Table<Supplier, string>;
   customers!: Table<Customer, string>;
   inventory_items!: Table<InventoryItem, string>;
-  sale_items!: Table<SaleItem, string>;
+  sale_items!: Table<LocalSaleItem, string>;
   transactions!: Table<Transaction, string>;
   inventory_bills!: Table<inventory_bills, string>;
 
@@ -824,7 +828,7 @@ class POSDatabase extends Dexie {
       const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
         type: 'sale',
         amount: obj.received_value || 0,
-        currency: storeCurrency,
+        currency: storeCurrency as 'USD' | 'LBP',
         description: `Cash sale${obj.customer_id ? ' to customer' : ''}`,
         reference: `SALE-${obj.id || Date.now()}`,
         storeId: obj.store_id,
@@ -987,7 +991,7 @@ class POSDatabase extends Dexie {
   }
 
   // Bill management methods
-  async createBillFromSaleItems(saleItems: SaleItem[], billData: Partial<Bill>, useSupabase: boolean = true): Promise<string> {
+  async createBillFromSaleItems(saleItems: LocalSaleItem[], billData: Partial<Bill>, useSupabase: boolean = true): Promise<string> {
     // If using Supabase, delegate to SupabaseService
     if (useSupabase) {
       console.log('Using Supabase for bill creation - delegating to SupabaseService');
