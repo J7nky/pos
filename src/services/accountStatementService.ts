@@ -93,11 +93,15 @@ export class AccountStatementService {
 
 
     const filteredTransactions = transactions.filter(transaction => 
-      transaction.customer_id === customer.id &&
-      new Date(transaction.created_at) >= new Date(startDate) &&
-      new Date(transaction.created_at) <= new Date(endDate)
+    {
+    console.log('filterred Transactions',"creating date: "+new Date(transaction.created_at) ,"end date: "+ new Date(endDate) );
+
+    transaction.customer_id === customer.id &&
+    new Date(transaction.created_at) >= new Date(startDate) &&
+    new Date(transaction.created_at) <= new Date(endDate)
+    }
     );
-    console.log('transactions filtered 131231', filteredTransactions);
+
 
     // Build transaction history
     const statementTransactions: StatementTransaction[] = [];
