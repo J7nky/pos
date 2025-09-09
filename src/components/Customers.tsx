@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText } from 'lucide-react';
-import { Customer, SaleItem, SaleItemDbRow, SaleItemTransforms, Supplier } from '../types';
+import { Customer, Supplier } from '../types';
 import Toast from './common/Toast';
 import SearchableSelect from './common/SearchableSelect';
 import { CurrencyService } from '../services/currencyService';
@@ -170,6 +170,8 @@ export default function Customers() {
     addTransaction({
       type: transactionType,
       category,
+      supplier_id: !isCustomer ? entity.id : null,
+      customer_id: isCustomer ? entity.id : null, 
       amount: safeAmount.amount,
       currency: safeAmount.currency,
       description: `Payment ${direction} ${entity.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,

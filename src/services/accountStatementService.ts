@@ -1,3 +1,4 @@
+import { LocalSaleItem } from '../lib/db';
 import { Customer, Supplier, Transaction, SaleItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
 
@@ -72,7 +73,7 @@ export class AccountStatementService {
    */
   public generateCustomerStatement(
     customer: Customer,
-    sales: SaleItem[],
+    sales: LocalSaleItem[],
     transactions: Transaction[],
     products: Product[],
     inventory: InventoryItem[],
@@ -81,27 +82,21 @@ export class AccountStatementService {
   ): AccountStatement {
     const now = new Date();
     const startDate = dateRange?.start || new Date(now.getFullYear(), 0, 1).toISOString(); // Start of year
-    const endDate = dateRange?.end || now.toISOString();
+    // If endDate is just a date (YYYY-MM-DD), make it end of day to include all transactions from that day
+    const endDate =now.toISOString();
 
     // Filter transactions within date range
     const filteredSales = sales.filter(sale => {
-      console.log('sale131231', sale.customer_id, customer.id);
-      sale.customer_id === customer.id && 
+      return sale.customer_id === customer.id &&  
       sale.created_at && new Date(sale.created_at) >= new Date(startDate) &&
-      sale.created_at && new Date(sale.created_at) <= new Date(endDate)});
-    
+      sale.created_at && new Date(sale.created_at) <= new Date(endDate);
+    });
+    const filteredTransactions = transactions.filter(transaction => {
 
-
-    const filteredTransactions = transactions.filter(transaction => 
-    {
-    console.log('filterred Transactions',"creating date: "+new Date(transaction.created_at) ,"end date: "+ new Date(endDate) );
-
-    transaction.customer_id === customer.id &&
-    new Date(transaction.created_at) >= new Date(startDate) &&
-    new Date(transaction.created_at) <= new Date(endDate)
-    }
-    );
-
+      return transaction.customer_id === customer.id &&
+      new Date(transaction.created_at) >= new Date(startDate) &&
+      new Date(transaction.created_at) <= new Date(endDate);
+    });
 
     // Build transaction history
     const statementTransactions: StatementTransaction[] = [];
@@ -112,8 +107,8 @@ export class AccountStatementService {
 
     // Add sales transactions
     filteredSales.forEach(sale => {
-      const product = products.find(p => p.id === sale.productId);
-      const inventoryItem = inventory.find(i => i.id === sale.inventoryItemId);
+      const product = products.find(p => p.id === sale.product_id);
+      const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
 
       if (product) {
         // Create product details for detailed view
@@ -122,8 +117,8 @@ export class AccountStatementService {
           productName: product.name,
           quantity: sale.quantity,
           unit: inventoryItem?.unit || 'piece',
-          unitPrice: sale.unitPrice,
-          totalPrice: sale.totalPrice,
+          unitPrice: sale.unit_price,
+          totalPrice: sale.received_value,
           weight: sale.weight || undefined,
           notes: sale.notes || undefined,
         }] : [];
@@ -131,22 +126,24 @@ export class AccountStatementService {
         const transaction: StatementTransaction = {
           id: sale.id,
           date: sale.created_at || now.toISOString(),
-          type: sale.paymentMethod === 'credit' ? 'credit_sale' : 'sale',
+          type: 'sale',
           description: viewMode === 'summary' 
-            ? `${sale.paymentMethod === 'credit' ? 'Credit Sale' : 'Sale'}`
-            : `Sale: ${product.name || '-'} | ${sale.quantity} | ${sale.weight ? ` ${sale.weight}kg` : '-'} | ${inventoryItem?.unit || 'piece'}`,
-
+            ? `${sale.payment_method === 'credit' ? 'Credit Sale' : 'Sale'}`
+            : `Sale: ${product.name || '-'} | ${inventoryItem?.unit || 'piece'}`,
+          quantity: sale.quantity,
+          weight:  sale.weight ?? 0,
+          price: sale.unit_price,
           currency: 'LBP', // Assuming LBP for sales
           balanceAfter: runningBalanceLBP,
-          paymentMethod: sale.paymentMethod || 'cash',
-          amount: sale.totalPrice,
+          paymentMethod: sale.payment_method || 'cash',
+          amount: sale.received_value,
           productDetails,
           reference: "S-" + sale.id.slice(-8)
         };
 
-        if (sale.paymentMethod === 'credit') {
+        if (sale.payment_method === 'credit') {
           // For credit sales, increase the customer's debt (balance)
-          runningBalanceLBP += sale.totalPrice;
+          runningBalanceLBP += sale.received_value;
           transaction.balanceAfter = runningBalanceLBP;
         }
 
@@ -158,12 +155,13 @@ export class AccountStatementService {
     filteredTransactions.forEach(transaction => {
       if ((transaction.type === 'income'||transaction.type ==="expense") || transaction.category === 'Customer Payment') {
         const transactionRecord: StatementTransaction = {
+          quantity: 0,
+          weight: 0,
+          price: 0,
           id: transaction.id,
           date: transaction.created_at,
           type: transaction.type === 'income' ? 'payment' : 'expense',
-          description: viewMode === 'summary' 
-            ? 'Payment Received'
-            : transaction.description,
+          description: 'Payment Received',
           amount: transaction.amount,
           currency: transaction.currency,
           balanceAfter: transaction.currency === 'USD' ? runningBalanceUSD : runningBalanceLBP,
@@ -189,8 +187,8 @@ export class AccountStatementService {
 
     // Calculate financial summary
     const totalSales = filteredSales.reduce((sum, sale) => {
-      if (sale.paymentMethod === 'credit') {
-        return sum + sale.totalPrice;
+      if (sale.payment_method === 'credit') {
+        return sum + sale.received_value;
       }
       return sum;
     }, 0);
@@ -256,8 +254,8 @@ export class AccountStatementService {
     // Filter sales related to this supplier
     const filteredSales = sales.filter(sale => 
       sale.supplierId === supplier.id && 
-      sale.created_at && new Date(sale.created_at) >= new Date(startDate) &&
-      sale.created_at && new Date(sale.created_at) <= new Date(endDate)
+      sale.createdAt && new Date(sale.createdAt) >= new Date(startDate) &&
+      sale.createdAt && new Date(sale.createdAt) <= new Date(endDate)
     );
     const filteredTransactions = transactions.filter(transaction => 
       transaction.description.includes(supplier.name) &&
@@ -296,9 +294,12 @@ export class AccountStatementService {
         }] : [];
 
         const transaction: StatementTransaction = {
+          quantity: 0,
+          weight: 0,
+          price: 0,
           id: sale.id,
-          date: sale.created_at || now.toISOString(),
-          type: 'commission',
+          date: sale.createdAt || now.toISOString(),
+          type: 'income',
           description: viewMode === 'summary'
             ? `Commission (${commissionRate}%)`
             : `Commission: ${product.name} sale (${commissionRate}% of $${sale.totalPrice.toFixed(2)})`,
@@ -319,12 +320,13 @@ export class AccountStatementService {
     filteredTransactions.forEach(transaction => {
       if (transaction.type === 'expense' && transaction.category === 'Supplier Payment') {
         const transactionRecord: StatementTransaction = {
+          quantity: 0,
+          weight: 0,
+          price: 0,
           id: transaction.id,
           date: transaction.created_at,
           type: 'payment',
-          description: viewMode === 'summary'
-            ? 'Payment Sent'
-            : transaction.description,
+          description: 'Payment Sent',
           amount: transaction.amount,
           currency: transaction.currency,
           balanceAfter: transaction.currency === 'USD' ? runningBalanceUSD : runningBalanceLBP,
