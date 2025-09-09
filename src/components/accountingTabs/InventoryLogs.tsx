@@ -314,6 +314,7 @@ export default function InventoryLogs() {
           id: createId(),
           type: 'income',
           category: 'Customer Payment',
+          customer_id: customer.id,
           amount: amount,
           currency: paymentForm.currency,
           description: `Payment from ${customer.name}: ${paymentForm.description}`,
@@ -339,9 +340,10 @@ export default function InventoryLogs() {
         
         // Add transaction
         await raw.addTransaction({
-          id: '',
+          id: createId(),
           type: 'expense',
           category: 'Supplier Payment',
+          supplier_id: supplier.id,
           amount: amount,
           currency: paymentForm.currency,
           description: `Payment to ${supplier.name}: ${paymentForm.description}`,

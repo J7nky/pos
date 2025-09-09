@@ -334,6 +334,9 @@ export interface StatementTransaction {
   type: 'sale' | 'payment'|'income'|'expense';
   description: string;
   amount: number;
+  quantity: number;
+  weight: number;
+  price: number;
   currency: 'USD' | 'LBP';
   balanceAfter: number;
   paymentMethod?: string;

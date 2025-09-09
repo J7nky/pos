@@ -23,7 +23,7 @@ import {
   Hash
 } from 'lucide-react';
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
-import { Customer, Supplier, Transaction, SaleItem, InventoryItem, Product, StatementTransaction, StatementProductDetail } from '../types';
+import { Customer, Supplier, Transaction, SaleItem, InventoryItem, Product, StatementTransaction, StatementProductDetail, LocalSaleItem } from '../types';
 import Toast from './common/Toast';
 
 interface AccountStatementModalProps {
@@ -31,7 +31,7 @@ interface AccountStatementModalProps {
   onClose: () => void;
   entity: Customer | Supplier;
   entityType: 'customer' | 'supplier';
-  sales: SaleItem[];
+  sales: LocalSaleItem[];
   transactions: Transaction[];
   products: Product[];
   inventory: InventoryItem[];
@@ -49,6 +49,7 @@ export default function AccountStatementModal({
   inventory,
   inventoryBills
 }: AccountStatementModalProps) {
+  console.log('transaction1234',sales);
   
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
@@ -430,14 +431,27 @@ console.log('newStatement131231', newStatement);
                               Date
                             </th>
                            
-                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Type
+                          
+                              <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Description
                             </th>
+                            
                             {viewMode === 'detailed' && (
                               <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Description
+                                Number
                               </th>
                             )}
+                             {viewMode === 'detailed' && (
+                              <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Weight
+                              </th>
+                            )}
+                             {viewMode === 'detailed' && (
+                              <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Price
+                              </th>
+                            )}
+                        
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Credit
                             </th>
@@ -453,6 +467,7 @@ console.log('newStatement131231', newStatement);
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
+
                           {statement.transactions.map((transaction) => (
                             <tr key={transaction.id} className="hover:bg-gray-50 transition-colors">
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -461,7 +476,7 @@ console.log('newStatement131231', newStatement);
                            
                               <td className="px-6 py-4">
                                 <div className="text-sm font-medium text-gray-900">
-                                  {transaction.type}
+                                  {transaction.description}
                                 </div>
                                 {transaction.paymentMethod && (
                                   <div className="text-xs text-gray-500 mt-1 flex items-center">
@@ -470,65 +485,30 @@ console.log('newStatement131231', newStatement);
                                   </div>
                                 )}
                               </td>
-                              {viewMode === 'detailed' && (
-                                <td className="px-6 py-4">
-                                   <div className="text-sm font-medium text-gray-900">
-                                  {transaction.description}
-                                </div>
-                                  {transaction.productDetails && transaction.productDetails.length > 0 ? (
-                                    <div className="space-y-2">
-
-                                      {transaction.productDetails.map((detail, index) => (
-                                        <div key={index} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                                          <div className="font-medium text-gray-900 mb-2 flex items-center">
-                                            <Package className="w-4 h-4 mr-2 text-blue-600" />
-                                            {detail.productName}
-                                          </div>
-                                          <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
-                                            <div className="flex items-center">
-                                              <Hash className="w-3 h-3 mr-1" />
-                                              Qty: {detail.quantity} {detail.unit}
-                                            </div>
-                                            <div className="flex items-center">
-                                              <DollarSign className="w-3 h-3 mr-1" />
-                                              Unit: {formatCurrency(detail.unitPrice, 'USD')}
-                                            </div>
-                                            {detail.weight && (
-                                              <div className="flex items-center">
-                                                <Weight className="w-3 h-3 mr-1" />
-                                                Weight: {detail.weight}kg
-                                              </div>
-                                            )}
-                                            <div className="flex items-center font-medium">
-                                              <Receipt className="w-3 h-3 mr-1" />
-                                              Total: {formatCurrency(detail.totalPrice, 'USD')}
-                                            </div>
-                                            {detail.commissionRate && (
-                                              <>
-                                                <div className="flex items-center text-purple-600">
-                                                  <TrendingUp className="w-3 h-3 mr-1" />
-                                                  Rate: {detail.commissionRate}%
-                                                </div>
-                                                <div className="flex items-center text-purple-600 font-medium">
-                                                  <DollarSign className="w-3 h-3 mr-1" />
-                                                  Commission: {formatCurrency(detail.commissionAmount || 0, 'USD')}
-                                                </div>
-                                              </>
-                                            )}
-                                          </div>
-                                          {detail.notes && (
-                                            <div className="mt-2 text-xs text-gray-500 italic">
-                                              {detail.notes}
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-sm text-gray-400">No product details</span>
-                                  )}
-                                </td>
-                              )}
+                                {viewMode === 'detailed' && (
+                                  <td className="px-6 py-4">
+                                    <div className="text-sm font-medium text-gray-900">
+                                    {transaction.quantity?`${transaction.quantity}`:'-'}
+                                  </div>
+                                
+                                  </td>
+                                )}
+                                {viewMode === 'detailed' && (
+                                  <td className="px-6 py-4">
+                                    <div className="text-sm font-medium text-gray-900">
+                                    {transaction.weight?`${transaction.weight}kg`:'-'}
+                                  </div>
+                                
+                                  </td>
+                                )}
+                                {viewMode === 'detailed' && (
+                                  <td className="px-6 py-4">
+                                    <div className="text-sm font-medium text-gray-900">
+                                    {transaction.price?`$${transaction.price}`:'-'}
+                                  </div>
+                                
+                                  </td>
+                                )}
                               {/* credit */}
                               <td className="px-6 py-4 whitespace-nowrap">
                                 {transaction.type === 'payment' ? (
