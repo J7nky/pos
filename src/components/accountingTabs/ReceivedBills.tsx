@@ -638,17 +638,16 @@ export default function ReceivedBills({
             <tbody className="bg-white divide-y divide-gray-200">
               {paginatedGroups.map((group: any) => (
                 <React.Fragment key={`group-${group.groupId}`}>
-                  <tr className="hover:bg-gray-50">
+                  <tr 
+                    className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => group.isBatch && toggleGroup(group.groupId)}
+                  >
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         {group.isBatch && (
-                          <button
-                            onClick={() => toggleGroup(group.groupId)}
-                            className="p-1 rounded hover:bg-gray-100"
-                            aria-label={expandedGroups.has(group.groupId) ? 'Collapse' : 'Expand'}
-                          >
+                          <div className="p-1">
                             <ChevronRight className={`w-4 h-4 text-gray-500 transition-transform ${expandedGroups.has(group.groupId) ? 'rotate-90' : ''}`} />
-                          </button>
+                          </div>
                         )}
                         <div className="text-sm text-gray-900">{new Date(group.receivedAt).toLocaleDateString()}</div>
                       </div>
@@ -696,13 +695,8 @@ export default function ReceivedBills({
                         {group.isBatch ? (
                           <>
                             <button
-                              onClick={() => toggleGroup(group.groupId)}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                            >
-                              {expandedGroups.has(group.groupId) ? 'Collapse' : 'Expand'}
-                            </button>
-                            <button
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent row click
                                 // Use first item to prefill batch edit
                                 const first = group.items[0];
                                 const synthetic = {
@@ -726,18 +720,34 @@ export default function ReceivedBills({
                             >
                               Edit Batch
                             </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent row click
+                                handleViewReceivedBillDetails(group.items[0]);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                            >
+                              <FileText className="w-3.5 h-3.5 text-gray-500" />
+                              <span>Details</span>
+                            </button>
                           </>
                         ) : (
                           <>
                             <button
-                              onClick={() => handleViewReceivedBillDetails(group.items[0])}
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent row click
+                                handleViewReceivedBillDetails(group.items[0]);
+                              }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
                               <FileText className="w-3.5 h-3.5 text-gray-500" />
                               <span>Details</span>
                             </button>
                             <button
-                              onClick={() => handleViewReceivedBillSalesLogs(group.items[0])}
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent row click
+                                handleViewReceivedBillSalesLogs(group.items[0]);
+                              }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
                               <Activity className="w-3.5 h-3.5 text-gray-500" />

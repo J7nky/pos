@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   X, 
   Download, 
@@ -8,22 +8,16 @@ import {
   DollarSign, 
   TrendingUp, 
   TrendingDown,
-  Package,
   CreditCard,
-  Receipt,
   Users,
   Truck,
   BarChart3,
   List,
-  Eye,
-  EyeOff,
-  Info,
-  ShoppingBag,
-  Weight,
-  Hash
+  Info
 } from 'lucide-react';
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
-import { Customer, Supplier, Transaction, SaleItem, InventoryItem, Product, StatementTransaction, StatementProductDetail, LocalSaleItem } from '../types';
+import { Customer, Supplier, Transaction, InventoryItem, Product } from '../types';
+import { LocalSaleItem } from '../lib/db';
 import Toast from './common/Toast';
 
 interface AccountStatementModalProps {
@@ -36,6 +30,7 @@ interface AccountStatementModalProps {
   products: Product[];
   inventory: InventoryItem[];
   inventoryBills: any[];
+  bills?: any[];
 }
 
 export default function AccountStatementModal({
@@ -47,7 +42,8 @@ export default function AccountStatementModal({
   transactions,
   products,
   inventory,
-  inventoryBills
+  inventoryBills,
+  bills
 }: AccountStatementModalProps) {
   
   const [statement, setStatement] = useState<AccountStatement | null>(null);
@@ -93,7 +89,8 @@ export default function AccountStatementModal({
           products,
           inventory,
           dateRange,
-          viewMode
+          viewMode,
+          bills
         );
       } else {
         newStatement = accountStatementService.generateSupplierStatement(
@@ -144,39 +141,6 @@ export default function AccountStatementModal({
     window.print();
   };
 
-  const getTransactionIcon = (type: string) => {
-    switch (type) {
-      case 'sale':
-        return <Receipt className="w-4 h-4 text-blue-600" />;
-      case 'credit_sale':
-        return <CreditCard className="w-4 h-4 text-orange-600" />;
-      case 'payment':
-        return <DollarSign className="w-4 h-4 text-green-600" />;
-      case 'commission':
-        return <TrendingUp className="w-4 h-4 text-purple-600" />;
-      case 'receiving':
-        return <Package className="w-4 h-4 text-indigo-600" />;
-      default:
-        return <FileText className="w-4 h-4 text-gray-600" />;
-    }
-  };
-
-  const getTransactionTypeLabel = (type: string) => {
-    switch (type) {
-      case 'sale':
-        return 'Sale';
-      case 'credit_sale':
-        return 'Credit Sale';
-      case 'payment':
-        return 'Payment';
-      case 'commission':
-        return 'Commission';
-      case 'receiving':
-        return 'Receiving';
-      default:
-        return type;
-    }
-  };
 
   const formatCurrency = (amount: number, currency: 'USD' | 'LBP') => {
     if (currency === 'USD') {

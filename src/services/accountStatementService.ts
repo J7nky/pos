@@ -1,4 +1,4 @@
-import { LocalSaleItem } from '../lib/db';
+import { LocalSaleItem, Bill } from '../lib/db';
 import { Customer, Supplier, Transaction, SaleItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
 
@@ -134,17 +134,18 @@ export class AccountStatementService {
     startDateISO: string,
     endDateISO: string,
     viewMode: 'summary' | 'detailed',
-    opening: { USD: number; LBP: number }
+    opening: { USD: number; LBP: number },
+    bills?: Bill[]
   ): { statementTransactions: StatementTransaction[]; ending: { USD: number; LBP: number }; totals: { salesLBP: number; paymentsUSD: number; paymentsLBP: number } } {
     const startDate = new Date(startDateISO);
     const endDate = new Date(endDateISO);
-    // Period credit sales (LBP)
+    
+    // Period credit sales (LBP) - filter by customer and date range
     const periodSales = sales.filter(s =>
       s.customer_id === customer.id &&
       s.payment_method === 'credit' &&
       !!s.created_at && new Date(s.created_at) >= startDate && new Date(s.created_at) <= endDate
     );
-
 
     // Period customer payments (USD or LBP)
     const periodPayments = transactions.filter(t =>
@@ -153,6 +154,25 @@ export class AccountStatementService {
       t.category === 'Customer Payment' &&
       new Date(t.created_at) >= startDate && new Date(t.created_at) <= endDate
     );
+
+    // In summary mode, group sales by bills if bills data is available
+    let salesToProcess = periodSales;
+    if (viewMode === 'summary' && bills && bills.length > 0) {
+      // Group sales by bill_id if available, otherwise use individual sales
+      const salesByBill = new Map<string, LocalSaleItem[]>();
+      
+      periodSales.forEach(sale => {
+        // Check if sale has a bill_id (this might be stored in a different field)
+        const billId = (sale as any).bill_id || 'individual';
+        if (!salesByBill.has(billId)) {
+          salesByBill.set(billId, []);
+        }
+        salesByBill.get(billId)!.push(sale);
+      });
+
+      // For summary mode, we'll process bills instead of individual sales
+      salesToProcess = periodSales; // Keep original logic for now, will modify below
+    }
 
     type RawEvent = {
       id: string;
@@ -171,25 +191,54 @@ export class AccountStatementService {
       notes?: string | null;
     };
 
-    const saleEvents: RawEvent[] = periodSales.map(sale => {
-      const product = products.find(p => p.id === sale.product_id);
-      const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
-      return {
-        id: sale.id,
-        date: sale.created_at || new Date().toISOString(),
-        kind: 'sale',
-        currency: 'LBP',
-        amount: sale.received_value || 0,
-        delta: (sale.received_value || 0),
-        productId: product?.id,
-        productName: product?.name,
-        unit: inventoryItem?.unit || 'piece',
-        quantity: sale.quantity,
-        weight: sale.weight ?? undefined,
-        unitPrice: sale.unit_price,
-        notes: sale.notes || null
-      };
-    });
+    let saleEvents: RawEvent[] = [];
+    
+    if (viewMode === 'summary' && bills && bills.length > 0) {
+      // In summary mode, create bill-level transactions
+      const customerBills = bills.filter(bill => 
+        bill.customer_id === customer.id &&
+        bill.payment_method === 'credit' &&
+        new Date(bill.bill_date) >= startDate && 
+        new Date(bill.bill_date) <= endDate
+      );
+
+      saleEvents = customerBills.map(bill => ({
+        id: bill.id,
+        date: bill.bill_date,
+        kind: 'sale' as const,
+        currency: 'LBP' as const,
+        amount: bill.total_amount,
+        delta: bill.total_amount,
+        productId: undefined,
+        productName: `Bill #${bill.bill_number}`,
+        unit: 'bill',
+        quantity: 1,
+        weight: undefined,
+        unitPrice: bill.total_amount,
+        notes: bill.notes || null
+      }));
+    } else {
+      // In detailed mode, create individual sale item transactions
+      saleEvents = periodSales.map(sale => {
+        const product = products.find(p => p.id === sale.product_id);
+        const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
+        return {
+          id: sale.id,
+          date: sale.created_at || new Date().toISOString(),
+          kind: 'sale' as const,
+          currency: 'LBP' as const,
+          amount: sale.received_value || 0,
+          delta: (sale.received_value || 0),
+          productId: product?.id,
+          productName: product?.name,
+          unit: inventoryItem?.unit || 'piece',
+          quantity: sale.quantity,
+          weight: sale.weight ?? undefined,
+          unitPrice: sale.unit_price,
+          notes: sale.notes || null
+        };
+      });
+    }
 
     const paymentEvents: RawEvent[] = periodPayments.map(t => ({
       id: t.id,
@@ -232,11 +281,20 @@ export class AccountStatementService {
           notes: ev.notes || undefined
         }] : [];
 
+        let description: string;
+        if (viewMode === 'summary' && ev.unit === 'bill') {
+          // Bill-level description for summary mode
+          description = `Credit Sale - ${ev.productName}`;
+        } else {
+          // Product-level description for detailed mode
+          description = `Sale: ${ev.productName || '-'} | ${ev.unit || 'piece'}`;
+        }
+
         statementTransactions.push({
           id: ev.id,
           date: ev.date,
           type: 'sale',
-          description: viewMode === 'summary' ? 'Credit Sale' : `Sale: ${ev.productName || '-' } | ${ev.unit || 'piece'}`,
+          description,
           quantity: ev.quantity || 0,
           weight: ev.weight || 0,
           price: ev.unitPrice || 0,
@@ -245,7 +303,7 @@ export class AccountStatementService {
           balanceAfter: runningLBP,
           paymentMethod: 'credit',
           productDetails,
-          reference: 'S-' + ev.id.slice(-8)
+          reference: viewMode === 'summary' && ev.unit === 'bill' ? `B-${ev.id.slice(-8)}` : 'S-' + ev.id.slice(-8)
         });
       } else {
         statementTransactions.push({
@@ -468,7 +526,8 @@ export class AccountStatementService {
     products: Product[],
     inventory: InventoryItem[],
     dateRange?: { start: string; end: string },
-    viewMode: 'summary' | 'detailed' = 'detailed'
+    viewMode: 'summary' | 'detailed' = 'detailed',
+    bills?: Bill[]
   ): AccountStatement {
     const now = new Date();
     const startDate = this.startOfDayISO(dateRange?.start || new Date(now.getFullYear(), 0, 1));
@@ -486,7 +545,8 @@ export class AccountStatementService {
       startDate,
       endDate,
       viewMode,
-      openingBalance
+      openingBalance,
+      bills
     );
 
     // Product summary based on period credit sales
