@@ -349,6 +349,8 @@ export class SupabaseService {
     }
   }
 
+  // Ledgers via server RPC removed. Statements are computed locally.
+
   static async createTransaction(transaction: any) {
     try {
       const cleanTransaction = cleanDataForSupabase(transaction);
