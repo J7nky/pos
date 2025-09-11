@@ -1168,6 +1168,7 @@ export default function Customers() {
           products={raw.products || []}
           inventory={raw.inventory || []}
           inventoryBills={raw.inventoryBills || []}
+          bills={raw.bills || []}
         />
       )}
     </div>
