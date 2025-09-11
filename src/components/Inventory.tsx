@@ -17,7 +17,6 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
   const firstInputRef = useRef<HTMLInputElement>(null);
   const [bulkProducts, setBulkProducts] = useState<string[]>([]);
   const [bulkItems, setBulkItems] = useState<Record<string, { product_id?: string; quantity: string; unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen'; price?: string; weight?: string }>>({});
-  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const selectRef = useRef<HTMLDivElement | null>(null);
   
   // Auto-focus first field when modal opens
@@ -493,9 +492,8 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                     addOptionText="Add New Product"
                                     className="w-full min-w-[200px]"
                                     portal={false}
-                                    onOpenChange={(open: boolean) => {
-                                      setIsProductDropdownOpen(open);
-                                      if ( selectRef.current) {
+                                    onOpenChange={(_open: boolean) => {
+                                      if (selectRef.current) {
                                         selectRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
                                       }
                                     }}
@@ -1089,12 +1087,7 @@ export default function Inventory() {
 
 
 
-  const [productForm, setProductForm] = useState({
-    name: '',
-    category: 'Fruits' as 'Fruits' | 'Vegetables',
-    image: '',
-    capturedPhoto: ''
-  });
+  // Removed unused top-level product form state
 
   // Removed camera capture states and refs (not used)
 
@@ -1122,47 +1115,7 @@ export default function Inventory() {
 
 
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setImageLoading(true);
-      // Check file size (limit to 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        alert('File size too large. Please choose an image under 5MB.');
-        setImageLoading(false);
-        return;
-
-
-      }
-
-      // Check file type
-      if (!file.type.startsWith('image/')) {
-        alert('Please select a valid image file.');
-        setImageLoading(false);
-        return;
-
-
-
-
-
-
-      }
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const result = e.target?.result as string;
-        setProductForm(prev => ({
-          ...prev,
-          image: result,
-          capturedPhoto: '' // Clear captured photo when loading file
-        }));
-        setImageLoading(false);
-      };
-      reader.readAsDataURL(file);
-    }
-    // Reset the input value so the same file can be selected again
-    event.target.value = '';
-  };
+  // Removed unused file upload handler
 
   const clearPhoto = () => {
     setProductForm(prev => ({
@@ -1222,12 +1175,7 @@ export default function Inventory() {
   const [productErrors, setProductErrors] = useState<any>({});
   const [supplierErrors, setSupplierErrors] = useState<any>({});
 
-  const validateProductForm = () => {
-    const errors: any = {};
-    if (!productForm.name) errors.name = 'Product name is required.';
-    if (!productForm.category) errors.category = 'Category is required.';
-    return errors;
-  };
+  // Removed unused top-level product validators
   const validateSupplierForm = () => {
     const errors: any = {};
     if (!supplierForm.name) errors.name = 'Supplier name is required.';
@@ -1235,35 +1183,7 @@ export default function Inventory() {
     return errors;
   };
 
-  const handleProductSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const errors = validateProductForm();
-    setProductErrors(errors);
-    if (Object.keys(errors).length > 0) return;
-    setLoading(l => ({ ...l, product: true }));
-
-
-    try {
-      await addProduct({
-        name: productForm.name,
-        category: productForm.category,
-        image: productForm.capturedPhoto || productForm.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
-      });
-      // no-op camera
-      setProductForm({
-        name: '',
-        category: 'Fruits',
-        image: '',
-        capturedPhoto: ''
-      });
-      setShowAddProductForm(false);
-      setProductErrors({});
-      showToast('success', 'Product added successfully!');
-    } catch (err) {
-      showToast('error', 'Failed to add product.');
-    }
-    setLoading(l => ({ ...l, product: false }));
-  };
+  // Removed unused top-level product submit handler
 
   const handleSupplierSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1301,18 +1221,7 @@ export default function Inventory() {
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 10);
   // Auto-focus first input in modals
-  const receiveFirstInputRef = useRef<HTMLInputElement>(null);
-  const productFirstInputRef = useRef<HTMLInputElement>(null);
-  const supplierFirstInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (showReceiveForm && receiveFirstInputRef.current) receiveFirstInputRef.current.focus();
-  }, [showReceiveForm]);
-  useEffect(() => {
-    if (showAddProductForm && productFirstInputRef.current) productFirstInputRef.current.focus();
-  }, [showAddProductForm]);
-  useEffect(() => {
-    if (showAddSupplierForm && supplierFirstInputRef.current) supplierFirstInputRef.current.focus();
-  }, [showAddSupplierForm]);
+  // Removed modal first-input autofocus refs to simplify
   // Allow closing modals with Escape key
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -2158,7 +2067,7 @@ export default function Inventory() {
                     onChange={(e) => setSupplierForm(prev => ({ ...prev, name: e.target.value }))}
                     className={`w-full border ${supplierErrors.name ? 'border-red-500' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500`}
                     required
-                    ref={supplierFirstInputRef}
+                    
 
 
 
