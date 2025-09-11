@@ -3,26 +3,16 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import SearchableSelect from './common/SearchableSelect';
-import MoneyInput from './common/MoneyInput';
-import SupplierFormModal from './common/SupplierFormModal';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { Plus, Search, Package, Truck, Eye, Camera, X, Upload } from 'lucide-react';
 import { SupabaseService } from '../services/supabaseService';
 import { db } from '../lib/db';
 
-// Debounce hook
-function useDebounce(value: string, delay: number) {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-  useEffect(() => {
-    const handler = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(handler);
-  }, [value, delay]);
-  return debouncedValue;
-}
+//
 
 
 // Enhanced ReceiveFormModal with major improvements
-const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userProfile, defaultCommissionRate, setRecentProducts, recentSuppliers, setRecentSuppliers, form, setForm, errors, setErrors }: any) => {
+const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userProfile, defaultCommissionRate, setRecentProducts, recentSuppliers, setRecentSuppliers, form, setForm, errors, setErrors, onAddSupplier, onAddProduct }: any) => {
   const [loading, setLoading] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
   const [bulkProducts, setBulkProducts] = useState<string[]>([]);
@@ -127,7 +117,6 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
       const plasticFee = form.empty_plastic
         ? Number(form.plastic_count || 0) * Number(form.plastic_price || 0)
         : undefined;
-        console.log(form.plastic_count, form.plastic_price ,plasticFee);
       await onSuccess({
         mode: 'batch',
         batch: {
@@ -271,6 +260,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                       onAddNew={() => setShowSupplierModal(true)}
                       className={`w-full ${errors.supplier_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
                       portal={true}
+                    onAddNew={onAddSupplier}
                     />
                     {errors.supplier_id && <p className="text-xs text-red-600 mt-1">{errors.supplier_id}</p>}
                   </div>
@@ -511,6 +501,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                                         selectRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
                                       }
                                     }}
+                                    onAddNew={onAddProduct}
                                   />
                                 </div>
                               )}
@@ -1108,94 +1099,21 @@ export default function Inventory() {
     capturedPhoto: ''
   });
 
-  // Camera states
-  const [isCameraActive, setIsCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState('');
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  // Removed camera capture states and refs (not used)
 
-  // Add spinner for image capture/upload
+  // Spinner for image capture/upload
   const [imageLoading, setImageLoading] = useState(false);
 
 
-  // Cleanup camera stream when component unmounts or modal closes
-  useEffect(() => {
-    return () => {
-      stopCamera();
-    };
-  }, []);
+  // Removed camera cleanup effect
 
-  const startCamera = async () => {
-    try {
-      setCameraError('');
-      setImageLoading(true);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode: 'environment' // Use back camera on mobile if available
-        }
-      });
+  // Removed camera start logic
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        streamRef.current = stream;
-        setIsCameraActive(true);
-      }
-    } catch (error) {
-      console.error('Error accessing camera:', error);
-      setCameraError('Unable to access camera. Please check permissions and ensure no other app is using the camera.');
-    }
-    setImageLoading(false);
-  };
+  // Removed camera stop logic
 
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
+  // Removed camera capture logic
 
-
-    }
-    setIsCameraActive(false);
-  };
-
-  const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      const context = canvas.getContext('2d');
-
-      if (context) {
-        // Set canvas dimensions to match video
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-
-        // Draw the video frame to canvas
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        // Convert to base64 data URL (compressed JPEG)
-        const dataURL = canvas.toDataURL('image/jpeg', 0.8);
-
-        setProductForm(prev => ({
-          ...prev,
-          image: dataURL,
-          capturedPhoto: dataURL
-        }));
-
-        stopCamera();
-      }
-    }
-  };
-
-  const retakePhoto = () => {
-    setProductForm(prev => ({
-      ...prev,
-      image: '',
-      capturedPhoto: ''
-    }));
-    startCamera();
-  };
+  // Removed camera retake logic
 
 
 
@@ -1335,7 +1253,7 @@ export default function Inventory() {
         category: productForm.category,
         image: productForm.capturedPhoto || productForm.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
       });
-      stopCamera();
+      // no-op camera
       setProductForm({
         name: '',
         category: 'Fruits',
@@ -1409,10 +1327,7 @@ export default function Inventory() {
   };
 
   // Debounced search for stock levels
-  const debouncedSearchTerm = useDebounce(searchTerm, 300);
-  const filteredStockLevels = stockLevels.filter(item =>
-    item && typeof item.product_name === 'string' && item.product_name.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
-  );
+  // Removed debounced search and StockTable since they are unused
 
   const recentReceives = inventory
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -1435,7 +1350,7 @@ export default function Inventory() {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (showReceiveForm) setShowReceiveForm(false);
-        if (showAddProductForm) { stopCamera(); setShowAddProductForm(false); }
+        if (showAddProductForm) { setShowAddProductForm(false); }
         if (showAddSupplierForm) setShowAddSupplierForm(false);
       }
     };
@@ -1742,6 +1657,7 @@ export default function Inventory() {
   };
 
   // Subcomponents
+  /* Removed unused StockTable component
   const StockTable = ({ filteredStockLevels, products, lowStockAlertsEnabled, lowStockThreshold }: any) => {
     // Pagination state
     const [page, setPage] = useState(1);
@@ -1821,47 +1737,48 @@ export default function Inventory() {
                           >
                             {supplier.supplier_name}: {supplier.quantity}
                             {/* Tooltip for contact info */}
-                            <span className="hidden group-hover:block absolute left-0 top-full mt-1 z-10 bg-white border border-gray-300 rounded shadow-lg px-3 py-2 text-xs text-gray-700 min-w-[180px]">
-                              {(() => {
-                                const info = getSupplierInfo(supplier.supplier_id);
-                                return info ? (
-                                  <>
-                                    {info.phone && <div><b>Phone:</b> {info.phone}</div>}
-                                    {info.email && <div><b>Email:</b> {info.email}</div>}
-                                  </>
-                                ) : <span>No contact info</span>;
-                              })()}
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-gray-500">
-                      {item.last_received ? new Date(item.last_received).toLocaleDateString() : 'Never'}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 text-xs rounded-full ${item.current_stock === 0
-                        ? 'bg-red-100 text-red-800'
-                        : lowStockAlertsEnabled && item.current_stock < lowStockThreshold
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-green-100 text-green-800'
-                        }`}>
-                        {item.current_stock === 0
-                          ? 'Out of Stock'
-                          : lowStockAlertsEnabled && item.current_stock < lowStockThreshold
-                            ? 'Low Stock'
-                            : 'In Stock'}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
+  //                           <span className="hidden group-hover:block absolute left-0 top-full mt-1 z-10 bg-white border border-gray-300 rounded shadow-lg px-3 py-2 text-xs text-gray-700 min-w-[180px]">
+  //                             {(() => {
+  //                               const info = getSupplierInfo(supplier.supplier_id);
+  //                               return info ? (
+  //                                 <>
+  //                                   {info.phone && <div><b>Phone:</b> {info.phone}</div>}
+  //                                   {info.email && <div><b>Email:</b> {info.email}</div>}
+  //                                 </>
+  //                               ) : <span>No contact info</span>;
+  //                             })()}
+  //                           </span>
+  //                         </span>
+  //                       ))}
+  //                     </div>
+  //                   </td>
+  //                   <td className="px-6 py-4 text-gray-500">
+  //                     {item.last_received ? new Date(item.last_received).toLocaleDateString() : 'Never'}
+  //                   </td>
+  //                   <td className="px-6 py-4">
+  //                     <span className={`px-2 py-1 text-xs rounded-full ${item.current_stock === 0
+  //                       ? 'bg-red-100 text-red-800'
+  //                       : lowStockAlertsEnabled && item.current_stock < lowStockThreshold
+  //                         ? 'bg-amber-100 text-amber-800'
+  //                         : 'bg-green-100 text-green-800'
+  //                       }`}>
+  //                       {item.current_stock === 0
+  //                         ? 'Out of Stock'
+  //                         : lowStockAlertsEnabled && item.current_stock < lowStockThreshold
+  //                           ? 'Low Stock'
+  //                           : 'In Stock'}
+  //                     </span>
+  //                   </td>
+  //                 </tr>
+  //               );
+  //             })}
+  //           </tbody>
+  //         </table>
+  //       </div>
+  //     </div>
+  //   );
+  // };
+  // */
   const RecentReceivesTable = ({ recentReceives, products, suppliers, onEdit, onDelete }: any) => (
     <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
       <div className="p-6 border-b">
@@ -1880,7 +1797,7 @@ export default function Inventory() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {recentReceives.map((item: any, batch_type: any) => {
+            {recentReceives.map((item: any) => {
               const product = products.find((p: any) => p.id === item.product_id);
               const supplier = suppliers.find((s: any) => s.id === item.supplier_id);
 
@@ -1902,7 +1819,7 @@ export default function Inventory() {
                   </td>
                   <td className="px-6 py-4 text-gray-900 dark:text-slate-100">{supplier?.name}</td>
                   <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full ${batch_type === 'commission'
+                    <span className={`px-2 py-1 text-xs rounded-full ${item.batch_type === 'commission'
                       ? 'bg-green-100 text-green-800'
                       : 'bg-blue-100 text-blue-800'
                       }`}>
@@ -2201,7 +2118,6 @@ export default function Inventory() {
         onClose={() => setShowReceiveForm(false)}
         onSuccess={async (data: any) => {
 
-          console.log('batch123', data);
           const { batch } = data;
           await raw.addInventoryBatch({
             type: batch.type,
@@ -2230,6 +2146,8 @@ export default function Inventory() {
         setForm={setReceiveForm}
         errors={receiveErrors}
         setErrors={setReceiveErrors}
+        onAddSupplier={() => setShowAddSupplierForm(true)}
+        onAddProduct={() => setShowAddProductForm(true)}
       />
 
       {/* Add Product Form Modal */}
