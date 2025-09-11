@@ -517,7 +517,7 @@ export default function POS() {
           const amountDue = Math.max(0, total - parseFloat(activeTab.amountReceived || '0'));
           // RULE 3 FIX: For credit sales, INCREASE customer balance (debt they owe us)
           await raw.updateCustomer(customer.id, {
-            usd_balance: (customer.usd_balance || 0) + amountDue,
+            lb_balance: (customer.lb_balance || 0) + amountDue,
           });
         }
       }

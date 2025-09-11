@@ -49,7 +49,6 @@ export default function AccountStatementModal({
   inventory,
   inventoryBills
 }: AccountStatementModalProps) {
-  console.log('transaction1234',sales);
   
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
@@ -74,7 +73,7 @@ export default function AccountStatementModal({
     if (isOpen && entity) {
       generateStatement();
     }
-  }, [isOpen, entity, dateRange, viewMode]);
+  }, [isOpen, entity, dateRange, viewMode, transactions, sales]);
 
   const generateStatement = async () => {
     if (!entity) return;
@@ -83,7 +82,9 @@ export default function AccountStatementModal({
     try {
       const accountStatementService = AccountStatementService.getInstance();
 
-      let newStatement: AccountStatement;
+      let newStatement: AccountStatement | null = null;
+
+      // Compute locally (always)
       if (entityType === 'customer') {
         newStatement = accountStatementService.generateCustomerStatement(
           entity as Customer,
@@ -94,14 +95,13 @@ export default function AccountStatementModal({
           dateRange,
           viewMode
         );
-console.log('newStatement131231', newStatement);
       } else {
         newStatement = accountStatementService.generateSupplierStatement(
           entity as Supplier,
-          sales,
+          sales as any,
           transactions,
           products,
-          inventoryBills,
+          inventoryBills as any,
           dateRange,
           viewMode
         );
@@ -325,8 +325,8 @@ console.log('newStatement131231', newStatement);
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {/* <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                       <div className="flex items-center justify-between mb-2">
                         <div className="text-sm font-medium text-gray-500">Opening Balance</div>
                         <TrendingUp className="w-4 h-4 text-gray-400" />
@@ -337,7 +337,7 @@ console.log('newStatement131231', newStatement);
                       <div className="text-sm text-gray-600 mt-1">
                         {formatCurrency(statement.financialSummary.openingBalance.LBP, 'LBP')}
                       </div>
-                    </div>
+                    </div> */}
 
                     <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                       <div className="flex items-center justify-between mb-2">
@@ -369,10 +369,10 @@ console.log('newStatement131231', newStatement);
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
                             <div className="text-sm font-medium text-gray-500">Total Payments</div>
-                            <TrendingDown className="w-4 h-4 text-green-400" />
+                            <TrendingUp className="w-4 h-4 text-green-400" />
                           </div>
                           <div className="text-2xl font-bold text-green-600">
-                            {formatCurrency(statement.financialSummary.totalPayments.LBP, 'USD')}
+                            {formatCurrency(statement.financialSummary.totalPayments.LBP, 'LBP')}
                           </div>
                         </div>
                       </>
@@ -384,7 +384,7 @@ console.log('newStatement131231', newStatement);
                             <TrendingUp className="w-4 h-4 text-purple-400" />
                           </div>
                           <div className="text-2xl font-bold text-purple-600">
-                            {formatCurrency(statement.financialSummary.totalReceivings.USD, 'USD')}
+                            {formatCurrency(statement.financialSummary.totalReceivings.LBP, 'LBP')}
                           </div>
                         </div>
 
@@ -411,9 +411,9 @@ console.log('newStatement131231', newStatement);
                       <FileText className="w-6 h-6 mr-3 text-gray-600" />
                       {viewMode === 'detailed' ? 'Detailed Transaction History' : 'Transaction Summary'}
                     </h3>
-                    <p className="text-sm text-gray-600 mt-1">
+                    {/* <p className="text-sm text-gray-600 mt-1">
                       {statement.transactions.length} transactions found
-                    </p>
+                    </p> */}
                   </div>
 
                   {statement.transactions.length === 0 ? (
@@ -504,7 +504,7 @@ console.log('newStatement131231', newStatement);
                                 {viewMode === 'detailed' && (
                                   <td className="px-6 py-4">
                                     <div className="text-sm font-medium text-gray-900">
-                                    {transaction.price?`$${transaction.price}`:'-'}
+                                    {transaction.price?`LBP${transaction.price}`:'-'}
                                   </div>
                                 
                                   </td>

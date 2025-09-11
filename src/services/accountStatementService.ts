@@ -68,6 +68,396 @@ export class AccountStatementService {
     return AccountStatementService.instance;
   }
 
+  // Normalize to local day boundaries and return ISO strings
+  private startOfDayISO(dateInput: string | Date): string {
+    const d = new Date(dateInput);
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+  }
+
+  private endOfDayISO(dateInput: string | Date): string {
+    const d = new Date(dateInput);
+    d.setHours(23, 59, 59, 999);
+    return d.toISOString();
+  }
+
+  /**
+   * Compute opening balances for a customer prior to the given start date.
+   * Opening = sum(credit sales) - sum(payments), per currency
+   */
+  private computeCustomerOpeningBalance(
+    customerId: string,
+    allSales: LocalSaleItem[],
+    allTransactions: Transaction[],
+    startDateISO: string
+  ): { USD: number; LBP: number } {
+    const startDate = new Date(startDateISO);
+
+    // Credit sales (increase receivable) before start date (assumed LBP)
+    const preCreditSalesLBP = allSales.filter(s =>
+      s.customer_id === customerId &&
+      s.payment_method === 'credit' &&
+      !!s.created_at && new Date(s.created_at) < startDate
+    );
+    const creditSalesSumLBP = preCreditSalesLBP.reduce((sum, s) => sum + (s.received_value || 0), 0);
+
+    // Customer payments (decrease receivable) before start date
+    const prePayments = allTransactions.filter(t =>
+      t.customer_id === customerId &&
+      t.type === 'income' &&
+      t.category === 'Customer Payment' &&
+      new Date(t.created_at) < startDate
+    );
+    const paymentsSumUSD = prePayments
+      .filter(t => t.currency === 'USD')
+      .reduce((sum, t) => sum + t.amount, 0);
+    const paymentsSumLBP = prePayments
+      .filter(t => t.currency === 'LBP')
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    // Opening per currency
+    return {
+      USD: 0 - paymentsSumUSD,
+      LBP: creditSalesSumLBP - paymentsSumLBP
+    };
+  }
+
+  /**
+   * Build period transactions (sorted) and compute running balances per currency for a customer
+   */
+  private buildCustomerPeriodTransactions(
+    customer: Customer,
+    sales: LocalSaleItem[],
+    transactions: Transaction[],
+    products: Product[],
+    inventory: InventoryItem[],
+    startDateISO: string,
+    endDateISO: string,
+    viewMode: 'summary' | 'detailed',
+    opening: { USD: number; LBP: number }
+  ): { statementTransactions: StatementTransaction[]; ending: { USD: number; LBP: number }; totals: { salesLBP: number; paymentsUSD: number; paymentsLBP: number } } {
+    const startDate = new Date(startDateISO);
+    const endDate = new Date(endDateISO);
+    // Period credit sales (LBP)
+    const periodSales = sales.filter(s =>
+      s.customer_id === customer.id &&
+      s.payment_method === 'credit' &&
+      !!s.created_at && new Date(s.created_at) >= startDate && new Date(s.created_at) <= endDate
+    );
+
+
+    // Period customer payments (USD or LBP)
+    const periodPayments = transactions.filter(t =>
+      t.customer_id === customer.id &&
+      t.type === 'income' &&
+      t.category === 'Customer Payment' &&
+      new Date(t.created_at) >= startDate && new Date(t.created_at) <= endDate
+    );
+
+    type RawEvent = {
+      id: string;
+      date: string;
+      kind: 'sale' | 'payment';
+      currency: 'USD' | 'LBP';
+      amount: number; // positive amount for display
+      delta: number; // signed effect on balance
+      // optional UI fields
+      productId?: string;
+      productName?: string;
+      unit?: string;
+      quantity?: number;
+      weight?: number;
+      unitPrice?: number;
+      notes?: string | null;
+    };
+
+    const saleEvents: RawEvent[] = periodSales.map(sale => {
+      const product = products.find(p => p.id === sale.product_id);
+      const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
+      return {
+        id: sale.id,
+        date: sale.created_at || new Date().toISOString(),
+        kind: 'sale',
+        currency: 'LBP',
+        amount: sale.received_value || 0,
+        delta: (sale.received_value || 0),
+        productId: product?.id,
+        productName: product?.name,
+        unit: inventoryItem?.unit || 'piece',
+        quantity: sale.quantity,
+        weight: sale.weight ?? undefined,
+        unitPrice: sale.unit_price,
+        notes: sale.notes || null
+      };
+    });
+
+    const paymentEvents: RawEvent[] = periodPayments.map(t => ({
+      id: t.id,
+      date: t.created_at,
+      kind: 'payment',
+      currency: t.currency,
+      amount: t.amount,
+      delta: -t.amount
+    }));
+
+    const events: RawEvent[] = [...saleEvents, ...paymentEvents].sort((a, b) => {
+      const da = new Date(a.date).getTime();
+      const db = new Date(b.date).getTime();
+      if (da !== db) return da - db;
+      // Stable tie-breaker: sales before payments
+      if (a.kind !== b.kind) return a.kind === 'sale' ? -1 : 1;
+      return a.id.localeCompare(b.id);
+    });
+
+    const statementTransactions: StatementTransaction[] = [];
+    let runningUSD = opening.USD;
+    let runningLBP = opening.LBP;
+
+    for (const ev of events) {
+      if (ev.currency === 'USD') {
+        runningUSD += ev.delta;
+      } else {
+        runningLBP += ev.delta;
+      }
+
+      if (ev.kind === 'sale') {
+        const productDetails: StatementProductDetail[] = viewMode === 'detailed' && ev.productId && ev.productName ? [{
+          productId: ev.productId,
+          productName: ev.productName,
+          quantity: ev.quantity || 0,
+          unit: ev.unit || 'piece',
+          unitPrice: ev.unitPrice || 0,
+          totalPrice: ev.amount,
+          weight: ev.weight,
+          notes: ev.notes || undefined
+        }] : [];
+
+        statementTransactions.push({
+          id: ev.id,
+          date: ev.date,
+          type: 'sale',
+          description: viewMode === 'summary' ? 'Credit Sale' : `Sale: ${ev.productName || '-' } | ${ev.unit || 'piece'}`,
+          quantity: ev.quantity || 0,
+          weight: ev.weight || 0,
+          price: ev.unitPrice || 0,
+          amount: ev.amount,
+          currency: 'LBP',
+          balanceAfter: runningLBP,
+          paymentMethod: 'credit',
+          productDetails,
+          reference: 'S-' + ev.id.slice(-8)
+        });
+      } else {
+        statementTransactions.push({
+          id: ev.id,
+          date: ev.date,
+          type: 'payment',
+          description: 'Payment Received',
+          quantity: 0,
+          weight: 0,
+          price: 0,
+          amount: ev.amount,
+          currency: ev.currency,
+          balanceAfter: ev.currency === 'USD' ? runningUSD : runningLBP,
+          reference: 'P-' + ev.id.slice(-8),
+          paymentMethod: 'Payment Received'
+        });
+      }
+    }
+
+    const totals = {
+      salesLBP: saleEvents.reduce((s, e) => s + e.amount, 0),
+      paymentsUSD: paymentEvents.filter(e => e.currency === 'USD').reduce((s, e) => s + e.amount, 0),
+      paymentsLBP: paymentEvents.filter(e => e.currency === 'LBP').reduce((s, e) => s + e.amount, 0)
+    };
+
+    return { statementTransactions, ending: { USD: runningUSD, LBP: runningLBP }, totals };
+  }
+
+  /**
+   * Compute opening balances for a supplier prior to the given start date.
+   * Opening LBP = sum(pre-period commissions) - sum(pre-period supplier payments LBP)
+   * Opening USD = 0 - sum(pre-period supplier payments USD)
+   * Note: Commission lookup follows existing code pattern using inventory_bills.
+   */
+  private computeSupplierOpeningBalance(
+    supplierId: string,
+    allSales: SaleItem[],
+    allTransactions: Transaction[],
+    inventoryBills: inventory_bills[],
+    startDateISO: string
+  ): { USD: number; LBP: number } {
+    const startDate = new Date(startDateISO);
+
+    // Pre-period commissions (LBP) per existing logic
+    const preSales = allSales.filter(s =>
+      s.supplierId === supplierId && !!s.createdAt && new Date(s.createdAt) < startDate
+    );
+    const commissionsLBP = preSales.reduce((sum, sale) => {
+      const invBill = inventoryBills.find(i => i.id === (sale as any).inventoryItemId);
+      const commissionRate = invBill?.commission_rate ? Number(invBill.commission_rate) : 0.1;
+      const commission = (sale.totalPrice * commissionRate) / 100;
+      return sum + commission;
+    }, 0);
+
+    // Pre-period supplier payments
+    const prePayments = allTransactions.filter(t =>
+      t.type === 'expense' &&
+      t.category === 'Supplier Payment' &&
+      !!t.created_at && new Date(t.created_at) < startDate &&
+      // Heuristic: description contains supplier name OR future enhancement: use supplier_id when available
+      true
+    );
+    const paymentsUSD = prePayments.filter(t => t.currency === 'USD').reduce((s, t) => s + t.amount, 0);
+    const paymentsLBP = prePayments.filter(t => t.currency === 'LBP').reduce((s, t) => s + t.amount, 0);
+
+    return { USD: 0 - paymentsUSD, LBP: commissionsLBP - paymentsLBP };
+  }
+
+  /**
+   * Build period transactions and running balances for a supplier
+   */
+  private buildSupplierPeriodTransactions(
+    supplier: Supplier,
+    sales: SaleItem[],
+    transactions: Transaction[],
+    products: Product[],
+    inventoryBills: inventory_bills[],
+    startDateISO: string,
+    endDateISO: string,
+    viewMode: 'summary' | 'detailed',
+    opening: { USD: number; LBP: number }
+  ): { statementTransactions: StatementTransaction[]; ending: { USD: number; LBP: number }; totals: { commissionsLBP: number; paymentsUSD: number; paymentsLBP: number } } {
+    const startDate = new Date(startDateISO);
+    const endDate = new Date(endDateISO);
+
+    const periodSales = sales.filter(s =>
+      s.supplierId === supplier.id && !!s.createdAt && new Date(s.createdAt) >= startDate && new Date(s.createdAt) <= endDate
+    );
+    const periodPayments = transactions.filter(t =>
+      t.type === 'expense' && t.category === 'Supplier Payment' &&
+      !!t.created_at && new Date(t.created_at) >= startDate && new Date(t.created_at) <= endDate
+    );
+
+    type RawEvent = {
+      id: string;
+      date: string;
+      kind: 'commission' | 'payment';
+      currency: 'USD' | 'LBP';
+      amount: number;
+      delta: number;
+      productId?: string;
+      productName?: string;
+      quantity?: number;
+      unitPrice?: number;
+      totalPrice?: number;
+      weight?: number;
+      commissionRate?: number;
+      notes?: string | null;
+    };
+
+    const commissionEvents: RawEvent[] = periodSales.map(sale => {
+      const product = products.find(p => p.id === sale.productId);
+      const invBill = inventoryBills.find(i => i.id === sale.inventoryItemId);
+      const commissionRate = invBill?.commission_rate ? Number(invBill.commission_rate) : 0.1;
+      const amount = (sale.totalPrice * commissionRate) / 100;
+      return {
+        id: sale.id,
+        date: sale.createdAt,
+        kind: 'commission',
+        currency: 'LBP',
+        amount,
+        delta: amount,
+        productId: product?.id,
+        productName: product?.name,
+        quantity: sale.quantity,
+        unitPrice: sale.unitPrice,
+        totalPrice: sale.totalPrice,
+        weight: sale.weight,
+        commissionRate,
+        notes: sale.notes
+      };
+    });
+
+    const paymentEvents: RawEvent[] = periodPayments.map(t => ({
+      id: t.id,
+      date: t.created_at,
+      kind: 'payment',
+      currency: t.currency,
+      amount: t.amount,
+      delta: -t.amount
+    }));
+
+    const events: RawEvent[] = [...commissionEvents, ...paymentEvents].sort((a, b) => {
+      const da = new Date(a.date).getTime();
+      const db = new Date(b.date).getTime();
+      if (da !== db) return da - db;
+      if (a.kind !== b.kind) return a.kind === 'commission' ? -1 : 1;
+      return a.id.localeCompare(b.id);
+    });
+
+    let runningUSD = opening.USD;
+    let runningLBP = opening.LBP;
+    const statementTransactions: StatementTransaction[] = [];
+
+    for (const ev of events) {
+      if (ev.currency === 'USD') runningUSD += ev.delta; else runningLBP += ev.delta;
+
+      if (ev.kind === 'commission') {
+        const productDetails: StatementProductDetail[] = viewMode === 'detailed' && ev.productId && ev.productName ? [{
+          productId: ev.productId,
+          productName: ev.productName,
+          quantity: ev.quantity || 0,
+          unit: 'piece',
+          unitPrice: ev.unitPrice || 0,
+          totalPrice: ev.totalPrice || 0,
+          weight: ev.weight,
+          commissionRate: ev.commissionRate,
+          commissionAmount: ev.amount,
+          notes: ev.notes || undefined
+        }] : [];
+
+        statementTransactions.push({
+          id: ev.id,
+          date: ev.date,
+          type: 'income',
+          description: viewMode === 'summary' ? `Commission (${ev.commissionRate ?? 0}%)` : `Commission: ${ev.productName || '-'} (${ev.commissionRate ?? 0}%)`,
+          quantity: 0,
+          weight: 0,
+          price: 0,
+          amount: ev.amount,
+          currency: 'LBP',
+          balanceAfter: runningLBP,
+          reference: `SALE-${ev.id.slice(-8)}`,
+          productDetails
+        });
+      } else {
+        statementTransactions.push({
+          id: ev.id,
+          date: ev.date,
+          type: 'payment',
+          description: 'Payment Sent',
+          quantity: 0,
+          weight: 0,
+          price: 0,
+          amount: ev.amount,
+          currency: ev.currency,
+          balanceAfter: ev.currency === 'USD' ? runningUSD : runningLBP,
+          reference: undefined,
+          paymentMethod: 'Payment Sent'
+        });
+      }
+    }
+
+    const totals = {
+      commissionsLBP: commissionEvents.reduce((s, e) => s + e.amount, 0),
+      paymentsUSD: paymentEvents.filter(e => e.currency === 'USD').reduce((s, e) => s + e.amount, 0),
+      paymentsLBP: paymentEvents.filter(e => e.currency === 'LBP').reduce((s, e) => s + e.amount, 0)
+    };
+
+    return { statementTransactions, ending: { USD: runningUSD, LBP: runningLBP }, totals };
+  }
+
   /**
    * Generate comprehensive account statement for a customer
    */
@@ -81,133 +471,27 @@ export class AccountStatementService {
     viewMode: 'summary' | 'detailed' = 'detailed'
   ): AccountStatement {
     const now = new Date();
-    const startDate = dateRange?.start || new Date(now.getFullYear(), 0, 1).toISOString(); // Start of year
-    // If endDate is just a date (YYYY-MM-DD), make it end of day to include all transactions from that day
-    const endDate =now.toISOString();
+    const startDate = this.startOfDayISO(dateRange?.start || new Date(now.getFullYear(), 0, 1));
+    const endDate = this.endOfDayISO(dateRange?.end || now);
 
-    // Filter transactions within date range
-    const filteredSales = sales.filter(sale => {
-      return sale.customer_id === customer.id &&  
-      sale.created_at && new Date(sale.created_at) >= new Date(startDate) &&
-      sale.created_at && new Date(sale.created_at) <= new Date(endDate);
-    });
-    const filteredTransactions = transactions.filter(transaction => {
+    // Compute opening balances from full history prior to start
+    const openingBalance = this.computeCustomerOpeningBalance(customer.id, sales, transactions, startDate);
+    // Build period transactions and running balances
+    const { statementTransactions, ending, totals } = this.buildCustomerPeriodTransactions(
+      customer,
+      sales,
+      transactions,
+      products,
+      inventory,
+      startDate,
+      endDate,
+      viewMode,
+      openingBalance
+    );
 
-      return transaction.customer_id === customer.id &&
-      new Date(transaction.created_at) >= new Date(startDate) &&
-      new Date(transaction.created_at) <= new Date(endDate);
-    });
-
-    // Build transaction history
-    const statementTransactions: StatementTransaction[] = [];
-    
-    // Start with opening balance
-    let runningBalanceUSD = customer.usd_balance || 0;
-    let runningBalanceLBP = customer.lb_balance || 0;
-
-    // Add sales transactions
-    filteredSales.forEach(sale => {
-      const product = products.find(p => p.id === sale.product_id);
-      const inventoryItem = inventory.find(i => i.id === sale.inventory_item_id);
-
-      if (product) {
-        // Create product details for detailed view
-        const productDetails: StatementProductDetail[] = viewMode === 'detailed' ? [{
-          productId: product.id,
-          productName: product.name,
-          quantity: sale.quantity,
-          unit: inventoryItem?.unit || 'piece',
-          unitPrice: sale.unit_price,
-          totalPrice: sale.received_value,
-          weight: sale.weight || undefined,
-          notes: sale.notes || undefined,
-        }] : [];
-
-        const transaction: StatementTransaction = {
-          id: sale.id,
-          date: sale.created_at || now.toISOString(),
-          type: 'sale',
-          description: viewMode === 'summary' 
-            ? `${sale.payment_method === 'credit' ? 'Credit Sale' : 'Sale'}`
-            : `Sale: ${product.name || '-'} | ${inventoryItem?.unit || 'piece'}`,
-          quantity: sale.quantity,
-          weight:  sale.weight ?? 0,
-          price: sale.unit_price,
-          currency: 'LBP', // Assuming LBP for sales
-          balanceAfter: runningBalanceLBP,
-          paymentMethod: sale.payment_method || 'cash',
-          amount: sale.received_value,
-          productDetails,
-          reference: "S-" + sale.id.slice(-8)
-        };
-
-        if (sale.payment_method === 'credit') {
-          // For credit sales, increase the customer's debt (balance)
-          runningBalanceLBP += sale.received_value;
-          transaction.balanceAfter = runningBalanceLBP;
-        }
-
-        statementTransactions.push(transaction);
-      }
-    });
-
-    // Add payment transactions
-    filteredTransactions.forEach(transaction => {
-      if ((transaction.type === 'income'||transaction.type ==="expense") || transaction.category === 'Customer Payment') {
-        const transactionRecord: StatementTransaction = {
-          quantity: 0,
-          weight: 0,
-          price: 0,
-          id: transaction.id,
-          date: transaction.created_at,
-          type: transaction.type === 'income' ? 'payment' : 'expense',
-          description: 'Payment Received',
-          amount: transaction.amount,
-          currency: transaction.currency,
-          balanceAfter: transaction.currency === 'USD' ? runningBalanceUSD : runningBalanceLBP,
-          reference: "P-" + transaction.id.slice(-8),
-          paymentMethod: 'Payment Received'
-        };
-
-        // Update running balance based on currency
-        if (transaction.currency === 'USD') {
-          runningBalanceUSD = Math.max(0, runningBalanceUSD - transaction.amount);
-          transactionRecord.balanceAfter = runningBalanceUSD;
-        } else {
-          runningBalanceLBP = Math.max(0, runningBalanceLBP - transaction.amount);
-          transactionRecord.balanceAfter = runningBalanceLBP;
-        }
-
-        statementTransactions.push(transactionRecord);
-      }
-    });
-
-    // Sort transactions by date
-    statementTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    // Calculate financial summary
-    const totalSales = filteredSales.reduce((sum, sale) => {
-      if (sale.payment_method === 'credit') {
-        return sum + sale.received_value;
-      }
-      return sum;
-    }, 0);
-
-    const totalPaymentsUSD = filteredTransactions
-      .filter(t => t.type === 'income' && t.category === 'Customer Payment' && t.currency === 'USD')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const totalPaymentsLBP = filteredTransactions
-      .filter(t => t.type === 'income' && t.category === 'Customer Payment' && t.currency === 'LBP')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const openingBalance = {
-      USD: customer.usd_balance || 0,
-      LBP: customer.lb_balance || 0
-    };
-
-    // Calculate product summary for detailed view
-    const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(filteredSales, products) : undefined;
+    // Product summary based on period credit sales
+    const periodCreditSales = sales.filter(s => s.customer_id === customer.id && s.payment_method === 'credit' && !!s.created_at && new Date(s.created_at) >= new Date(startDate) && new Date(s.created_at) <= new Date(endDate));
+    const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(periodCreditSales as unknown as SaleItem[], products) : undefined;
 
     return {
       entityId: customer.id,
@@ -219,17 +503,11 @@ export class AccountStatementService {
       transactions: statementTransactions,
       financialSummary: {
         openingBalance,
-        currentBalance: {
-          USD: runningBalanceUSD,
-          LBP: runningBalanceLBP
-        },
-        totalSales: { USD: 0, LBP: totalSales },
-        totalPayments: { USD: totalPaymentsUSD, LBP: totalPaymentsLBP },
+        currentBalance: { USD: ending.USD, LBP: ending.LBP },
+        totalSales: { USD: 0, LBP: totals.salesLBP },
+        totalPayments: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP },
         totalReceivings: { USD: 0, LBP: 0 },
-        netChange: {
-          USD: totalPaymentsUSD,
-          LBP: totalPaymentsLBP - totalSales
-        }
+        netChange: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP - totals.salesLBP }
       },
       productSummary
     };
@@ -248,130 +526,31 @@ export class AccountStatementService {
     viewMode: 'summary' | 'detailed' = 'detailed'
   ): AccountStatement {
     const now = new Date();
-    const startDate = dateRange?.start || new Date(now.getFullYear(), 0, 1).toISOString();
-    const endDate = dateRange?.end || now.toISOString();
+    const startDate = this.startOfDayISO(dateRange?.start || new Date(now.getFullYear(), 0, 1));
+    const endDate = this.endOfDayISO(dateRange?.end || now);
 
-    // Filter sales related to this supplier
-    const filteredSales = sales.filter(sale => 
-      sale.supplierId === supplier.id && 
-      sale.createdAt && new Date(sale.createdAt) >= new Date(startDate) &&
-      sale.createdAt && new Date(sale.createdAt) <= new Date(endDate)
-    );
-    const filteredTransactions = transactions.filter(transaction => 
-      transaction.description.includes(supplier.name) &&
-      new Date(transaction.created_at) >= new Date(startDate) &&
-      new Date(transaction.created_at) <= new Date(endDate)
+    const openingBalance = this.computeSupplierOpeningBalance(
+      supplier.id,
+      sales,
+      transactions,
+      inventoryBills,
+      startDate
     );
 
-    // Build transaction history
-    const statementTransactions: StatementTransaction[] = [];
-    
-    // Start with opening balance
-    let runningBalanceUSD = supplier.usd_balance || 0;
-    let runningBalanceLBP = supplier.lb_balance || 0;
+    const { statementTransactions, ending, totals } = this.buildSupplierPeriodTransactions(
+      supplier,
+      sales,
+      transactions,
+      products,
+      inventoryBills,
+      startDate,
+      endDate,
+      viewMode,
+      openingBalance
+    );
 
-    // Add commission transactions (sales generate commission for suppliers)
-    filteredSales.forEach(sale => {
-      const product = products.find(p => p.id === sale.productId);
-      const inventoryBill = inventoryBills.find(i => i.id === sale.inventoryItemId);
-
-      if (product && inventoryBill) {
-        const  commissionRate = inventoryBill?.commission_rate || 0.1;
-        const commissionAmount = (sale.totalPrice * Number(commissionRate)) / 100;
-
-        // Create product details for detailed view
-        const productDetails: StatementProductDetail[] = viewMode === 'detailed' ? [{
-          productId: product.id,
-          productName: product.name,
-          quantity: sale.quantity,
-          unit: 'piece',
-          unitPrice: sale.unitPrice,
-          totalPrice: sale.totalPrice,
-          weight: sale.weight || undefined,
-          commissionRate: Number(commissionRate),
-          commissionAmount,
-          notes: sale.notes || undefined
-        }] : [];
-
-        const transaction: StatementTransaction = {
-          quantity: 0,
-          weight: 0,
-          price: 0,
-          id: sale.id,
-          date: sale.createdAt || now.toISOString(),
-          type: 'income',
-          description: viewMode === 'summary'
-            ? `Commission (${commissionRate}%)`
-            : `Commission: ${product.name} sale (${commissionRate}% of $${sale.totalPrice.toFixed(2)})`,
-          amount: commissionAmount,
-          currency: "LBP",
-          balanceAfter: runningBalanceLBP,
-          reference: `SALE-${sale.id.slice(-8)}`,
-          productDetails
-        };
-
-        runningBalanceLBP += commissionAmount;
-        transaction.balanceAfter = runningBalanceLBP;
-        statementTransactions.push(transaction);
-      }
-    });
-
-    // Add payment transactions
-    filteredTransactions.forEach(transaction => {
-      if (transaction.type === 'expense' && transaction.category === 'Supplier Payment') {
-        const transactionRecord: StatementTransaction = {
-          quantity: 0,
-          weight: 0,
-          price: 0,
-          id: transaction.id,
-          date: transaction.created_at,
-          type: 'payment',
-          description: 'Payment Sent',
-          amount: transaction.amount,
-          currency: transaction.currency,
-          balanceAfter: transaction.currency === 'USD' ? runningBalanceUSD : runningBalanceLBP,
-          reference: transaction.reference || undefined,
-          paymentMethod: 'Payment Sent'
-        };
-
-        // Update running balance
-        if (transaction.currency === 'USD') {
-          runningBalanceUSD = Math.max(0, runningBalanceUSD - transaction.amount);
-          transactionRecord.balanceAfter = runningBalanceUSD;
-        } else {
-          runningBalanceLBP = Math.max(0, runningBalanceLBP - transaction.amount);
-          transactionRecord.balanceAfter = runningBalanceLBP;
-        }
-
-        statementTransactions.push(transactionRecord);
-      }
-    });
-
-    // Sort transactions by date
-    statementTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    // Calculate financial summary
-    const totalCommissions = filteredSales.reduce((sum, sale) => {
-      const inventoryItem = inventoryBills.find(i => i.id === sale.inventoryItemId);
-      const commissionRate = inventoryItem?.commission_rate || 0.1;
-      return sum + ((sale.totalPrice * Number(commissionRate)) / 100);
-    }, 0);
-
-    const totalPaymentsUSD = filteredTransactions
-      .filter(t => t.type === 'expense' && t.category === 'Supplier Payment' && t.currency === 'USD')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const totalPaymentsLBP = filteredTransactions
-      .filter(t => t.type === 'expense' && t.category === 'Supplier Payment' && t.currency === 'LBP')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const openingBalance = {
-      USD: supplier.usd_balance || 0,
-      LBP: supplier.lb_balance || 0
-    };
-
-    // Calculate product summary for detailed view
-    const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(filteredSales, products) : undefined;
+    const periodSales = sales.filter(s => s.supplierId === supplier.id && !!s.createdAt && new Date(s.createdAt) >= new Date(startDate) && new Date(s.createdAt) <= new Date(endDate));
+    const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(periodSales, products) : undefined;
 
     return {
       entityId: supplier.id,
@@ -383,17 +562,11 @@ export class AccountStatementService {
       transactions: statementTransactions,
       financialSummary: {
         openingBalance,
-        currentBalance: {
-          USD: runningBalanceUSD,
-          LBP: runningBalanceLBP
-        },
+        currentBalance: { USD: ending.USD, LBP: ending.LBP },
         totalSales: { USD: 0, LBP: 0 },
-        totalPayments: { USD: totalPaymentsUSD, LBP: totalPaymentsLBP },
-        totalReceivings: { USD: 0, LBP: totalCommissions },
-        netChange: {
-          USD: -totalPaymentsUSD,
-          LBP: totalCommissions - totalPaymentsLBP
-        }
+        totalPayments: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP },
+        totalReceivings: { USD: 0, LBP: totals.commissionsLBP },
+        netChange: { USD: -totals.paymentsUSD, LBP: totals.commissionsLBP - totals.paymentsLBP }
       },
       productSummary
     };

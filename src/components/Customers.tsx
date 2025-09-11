@@ -124,7 +124,7 @@ export default function Customers() {
       customerId: '',
       supplierId: '',
       amount: '',
-      currency: 'USD',
+      currency: 'LBP',
       description: '',
       reference: ''
     });
@@ -167,6 +167,7 @@ export default function Customers() {
     isCustomer: boolean
   ) => {
     const direction = isCustomer ? 'from' : 'to';
+    const transactionId = createId();
     addTransaction({
       type: transactionType,
       category,
@@ -175,9 +176,9 @@ export default function Customers() {
       amount: safeAmount.amount,
       currency: safeAmount.currency,
       description: `Payment ${direction} ${entity.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
-      reference: paymentForm.reference,
+      reference: "P-" + transactionId.slice(0, 8),
       created_by: userProfile?.id || '',
-      id: createId()
+      id: transactionId
     });
   };
 
