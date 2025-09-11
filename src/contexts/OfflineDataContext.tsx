@@ -1174,6 +1174,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _synced: false,
       weight: itemData.weight ?? null,
       price: itemData.price ?? null,
+      selling_price: (itemData as any).selling_price ?? null,
       batch_id: itemData.batch_id ?? null
     };
 
@@ -1240,6 +1241,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         supplier_id,
         weight: it.weight ?? null,
         price: it.price ?? null,
+        selling_price: it.selling_price ?? null,
         received_quantity: it.received_quantity ??0,  
         batch_id: batchId as string | null
       }));
@@ -2024,6 +2026,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           unit: 'box',
           weight: null,
           price: null,
+          selling_price: null,
           received_quantity: quantity,
           created_at: new Date().toISOString(),
           batch_id: null

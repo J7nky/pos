@@ -1,10 +1,10 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-
-
 import SearchableSelect from './common/SearchableSelect';
 import MoneyInput from './common/MoneyInput';
+import SupplierFormModal from './common/SupplierFormModal';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { Plus, Search, Package, Truck, Eye, Camera, X, Upload } from 'lucide-react';
 import { SupabaseService } from '../services/supabaseService';
@@ -20,6 +20,7 @@ function useDebounce(value: string, delay: number) {
   return debouncedValue;
 }
 
+
 // Enhanced ReceiveFormModal with major improvements
 const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userProfile, defaultCommissionRate, setRecentProducts, recentSuppliers, setRecentSuppliers, form, setForm, errors, setErrors }: any) => {
   const [loading, setLoading] = useState(false);
@@ -28,7 +29,7 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
   const [bulkItems, setBulkItems] = useState<Record<string, { product_id?: string; quantity: string; unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen'; price?: string; weight?: string }>>({});
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const selectRef = useRef<HTMLDivElement | null>(null);
-  
+  const [showAddSupplierForm, setShowAddSupplierForm] = useState(false);
   // Auto-focus first field when modal opens
   useEffect(() => {
     if (open && firstInputRef.current) firstInputRef.current.focus();
@@ -262,10 +263,12 @@ const ReceiveFormModal = ({ open, onClose, onSuccess, products, suppliers, userP
                       placeholder="Select Supplier *"
                       searchPlaceholder="Search suppliers..."
                       categories={['Commission', 'Cash']}
+                      
                       recentSelections={recentSuppliers}
                       onRecentUpdate={setRecentSuppliers}
                       showAddOption={true}
                       addOptionText="Add New Supplier"
+                      onAddNew={() => setShowSupplierModal(true)}
                       className={`w-full ${errors.supplier_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
                       portal={true}
                     />
@@ -1080,6 +1083,7 @@ export default function Inventory() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddProductForm, setShowAddProductForm] = useState(false);
   const [showAddSupplierForm, setShowAddSupplierForm] = useState(false);
+  const [showSupplierModal, setShowSupplierModal] = useState(false);
 
 
 
@@ -1374,6 +1378,34 @@ export default function Inventory() {
       showToast('error', 'Failed to add supplier.');
     }
     setLoading(l => ({ ...l, supplier: false }));
+  };
+
+  // Handler for modal-based supplier creation
+  const handleSupplierModalSuccess = async (supplierData: Partial<any>) => {
+    try {
+      await addSupplier({
+        name: supplierData.name!,
+        phone: supplierData.phone!,
+        email: supplierData.email || '',
+        address: supplierData.address || '',
+      });
+      setShowSupplierModal(false);
+      
+      // Auto-select the newly created supplier by finding it in the updated suppliers list
+      setTimeout(() => {
+        const newSupplier = suppliers.find(s => 
+          s.name === supplierData.name && s.phone === supplierData.phone
+        );
+        if (newSupplier) {
+          setReceiveForm({ ...receiveForm, supplier_id: newSupplier.id });
+        }
+      }, 100);
+      
+      showToast('success', 'Supplier added successfully!');
+    } catch (err) {
+      showToast('error', 'Failed to add supplier.');
+      throw err; // Re-throw to let the modal handle the error
+    }
   };
 
   // Debounced search for stock levels
@@ -2584,6 +2616,14 @@ export default function Inventory() {
             showToast('error', 'Failed to delete product.');
           }
         }}
+      />
+
+      {/* Supplier Form Modal */}
+      <SupplierFormModal
+        open={showSupplierModal}
+        onClose={() => setShowSupplierModal(false)}
+        onSuccess={handleSupplierModalSuccess}
+        existingSuppliers={suppliers}
       />
     </div>
   );

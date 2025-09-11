@@ -261,6 +261,7 @@ export default function POS() {
         quantity: available,
         receivedQuantity: inventoryItem.received_quantity,
         price: inventoryItem.price || 0,
+        sellingPrice: inventoryItem.selling_price || null,
         type: inventoryItem.type || 'cash',
         receivedAt: inventoryItem.received_at || inventoryItem.created_at
       };
@@ -1039,7 +1040,61 @@ export default function POS() {
 
 const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryItems, addToCart }: any) => {
   const { t } = useI18n();
-  
+  const { formatCurrency } = useCurrency();
+  const [showSalePrice, setShowSalePrice] = useState<{ [key: string]: boolean }>({});
+
+  const handleLongPress = (e: React.MouseEvent, inventoryItemId: string, sellingPrice: number | null) => {
+    if (sellingPrice && sellingPrice > 0) {
+      const timer = setTimeout(() => {
+        setShowSalePrice(prev => ({
+          ...prev,
+          [inventoryItemId]: true
+        }));
+      }, 500); // 500ms long press
+
+      const handleMouseUp = () => {
+        clearTimeout(timer);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent, inventoryItemId: string, sellingPrice: number | null) => {
+    if (sellingPrice && sellingPrice > 0) {
+      const timer = setTimeout(() => {
+        setShowSalePrice(prev => ({
+          ...prev,
+          [inventoryItemId]: true
+        }));
+      }, 500); // 500ms long press
+
+      const handleTouchEnd = () => {
+        clearTimeout(timer);
+        document.removeEventListener('touchend', handleTouchEnd);
+      };
+
+      document.addEventListener('touchend', handleTouchEnd);
+    }
+  };
+
+  const hideSalePrice = (inventoryItemId: string) => {
+    setShowSalePrice(prev => ({
+      ...prev,
+      [inventoryItemId]: false
+    }));
+  };
+
+  // Hide all sale prices when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = () => {
+      setShowSalePrice({});
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
@@ -1086,11 +1141,13 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                       <AccessibleButton
                         key={inventoryItem.inventoryItemId}
                         onClick={() => addToCart(product.id, inventoryItem.inventoryItemId)}
+                        onMouseDown={(e) => handleLongPress(e, inventoryItem.inventoryItemId, inventoryItem.sellingPrice)}
+                        onTouchStart={(e) => handleTouchStart(e, inventoryItem.inventoryItemId, inventoryItem.sellingPrice)}
                         variant="ghost"
                         size="sm"
                         touchOptimized
                         disabled={inventoryItem.quantity === 0}
-                        className={`w-full p-2 rounded-lg border transition-all duration-200 text-left ${
+                        className={`w-full p-2 rounded-lg border transition-all duration-200 text-left relative ${
                           inventoryItem.quantity === 0
                             ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
                             : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 hover:shadow-md'
@@ -1108,15 +1165,36 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                             }`}>
                               {inventoryItem.quantity} available
                             </span>
-                            {inventoryItem.price > 0 && (
-                              <span className="font-semibold text-blue-700">
-                                ${inventoryItem.price.toFixed(2)}
-                              </span>
-                            )}
+                            <div className="flex items-center space-x-1">
+                              {inventoryItem.sellingPrice && inventoryItem.sellingPrice > 0 && (
+                                <span className="text-[8px] text-yellow-600 bg-yellow-100 px-1 py-0.5 rounded-full">
+                                  Price
+                                </span>
+                              )}
+                            
+                            </div>
                           </div>
                           <div className="text-[10px] text-gray-500">
                             Received: {inventoryItem.receivedQuantity}
                           </div>
+                          
+                          {/* Sale Price Tooltip */}
+                          {showSalePrice[inventoryItem.inventoryItemId] && inventoryItem.sellingPrice && inventoryItem.sellingPrice > 0 && (
+                            <div 
+                              className="absolute top-0 left-0 right-0 bg-yellow-100 border border-yellow-300 rounded-lg p-2 shadow-lg z-10 cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                hideSalePrice(inventoryItem.inventoryItemId);
+                              }}
+                            >
+                              <div className="text-xs font-semibold text-yellow-800 text-center">
+                                Sale Price: {formatCurrency(inventoryItem.sellingPrice)}
+                              </div>
+                              <div className="text-[10px] text-yellow-600 text-center mt-1">
+                                Click to hide
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </AccessibleButton>
                     ))}

@@ -5,6 +5,7 @@ import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck, DollarS
 import { Customer, Supplier } from '../types';
 import Toast from './common/Toast';
 import SearchableSelect from './common/SearchableSelect';
+import SupplierFormModal from './common/SupplierFormModal';
 import { CurrencyService } from '../services/currencyService';
 import AccountStatementModal from './AccountStatementModal';
 import { createId } from '../lib/db';
@@ -35,15 +36,7 @@ export default function Customers() {
     address: '',
     isActive: true,
   });
-  const [supplierForm, setSupplierForm] = useState<Partial<Supplier>>({
-    name: '',
-    phone: '',
-    email: '',
-    address: '',
-    
-  });
   const [customerFormError, setCustomerFormError] = useState<string | null>(null);
-  const [supplierFormError, setSupplierFormError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
     message: '',
     type: 'success',
@@ -479,68 +472,14 @@ export default function Customers() {
   // Supplier handlers
   const handleAddSupplierClick = () => {
     setEditingSupplier(null);
-    setSupplierForm({
-      name: '',
-      phone: '',
-      email: '',
-      address: '',
-    });
     setShowSupplierForm(true);
   };
 
   const handleEditSupplierClick = (supplier: Supplier) => {
     setEditingSupplier(supplier);
-    setSupplierForm({
-      name: supplier.name,
-      phone: supplier.phone,
-      email: supplier.email || '',
-      address: supplier.address || '',
-    });
     setShowSupplierForm(true);
   };
 
-  const handleSupplierFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value, type } = e.target;
-    setSupplierForm(prev => ({
-      ...prev,
-      [name]: type === 'number' ? parseFloat(value) : value,
-    }));
-  };
-
-  const handleSupplierCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSupplierForm(prev => ({
-      ...prev,
-    }));
-  };
-
-  const handleSupplierFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!supplierForm.name || !supplierForm.phone) {
-      setSupplierFormError('Name and Phone are required.');
-      showToast('Name and Phone are required.', 'error');
-      return;
-    }
-    const exists = suppliers.some(s => s.name.trim().toLowerCase() === supplierForm.name!.trim().toLowerCase() && s.phone.trim() === supplierForm.phone!.trim() && (!editingSupplier || s.id !== editingSupplier.id));
-    if (exists) {
-      setSupplierFormError('This supplier already exists.');
-      showToast('This supplier already exists.', 'error');
-      return;
-    }
-    setSupplierFormError(null);
-    if (editingSupplier) {
-      // Note: We'll need to add updateSupplier to the context later
-      showToast('Supplier update functionality coming soon!', 'error');
-    } else {
-      addSupplier({
-        name: supplierForm.name!,
-        phone: supplierForm.phone!,
-        email: supplierForm.email || '',
-        address: supplierForm.address || '',
-      });
-      showToast('Supplier added successfully!', 'success');
-    }
-    setShowSupplierForm(false);
-  };
 
   const filteredCustomers = customers.filter(customer =>
     customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -870,86 +809,27 @@ export default function Customers() {
       )}
 
       {/* Supplier Form Modal */}
-      {showSupplierForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">
-                {editingSupplier ? 'Edit Supplier' : 'Add New Supplier'}
-              </h2>
-            </div>
-            <form onSubmit={handleSupplierFormSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="supplier-name" className="block text-sm font-medium text-gray-700">Name *</label>
-                  <input
-                    type="text"
-                    id="supplier-name"
-                    name="name"
-                    value={supplierForm.name}
-                    onChange={handleSupplierFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="supplier-phone" className="block text-sm font-medium text-gray-700">Phone *</label>
-                  <input
-                    type="text"
-                    id="supplier-phone"
-                    name="phone"
-                    value={supplierForm.phone}
-                    onChange={handleSupplierFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="supplier-email" className="block text-sm font-medium text-gray-700">Email</label>
-                  <input
-                    type="email"
-                    id="supplier-email"
-                    name="email"
-                    value={supplierForm.email || ''}
-                    onChange={handleSupplierFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="supplier-address" className="block text-sm font-medium text-gray-700">Address</label>
-                  <input
-                    type="text"
-                    id="supplier-address"
-                    name="address"
-                    value={supplierForm.address}
-                    onChange={handleSupplierFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-               
-         
-              </div>
-              {supplierFormError && <div className="text-red-600 text-sm font-medium pt-2">{supplierFormError}</div>}
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowSupplierForm(false)}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  {editingSupplier ? 'Save Changes' : 'Add Supplier'}
-                </button>
-              </div>
-              
-            </form>
-          </div>
-        </div>
-      )}
+      <SupplierFormModal
+        open={showSupplierForm}
+        onClose={() => setShowSupplierForm(false)}
+        onSuccess={async (supplierData) => {
+          if (editingSupplier) {
+            // Note: We'll need to add updateSupplier to the context later
+            showToast('Supplier update functionality coming soon!', 'error');
+          } else {
+            addSupplier({
+              name: supplierData.name!,
+              phone: supplierData.phone!,
+              email: supplierData.email || '',
+              address: supplierData.address || '',
+            });
+            showToast('Supplier added successfully!', 'success');
+          }
+          setShowSupplierForm(false);
+        }}
+        editingSupplier={editingSupplier}
+        existingSuppliers={suppliers}
+      />
 
       {/* Customer Payment Form Modal */}
       {showPaymentForm === 'customer' && (
