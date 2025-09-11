@@ -1,0 +1,215 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { X } from 'lucide-react';
+import { Supplier } from '../../types';
+
+interface SupplierFormModalProps {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: (supplier: Partial<Supplier>) => Promise<void>;
+  editingSupplier?: Supplier | null;
+  existingSuppliers?: Supplier[];
+}
+
+export default function SupplierFormModal({ 
+  open, 
+  onClose, 
+  onSuccess, 
+  editingSupplier = null,
+  existingSuppliers = []
+}: SupplierFormModalProps) {
+  const [supplierForm, setSupplierForm] = useState<Partial<Supplier>>({
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+  });
+  const [supplierFormError, setSupplierFormError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const firstInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus first field when modal opens
+  useEffect(() => {
+    if (open && firstInputRef.current) firstInputRef.current.focus();
+  }, [open]);
+
+  // Keyboard support - Escape to close
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && open) onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [open, onClose]);
+
+  // Reset form when modal opens/closes or editing supplier changes
+  useEffect(() => {
+    if (open) {
+      if (editingSupplier) {
+        setSupplierForm({
+          name: editingSupplier.name,
+          phone: editingSupplier.phone,
+          email: editingSupplier.email || '',
+          address: editingSupplier.address || '',
+        });
+      } else {
+        setSupplierForm({
+          name: '',
+          phone: '',
+          email: '',
+          address: '',
+        });
+      }
+      setSupplierFormError(null);
+    }
+  }, [open, editingSupplier]);
+
+  const handleSupplierFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
+    setSupplierForm(prev => ({
+      ...prev,
+      [name]: type === 'number' ? parseFloat(value) : value,
+    }));
+  };
+
+  const handleSupplierFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!supplierForm.name || !supplierForm.phone) {
+      setSupplierFormError('Name and Phone are required.');
+      return;
+    }
+
+    // Check for duplicate suppliers
+    const exists = existingSuppliers.some(s => 
+      s.name.trim().toLowerCase() === supplierForm.name!.trim().toLowerCase() && 
+      s.phone.trim() === supplierForm.phone!.trim() && 
+      (!editingSupplier || s.id !== editingSupplier.id)
+    );
+    
+    if (exists) {
+      setSupplierFormError('This supplier already exists.');
+      return;
+    }
+
+    setSupplierFormError(null);
+    setLoading(true);
+
+    try {
+      await onSuccess({
+        name: supplierForm.name!,
+        phone: supplierForm.phone!,
+        email: supplierForm.email || '',
+        address: supplierForm.address || '',
+      });
+      onClose();
+    } catch (error) {
+      setSupplierFormError('Failed to save supplier. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900">
+              {editingSupplier ? 'Edit Supplier' : 'Add New Supplier'}
+            </h2>
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+        </div>
+        
+        <form onSubmit={handleSupplierFormSubmit} className="p-6 space-y-4">
+          {/* Hidden input for auto-focus */}
+          <input
+            ref={firstInputRef}
+            style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }}
+            tabIndex={-1}
+          />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="supplier-name" className="block text-sm font-medium text-gray-700">Name *</label>
+              <input
+                type="text"
+                id="supplier-name"
+                name="name"
+                value={supplierForm.name}
+                onChange={handleSupplierFormChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="supplier-phone" className="block text-sm font-medium text-gray-700">Phone *</label>
+              <input
+                type="text"
+                id="supplier-phone"
+                name="phone"
+                value={supplierForm.phone}
+                onChange={handleSupplierFormChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="supplier-email" className="block text-sm font-medium text-gray-700">Email</label>
+              <input
+                type="email"
+                id="supplier-email"
+                name="email"
+                value={supplierForm.email || ''}
+                onChange={handleSupplierFormChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="supplier-address" className="block text-sm font-medium text-gray-700">Address</label>
+              <input
+                type="text"
+                id="supplier-address"
+                name="address"
+                value={supplierForm.address}
+                onChange={handleSupplierFormChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+          
+          {supplierFormError && (
+            <div className="text-red-600 text-sm font-medium pt-2">{supplierFormError}</div>
+          )}
+          
+          <div className="flex justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading}
+            >
+              {loading ? 'Saving...' : (editingSupplier ? 'Save Changes' : 'Add Supplier')}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
