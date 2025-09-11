@@ -1099,7 +1099,6 @@ export default function Inventory() {
   // Removed camera capture states and refs (not used)
 
   // Spinner for image capture/upload
-  const [imageLoading, setImageLoading] = useState(false);
 
 
   // Removed camera cleanup effect
