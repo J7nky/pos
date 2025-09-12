@@ -39,6 +39,16 @@ export interface CashDrawerSession extends BaseEntity {
   status: 'open' | 'closed';
   notes?: string;
 }
+
+export interface Store extends BaseEntity {
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  preferred_currency: 'USD' | 'LBP';
+  preferred_language: 'en' | 'ar' | 'fr';
+  preferred_commission_rate: number;
+}
 export interface Supplier extends BaseEntity {
   name: string;
   phone: string;
@@ -207,6 +217,9 @@ export interface inventory_bills extends BaseEntity {
 }
 
 class POSDatabase extends Dexie {
+  // Store configuration
+  stores!: Table<Store, string>;
+  
   // Core tables
   products!: Table<Product, string>;
   suppliers!: Table<Supplier, string>;
@@ -230,7 +243,10 @@ class POSDatabase extends Dexie {
     
     console.log('🔧 Initializing POSDatabase...');
     
-    this.version(13).stores({
+    this.version(14).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, updated_at',
+      
       // Cash drawer tables
       cash_drawer_accounts: 'id, &store_id, account_code, updated_at',
       cash_drawer_sessions: 'id, store_id, account_id, status, created_at',

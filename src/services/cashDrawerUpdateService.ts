@@ -287,7 +287,7 @@ export class CashDrawerUpdateService {
               category: `cash_drawer_${transactionData.type}`,
               amount: Math.abs(balanceChange),
               currency: storeCurrency,
-              description: `${transactionData.description} - Cash Drawer Update (Session: ${session?.id || 'N/A'})`,
+              description: `${transactionData.description} - Cash Drawer Update`,
               reference: `${transactionData.reference}_SESSION_${session?.id || 'N/A'}`,
               store_id: transactionData.storeId,
               created_by: transactionData.createdBy,
@@ -497,9 +497,11 @@ export class CashDrawerUpdateService {
       console.log(`💰 Starting balance from current session: ${totalBalance}`);
 
       // Get all cash drawer transactions for this specific session
+      // Use a more efficient query by filtering on store_id first, then category
       const cashTransactions = await db.transactions
+        .where('store_id')
+        .equals(storeId)
         .filter(trans => 
-          trans.store_id === storeId &&
           trans.category.startsWith('cash_drawer_') &&
           (trans.reference?.includes(`_SESSION_${currentSession.id}`) || 
            new Date(trans.created_at) >= new Date(currentSession.opened_at))
@@ -556,9 +558,11 @@ export class CashDrawerUpdateService {
   public async getCashDrawerTransactionHistory(
     storeId: string,
     startDate?: string,
-    endDate?: string
+    endDate?: string,
+    limit?: number
   ): Promise<any[]> {
     try {
+      // Use more efficient query by filtering on store_id first
       const transactions = await db.transactions
         .where('store_id')
         .equals(storeId)
@@ -578,9 +582,16 @@ export class CashDrawerUpdateService {
         });
       }
 
-      return filteredTransactions.sort((a, b) => 
+      const sortedTransactions = filteredTransactions.sort((a, b) => 
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
+
+      // Apply limit if specified
+      if (limit && limit > 0) {
+        return sortedTransactions.slice(0, limit);
+      }
+
+      return sortedTransactions;
     } catch (error) {
       console.error('Error getting cash drawer transaction history:', error);
       return [];

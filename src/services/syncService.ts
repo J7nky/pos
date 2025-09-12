@@ -17,6 +17,9 @@ const SYNC_CONFIG = {
 // Table mapping for sync operations
 // CRITICAL: Order matters for foreign key dependencies
 const SYNC_TABLES = [
+  // Store configuration (no dependencies)
+  'stores',
+  
   // Core entities (no dependencies)
   'products',
   'suppliers', 
@@ -1634,10 +1637,18 @@ export class SyncService {
       }
 
       // Download latest data
-      const { data: remoteRecords, error } = await supabase
+      let query = supabase
         .from(tableName as any)
-        .select('*')
-        .eq('store_id', storeId);
+        .select('*');
+      
+      // Stores table doesn't have store_id, so we filter by the specific store ID
+      if (tableName === 'stores') {
+        query = query.eq('id', storeId);
+      } else {
+        query = query.eq('store_id', storeId);
+      }
+      
+      const { data: remoteRecords, error } = await query;
 
       if (error) {
         result.errors.push(`Download failed: ${error.message}`);

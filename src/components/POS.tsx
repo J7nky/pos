@@ -220,18 +220,6 @@ export default function POS() {
     return Math.max(0, totalStock - reservedAcrossTabs);
   };
 
-  const filteredProducts = (products || []).filter(product => 
-  
-    product.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-    getProductStock(product.id) > 0
-  );
-
-  const getProductWeight = (productId: string, supplierId: string) => {
-    // In wholesale, products are received by quantity but sold by weight
-    // Weight is entered at point of sale, not from inventory
-    return null;
-  };
-
   const getProductInventoryItems = (productId: string) => {
     // Get all individual inventory items for this product
     const productInventoryItems = inventory
@@ -268,6 +256,25 @@ export default function POS() {
     });
   };
 
+  const filteredProducts = (products || []).filter(product => {
+    if (getProductStock(product.id) === 0) return false;
+    
+    const searchLower = searchTerm.toLowerCase();
+    
+    // Search by product name
+    if (product.name.toLowerCase().includes(searchLower)) {
+      return true;
+    }
+    
+    // Search by supplier names for this product
+    const productInventoryItems = getProductInventoryItems(product.id);
+    const hasMatchingSupplier = productInventoryItems.some(item => 
+      item.supplierName.toLowerCase().includes(searchLower)
+    );
+    
+    return hasMatchingSupplier;
+  });
+
   // In addToCart, add specific inventory item to cart respecting temporary reservations across all tabs
   const addToCart = (productId: string, inventoryItemId: string) => {
     const product = products.find(p => p.id === productId);
@@ -287,7 +294,7 @@ export default function POS() {
     }, 0);
     const available = Math.max(0, (inventoryItem.quantity || 0) - reserved);
 
-    // Check if we already have this specific inventory item in the cart
+    // Check if we already have this specific addToCart item in the cart
     const existingItem = activeTab.cart.find(item => 
       item.inventoryItemId === inventoryItemId
     );
@@ -313,8 +320,8 @@ export default function POS() {
         supplierName: supplier.name,
         quantity: 1,
         weight: undefined, // Weight will be entered manually during sale
-        unitPrice: inventoryItem.price || 0.00, // Use price from this specific inventory item
-        totalPrice: Math.round((inventoryItem.price || 0.00) * 100) / 100,
+        unitPrice:0.00, // Use price from this specific inventory item
+        totalPrice: 0.00,
         paymentMethod: activeTab.paymentMethod, // Set payment method from current tab
         notes: inventoryItem.notes || null,
         inventoryType: inventoryItem.type || 'cash', // Track the inventory type
@@ -812,7 +819,7 @@ export default function POS() {
                 ref={searchInputRef}
                 tabIndex={1}
                 accessKey="f"
-                aria-label="Search products (Ctrl+F)"
+                aria-label="Search products or suppliers (Ctrl+F)"
               />
             </div>
           </div>
@@ -1131,6 +1138,9 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
                         {product.category}
                       </span>
                     )}
+
+
+                    
                   </div>
                 </div>
 

@@ -32,7 +32,7 @@ export default function CashDrawerMonitor() {
     try {
       const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(raw.storeId);
       const history = await cashDrawerUpdateService.getCashDrawerTransactionHistory(raw.storeId);
-      
+      console.log('💰 Balance:', balance);
       setCashDrawerStatus({
         currentBalance: balance,
         lastUpdated: new Date().toISOString(),

@@ -8,7 +8,6 @@ import SearchableSelect from './common/SearchableSelect';
 import SupplierFormModal from './common/SupplierFormModal';
 import { CurrencyService } from '../services/currencyService';
 import AccountStatementModal from './AccountStatementModal';
-import { createId } from '../lib/db';
 import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 
 export default function Customers() {
@@ -20,7 +19,6 @@ export default function Customers() {
   const updateCustomer = raw.updateCustomer;
   const addSupplier = raw.addSupplier;
   const updateSupplier = raw.updateSupplier;
-  const addTransaction = raw.addTransaction;
   const { userProfile } = useSupabaseAuth();
 
   const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>('customers');
@@ -151,29 +149,6 @@ export default function Customers() {
     }
   };
 
-  const recordTransaction = (
-    entity: Customer | Supplier,
-    safeAmount: any,
-    paymentForm: any,
-    transactionType: 'income' | 'expense',
-    category: string,
-    isCustomer: boolean
-  ) => {
-    const direction = isCustomer ? 'from' : 'to';
-    const transactionId = createId();
-    addTransaction({
-      type: transactionType,
-      category,
-      supplier_id: !isCustomer ? entity.id : null,
-      customer_id: isCustomer ? entity.id : null, 
-      amount: safeAmount.amount,
-      currency: safeAmount.currency,
-      description: `Payment ${direction} ${entity.name}${paymentForm.description ? ': ' + paymentForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${paymentForm.amount} ${paymentForm.currency})` : ''}`,
-      reference: "P-" + transactionId.slice(0, 8),
-      created_by: userProfile?.id || '',
-      id: transactionId
-    });
-  };
 
   const updateCashDrawer = async (
     entity: Customer | Supplier,
@@ -240,14 +215,7 @@ export default function Customers() {
       // Update entity balance
       await updateEntityBalance(entity, entityId, Number(amount), currency, isCustomer);
 
-      // Get safe amount for database storage
-
-      // Record transaction
-      const transactionType = isCustomer ? 'income' : 'expense';
-      const category = isCustomer ? 'Customer Payment' : 'Supplier Payment';
-      recordTransaction(entity, safeAmount, { amount, currency, description, reference }, transactionType, category, isCustomer);
-
-      // Update cash drawer
+      // Update cash drawer (this also creates the transaction record)
       const cashDrawerType = isCustomer ? 'payment' : 'expense';
       const cashDrawerResult = await updateCashDrawer(entity, safeAmount, { amount, currency, description, reference, customerId: isCustomer ? entityId : '', supplierId: isCustomer ? '' : entityId }, cashDrawerType, isCustomer);
 

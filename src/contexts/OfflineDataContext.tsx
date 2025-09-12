@@ -17,6 +17,7 @@ import {
   createId
 } from '../lib/db';
 import { syncService, SyncResult } from '../services/syncService';
+import { SupabaseService } from '../services/supabaseService';
 
 type Tables = Database['public']['Tables'];
 
@@ -208,9 +209,56 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   });
   const [stockLevels, setStockLevels] = useState<any[]>([]);
 
+  // Load store data and update currency
+  const loadStoreData = async () => {
+    if (!storeId) return;
+    
+    try {
+      // First check if store data exists in IndexedDB
+      const existingStore = await db.stores.where('id').equals(storeId).first();
+      
+      if (existingStore) {
+        // Use existing store data
+        console.log('📦 Using cached store data:', existingStore);
+        if (existingStore.preferred_currency) {
+          setCurrency(existingStore.preferred_currency);
+        }
+        if (existingStore.preferred_commission_rate !== undefined) {
+          setDefaultCommissionRate(existingStore.preferred_commission_rate);
+        }
+      } else {
+        // Load from Supabase and save to IndexedDB
+        console.log('🔄 Loading store data from Supabase...');
+        const storeData = await SupabaseService.getStore(storeId);
+        
+        if (storeData) {
+          // Save to IndexedDB
+          await db.stores.put({
+            ...storeData,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+          
+          // Update local state
+          if (storeData.preferred_currency) {
+            setCurrency(storeData.preferred_currency);
+          }
+          if (storeData.preferred_commission_rate !== undefined) {
+            setDefaultCommissionRate(storeData.preferred_commission_rate);
+          }
+          
+          console.log('✅ Store data loaded and cached:', storeData);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error loading store data:', error);
+    }
+  };
+
   // Initialize data when store is available
   useEffect(() => {
     if (storeId) {
+      loadStoreData();
       initializeData();
       // Check undo validity after data is loaded
       setTimeout(() => checkUndoValidity(), 1000);
