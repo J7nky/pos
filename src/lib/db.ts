@@ -354,12 +354,7 @@ class POSDatabase extends Dexie {
       console.error('❌ Failed to register transaction hook:', error);
     }
     
-    try {
-      (this.sale_items as any).hook('creating', this.handleSaleItemCreated);
-      console.log('✅ Sale items hook registered');
-    } catch (error) {
-      console.error('❌ Failed to register sale items hook:', error);
-    }
+    // Sale items hook removed - cash drawer updates now handled directly in addSale function
     console.log('✅ Cash drawer hooks registration completed');
 
     // Only add update hooks for tables that have updated_at
@@ -796,56 +791,7 @@ class POSDatabase extends Dexie {
     }
   };
 
-  // Hook for automatic cash drawer updates when sale items are created
-  private handleSaleItemCreated = async (primKey: any, obj: any, trans: any) => {
-    
-    console.log('🔍 handleSaleItemCreated hook triggered!', { primKey, obj });
-    console.log('🔍 Hook method called with:', { primKey, obj, trans });
-    
-    try {
-      // Only process cash sales
-      if (obj.payment_method !== 'cash') {
-        console.log('⏭️ Skipping non-cash sale:', obj.payment_method);
-        return;
-      }
-
-      // Skip if this is a cash drawer transaction to prevent infinite loops
-      if (obj.category && obj.category.startsWith('cash_drawer_')) {
-        console.log('🔄 Skipping cash drawer update for cash drawer transaction to prevent loop');
-        return;
-      }
-
-      // Import the service dynamically to avoid circular dependencies
-      const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-      
-      console.log(`💰 Auto-updating cash drawer for cash sale: $${obj.received_value || 0}`);
-      
-      // Get store's preferred currency
-      const account = await this.getCashDrawerAccount(obj.store_id);
-      const storeCurrency = account?.currency || 'USD';
-      
-      // Use the internal transaction update method that can auto-open sessions
-      const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-        type: 'sale',
-        amount: obj.received_value || 0,
-        currency: storeCurrency as 'USD' | 'LBP',
-        description: `Cash sale${obj.customer_id ? ' to customer' : ''}`,
-        reference: `SALE-${obj.id || Date.now()}`,
-        storeId: obj.store_id,
-        createdBy: obj.created_by,
-        customerId: obj.customer_id || undefined,
-        allowAutoSessionOpen: true // Allow automatic session opening for hooks
-      });
-      
-      if (!updateResult.success) {
-        console.error('Failed to update cash drawer for sale:', updateResult.error);
-      } else {
-        console.log('✅ Cash drawer updated successfully for sale');
-      }
-    } catch (error) {
-      console.error('Error in sale item created hook:', error);
-    }
-  };
+  // Sale items hook removed - cash drawer updates now handled directly in addSale function
 
   // Utility methods for sync management
   async markAsSynced(tableName: string, recordId: string) {
@@ -1721,6 +1667,8 @@ if (typeof window !== 'undefined') {
       console.error('❌ Test failed:', error);
     }
   };
+
+  // Hook testing function removed - hooks no longer used for sales
 
   // Add cash drawer debugging function
   (window as any).debugCashDrawer = async (storeId?: string) => {

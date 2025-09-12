@@ -90,7 +90,7 @@ interface OfflineDataContextType {
     type:string,
     plastic_fee?:number|null;
     items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
-  }) => Promise<{ batchId: string }>;
+  }) => Promise<{ batchId: string; financialResult?: any }>;
   addSale: (items: any[]) => Promise<void>;
   updateSale: (id: string, updates: Partial<SaleItem>) => Promise<void>;
   deleteSale: (id: string) => Promise<void>;
@@ -723,23 +723,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       ...item
     }));
 
-    // Try to create in Supabase first if online
-    if (isOnline) {
-      try {
-        const { SupabaseService } = await import('../services/supabaseService');
-        const supabaseBill = await SupabaseService.createBill(bill, mappedLineItems);
-        if (supabaseBill) {
-          // Update local bill with Supabase ID and mark as synced
-          bill.id = supabaseBill.id;
-          bill._synced = true;
-          mappedLineItems.forEach(item => {
-            item._synced = true;
-          });
-        }
-      } catch (error) {
-        console.warn('Failed to create bill in Supabase, falling back to local only:', error);
-      }
-    }
+    // Store locally first - sync to server will be handled by debouncedSync
+    // This ensures offline-first behavior and prevents RPC calls during checkout
 
     // Log the final bill data for debugging
     console.log('📋 Final line items data before storage:', mappedLineItems.length, 'items');
@@ -1205,9 +1190,47 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!items || items.length === 0) throw new Error('No items provided');
 
     const batchId = createId();
+    
+    // Get the actual supplier ID before processing
+    const actualSupplierId = supplier_id === 'trade' ? await getOrCreateTradeSupplier() : supplier_id;
+
+    // Process financial transactions for cash and credit purchases
+    let financialResult = null;
+    if (type === 'cash' || type === 'credit') {
+      try {
+        const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
+        
+        const purchaseData = {
+          supplier_id: actualSupplierId,
+          type: type as 'cash' | 'credit' | 'commission',
+          items: items.map(item => ({
+            product_id: item.product_id || '',
+            quantity: item.quantity || 0,
+            unit: item.unit || '',
+            weight: item.weight,
+            price: item.price,
+            selling_price: item.selling_price
+          })),
+          porterage_fee: porterage_fee || undefined,
+          transfer_fee: transfer_fee || undefined,
+          plastic_fee: plastic_fee || undefined,
+          commission_rate: commission_rate || undefined,
+          created_by,
+          store_id: storeId,
+          status: status || undefined
+        };
+
+        financialResult = await inventoryPurchaseService.processInventoryPurchase(purchaseData);
+        console.log('Financial transaction processed:', financialResult);
+      } catch (error) {
+        console.error('Error processing financial transaction:', error);
+        throw new Error(`Failed to process financial transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    }
+
     const batchRecord = {
       id: batchId,
-      supplier_id,
+      supplier_id: actualSupplierId,
       status,
       porterage_fee,
       transfer_fee,
@@ -1229,7 +1252,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await db.inventory_bills.add(batchRecord);
       console.log(batchRecord,'batchrecord')
       const now = new Date().toISOString();
-
+      
       const mappedItems = items.map((it) => ({
         id:createId(),
         product_id:it.product_id??'',
@@ -1238,7 +1261,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         store_id: storeId,
         created_at: now,
         _synced: false,
-        supplier_id,
+        supplier_id: actualSupplierId,
         weight: it.weight ?? null,
         price: it.price ?? null,
         selling_price: it.selling_price ?? null,
@@ -1257,7 +1280,55 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     debouncedSync();
 
-    return { batchId };
+    return { batchId, financialResult };
+  };
+
+  // Helper function to get or create Trade supplier
+  const getOrCreateTradeSupplier = async (): Promise<string> => {
+    if (!storeId) throw new Error('No store ID available');
+    
+    try {
+      // Ensure database is open
+      await db.open();
+      
+      // Look for existing "Trade" supplier
+      const existingSupplier = await db.suppliers
+        .where('name')
+        .equals('Trade')
+        .and(s => s.store_id === storeId)
+        .first();
+
+      if (existingSupplier) {
+        return existingSupplier.id;
+      }
+
+      // Create new "Trade" supplier
+      const tradeSupplierId = createId();
+      const tradeSupplier = {
+        id: tradeSupplierId,
+        name: 'Trade',
+        email: '',
+        phone: '',
+        address: '',
+        store_id: storeId,
+        usd_balance: 0,
+        lb_balance: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        _synced: false
+      };
+
+      await db.suppliers.add(tradeSupplier);
+      return tradeSupplierId;
+    } catch (error) {
+      console.error('Error getting/creating Trade supplier:', error);
+      console.error('Database state:', {
+        isOpen: db.isOpen(),
+        tables: db.tables.map(t => t.name),
+        version: db.verno
+      });
+      throw new Error('Failed to get or create Trade supplier');
+    }
   };
 
   const addSale = async (
@@ -1301,7 +1372,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Use transaction to ensure atomicity for database operations only
     await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
-      // Add sale items
+      // Add sale items using bulkAdd for better performance
       await db.sale_items.bulkAdd(saleItemsWithIds);
 
       // Deduct from specific inventory items
@@ -1392,21 +1463,38 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Add cash drawer restoration if there were cash sales
-    if (cashSaleItems.length > 0) {
-      const account = await db.getCashDrawerAccount(storeId);
-      if (account) {
-        const cashAmount = cashSaleItems.reduce((sum, item) => sum + (item.received_value || 0), 0);
-        saleUndoData.steps.push({
-          op: 'update',
-          table: 'cash_drawer_accounts',
-          id: account.id,
-          changes: { current_balance: (account.current_balance || 0) - cashAmount, _synced: false }
-        });
-        saleUndoData.affected.push({ table: 'cash_drawer_accounts', id: account.id });
+    // Note: Cash drawer updates are now handled directly via cashDrawerUpdateService
+    // The transaction records created by the service will be cleaned up during undo
 
-        // Note: Cash drawer transactions are handled automatically by the database hook
-        // and will be cleaned up when the sale items are deleted during undo
+    // Update cash drawer for cash sales (following the same pattern as payments)
+    const cashSaleItemsForDrawer = saleItemsWithIds.filter(item => item.payment_method === 'cash');
+    if (cashSaleItemsForDrawer.length > 0) {
+      try {
+        const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+        
+        const totalCashAmount = cashSaleItemsForDrawer.reduce((sum, item) => sum + (item.received_value || 0), 0);
+        
+        console.log(`💰 Updating cash drawer for cash sales: $${totalCashAmount}`);
+        
+        const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
+          type: 'sale',
+          amount: totalCashAmount,
+          currency: 'LBP', // Assuming LBP for now, could be made dynamic
+          description: `Cash sale - ${cashSaleItemsForDrawer.length} items`,
+          reference: `SALE-${Date.now()}`,
+          storeId: storeId,
+          createdBy: currentUserId,
+          customerId: cashSaleItemsForDrawer[0]?.customer_id || undefined,
+          allowAutoSessionOpen: true
+        });
+
+        if (cashDrawerResult.success) {
+          console.log(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
+        } else {
+          console.error('❌ Failed to update cash drawer:', cashDrawerResult.error);
+        }
+      } catch (error) {
+        console.error('❌ Error updating cash drawer for sales:', error);
       }
     }
 
@@ -1655,10 +1743,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.log('🔄 Attempting undo for action:', action);
 
       // Check if any affected records are synced
+      // Exception: cash_drawer_accounts can be synced and still allow undo (only balance changes)
       for (const item of action.affected || []) {
         const record = await (db as any)[item.table].get(item.id);
-        if (!record || record._synced) {
-          console.log(`❌ Cannot undo: record ${item.id} in ${item.table} is synced or missing`);
+        if (!record) {
+          console.log(`❌ Cannot undo: record ${item.id} in ${item.table} is missing`);
+          localStorage.removeItem('last_undo_action');
+          setCanUndo(false);
+          return false;
+        }
+        
+        // Allow undo for cash_drawer_accounts even if synced (only balance changes)
+        if (record._synced && item.table !== 'cash_drawer_accounts') {
+          console.log(`❌ Cannot undo: record ${item.id} in ${item.table} is synced`);
           localStorage.removeItem('last_undo_action');
           setCanUndo(false);
           return false;
@@ -1720,7 +1817,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     for (const item of action.affected || []) {
       const record = await (db as any)[item.table].get(item.id);
-      if (!record || record._synced) {
+      if (!record) {
+        isValid = false;
+        break;
+      }
+      
+      // Allow undo for cash_drawer_accounts even if synced (only balance changes)
+      if (record._synced && item.table !== 'cash_drawer_accounts') {
         isValid = false;
         break;
       }
