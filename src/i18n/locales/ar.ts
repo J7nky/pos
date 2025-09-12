@@ -222,7 +222,7 @@ const ar = {
     weight: 'الوزن',
     price: 'السعر',
     searchCustomers: 'ابحث عن العملاء...',
-    searchProducts: 'ابحث عن المنتجات...'
+    searchProducts: 'ابحث عن المنتجات أو الموردين...'
   },
   reports: {
     header: 'التقارير والتحليلات',

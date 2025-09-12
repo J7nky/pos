@@ -2,8 +2,7 @@ import React, { useEffect } from 'react';
 import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
-import { db } from '../lib/db';
+// Removed cashDrawerUpdateService and db imports - using local data only
 import { useCurrency } from '../hooks/useCurrency';
 import { useI18n } from '../i18n';
 import { 
@@ -49,16 +48,19 @@ const getTransactionColor = (type: string) => {
   }
   return 'text-gray-600';
 };
+// Using local currency from context - no caching needed
+
 export default function Home() {
   const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
   const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
   const [storePreferredCurrency, setStorePreferredCurrency] = useState<'USD' | 'LBP'>('USD');
+  const [isLoadingCashDrawer, setIsLoadingCashDrawer] = useState(false);
 
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) : [];
-  const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at})) : [];
-  const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({...s, createdAt: s.created_at})) : [];
+  // const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at})) : [];
+  const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({...s, createdAt: s.createdAt})) : [];
   const stockLevels = Array.isArray(raw.stockLevels) ? raw.stockLevels : [];
   const cashDrawer = raw.cashDrawer;
   const openCashDrawer = raw.openCashDrawer;
@@ -78,7 +80,7 @@ export default function Home() {
   const todaySales = sales.filter(sale => 
     sale.createdAt && sale.createdAt.split('T')[0] 
   );
-  const todayRevenue = todaySales.reduce((sum, sale) => sum + sale.received_value, 0);
+  const todayRevenue = todaySales.reduce((sum, sale) => sum + (sale.receivedValue || 0), 0);
   const todayExpenses = transactions.filter(t => 
     t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today
   ).reduce((sum, t) => {
@@ -86,47 +88,100 @@ export default function Home() {
     return sum + convertedAmount;
   }, 0);
 
+  // Helper function to get local cash drawer session from context
+  const getLocalCurrentSession = () => {
+    return cashDrawer; // Already available in context
+  };
+
+  // Helper function to calculate cash drawer balance from local transactions
+  const calculateLocalCashDrawerBalance = (currentSession: any): number => {
+    if (!currentSession) {
+      console.log('💰 No active session found, balance is 0');
+      return 0;
+    }
+
+    // Start with the current session's opening amount or current balance
+    let totalBalance = currentSession.opening_amount || currentSession.currentBalance || 0;
+    console.log(`💰 Starting balance from current session: ${totalBalance}`);
+
+    // Get all cash drawer transactions from local data for this specific session
+    const cashTransactions = transactions.filter(trans =>
+      trans.store_id === raw.storeId &&
+      trans.category?.startsWith('cash_drawer_') &&
+      (!currentSession.id || trans.reference?.includes(`_SESSION_${currentSession.id}`) ||
+       new Date(trans.created_at) >= new Date(currentSession.opened_at || currentSession.lastUpdated))
+    );
+
+    console.log(`💰 Found ${cashTransactions.length} cash drawer transactions since session start`);
+
+    // Add all income transactions and subtract all expense transactions
+    // for (const trans of cashTransactions) {
+    //   if (trans.type === 'income') {
+    //     totalBalance += trans.amount;
+    //     console.log(`💰 Added income: ${trans.amount}, new balance: ${totalBalance}`);
+    //   } else if (trans.type === 'expense') {
+    //     totalBalance -= trans.amount;
+    //     console.log(`💰 Subtracted expense: ${trans.amount}, new balance: ${totalBalance}`);
+    //   }
+    // }
+
+    console.log(`💰 Final calculated balance: ${totalBalance}`);
+    return totalBalance;
+  };
+
+  // Helper function to get cash drawer transaction history from local data
+  const getLocalCashDrawerHistory = (limit: number = 50): any[] => {
+    const cashDrawerTransactions = transactions
+      .filter(trans =>
+        trans.store_id === raw.storeId &&
+        trans.category?.startsWith('cash_drawer_')
+      )
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, limit);
+
+    console.log(`💰 Found ${cashDrawerTransactions.length} local cash drawer transactions`);
+    return cashDrawerTransactions;
+  };
+
   const loadCashDrawerStatus = async () => {
     if (!raw.storeId) return;
-    
+
+    setIsLoadingCashDrawer(true);
     try {
-      // Get store's preferred currency first
-      const storeCurrency = await cashDrawerUpdateService.getStorePreferredCurrency(raw.storeId);
-      setStorePreferredCurrency(storeCurrency);
-      
-      const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(raw.storeId);
-      const history = await cashDrawerUpdateService.getCashDrawerTransactionHistory(raw.storeId);
-      const currentSession = await db.getCurrentCashDrawerSession(raw.storeId);
-      
+      // Use ONLY local data - completely offline-capable
+      const currentSession = getLocalCurrentSession();
+      const localBalance = calculateLocalCashDrawerBalance(currentSession);
+      const localHistory = getLocalCashDrawerHistory();
+
+      // Use local currency from context (stored in localStorage)
+      const localCurrency = raw.currency || 'USD';
+      setStorePreferredCurrency(localCurrency);
+
       console.log('🔍 loadCashDrawerStatus - currentSession:', currentSession);
-      console.log('🔍 loadCashDrawerStatus - openedAt:', currentSession?.opened_at);
-      
+      console.log('🔍 loadCashDrawerStatus - localBalance:', localBalance);
+      console.log('🔍 loadCashDrawerStatus - localHistory count:', localHistory.length);
+      console.log('🔍 loadCashDrawerStatus - localCurrency:', localCurrency);
+
       setCashDrawerStatus({
-        currentBalance: balance,
+        currentBalance: localBalance,
         lastUpdated: new Date().toISOString(),
-        transactionCount: history.length,
-        openedAt: currentSession?.opened_at || ''
+        transactionCount: localHistory.length,
+        openedAt: currentSession?.opened_at || currentSession?.lastUpdated || ''
       });
-      
-      setTransactionHistory(history);
+
+      setTransactionHistory(localHistory);
     } catch (error) {
       console.error('Error loading cash drawer status:', error);
     } finally {
+      setIsLoadingCashDrawer(false);
     }
   };
 
   // Helper function to normalize cash drawer balance to store's preferred currency
   const getNormalizedCashDrawerBalance = (balance: number): number => {
-    if (!cashDrawerStatus || !storePreferredCurrency) {
-      return balance
-    }
-    else{
-      const newBalance=cashDrawerUpdateService.normalizeAmountToStoreCurrency(balance, 'LBP', storePreferredCurrency);
-      return newBalance;
-
-    }
-    // Normalize the balance to the store's preferred currency
-    // Assuming the balance is stored in USD (base currency) and needs to be converted
+    // For now, return balance as-is since we're using local currency
+    // In the future, we can implement proper currency conversion if needed
+    return balance;
   };
 
   // Helper function to format currency based on store's preferred currency
@@ -274,10 +329,10 @@ export default function Home() {
   const stats = [
     {
       title: `Cash in Drawer (${storePreferredCurrency})`,
-      value: cashDrawerStatus ? formatCurrencyForStore(getNormalizedCashDrawerBalance(cashDrawerStatus.currentBalance)) : 'Closed',
+      value: isLoadingCashDrawer ? 'Loading...' : (cashDrawerStatus ? formatCurrencyForStore(getNormalizedCashDrawerBalance(cashDrawerStatus.currentBalance)) : 'Closed'),
       icon: DollarSign,
       color: 'bg-green-500',
-      change: cashDrawerStatus ? `Opened: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}` : 'Not opened today'
+      change: isLoadingCashDrawer ? 'Loading...' : (cashDrawerStatus ? `Opened: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}` : 'Not opened today')
     },
     {
       title: `Today's Expense (${storePreferredCurrency})`, 
