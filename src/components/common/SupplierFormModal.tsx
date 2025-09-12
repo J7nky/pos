@@ -100,6 +100,8 @@ export default function SupplierFormModal({
         phone: supplierForm.phone!,
         email: supplierForm.email || '',
         address: supplierForm.address || '',
+        lb_balance: 0,
+        usd_balance: 0,
       });
       onClose();
     } catch (error) {

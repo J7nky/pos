@@ -266,6 +266,7 @@ export interface Database {
   product_id: string;
   supplier_id: string;
   quantity: number;
+  selling_price: number | null;
   unit: string;
   weight: number | null;
   price: number | null;
@@ -279,6 +280,7 @@ export interface Database {
         product_id?: string;
         supplier_id?: string;
         quantity?: number;
+        selling_price?: number | null;
         unit?: string;
         weight?: number | null;
         price?: number | null;
@@ -292,6 +294,7 @@ export interface Database {
           product_id?: string;
           supplier_id?: string;
           quantity?: number;
+          selling_price?: number | null;
           unit?: string;
           weight?: number | null;
           price?: number | null;
