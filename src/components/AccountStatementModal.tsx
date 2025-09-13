@@ -366,11 +366,14 @@ export default function AccountStatementModal({
                       <>
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-500">Total Commissions</div>
+                            <div className="text-sm font-medium text-gray-500">Total Received Bills</div>
                             <TrendingUp className="w-4 h-4 text-purple-400" />
                           </div>
                           <div className="text-2xl font-bold text-purple-600">
                             {formatCurrency(statement.financialSummary.totalReceivings.LBP, 'LBP')}
+                          </div>
+                          <div className="text-sm text-gray-600 mt-1">
+                            {formatCurrency(statement.financialSummary.totalReceivings.USD, 'USD')}
                           </div>
                         </div>
 
@@ -381,6 +384,9 @@ export default function AccountStatementModal({
                           </div>
                           <div className="text-2xl font-bold text-red-600">
                             {formatCurrency(statement.financialSummary.totalPayments.USD, 'USD')}
+                          </div>
+                          <div className="text-sm text-gray-600 mt-1">
+                            {formatCurrency(statement.financialSummary.totalPayments.LBP, 'LBP')}
                           </div>
                         </div>
                       </>
