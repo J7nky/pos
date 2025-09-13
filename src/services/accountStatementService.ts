@@ -156,7 +156,6 @@ export class AccountStatementService {
     );
 
     // In summary mode, group sales by bills if bills data is available
-    let salesToProcess = periodSales;
     if (viewMode === 'summary' && bills && bills.length > 0) {
       // Group sales by bill_id if available, otherwise use individual sales
       const salesByBill = new Map<string, LocalSaleItem[]>();
@@ -171,7 +170,7 @@ export class AccountStatementService {
       });
 
       // For summary mode, we'll process bills instead of individual sales
-      salesToProcess = periodSales; // Keep original logic for now, will modify below
+      // Keep original logic for now, will modify below
     }
 
     type RawEvent = {
@@ -343,6 +342,7 @@ export class AccountStatementService {
     allSales: SaleItem[],
     allTransactions: Transaction[],
     inventoryBills: inventory_bills[],
+    inventoryItems: InventoryItem[],
     startDateISO: string
   ): { USD: number; LBP: number } {
     const startDate = new Date(startDateISO);
@@ -352,9 +352,12 @@ export class AccountStatementService {
       s.supplierId === supplierId && !!s.createdAt && new Date(s.createdAt) < startDate
     );
     const commissionsLBP = preSales.reduce((sum, sale) => {
-      const invBill = inventoryBills.find(i => i.id === (sale as any).inventoryItemId);
-      const commissionRate = invBill?.commission_rate ? Number(invBill.commission_rate) : 0.1;
-      const commission = (sale.totalPrice * commissionRate) / 100;
+      const invItem = inventoryItems.find(ii => ii.id === sale.inventoryItemId);
+      const bill = invItem ? inventoryBills.find(b => b.id === invItem.batchId) : undefined;
+      const commissionRatePercent = bill?.commission_rate !== undefined && bill?.commission_rate !== null
+        ? Number(bill.commission_rate)
+        : 10; // default 10%
+      const commission = (sale.totalPrice * commissionRatePercent) / 100;
       return sum + commission;
     }, 0);
 
@@ -362,9 +365,8 @@ export class AccountStatementService {
     const prePayments = allTransactions.filter(t =>
       t.type === 'expense' &&
       t.category === 'Supplier Payment' &&
-      !!t.created_at && new Date(t.created_at) < startDate &&
-      // Heuristic: description contains supplier name OR future enhancement: use supplier_id when available
-      true
+      t.supplier_id === supplierId &&
+      !!t.created_at && new Date(t.created_at) < startDate
     );
     const paymentsUSD = prePayments.filter(t => t.currency === 'USD').reduce((s, t) => s + t.amount, 0);
     const paymentsLBP = prePayments.filter(t => t.currency === 'LBP').reduce((s, t) => s + t.amount, 0);
@@ -384,6 +386,7 @@ export class AccountStatementService {
     startDateISO: string,
     endDateISO: string,
     viewMode: 'summary' | 'detailed',
+    inventoryItems: InventoryItem[],
     opening: { USD: number; LBP: number }
   ): { statementTransactions: StatementTransaction[]; ending: { USD: number; LBP: number }; totals: { commissionsLBP: number; paymentsUSD: number; paymentsLBP: number } } {
     const startDate = new Date(startDateISO);
@@ -393,14 +396,28 @@ export class AccountStatementService {
       s.supplierId === supplier.id && !!s.createdAt && new Date(s.createdAt) >= startDate && new Date(s.createdAt) <= endDate
     );
     const periodPayments = transactions.filter(t =>
-      t.type === 'expense' && t.category === 'Supplier Payment' &&
+      t.type === 'expense' && t.category === 'Supplier Payment' && t.supplier_id === supplier.id &&
       !!t.created_at && new Date(t.created_at) >= startDate && new Date(t.created_at) <= endDate
     );
+    const periodCreditPurchases = transactions.filter(t =>
+      t.type === 'expense' && t.category === 'Credit Purchase' && t.supplier_id === supplier.id &&
+      !!t.created_at && new Date(t.created_at) >= startDate && new Date(t.created_at) <= endDate
+    );
+    const periodCreditPurchasesInventoryItems = inventoryItems.filter(i =>
+      i.supplier_id === supplier.id && !!i.created_at && new Date(i.created_at) >= startDate && new Date(i.created_at) <= endDate
+    );
+    const creditPurchasesInventoryBills = inventoryBills.filter(b => b.type === 'credit');
+    console.log(creditPurchasesInventoryBills,'creditPurchasesInventoryBills 1 ');
+    console.log(periodCreditPurchasesInventoryItems,'creditPurchasesInventoryBills 2');
 
+    periodCreditPurchasesInventoryItems.forEach(item => {
+      const batch = creditPurchasesInventoryBills.find(b => b.id === item.batch_id);
+      item.batchId = batch?.id || item.id;
+    });
     type RawEvent = {
       id: string;
       date: string;
-      kind: 'commission' | 'payment';
+      kind: 'commission' | 'payment' | 'credit_purchase';
       currency: 'USD' | 'LBP';
       amount: number;
       delta: number;
@@ -416,8 +433,9 @@ export class AccountStatementService {
 
     const commissionEvents: RawEvent[] = periodSales.map(sale => {
       const product = products.find(p => p.id === sale.productId);
-      const invBill = inventoryBills.find(i => i.id === sale.inventoryItemId);
-      const commissionRate = invBill?.commission_rate ? Number(invBill.commission_rate) : 0.1;
+      const invItem = inventoryItems.find(ii => ii.id === sale.inventoryItemId);
+      const bill = invItem ? inventoryBills.find(b => b.id === invItem.batchId) : undefined;
+      const commissionRate = bill?.commission_rate !== undefined && bill?.commission_rate !== null ? Number(bill.commission_rate) : 10;
       const amount = (sale.totalPrice * commissionRate) / 100;
       return {
         id: sale.id,
@@ -446,11 +464,24 @@ export class AccountStatementService {
       delta: -t.amount
     }));
 
-    const events: RawEvent[] = [...commissionEvents, ...paymentEvents].sort((a, b) => {
+    const creditPurchaseEvents: RawEvent[] = periodCreditPurchases.map(t => ({
+      id: t.id,
+      date: t.created_at,
+      kind: 'credit_purchase',
+      currency: t.currency,
+      amount: t.amount,
+      delta: t.amount // Credit purchases increase what we owe (positive delta)
+    }));
+
+    const events: RawEvent[] = [...commissionEvents, ...paymentEvents, ...creditPurchaseEvents].sort((a, b) => {
       const da = new Date(a.date).getTime();
       const db = new Date(b.date).getTime();
       if (da !== db) return da - db;
-      if (a.kind !== b.kind) return a.kind === 'commission' ? -1 : 1;
+      if (a.kind !== b.kind) {
+        // Sort order: commission, credit_purchase, payment
+        const order = { commission: 0, credit_purchase: 1, payment: 2 };
+        return order[a.kind] - order[b.kind];
+      }
       return a.id.localeCompare(b.id);
     });
 
@@ -480,16 +511,16 @@ export class AccountStatementService {
           date: ev.date,
           type: 'income',
           description: viewMode === 'summary' ? `Commission (${ev.commissionRate ?? 0}%)` : `Commission: ${ev.productName || '-'} (${ev.commissionRate ?? 0}%)`,
-          quantity: 0,
-          weight: 0,
-          price: 0,
+          quantity: ev.quantity || 0,
+          weight: ev.weight || 0,
+          price: ev.unitPrice || 0,
           amount: ev.amount,
           currency: 'LBP',
           balanceAfter: runningLBP,
           reference: `SALE-${ev.id.slice(-8)}`,
           productDetails
         });
-      } else {
+      } else if (ev.kind === 'payment') {
         statementTransactions.push({
           id: ev.id,
           date: ev.date,
@@ -504,13 +535,105 @@ export class AccountStatementService {
           reference: undefined,
           paymentMethod: 'Payment Sent'
         });
+
+      } else if (ev.kind === 'credit_purchase') {
+        // For credit purchases, we need to find related inventory items
+        // Since there's no direct link, we'll find items from the same supplier around the same time
+        const transactionDate = new Date(ev.date);
+        const timeWindow = 24 * 60 * 60 * 1000; // 24 hours window
+
+        const relatedInventoryItems = periodCreditPurchasesInventoryItems.filter(item => {
+          const itemDate = new Date(item.createdAt);
+          const timeDiff = Math.abs(itemDate.getTime() - transactionDate.getTime());
+          return timeDiff <= timeWindow;
+        });
+        if (viewMode === 'detailed' && relatedInventoryItems.length > 0) {
+          // Create individual transaction for each inventory item
+          relatedInventoryItems.forEach((inventoryItem, index) => {
+            const product = products.find(p => p.id === inventoryItem.productId);
+            const productDetails: StatementProductDetail[] = [{
+              productId: inventoryItem.productId,
+              productName: product?.name || 'Unknown Product',
+              quantity: inventoryItem.quantity || 0,
+              unit: inventoryItem.unit || 'piece',
+              unitPrice: inventoryItem.price || 0,
+              totalPrice: (inventoryItem.quantity || 0) * (inventoryItem.price || 0),
+              weight: inventoryItem.weight || 0,
+              commissionRate: ev.commissionRate,
+              commissionAmount: 0,
+              notes: ev.notes || undefined
+            }];
+
+            // Split the total amount proportionally among items
+            const itemAmount = relatedInventoryItems.length > 1 
+              ? (ev.amount * ((inventoryItem.quantity || 0) * (inventoryItem.price || 0))) / 
+                relatedInventoryItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.price || 0)), 0)
+              : ev.amount;
+
+            statementTransactions.push({
+              id: `${ev.id}-${index}`,
+              date: ev.date,
+              type: 'expense',
+              description: `Credit Purchase: ${product?.name || 'Unknown Product'}`,
+              quantity: inventoryItem.quantity || 0,
+              weight: inventoryItem.weight || 0,
+              price: inventoryItem.price || 0,
+              amount: itemAmount,
+              currency: ev.currency,
+              balanceAfter: ev.currency === 'USD' ? runningUSD : runningLBP,
+              reference: `CREDIT-${ev.id.slice(-8)}`,
+              paymentMethod: 'Credit Purchase',
+              productDetails
+            });
+          });
+        } else {
+          // Summary mode - show single transaction
+          const productDetails: StatementProductDetail[] = viewMode === 'detailed' && relatedInventoryItems.length > 0 ? relatedInventoryItems.map(inventoryItem => {
+            const product = products.find(p => p.id === inventoryItem.productId);
+            return {
+              productId: inventoryItem.productId,
+              productName: product?.name || 'Unknown Product',
+              quantity: inventoryItem.quantity || 0,
+              unit: inventoryItem.unit || 'piece',
+              unitPrice: inventoryItem.price || 0,
+              totalPrice: (inventoryItem.quantity || 0) * (inventoryItem.price || 0),
+              weight: inventoryItem.weight || 0,
+              commissionRate: ev.commissionRate,
+              commissionAmount: 0,
+              notes: ev.notes || undefined
+            };
+          }) : [];
+
+          let description = 'Credit Purchase';
+          if (relatedInventoryItems.length > 0) {
+            description = `Credit Purchase: ${relatedInventoryItems.length} items`;
+          }
+
+          statementTransactions.push({
+            id: ev.id,
+            date: ev.date,
+            type: 'expense',
+            description,
+            quantity: 0,
+            weight: 0,
+            price: 0,
+            amount: ev.amount,
+            currency: ev.currency,
+            balanceAfter: ev.currency === 'USD' ? runningUSD : runningLBP,
+            reference: `CREDIT-${ev.id.slice(-8)}`,
+            paymentMethod: 'Credit Purchase',
+            productDetails
+          });
+        }
       }
     }
 
     const totals = {
       commissionsLBP: commissionEvents.reduce((s, e) => s + e.amount, 0),
       paymentsUSD: paymentEvents.filter(e => e.currency === 'USD').reduce((s, e) => s + e.amount, 0),
-      paymentsLBP: paymentEvents.filter(e => e.currency === 'LBP').reduce((s, e) => s + e.amount, 0)
+      paymentsLBP: paymentEvents.filter(e => e.currency === 'LBP').reduce((s, e) => s + e.amount, 0),
+      creditPurchasesUSD: creditPurchaseEvents.filter(e => e.currency === 'USD').reduce((s, e) => s + e.amount, 0),
+      creditPurchasesLBP: creditPurchaseEvents.filter(e => e.currency === 'LBP').reduce((s, e) => s + e.amount, 0)
     };
 
     return { statementTransactions, ending: { USD: runningUSD, LBP: runningLBP }, totals };
@@ -579,6 +702,7 @@ export class AccountStatementService {
   public generateSupplierStatement(
     supplier: Supplier,
     sales: SaleItem[],
+    inventoryItems: InventoryItem[],
     transactions: Transaction[],
     products: Product[],
     inventoryBills: inventory_bills[],
@@ -594,6 +718,7 @@ export class AccountStatementService {
       sales,
       transactions,
       inventoryBills,
+      inventoryItems,
       startDate
     );
 
@@ -606,6 +731,7 @@ export class AccountStatementService {
       startDate,
       endDate,
       viewMode,
+      inventoryItems,
       openingBalance
     );
 

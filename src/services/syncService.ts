@@ -18,7 +18,7 @@ const SYNC_CONFIG = {
 // CRITICAL: Order matters for foreign key dependencies
 const SYNC_TABLES = [
   // Store configuration (no dependencies)
-  'stores',
+  // 'stores',
   
   // Core entities (no dependencies)
   'products',

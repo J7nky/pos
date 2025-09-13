@@ -46,8 +46,8 @@ export default function Settings() {
   
   const { t, language, setLanguage } = useI18n();
 
-  const [tempThreshold, setTempThreshold] = useState(lowStockThreshold.toString());
-  const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate.toString());
+  const [tempThreshold, setTempThreshold] = useState(lowStockThreshold?.toString() || '10');
+  const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate?.toString() || '10');
   const [tempCurrency, setTempCurrency] = useState<'USD' | 'LBP'>(currency);
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -231,7 +231,7 @@ export default function Settings() {
                   <span className="text-gray-600">{t('settings.units')}</span>
                   <button
                     onClick={handleThresholdSave}
-                    disabled={tempThreshold === lowStockThreshold.toString()}
+                    disabled={tempThreshold === (lowStockThreshold?.toString() || '10')}
                     className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
                   >
                     <Save className="w-4 h-4 mr-2" />
@@ -270,7 +270,7 @@ export default function Settings() {
                 <span className="text-gray-600">%</span>
                 <button
                   onClick={handleCommissionRateSave}
-                  disabled={tempCommissionRate === defaultCommissionRate.toString()}
+                  disabled={tempCommissionRate === (defaultCommissionRate?.toString() || '10')}
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
                 >
                   <Save className="w-4 h-4 mr-2" />

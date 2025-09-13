@@ -71,7 +71,7 @@ export class InventoryPurchaseService {
         case 'credit':
           return await this.processCreditPurchase(data, items, totalAmount, fees);
         case 'commission':
-          return await this.processCommissionPurchase(data, items, totalAmount, fees);
+          return await this.processCommissionPurchase(data, items, fees);
         default:
           throw new Error(`Unsupported purchase type: ${data.type}`);
       }
@@ -124,10 +124,10 @@ export class InventoryPurchaseService {
     
     try {
       // For cash purchases, always use "Trade" as supplier
-      const tradeSupplierId = await this.getOrCreateTradeSupplier(data.store_id);
+      await this.getOrCreateTradeSupplier(data.store_id);
       
       // Update cash drawer with the total amount (deduct)
-      const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForExpense({
+      await cashDrawerUpdateService.updateCashDrawerForExpense({
         amount: totalAmount,
         currency: 'USD',
         storeId: data.store_id,
@@ -154,7 +154,7 @@ export class InventoryPurchaseService {
   }
 
   /**
-   * Process credit purchase - add to supplier balance, deduct fees from cash drawer
+   * Process credit purchase - add to supplier balance, deduct fees from cash drawer, record transaction
    */
   private async processCreditPurchase(
     data: InventoryPurchaseData, 
@@ -168,18 +168,38 @@ export class InventoryPurchaseService {
       // Add total amount to supplier balance (we owe them)
       const supplier = await db.suppliers.get(data.supplier_id);
       if (supplier) {
-        const currentBalance = supplier.usd_balance || 0;
+        const currentBalance = supplier.lb_balance || 0;
         await db.suppliers.update(data.supplier_id, {
-          usd_balance: currentBalance + totalAmount,
+          lb_balance: currentBalance + totalAmount,
           updated_at: new Date().toISOString(),
           _synced: false
         });
       }
 
+      // Create transaction record for credit purchase (appears in account statement)
+      const creditPurchaseTransaction = {
+        id: transactionId,
+        type: 'expense' as const,
+        category: 'Credit Purchase',
+        amount: totalAmount,
+        currency: 'LBP' as const,
+        description: `Credit purchase - ${items.length} items from ${supplier?.name || 'Supplier'}`,
+        reference: `CREDIT-${Date.now()}`,
+        store_id: data.store_id,
+        created_by: data.created_by,
+        created_at: new Date().toISOString(),
+        supplier_id: data.supplier_id,
+        customer_id: null,
+        _synced: false
+      };
+
+      // Store the transaction in the database
+      await db.transactions.add(creditPurchaseTransaction);
+
       // Deduct only fees from cash drawer (supplier not responsible for fees)
       let cashDrawerImpact = 0;
       if (fees.total > 0) {
-        const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForExpense({
+        await cashDrawerUpdateService.updateCashDrawerForExpense({
           amount: fees.total,
           currency: 'USD',
           storeId: data.store_id,
@@ -190,10 +210,6 @@ export class InventoryPurchaseService {
         });
         cashDrawerImpact = -fees.total;
       }
-
-      // Transaction will be created by cashDrawerUpdateService for fees only
-
-      // Fees transaction will be created by cashDrawerUpdateService
 
       return {
         success: true,
@@ -216,7 +232,6 @@ export class InventoryPurchaseService {
   private async processCommissionPurchase(
     data: InventoryPurchaseData, 
     items: any[], 
-    totalAmount: number, 
     fees: any
   ): Promise<PurchaseTransactionResult> {
     const transactionId = createId();
@@ -225,7 +240,7 @@ export class InventoryPurchaseService {
       // For commission purchases, only deduct fees from cash drawer
       let cashDrawerImpact = 0;
       if (fees.total > 0) {
-        const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForExpense({
+        await cashDrawerUpdateService.updateCashDrawerForExpense({
           amount: fees.total,
           currency: 'USD',
           storeId: data.store_id,
