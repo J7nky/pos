@@ -192,6 +192,28 @@ export default function Customers() {
     const isCustomer = entityType === 'customer';
 
     try {
+      // For supplier payments, check cash drawer balance BEFORE processing
+      if (!isCustomer) {
+        const safeAmount = getSafeAmount(amount, currency);
+        const currentBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile?.store_id || '');
+        
+        // Convert payment amount to store currency for comparison
+        const storeCurrency = await cashDrawerUpdateService.getStorePreferredCurrency(userProfile?.store_id || '');
+        const normalizedPaymentAmount = cashDrawerUpdateService.normalizeAmountToStoreCurrency(
+          safeAmount.amount,
+          currency,
+          storeCurrency
+        );
+
+        if (normalizedPaymentAmount > currentBalance) {
+          showToast(
+            `Insufficient cash drawer balance. Payment amount: ${currency} ${Number(amount).toLocaleString()}, Available balance: ${storeCurrency} ${currentBalance.toLocaleString()}`,
+            'error'
+          );
+          return false;
+        }
+      }
+
       // Use the ERP Financial Service to process the payment
       const { erpFinancialService } = await import('../services/erpFinancialService');
 
@@ -296,6 +318,8 @@ export default function Customers() {
           errorMessage = 'Network error. Please check your connection and try again.';
         } else if (err.message.includes('permission') || err.message.includes('unauthorized')) {
           errorMessage = 'You do not have permission to process this payment.';
+        } else if (err.message.includes('Insufficient funds in cash drawer')) {
+          errorMessage = err.message; // Use the detailed message from cash drawer service
         } else if (err.message.includes('balance') || err.message.includes('insufficient')) {
           errorMessage = 'Insufficient funds or balance error.';
         } else if (err.message.includes('currency')) {

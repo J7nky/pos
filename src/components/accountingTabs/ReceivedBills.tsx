@@ -10,8 +10,10 @@ import {
   AlertCircle,
   ChevronRight,
   X,
-  Edit
+  Edit,
+  Scale
 } from 'lucide-react';
+import WeightComparisonReport from '../WeightComparisonReport';
 
 type ReceivedBillsProps = {
   inventory: any[];
@@ -56,6 +58,7 @@ export default function ReceivedBills({
   const [batchEditForm, setBatchEditForm] = useState<{ porterage?: string; transfer_fee?: string; notes?: string; commission_rate?: string }>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [closedBillIds, setClosedBillIds] = useState<Set<string>>(new Set());
+  const [showWeightComparison, setShowWeightComparison] = useState(false);
 
 
   const getReceivedBills = useMemo(() => {
@@ -730,6 +733,17 @@ export default function ReceivedBills({
                               <FileText className="w-3.5 h-3.5 text-gray-500" />
                               <span>Details</span>
                             </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedReceivedBill(group.items[0]);
+                                setShowWeightComparison(true);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                            >
+                              <Scale className="w-3.5 h-3.5 text-gray-500" />
+                              <span>Weight Analysis</span>
+                            </button>
                           </>
                         ) : (
                           <>
@@ -752,6 +766,17 @@ export default function ReceivedBills({
                             >
                               <Activity className="w-3.5 h-3.5 text-gray-500" />
                               <span>Sales Logs</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedReceivedBill(group.items[0]);
+                                setShowWeightComparison(true);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                            >
+                              <Scale className="w-3.5 h-3.5 text-gray-500" />
+                              <span>Weight Analysis</span>
                             </button>
                           </>
                         )}
@@ -818,6 +843,16 @@ export default function ReceivedBills({
                                         >
                                           <Activity className="w-3.5 h-3.5 text-gray-500" />
                                           <span>Sales Logs</span>
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setSelectedReceivedBill(bill);
+                                            setShowWeightComparison(true);
+                                          }}
+                                          className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                                        >
+                                          <Scale className="w-3.5 h-3.5 text-gray-500" />
+                                          <span>Weight Analysis</span>
                                         </button>
                                       </div>
                                     </td>
@@ -969,6 +1004,10 @@ export default function ReceivedBills({
               )}
             </div>
             <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+              <button onClick={() => setShowWeightComparison(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+                <Scale className="w-4 h-4" />
+                Weight Analysis
+              </button>
               <button onClick={() => handleViewReceivedBillSalesLogs(selectedReceivedBill)} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">View Sales Logs</button>
               <button onClick={() => setShowReceivedBillDetails(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">Close</button>
             </div>
@@ -1053,6 +1092,40 @@ export default function ReceivedBills({
             });
           }}
         />
+      )}
+
+      {/* Weight Comparison Modal */}
+      {showWeightComparison && selectedReceivedBill && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900">Weight Analysis</h2>
+                <button onClick={() => setShowWeightComparison(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <p className="text-sm text-gray-600 mt-1">
+                {selectedReceivedBill.productName} - {selectedReceivedBill.supplierName}
+              </p>
+            </div>
+            <div className="p-6">
+              <WeightComparisonReport
+                productId={selectedReceivedBill.productId}
+                supplierId={selectedReceivedBill.supplierId}
+                billId={selectedReceivedBill.batchId}
+              />
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button 
+                onClick={() => setShowWeightComparison(false)} 
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Removed parent-level Close Bill modal. The Sales Logs modal now manages its own confirmation modal. */}
