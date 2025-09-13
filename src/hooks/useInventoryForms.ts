@@ -88,7 +88,7 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
   useEffect(() => {
     if (receiveForm.type === 'commission' && receiveForm.supplier_id) {
       // Always use the global default commission rate
-      const expectedRate = defaultCommissionRate.toString();
+      const expectedRate = defaultCommissionRate?.toString() || '10';
       if (receiveForm.commission_rate !== expectedRate) {
         setReceiveForm(prev => ({ ...prev, commission_rate: expectedRate }));
       }
@@ -179,4 +179,5 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
     resetReceiveForm,
   };
 };
+
 

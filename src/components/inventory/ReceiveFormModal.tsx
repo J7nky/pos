@@ -106,10 +106,13 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           }
         }
         
-        // Credit purchase validation - requires valid supplier
+        // Credit purchase validation - requires valid supplier and price
         if (form.type === 'credit') {
           if (!form.supplier_id) {
             errors.supplier_id = 'Supplier is required for credit purchases.';
+          }
+          if (!item || !item.price || isNaN(Number(item.price)) || Number(item.price) <= 0) {
+            errors[`price_${pid}`] = 'Price is required and must be greater than 0 for credit purchases.';
           }
         }
       }
@@ -155,7 +158,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           received_quantity: parseInt(bi.quantity),
           unit: bi.unit,
           weight: bi.weight ? parseFloat(bi.weight) : undefined,
-          price: form.type === 'cash' && bi.price ? parseFloat(bi.price) : undefined,
+          price: (form.type === 'cash' || form.type === 'credit') && bi.price ? parseFloat(bi.price) : undefined,
           selling_price: bi.selling_price ? parseFloat(bi.selling_price) : undefined,
           status: form.status || undefined,
         };
