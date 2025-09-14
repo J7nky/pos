@@ -84,14 +84,16 @@ export interface inventory_bills { id: string;
   created_at:string;
   notes?:string;
   commission_rate?:string;
-  plastic_fee?:string
+  plastic_fee?:string;
+  type:string
   }
 
-// Unified SaleItem interface - single source of truth
-export interface SaleItem {
+// BillLineItem interface - maps directly to bill_line_items table
+export interface BillLineItem {
   // Core identifiers
   id: string;
   storeId: string;
+  billId: string;
   inventoryItemId: string;
   productId: string;
   supplierId: string;
@@ -101,7 +103,7 @@ export interface SaleItem {
   quantity: number;
   weight?: number;
   unitPrice: number;
-  totalPrice: number; // Calculated field for UI
+  lineTotal: number; // Maps to line_total in database
   receivedValue: number; // Amount actually received
   
   // Transaction details
@@ -120,8 +122,8 @@ export interface SaleItem {
   deleted?: boolean;
 }
 
-// Cart item - partial SaleItem for items being added to cart
-export interface CartItem extends Omit<SaleItem, 'id' | 'createdAt' | 'createdBy' | 'receivedValue'> {
+// Cart item - partial BillLineItem for items being added to cart
+export interface CartItem extends Omit<BillLineItem, 'id' | 'createdAt' | 'createdBy' | 'receivedValue'> {
   id?: string; // Optional for new cart items
   receivedValue?: number; // Optional until checkout
   createdAt?: string;
@@ -129,44 +131,52 @@ export interface CartItem extends Omit<SaleItem, 'id' | 'createdAt' | 'createdBy
 }
 
 // Database transformation types for Supabase integration
-export type SaleItemDbRow = {
+export type BillLineItemDbRow = {
   id: string;
   store_id: string;
-  inventory_item_id: string;
+  bill_id: string;
   product_id: string;
+  product_name: string;
   supplier_id: string;
-  customer_id: string | null;
+  supplier_name: string;
+  inventory_item_id: string | null;
   quantity: number;
-  weight: number | null;
   unit_price: number;
-  received_value: number;
-  payment_method: 'cash' | 'card' | 'credit';
+  line_total: number;
+  weight: number | null;
   notes: string | null;
-  created_at: string;
+  line_order: number;
+  payment_method: 'cash' | 'card' | 'credit';
+  customer_id: string | null;
   created_by: string;
+  received_value: number;
+  created_at: string;
+  updated_at: string;
 };
 
-export type SaleItemDbInsert = Omit<SaleItemDbRow, 'id' | 'created_at'> & {
+export type BillLineItemDbInsert = Omit<BillLineItemDbRow, 'id' | 'created_at' | 'updated_at'> & {
   id?: string;
   created_at?: string;
+  updated_at?: string;
 };
 
-export type SaleItemDbUpdate = Partial<Omit<SaleItemDbRow, 'id' | 'created_at' | 'store_id' | 'created_by'>>;
+export type BillLineItemDbUpdate = Partial<Omit<BillLineItemDbRow, 'id' | 'created_at' | 'updated_at' | 'store_id' | 'created_by'>>;
 
 // Type transformation utilities
-export const SaleItemTransforms = {
-  // Convert from database row to frontend SaleItem
-  fromDbRow: (dbRow: SaleItemDbRow): SaleItem => ({
+export const BillLineItemTransforms = {
+  // Convert from database row to frontend BillLineItem
+  fromDbRow: (dbRow: BillLineItemDbRow): BillLineItem => ({
     id: dbRow.id,
     storeId: dbRow.store_id,
-    inventoryItemId: dbRow.inventory_item_id,
+    billId: dbRow.bill_id,
+    inventoryItemId: dbRow.inventory_item_id || '',
     productId: dbRow.product_id,
     supplierId: dbRow.supplier_id,
     customerId: dbRow.customer_id || undefined,
     quantity: dbRow.quantity,
     weight: dbRow.weight || undefined,
     unitPrice: dbRow.unit_price,
-    totalPrice: dbRow.quantity * dbRow.unit_price, // Calculate total
+    lineTotal: dbRow.line_total,
     receivedValue: dbRow.received_value,
     paymentMethod: dbRow.payment_method,
     notes: dbRow.notes || undefined,
@@ -176,35 +186,40 @@ export const SaleItemTransforms = {
     deleted: false,
   }),
 
-  // Convert from frontend SaleItem to database insert
-  toDbInsert: (saleItem: SaleItem): SaleItemDbInsert => ({
-    id: saleItem.id,
-    store_id: saleItem.storeId,
-    inventory_item_id: saleItem.inventoryItemId,
-    product_id: saleItem.productId,
-    supplier_id: saleItem.supplierId,
-    customer_id: saleItem.customerId || null,
-    quantity: saleItem.quantity,
-    weight: saleItem.weight || null,
-    unit_price: saleItem.unitPrice,
-    received_value: saleItem.receivedValue,
-    payment_method: saleItem.paymentMethod,
-    notes: saleItem.notes || null,
-    created_at: saleItem.createdAt,
-    created_by: saleItem.createdBy,
+  // Convert from frontend BillLineItem to database insert
+  toDbInsert: (billLineItem: BillLineItem): BillLineItemDbInsert => ({
+    id: billLineItem.id,
+    store_id: billLineItem.storeId,
+    bill_id: billLineItem.billId,
+    product_id: billLineItem.productId,
+    product_name: '', // Will be populated from product lookup
+    supplier_id: billLineItem.supplierId,
+    supplier_name: '', // Will be populated from supplier lookup
+    inventory_item_id: billLineItem.inventoryItemId || null,
+    quantity: billLineItem.quantity,
+    unit_price: billLineItem.unitPrice,
+    line_total: billLineItem.lineTotal,
+    weight: billLineItem.weight || null,
+    notes: billLineItem.notes || null,
+    line_order: 1, // Default order
+    payment_method: billLineItem.paymentMethod,
+    customer_id: billLineItem.customerId || null,
+    created_by: billLineItem.createdBy,
+    received_value: billLineItem.receivedValue,
   }),
 
-  // Convert from frontend SaleItem to database update
-  toDbUpdate: (updates: Partial<SaleItem>): SaleItemDbUpdate => {
-    const dbUpdate: SaleItemDbUpdate = {};
+  // Convert from frontend BillLineItem to database update
+  toDbUpdate: (updates: Partial<BillLineItem>): BillLineItemDbUpdate => {
+    const dbUpdate: BillLineItemDbUpdate = {};
     
-    if (updates.inventoryItemId !== undefined) dbUpdate.inventory_item_id = updates.inventoryItemId;
+    if (updates.inventoryItemId !== undefined) dbUpdate.inventory_item_id = updates.inventoryItemId || null;
     if (updates.productId !== undefined) dbUpdate.product_id = updates.productId;
     if (updates.supplierId !== undefined) dbUpdate.supplier_id = updates.supplierId;
     if (updates.customerId !== undefined) dbUpdate.customer_id = updates.customerId || null;
     if (updates.quantity !== undefined) dbUpdate.quantity = updates.quantity;
     if (updates.weight !== undefined) dbUpdate.weight = updates.weight || null;
     if (updates.unitPrice !== undefined) dbUpdate.unit_price = updates.unitPrice;
+    if (updates.lineTotal !== undefined) dbUpdate.line_total = updates.lineTotal;
     if (updates.receivedValue !== undefined) dbUpdate.received_value = updates.receivedValue;
     if (updates.paymentMethod !== undefined) dbUpdate.payment_method = updates.paymentMethod;
     if (updates.notes !== undefined) dbUpdate.notes = updates.notes || null;
@@ -212,13 +227,15 @@ export const SaleItemTransforms = {
     return dbUpdate;
   },
 
-  // Convert CartItem to SaleItem (for checkout)
-  fromCartItem: (cartItem: CartItem, id: string, createdAt: string, createdBy: string): SaleItem => ({
+  // Convert CartItem to BillLineItem (for checkout)
+  fromCartItem: (cartItem: CartItem, id: string, billId: string, createdAt: string, createdBy: string): BillLineItem => ({
     ...cartItem,
     id,
+    billId,
     createdAt,
     createdBy,
-    receivedValue: cartItem.receivedValue || cartItem.totalPrice, // Default to totalPrice if not set
+    lineTotal: cartItem.lineTotal || (cartItem.quantity * cartItem.unitPrice),
+    receivedValue: cartItem.receivedValue || cartItem.lineTotal || (cartItem.quantity * cartItem.unitPrice),
     synced: false,
     deleted: false,
   }),

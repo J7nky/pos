@@ -30,8 +30,7 @@ const SYNC_TABLES = [
   'inventory_bills',
   'inventory_items',
   
-  // Sales (depends on products, suppliers, customers)
-  'sale_items',
+  
   'transactions',
   
   // Bills (depends on customers, users)
@@ -1450,21 +1449,21 @@ export class SyncService {
       }
     }
 
-    const tablesWithoutUpdatedAt = ['inventory_items', 'sale_items', 'transactions', 'inventory_bills'];
+    const tablesWithoutUpdatedAt = ['inventory_items', 'transactions', 'inventory_bills'];
     
     if (tablesWithoutUpdatedAt.includes(tableName)) {
       delete cleanRecord.updated_at;
     }
     
     // Handle sale_items specific field cleanup
-    if (tableName === 'sale_items') {
+    if (tableName === 'bill_line_items') {
       // Ensure required fields are present and valid
       if (!cleanRecord.inventory_item_id) {
         cleanRecord.inventory_item_id = null; // Use null for UUID fields, not empty string
       }
       if (!cleanRecord.created_by) {
         // Instead of filtering out, log the issue and use a fallback
-        console.warn(`⚠️ Sale item ${cleanRecord.id} missing created_by field, using fallback`);
+        console.warn(`⚠️ Bill line item ${cleanRecord.id} missing created_by field, using fallback`);
         cleanRecord.created_by = '00000000-0000-0000-0000-000000000000'; // Fallback UUID
       }
       if (!cleanRecord.customer_id) {
@@ -1479,16 +1478,17 @@ export class SyncService {
       // Remove fields that don't exist in Supabase schema
       delete cleanRecord.tax_amount;
       delete cleanRecord.discount_amount;
-      delete cleanRecord.inventory_item_id; // Remove this field as it doesn't exist in bills table
+      delete cleanRecord.inventoryItemId; // Remove this field as it doesn't exist in bills table
       delete cleanRecord.due_date;
       delete cleanRecord.status;
       delete cleanRecord.last_modified_by;
       delete cleanRecord.last_modified_at;
       
       // CRITICAL: Remove any line item fields that might have been incorrectly added to bills
-      const lineItemFields = ['product_id', 'supplier_id', 'quantity', 'unit_price', 'line_total', 'weight', 'line_order'];
+      const lineItemFields = ['productId', 'supplierId', 'quantity', 'unitPrice', 'lineTotal', 'weight', 'line_order'];
       lineItemFields.forEach(field => {
         if (cleanRecord[field] !== undefined) {
+          console.warn(`🚫 Removing line item field '${field}' from bills data:`, cleanRecord[field]);
           console.warn(`🚫 Removing line item field '${field}' from bills data:`, cleanRecord[field]);
           delete cleanRecord[field];
         }
@@ -1507,8 +1507,7 @@ export class SyncService {
     if (tableName === 'bill_line_items') {
       // Ensure required fields for bill line items
       // Remove fields that don't exist in Supabase schema
-      delete cleanRecord.created_by;
-      delete cleanRecord.customer_id;
+   
       
       if (!cleanRecord.product_name) {
         cleanRecord.product_name = 'Unknown Product';

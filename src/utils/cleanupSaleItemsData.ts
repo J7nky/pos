@@ -19,7 +19,7 @@ export async function cleanupSaleItemsReceivedQuantity(): Promise<{
     console.log('🧹 Starting cleanup of sale_items received_quantity fields...');
 
     // Get all sale_items records
-    const allSaleItems = await db.sale_items.toArray();
+    const allSaleItems = await db.bill_line_items.toArray();
     result.recordsFound = allSaleItems.length;
 
     console.log(`📊 Found ${allSaleItems.length} sale_items records to check`);
@@ -43,7 +43,7 @@ export async function cleanupSaleItemsReceivedQuantity(): Promise<{
         const { received_quantity, ...cleanItem } = item as any;
         
         // Update the record
-        await db.sale_items.update(item.id, {
+        await db.bill_line_items.update(item.id, {
           ...cleanItem,
           _synced: false // Mark as unsynced so it gets uploaded correctly
         });
@@ -93,7 +93,7 @@ export async function validateSaleItemsStructure(): Promise<{
   try {
     console.log('🔍 Validating sale_items data structure...');
 
-    const allSaleItems = await db.sale_items.toArray();
+    const allSaleItems = await db.bill_line_items.toArray();
     result.totalRecords = allSaleItems.length;
 
     // Expected fields for sale_items (matching Supabase schema)
@@ -250,7 +250,7 @@ export async function repairSaleItemsData(): Promise<{
   try {
     console.log('🔧 Starting repair of sale_items data...');
 
-    const allSaleItems = await db.sale_items.toArray();
+    const allSaleItems = await db.bill_line_items.toArray();
     result.recordsProcessed = allSaleItems.length;
 
     console.log(`📊 Found ${allSaleItems.length} sale_items records to process`);
@@ -414,7 +414,7 @@ export async function repairSaleItemsData(): Promise<{
           // Mark as unsynced so it gets uploaded with correct data
           repairedItem._synced = false;
           
-          await db.sale_items.update(item.id, repairedItem);
+          await db.bill_line_items.update(item.id, repairedItem);
           console.log(`🔧 Repaired sale_item ${item.id}`);
           result.recordsRepaired++;
         }

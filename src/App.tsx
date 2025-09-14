@@ -78,11 +78,11 @@ function App() {
   return (
     <I18nProvider>
       <SupabaseAuthProvider>
-        <SupabaseDataProvider>
-          <OfflineDataProvider>
+        <OfflineDataProvider>
+          <SupabaseDataProvider>
             <AppContent />
-          </OfflineDataProvider>
-        </SupabaseDataProvider>
+          </SupabaseDataProvider>
+        </OfflineDataProvider>
       </SupabaseAuthProvider>
     </I18nProvider>
   );

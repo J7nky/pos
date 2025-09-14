@@ -242,11 +242,11 @@ export class SupabaseService {
     }
   }
 
-  // Sale Items (since there's no sales table, we work directly with sale_items)
-  static async getSaleItems(storeId: any, limit?: number) {
+  // Bill Line Items (replaces sale_items functionality)
+  static async getBillLineItems(storeId: any, limit?: number) {
     try {
       let query = supabase
-        .from('sale_items')
+        .from('bill_line_items')
         .select(`
           *,
           products(name, category),
@@ -268,11 +268,11 @@ export class SupabaseService {
     }
   }
 
-  static async createSaleItem(item: any) {
+  static async createBillLineItem(item: any) {
     try {
       const cleanItem = cleanDataForSupabase(item);
       const { data, error } = await supabase
-        .from('sale_items')
+        .from('bill_line_items')
         .insert(cleanItem)
         .select()
         .single();
@@ -284,10 +284,21 @@ export class SupabaseService {
     }
   }
 
-  static async deleteSaleItem(id: any) {
+  // Legacy methods for backward compatibility
+  static async getSaleItems(storeId: any, limit?: number) {
+    console.warn('getSaleItems is deprecated - use getBillLineItems instead');
+    return this.getBillLineItems(storeId, limit);
+  }
+
+  static async createSaleItem(item: any) {
+    console.warn('createSaleItem is deprecated - use createBillLineItem instead');
+    return this.createBillLineItem(item);
+  }
+
+  static async deleteBillLineItem(id: any) {
     try {
       const { error } = await supabase
-        .from('sale_items')
+        .from('bill_line_items')
         .delete()
         .eq('id', id);
       if (error) throw error;
@@ -297,10 +308,16 @@ export class SupabaseService {
     }
   }
 
-  static async deleteSaleItemsByInventoryItem(inventoryItemId: any) {
+  // Legacy method for backward compatibility
+  static async deleteSaleItem(id: any) {
+    console.warn('deleteSaleItem is deprecated - use deleteBillLineItem instead');
+    return this.deleteBillLineItem(id);
+  }
+
+  static async deleteBillLineItemsByInventoryItem(inventoryItemId: any) {
     try {
       const { error } = await supabase
-        .from('sale_items')
+        .from('bill_line_items')
         .delete()
         .eq('inventory_item_id', inventoryItemId);
       if (error) throw error;
@@ -310,11 +327,17 @@ export class SupabaseService {
     }
   }
 
-    static async updateSaleItem(id: any, updates: any) {
+  // Legacy method for backward compatibility
+  static async deleteSaleItemsByInventoryItem(inventoryItemId: any) {
+    console.warn('deleteSaleItemsByInventoryItem is deprecated - use deleteBillLineItemsByInventoryItem instead');
+    return this.deleteBillLineItemsByInventoryItem(inventoryItemId);
+  }
+
+  static async updateBillLineItem(id: any, updates: any) {
     try {
       const cleanUpdates = cleanDataForSupabase(updates);
       const { data, error } = await supabase
-        .from('sale_items')
+        .from('bill_line_items')
         .update(cleanUpdates)
         .eq('id', id)
         .select()
@@ -325,6 +348,12 @@ export class SupabaseService {
     } catch (error) {
       handleSupabaseError(error);
     }
+  }
+
+  // Legacy method for backward compatibility
+  static async updateSaleItem(id: any, updates: any) {
+    console.warn('updateSaleItem is deprecated - use updateBillLineItem instead');
+    return this.updateBillLineItem(id, updates);
   }
 
   // Transactions

@@ -128,16 +128,16 @@ const Inventory: React.FC = () => {
   };
 
   const deleteInventoryItem = async (item: any) => {
-    await db.transaction('rw', [db.sale_items, db.inventory_items], async () => {
-      const relatedSaleItems = await db.sale_items.where('inventory_item_id').equals(item.id).toArray();
-      for (const si of relatedSaleItems) {
-        await db.softDelete('sale_items', si.id);
+    await db.transaction('rw', [db.bill_line_items, db.inventory_items], async () => {
+      const relatedBillLineItems = await db.bill_line_items.where('inventory_item_id').equals(item.id).toArray();
+      for (const bli of relatedBillLineItems) {
+        await db.softDelete('bill_line_items', bli.id);
       }
       await db.softDelete('inventory_items', item.id);
     });
 
     try {
-      await SupabaseService.deleteSaleItemsByInventoryItem(item.id);
+      await SupabaseService.deleteBillLineItemsByInventoryItem(item.id);
       await SupabaseService.deleteInventoryItem(item.id);
     } catch (err) {
       console.warn('Remote delete skipped or failed; will sync later:', err);
