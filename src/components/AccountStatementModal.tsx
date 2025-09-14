@@ -16,8 +16,8 @@ import {
   Info
 } from 'lucide-react';
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
-import { Customer, Supplier, Transaction, InventoryItem, Product, SaleItem } from '../types';
-import { LocalSaleItem } from '../lib/db';
+import { Customer, Supplier, Transaction, InventoryItem, Product,  } from '../types';
+import { BillLineItem } from '../lib/db';
 import Toast from './common/Toast';
 
 interface AccountStatementModalProps {
@@ -25,7 +25,7 @@ interface AccountStatementModalProps {
   onClose: () => void;
   entity: Customer | Supplier;
   entityType: 'customer' | 'supplier';
-  sales: LocalSaleItem[];
+  sales: BillLineItem[];
   transactions: Transaction[];
   products: Product[];
   inventory: InventoryItem[];
@@ -94,29 +94,30 @@ export default function AccountStatementModal({
         );
       } else {
         // Normalize LocalSaleItem[] to unified SaleItem[] for supplier statements
-        const normalizedSales: SaleItem[] = (sales as any[]).map((s: any) => ({
-          id: s.id,
-          storeId: s.store_id,
-          inventoryItemId: s.inventory_item_id,
-          productId: s.product_id,
-          supplierId: s.supplier_id,
-          customerId: s.customer_id || undefined,
-          quantity: s.quantity || 0,
-          weight: s.weight ?? undefined,
-          unitPrice: s.unit_price || 0,
-          totalPrice: (s.quantity || 0) * (s.unit_price || 0),
-          receivedValue: s.received_value || 0,
-          paymentMethod: s.payment_method,
-          notes: s.notes || undefined,
-          createdAt: s.created_at,
-          createdBy: s.created_by,
-          synced: s._synced ?? true,
-          deleted: s._deleted ?? false,
-        }));
+        // const normalizedSales: BillLineItem[] = (sales as any[]).map((s: any) => ({
+        //   id: s.id,
+        //   storeId: s.store_id,
+        //   inventoryItemId: s.inventory_item_id,
+        //   billId: s.bill_id,
+        //   productId: s.product_id,
+        //   supplierId: s.supplier_id,
+        //   customerId: s.customer_id || undefined,
+        //   quantity: s.quantity || 0,
+        //   weight: s.weight ?? undefined,
+        //   unitPrice: s.unit_price || 0,
+        //   totalPrice: (s.quantity || 0) * (s.unit_price || 0),
+        //   receivedValue: s.received_value || 0,
+        //   paymentMethod: s.payment_method,
+        //   notes: s.notes || undefined,
+        //   createdAt: s.created_at,
+        //   createdBy: s.created_by,
+        //   synced: s._synced ?? true,
+        //   deleted: s._deleted ?? false,
+        // }));
 
         newStatement = accountStatementService.generateSupplierStatement(
           entity as Supplier,
-          normalizedSales,
+          sales,
           inventory,
           transactions,
           products,

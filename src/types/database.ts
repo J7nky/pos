@@ -384,6 +384,10 @@ export interface Database {
           weight: number | null;
           notes: string | null;
           line_order: number;
+          payment_method: 'cash' | 'card' | 'credit';
+          customer_id: string | null;
+          created_by: string;
+          received_value: number;
           created_at: string;
           updated_at: string;
         };
@@ -402,6 +406,10 @@ export interface Database {
           weight?: number | null;
           notes?: string | null;
           line_order?: number;
+          payment_method: 'cash' | 'card' | 'credit';
+          customer_id?: string | null;
+          created_by: string;
+          received_value: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -420,6 +428,10 @@ export interface Database {
           weight?: number | null;
           notes?: string | null;
           line_order?: number;
+          payment_method?: 'cash' | 'card' | 'credit';
+          customer_id?: string | null;
+          created_by?: string;
+          received_value?: number;
           updated_at?: string;
         };
       };
@@ -514,53 +526,6 @@ export interface Database {
           created_at:string;
           type?:string
           notes?:string
-        };
-      };
-      sale_items: {
-        Row: {
-          id: string;
-          quantity: number;
-          inventory_item_id: string;
-          product_id: string;
-          supplier_id: string;
-          weight: number | null;
-          unit_price: number;
-          received_value: number;
-          payment_method: 'cash' | 'card' | 'credit';
-          notes: string | null;
-          created_at: string;
-          store_id: string;
-          customer_id: string | null;
-          created_by: string;
-        };
-        Insert: {
-          quantity: number;
-          id?: string;
-          inventory_item_id: string;
-          product_id: string;
-          supplier_id: string;
-          weight?: number | null;
-          unit_price: number;
-          received_value: number;
-          payment_method: 'cash' | 'card' | 'credit';
-          notes?: string | null;
-          created_at?: string;
-          store_id: string;
-          customer_id?: string | null;
-          created_by: string;
-        };
-        Update: {
-          id?: string;
-          quantity?: number;
-          inventory_item_id: string;
-          product_id?: string;
-          supplier_id?: string;
-          weight?: number | null;
-          unit_price?: number;
-          received_value?: number;
-          payment_method?: 'cash' | 'card' | 'credit';
-              notes?: string | null;
-          customer_id?: string | null;
         };
       };
       transactions: {
