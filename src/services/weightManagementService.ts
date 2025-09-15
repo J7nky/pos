@@ -567,3 +567,4 @@ export class WeightManagementService {
 }
 
 export const weightManagementService = WeightManagementService.getInstance();
+

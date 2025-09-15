@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthContext';
 import { OfflineDataProvider } from './contexts/OfflineDataContext';
-import { SupabaseDataProvider } from './contexts/SupabaseDataContext';
+// Removed SupabaseDataProvider - using OfflineDataProvider directly
 import SupabaseLogin from './components/SupabaseLogin';
 import Layout from './components/Layout';
 import Home from './components/Home';
@@ -79,9 +79,7 @@ function App() {
     <I18nProvider>
       <SupabaseAuthProvider>
         <OfflineDataProvider>
-          <SupabaseDataProvider>
-            <AppContent />
-          </SupabaseDataProvider>
+          <AppContent />
         </OfflineDataProvider>
       </SupabaseAuthProvider>
     </I18nProvider>

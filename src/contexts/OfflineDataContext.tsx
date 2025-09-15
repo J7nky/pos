@@ -17,11 +17,11 @@ import {
   createId,
 } from '../lib/db';
 import { syncService, SyncResult } from '../services/syncService';
-import { SupabaseService } from '../services/supabaseService';
+// Removed SupabaseService import - using offline-first approach only
 
 type Tables = Database['public']['Tables'];
 
-// Match exact SupabaseDataContext interface for seamless migration
+// Offline-first data context interface
 interface OfflineDataContextType {
   storeId: any;
   // Data - matching exact structure
@@ -79,7 +79,11 @@ interface OfflineDataContextType {
   addCustomer: (customer: Omit<Tables['customers']['Insert'], 'store_id'>) => Promise<void>;
   updateCustomer: (id: string, updates: Tables['customers']['Update']) => Promise<void>;
   updateSupplier: (id: string, updates: Tables['suppliers']['Update']) => Promise<void>;
+  updateProduct: (id: string, updates: Tables['products']['Update']) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
+  updateInventoryItem: (id: string, updates: Tables['inventory_items']['Update']) => Promise<void>;
+  deleteInventoryItem: (id: string) => Promise<void>;
   addInventoryBatch: (args: {
     supplier_id: string;
     created_by: string;
@@ -108,6 +112,9 @@ interface OfflineDataContextType {
   getBills: (filters?: any) => Promise<any[]>;
   getBillDetails: (billId: string) => Promise<any | null>;
   createBillAuditLog: (auditData: any) => Promise<void>;
+  
+  // Store operations
+  getStore: (storeId: string) => Promise<any | null>;
   
 
   deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
@@ -150,7 +157,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // console.log('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline);
 
-  // Data states - matching SupabaseDataContext structure
+  // Data states - offline-first structure
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
   const [suppliers, setSuppliers] = useState<Tables['suppliers']['Row'][]>([]);
   const [customers, setCustomers] = useState<Tables['customers']['Row'][]>([]);
@@ -227,31 +234,50 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           setDefaultCommissionRate(existingStore.preferred_commission_rate);
         }
       } else {
-        // Load from Supabase and save to IndexedDB
-        console.log('🔄 Loading store data from Supabase...');
-        const storeData = await SupabaseService.getStore(storeId);
-        
-        if (storeData) {
-          // Save to IndexedDB
-          await db.stores.put({
-            ...(storeData as any),
-            _synced: true,
-            _lastSyncedAt: new Date().toISOString()
-          });
-          
-          // Update local state
-          if ((storeData as any).preferred_currency) {
-            setCurrency((storeData as any).preferred_currency);
-          }
-          if ((storeData as any).preferred_commission_rate !== undefined) {
-            setDefaultCommissionRate((storeData as any).preferred_commission_rate);
-          }
-          
-          console.log('✅ Store data loaded and cached:', storeData);
-        }
+        // Store not found locally - will be synced when connection is available
+        console.log('📴 Store data not found locally - will sync when online');
+        // Use default values for now
+        setCurrency('USD');
+        setDefaultCommissionRate(10);
       }
     } catch (error) {
       console.error('❌ Error loading store data:', error);
+    }
+  };
+
+  // Initialize default exchange rates
+  const initializeExchangeRates = async () => {
+    try {
+      const existingRates = await db.exchange_rates.toArray();
+      
+      if (existingRates.length === 0) {
+        console.log('💱 Initializing default exchange rates...');
+        const now = new Date().toISOString();
+        
+        // Add default exchange rates
+        const defaultRates = [
+          { from_currency: 'USD', to_currency: 'LBP', rate: 89500 },
+          { from_currency: 'LBP', to_currency: 'USD', rate: 1 / 89500 },
+          { from_currency: 'USD', to_currency: 'USD', rate: 1 },
+          { from_currency: 'LBP', to_currency: 'LBP', rate: 1 }
+        ];
+        
+        for (const rate of defaultRates) {
+          await db.exchange_rates.add({
+            id: `rate_${rate.from_currency}_${rate.to_currency}_${Date.now()}`,
+            from_currency: rate.from_currency,
+            to_currency: rate.to_currency,
+            rate: rate.rate,
+            created_at: now,
+            updated_at: now,
+            _synced: false
+          });
+        }
+        
+        console.log('✅ Default exchange rates initialized');
+      }
+    } catch (error) {
+      console.error('❌ Error initializing exchange rates:', error);
     }
   };
 
@@ -260,6 +286,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (storeId) {
       loadStoreData();
       initializeData();
+      // initializeExchangeRates();
       // Check undo validity after data is loaded
       setTimeout(() => checkUndoValidity(), 1000);
     }
@@ -489,7 +516,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       console.log(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${saleItemsData.length} sale items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
 
-      // Transform data to match SupabaseDataContext structure
+      // Transform data for offline-first structure
       setProducts(productsData as Tables['products']['Row'][]);
       setSuppliers(suppliersData.map(s => ({ ...s, lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0 })) as Tables['suppliers']['Row'][]);
       setCustomers(customersData.map(c => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
@@ -870,7 +897,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           createdBy: currentUserId,
           customerId: cashSaleItems[0]?.customer_id || undefined,
           allowAutoSessionOpen: true
-        });
+        }, getStore);
 
         if (cashDrawerResult.success) {
           console.log(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
@@ -898,36 +925,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const now = new Date().toISOString();
     
-    // Try to update in Supabase first if online
-    if (isOnline) {
-      try {
-        const { SupabaseService } = await import('../services/supabaseService');
-        await SupabaseService.updateBill(billId, updates);
-        
-        // Create audit log in Supabase
-        const auditLog = {
-          bill_id: billId,
-          store_id: storeId,
-          action: 'update',
-          changed_by: changedBy,
-          change_reason: changeReason || null,
-          field_changed: Object.keys(updates).join(', '),
-          old_value: null,
-          new_value: JSON.stringify(updates),
-          created_at: now
-        };
-        
-        await SupabaseService.createBillAuditLog(auditLog);
-      } catch (error) {
-        console.warn('Failed to update bill in Supabase, falling back to local only:', error);
-      }
-    }
-    
+    // Pure offline-first approach - update local database only
     await db.transaction('rw', [db.bills, db.bill_audit_logs], async () => {
       await db.bills.update(billId, {
         ...updates,
         updated_at: now,
-        _synced: isOnline // Mark as synced if we successfully updated in Supabase
+        _synced: false // Mark as unsynced for background sync
       });
 
       // Create audit log
@@ -944,7 +947,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         ip_address: null,
         created_at: now,
         updated_at: now,
-        _synced: isOnline // Mark as synced if we successfully updated in Supabase
+        _synced: false // Mark as unsynced for background sync
       };
       
       await db.bill_audit_logs.add(auditLog);
@@ -964,38 +967,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const now = new Date().toISOString();
 
-    // Try to delete in Supabase first if online
-    if (isOnline) {
-      try {
-        const { SupabaseService } = await import('../services/supabaseService');
-        await SupabaseService.deleteBill(billId, softDelete);
-        
-        // Create audit log in Supabase
-        const auditLog = {
-          bill_id: billId,
-          store_id: storeId,
-          action: 'delete',
-          changed_by: deletedBy,
-          change_reason: deleteReason || null,
-          field_changed: 'status',
-          old_value: 'active',
-          new_value: softDelete ? 'cancelled' : 'deleted',
-          created_at: now
-        };
-        
-        await SupabaseService.createBillAuditLog(auditLog);
-      } catch (error) {
-        console.warn('Failed to delete bill in Supabase, falling back to local only:', error);
-      }
-    }
-
+    // Pure offline-first approach - delete from local database only
     await db.transaction('rw', [db.bills, db.bill_line_items, db.bill_audit_logs], async () => {
       if (softDelete) {
         // Soft delete - mark as deleted
         await db.bills.update(billId, {
           _deleted: true,
           updated_at: now,
-          _synced: isOnline // Mark as synced if we successfully deleted in Supabase
+          _synced: false // Mark as unsynced for background sync
         });
         
         // Also soft delete line items
@@ -1003,7 +982,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         for (const item of lineItems) {
           await db.bill_line_items.update(item.id, {
             _deleted: true,
-            _synced: isOnline // Mark as synced if we successfully deleted in Supabase
+            _synced: false // Mark as unsynced for background sync
           });
         }
       } else {
@@ -1026,7 +1005,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         ip_address: null,
         created_at: now,
         updated_at: now,
-        _synced: isOnline // Mark as synced if we successfully deleted in Supabase
+        _synced: false // Mark as unsynced for background sync
       };
       
       await db.bill_audit_logs.add(auditLog);
@@ -1040,36 +1019,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const getBills = async (filters?: any): Promise<any[]> => {
     if (!storeId) return [];
 
-    // Try to get bills from Supabase first if online
-    // if (isOnline) {
-    //   try {
-    //     const { SupabaseService } = await import('../services/supabaseService');
-    //     const supabaseBills = await SupabaseService.getBills(storeId, filters);
-    //     console.log('supabaseBills', supabaseBills);
-    //     if (supabaseBills && supabaseBills.length > 0) {
-    //       // Store Supabase bills in local database for offline access
-    //       for (const supabaseBill of supabaseBills) {
-    //         const existingBill = await db.bills.get(supabaseBill.id);
-    //         if (!existingBill) {
-    //           // Add new bill from Supabase
-    //           await db.bills.add({
-    //             ...supabaseBill,
-    //             _synced: true
-    //           });
-    //         } else if (existingBill.updated_at !== supabaseBill.updated_at) {
-    //           // Update existing bill with Supabase data
-    //           await db.bills.update(supabaseBill.id, {
-    //             ...supabaseBill,
-    //             _synced: true
-    //           });
-    //         }
-    //       }
-    //     }
-    //   } catch (error) {
-    //     console.warn('Failed to get bills from Supabase, using local data:', error);
-    //   }
-    // }
-
+    // Pure offline-first approach - read only from local database
     let query = db.bills.where('store_id').equals(storeId).filter(bill => !bill._deleted);
     
     // Apply filters if provided
@@ -1117,7 +1067,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const getBillDetails = async (billId: string): Promise<any | null> => {
     if (!storeId) return null;
 
-    // Get bill details from local database first (offline-first approach)
+    // Pure offline-first approach - read only from local database
     const bill = await db.bills.get(billId);
     if (!bill || bill._deleted) return null;
 
@@ -1139,60 +1089,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       audit_logs: auditLogs
     };
 
-    // If online and bill is not synced, try to sync in background
-    if (isOnline && !bill._synced) {
-      try {
-        const { SupabaseService } = await import('../services/supabaseService');
-        const supabaseBillDetails = await SupabaseService.getBillDetails(billId);
-        
-        if (supabaseBillDetails) {
-          // Update local bill with Supabase data
-          await db.bills.update(billId, {
-            ...(supabaseBillDetails as any),
-            _synced: true
-          });
-          
-          // Update line items
-          if ((supabaseBillDetails as any).bill_line_items) {
-            for (const lineItem of (supabaseBillDetails as any).bill_line_items) {
-              const existingItem = await db.bill_line_items.get(lineItem.id);
-              if (!existingItem) {
-                await db.bill_line_items.add({
-                  ...(lineItem as any),
-                  _synced: true
-                });
-              } else {
-                await db.bill_line_items.update(lineItem.id, {
-                  ...(lineItem as any),
-                  _synced: true
-                });
-              }
-            }
-          }
-          
-          // Update audit logs
-          if ((supabaseBillDetails as any).bill_audit_logs) {
-            for (const auditLog of (supabaseBillDetails as any).bill_audit_logs) {
-              const existingLog = await db.bill_audit_logs.get(auditLog.id);
-              if (!existingLog) {
-                await db.bill_audit_logs.add({
-                  ...(auditLog as any),
-                  _synced: true
-                });
-              } else {
-                await db.bill_audit_logs.update(auditLog.id, {
-                  ...(auditLog as any),
-                  _synced: true
-                });
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to sync bill details from Supabase:', error);
-      }
-    }
-
     return result;
   };
 
@@ -1211,6 +1107,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await refreshData();
     await updateUnsyncedCount();
     debouncedSync();
+  };
+
+  const getStore = async (storeId: string): Promise<any | null> => {
+    try {
+      // Pure offline-first approach - read only from local database
+      const store = await db.stores.get(storeId);
+      return store || null;
+    } catch (error) {
+      console.error('Error getting store from local database:', error);
+      return null;
+    }
   };
 
   // Cleanup timeout on unmount
@@ -1306,6 +1213,30 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     debouncedSync();
   };
 
+  const updateProduct = async (id: string, updates: Tables['products']['Update']): Promise<void> => {
+    await db.products.update(id, { ...updates, _synced: false });
+    await refreshData();
+    await updateUnsyncedCount();
+
+    // Reset auto-sync timer to ensure full undo window
+    resetAutoSyncTimer();
+    
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
+  };
+
+  const deleteProduct = async (id: string): Promise<void> => {
+    await db.products.update(id, { _deleted: true, _synced: false });
+    await refreshData();
+    await updateUnsyncedCount();
+
+    // Reset auto-sync timer to ensure full undo window
+    resetAutoSyncTimer();
+    
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
+  };
+
   const addInventoryItem = async (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
@@ -1332,6 +1263,39 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Reset auto-sync timer to ensure full undo window
     resetAutoSyncTimer();
 
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
+  };
+
+  const updateInventoryItem = async (id: string, updates: Tables['inventory_items']['Update']): Promise<void> => {
+    await db.inventory_items.update(id, { ...updates, _synced: false });
+    await refreshData();
+    await updateUnsyncedCount();
+
+    // Reset auto-sync timer to ensure full undo window
+    resetAutoSyncTimer();
+    
+    // Use debounced sync to batch rapid changes
+    debouncedSync();
+  };
+
+  const deleteInventoryItem = async (id: string): Promise<void> => {
+    // Get related bill line items and soft delete them first
+    await db.transaction('rw', [db.bill_line_items, db.inventory_items], async () => {
+      const relatedBillLineItems = await db.bill_line_items.where('inventory_item_id').equals(id).toArray();
+      for (const bli of relatedBillLineItems) {
+        await db.bill_line_items.update(bli.id, { _deleted: true, _synced: false });
+      }
+      // Soft delete the inventory item
+      await db.inventory_items.update(id, { _deleted: true, _synced: false });
+    });
+
+    await refreshData();
+    await updateUnsyncedCount();
+
+    // Reset auto-sync timer to ensure full undo window
+    resetAutoSyncTimer();
+    
     // Use debounced sync to batch rapid changes
     debouncedSync();
   };
@@ -1518,7 +1482,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       store_id: storeId,
       bill_number: `TEMP-${Date.now()}`,
       customer_id: items[0]?.customer_id || null,
-      customer_name: null,
       subtotal: items.reduce((sum, item) => sum + (item.received_value || item.unit_price * item.quantity), 0),
       total_amount: items.reduce((sum, item) => sum + (item.received_value || item.unit_price * item.quantity), 0),
       payment_method: items[0]?.payment_method || 'cash',
@@ -1676,7 +1639,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           createdBy: currentUserId,
           customerId: cashSaleItemsForDrawer[0]?.customer_id || undefined,
           allowAutoSessionOpen: true
-        });
+        }, getStore);
 
         if (cashDrawerResult.success) {
           console.log(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
@@ -2384,7 +2347,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addCustomer,
       updateCustomer,
       updateSupplier,
+      updateProduct,
+      deleteProduct,
       addInventoryItem,
+      updateInventoryItem,
+      deleteInventoryItem,
       addInventoryBatch,
       addSale,
       updateSale,
@@ -2402,6 +2369,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       getBills,
       getBillDetails,
       createBillAuditLog,
+      
+      // Store operations
+      getStore,
   
       deductInventoryQuantity,
       restoreInventoryQuantity,

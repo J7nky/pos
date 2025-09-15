@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
-import { SupabaseService } from '../../services/supabaseService';
 import { useCurrency } from '../../hooks/useCurrency';
 import SearchableSelect from '../common/SearchableSelect';
 import MoneyInput from '../common/MoneyInput';
@@ -49,7 +48,6 @@ interface Bill {
   id: string;
   bill_number: string;
   customer_id: string | null;
-  customer_name: string | null;
   subtotal: number;
   total_amount: number;
   payment_method: 'cash' | 'card' | 'credit';
@@ -112,6 +110,13 @@ export default function InventoryLogs() {
   const products = raw.products;
   const transactions = raw.transactions;
   const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus, getCashDrawerSessionDetails } = raw; // Add this line
+
+  // Helper function to get customer name
+  const getCustomerName = (customerId: string | null): string => {
+    if (!customerId) return 'Walk-in Customer';
+    const customer = customers.find(c => c.id === customerId);
+    return customer?.name || 'Walk-in Customer';
+  };
 
   // State
   const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' | 'cash-drawer'>('bills');
@@ -237,7 +242,6 @@ export default function InventoryLogs() {
     try {
       const updates = {
         customer_id: editForm.customer_id,
-        customer_name: editForm.customer_name,
         payment_method: editForm.payment_method,
         payment_status: editForm.payment_status,
         amount_paid: editForm.amount_paid || 0,
@@ -421,7 +425,7 @@ export default function InventoryLogs() {
       ...bills.map(bill => [
         bill.bill_number,
         new Date(bill.bill_date).toLocaleDateString(),
-        bill.customer_name || 'Walk-in Customer',
+        getCustomerName(bill.customer_id),
         bill.total_amount.toFixed(2),
         bill.payment_status,
         bill.status
@@ -706,7 +710,7 @@ export default function InventoryLogs() {
                         <div className="flex items-center">
                           <User className="w-4 h-4 text-gray-400 mr-2" />
                           <span className="text-sm text-gray-900">
-                            {bill.customer_name || 'Walk-in Customer'}
+                            {getCustomerName(bill.customer_id)}
                           </span>
                         </div>
                       </td>
@@ -1172,7 +1176,7 @@ export default function InventoryLogs() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Customer:</span>
-                      <span className="font-medium">{selectedBill.customer_name || 'Walk-in Customer'}</span>
+                      <span className="font-medium">{getCustomerName(selectedBill.customer_id)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Payment Method:</span>
@@ -1269,14 +1273,19 @@ export default function InventoryLogs() {
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Customer Name</label>
-                  <input
-                    type="text"
-                    value={editForm.customer_name || ''}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, customer_name: e.target.value }))}
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Customer</label>
+                  <select
+                    value={editForm.customer_id || ''}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, customer_id: e.target.value || null }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Walk-in Customer"
-                  />
+                  >
+                    <option value="">Walk-in Customer</option>
+                    {customers.map(customer => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

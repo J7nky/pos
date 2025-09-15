@@ -506,3 +506,4 @@ export class WeightValidationService {
 }
 
 export const weightValidationService = WeightValidationService.getInstance();
+

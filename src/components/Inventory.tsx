@@ -5,8 +5,7 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useInventoryForms } from '../hooks/useInventoryForms';
 import { useInventoryModals } from '../hooks/useInventoryModals';
 import { Plus, Search, Package, Truck } from 'lucide-react';
-import { SupabaseService } from '../services/supabaseService';
-import { db } from '../lib/db';
+// Removed SupabaseService import - using offline-first context methods only
 
 // Import components
 import ReceiveFormModal from './inventory/ReceiveFormModal';
@@ -34,9 +33,15 @@ const Inventory: React.FC = () => {
     supplier_id: i.supplier_id, 
     created_at: i.created_at 
   })) as InventoryItem[];
-  const addSupplier = raw.addSupplier;
-  const addProduct = raw.addProduct;
-  const defaultCommissionRate = raw.defaultCommissionRate;
+  const { 
+    addSupplier, 
+    addProduct, 
+    updateProduct, 
+    deleteProduct, 
+    updateInventoryItem, 
+    deleteInventoryItem,
+    defaultCommissionRate 
+  } = raw;
   const { userProfile } = useSupabaseAuth();
 
   // Local storage for recent selections
@@ -118,29 +123,28 @@ const Inventory: React.FC = () => {
     setLoading((l: any) => ({ ...l, supplier: false }));
   };
 
-  // Inventory operations
-  const updateInventoryItem = async (item: any) => {
-    await SupabaseService.updateInventoryItem(item.id, {
-      quantity: Number(item.quantity),
-      price: item.price ? Number(item.price) : null,
-      status: item.status || null,
-    });
+  // Inventory operations - using offline-first context methods
+  const handleUpdateInventoryItem = async (item: any) => {
+    try {
+      await updateInventoryItem(item.id, {
+        quantity: Number(item.quantity),
+        price: item.price ? Number(item.price) : null,
+        status: item.status || null,
+      });
+      showToast('success', 'Inventory item updated successfully!');
+    } catch (error) {
+      console.error('Error updating inventory item:', error);
+      showToast('error', 'Failed to update inventory item.');
+    }
   };
 
-  const deleteInventoryItem = async (item: any) => {
-    await db.transaction('rw', [db.bill_line_items, db.inventory_items], async () => {
-      const relatedBillLineItems = await db.bill_line_items.where('inventory_item_id').equals(item.id).toArray();
-      for (const bli of relatedBillLineItems) {
-        await db.softDelete('bill_line_items', bli.id);
-      }
-      await db.softDelete('inventory_items', item.id);
-    });
-
+  const handleDeleteInventoryItem = async (item: any) => {
     try {
-      await SupabaseService.deleteBillLineItemsByInventoryItem(item.id);
-      await SupabaseService.deleteInventoryItem(item.id);
-    } catch (err) {
-      console.warn('Remote delete skipped or failed; will sync later:', err);
+      await deleteInventoryItem(item.id);
+      showToast('success', 'Inventory item deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting inventory item:', error);
+      showToast('error', 'Failed to delete inventory item.');
     }
   };
 
@@ -164,20 +168,22 @@ const Inventory: React.FC = () => {
   };
 
   const handleProductUpdate = async (data: any) => {
-    await SupabaseService.updateProduct(data.id, { 
-      name: data.name, 
-      category: data.category, 
-      image: data.image 
-    });
-    await raw.refreshData();
-    showToast('success', 'Product updated successfully!');
+    try {
+      await updateProduct(data.id, { 
+        name: data.name, 
+        category: data.category, 
+        image: data.image 
+      });
+      showToast('success', 'Product updated successfully!');
+    } catch (error) {
+      console.error('Error updating product:', error);
+      showToast('error', 'Failed to update product.');
+    }
   };
 
   const handleProductDelete = async (product: any) => {
     try {
-      await SupabaseService.deleteProduct(product.id);
-      await db.products.delete(product.id);
-      await raw.refreshData();
+      await deleteProduct(product.id);
       showToast('success', 'Product deleted successfully!');
     } catch (error) {
       console.error('Error deleting product:', error);
@@ -320,13 +326,7 @@ const Inventory: React.FC = () => {
           item={editItem}
           onClose={() => setEditItem(null)}
           onSave={async (form: any) => {
-            try {
-              await updateInventoryItem(form);
-              await raw.refreshData();
-              showToast('success', 'Inventory item updated!');
-            } catch {
-              showToast('error', 'Failed to update inventory item.');
-            }
+            await handleUpdateInventoryItem(form);
             setEditItem(null);
           }}
         />
@@ -337,13 +337,7 @@ const Inventory: React.FC = () => {
           item={deleteItem}
           onClose={() => setDeleteItem(null)}
           onDelete={async (item: any) => {
-            try {
-              await deleteInventoryItem(item);
-              await raw.refreshData();
-              showToast('success', 'Inventory item deleted!');
-            } catch {
-              showToast('error', 'Failed to delete inventory item.');
-            }
+            await handleDeleteInventoryItem(item);
             setDeleteItem(null);
           }}
         />

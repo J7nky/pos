@@ -484,8 +484,6 @@ export default function POS() {
         store_id: raw.storeId,
         bill_number: `BILL-${Date.now()}`,
         customer_id: activeTab.selectedCustomer || null,
-        customer_name: activeTab.selectedCustomer ? 
-          customers.find(c => c.id === activeTab.selectedCustomer)?.name || null : null,
         subtotal: total,
         total_amount: total,
         payment_method: activeTab.paymentMethod,

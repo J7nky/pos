@@ -221,6 +221,15 @@ export interface inventory_bills extends BaseEntity {
   type?:string
 }
 
+export interface ExchangeRate extends BaseEntity {
+  id: string;
+  from_currency: 'USD' | 'LBP';
+  to_currency: 'USD' | 'LBP';
+  rate: number;
+  created_at: string;
+  updated_at: string;
+}
+
 class POSDatabase extends Dexie {
   // Store configuration
   stores!: Table<Store, string>;
@@ -237,6 +246,9 @@ class POSDatabase extends Dexie {
   bills!: Table<Bill, string>;
   bill_line_items!: Table<BillLineItem, string>;
   bill_audit_logs!: Table<BillAuditLog, string>;
+  // Currency management tables
+  exchange_rates!: Table<ExchangeRate, string>;
+  
   // Sync management tables
   sync_metadata!: Table<SyncMetadata, string>;
   pending_syncs!: Table<PendingSync, string>;
@@ -255,22 +267,25 @@ class POSDatabase extends Dexie {
       cash_drawer_accounts: 'id, &store_id, account_code, updated_at',
       cash_drawer_sessions: 'id, store_id, account_id, status, created_at',
       
-      // Core tables with enhanced indexing to match database schema
+      // Core tables with comprehensive indexing for performance
       // Tables WITH updated_at: products, suppliers, customers
-      products: 'id, store_id, name, category, updated_at',
-      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
-      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
+      products: 'id, store_id, name, category, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance, _synced, _deleted',
 
       // Tables WITHOUT updated_at: inventory_items, transactions
-      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
-      transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
-      inventory_bills: 'id, store_id, supplier_id, received_at, created_by',
+      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, _synced, _deleted',
   
       // Bill management tables (now includes sale functionality)
-      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at',
-      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, customer_id, payment_method, created_by, created_at, line_order',
-      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at',
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, customer_id, payment_method, created_by, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
 
+      // Currency management
+      exchange_rates: 'id, from_currency, to_currency, rate, created_at, updated_at, _synced, _deleted',
+      
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
       pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count'

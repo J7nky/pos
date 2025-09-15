@@ -454,7 +454,7 @@ export class SupabaseService {
 
       // Apply filters
       if (filters?.searchTerm) {
-        query = query.or(`bill_number.ilike.%${filters.searchTerm}%,customer_name.ilike.%${filters.searchTerm}%,notes.ilike.%${filters.searchTerm}%`);
+        query = query.or(`bill_number.ilike.%${filters.searchTerm}%,notes.ilike.%${filters.searchTerm}%`);
       }
       if (filters?.dateFrom) {
         query = query.gte('bill_date', filters.dateFrom);
@@ -495,7 +495,7 @@ export class SupabaseService {
           
           // Apply the same filters to the simple query
           if (filters?.searchTerm) {
-            simpleQuery.or(`bill_number.ilike.%${filters.searchTerm}%,customer_name.ilike.%${filters.searchTerm}%,notes.ilike.%${filters.searchTerm}%`);
+            simpleQuery.or(`bill_number.ilike.%${filters.searchTerm}%,notes.ilike.%${filters.searchTerm}%`);
           }
           if (filters?.dateFrom) {
             simpleQuery.gte('bill_date', filters.dateFrom);
@@ -699,77 +699,6 @@ export class SupabaseService {
 
       if (error) throw error;
       return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  // Bill Line Items
-  static async createBillLineItem(lineItem: {
-    store_id: string;
-    bill_id: string;
-    product_id: string;
-    product_name: string;
-    supplier_id: string;
-    supplier_name: string;
-    inventory_item_id?: string | null;
-    quantity: number;
-    unit_price: number;
-    line_total: number;
-    weight?: number | null;
-    notes?: string | null;
-    line_order: number;
-  }) {
-    try {
-      const cleanLineItem = cleanDataForSupabase(lineItem as any);
-      const { data, error } = await supabase
-        .from('bill_line_items')
-        .insert(cleanLineItem)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async updateBillLineItem(lineItemId: any, updates: {
-    quantity?: number;
-    unit_price?: number;
-    line_total?: number;
-    weight?: number | null;
-    notes?: string | null;
-  }) {
-    try {
-      const cleanUpdates = cleanDataForSupabase(updates);
-      const { data, error } = await supabase
-        .from('bill_line_items')
-        .update({
-          ...cleanUpdates,
-          updated_at: new Date().toISOString()
-        } as any)
-        .eq('id', lineItemId)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async deleteBillLineItem(lineItemId: any) {
-    try {
-      const { error } = await supabase
-        .from('bill_line_items')
-        .delete()
-        .eq('id', lineItemId);
-      
-      if (error) throw error;
-      return true;
     } catch (error) {
       handleSupabaseError(error);
     }

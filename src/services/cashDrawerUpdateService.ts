@@ -193,7 +193,8 @@ export class CashDrawerUpdateService {
    * Protected against race conditions with operation locking
    */
   public async updateCashDrawerForTransaction(
-    transactionData: CashTransactionData
+    transactionData: CashTransactionData,
+    getStore?: (storeId: string) => Promise<any | null>
   ): Promise<CashDrawerUpdateResult> {
     
     // Validate input data
@@ -210,7 +211,7 @@ export class CashDrawerUpdateService {
     return this.acquireOperationLock(transactionData.storeId, async () => {
       try {
         // Get store's preferred currency from cash drawer account
-        const storeCurrency = await this.getStorePreferredCurrency(transactionData.storeId);
+        const storeCurrency = await this.getStorePreferredCurrency(transactionData.storeId, getStore);
         
         // Normalize amount to store's preferred currency
         const normalizedAmount = this.normalizeAmountToStoreCurrency(
@@ -532,22 +533,29 @@ export class CashDrawerUpdateService {
   /**
    * Get store's preferred currency from stores table
    */
-  public async getStorePreferredCurrency(storeId: string): Promise<'USD' | 'LBP'> {
+  public async getStorePreferredCurrency(storeId: string, getStore?: (storeId: string) => Promise<any | null>): Promise<'USD' | 'LBP'> {
     try {
-      // Import SupabaseService dynamically to avoid circular dependencies
-      const { SupabaseService } = await import('./supabaseService');
-      const store: any = await SupabaseService.getStore(storeId);
+      let store: any = null;
+      
+      if (getStore) {
+        // Use provided getStore function (offline-first approach)
+        store = await getStore(storeId);
+      } else {
+        // Fallback to SupabaseService for backward compatibility
+        const { SupabaseService } = await import('./supabaseService');
+        store = await SupabaseService.getStore(storeId);
+      }
       
       if (store && store.preferred_currency) {
         console.log(`💰 Store ${storeId} preferred currency: ${store.preferred_currency}`);
         return store.preferred_currency;
       }
       
-      console.warn(`💰 Store ${storeId} has no preferred_currency set, using USD as default`);
+      console.warn(`💰 Store ${storeId} has no preferred_currency set, using LBP as default`);
       // Fallback to default currency
       return 'LBP';
     } catch (error) {
-      console.warn(`💰 Could not determine store currency from stores table for store ${storeId}, using USD as default:`, error);
+      console.warn(`💰 Could not determine store currency for store ${storeId}, using LBP as default:`, error);
       return 'LBP';
     }
   }

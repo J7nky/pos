@@ -30,6 +30,7 @@ interface SupabaseAuthContextType {
   signUp: (email: string, password: string, profile: Omit<UserProfile, 'id' | 'email'>) => Promise<boolean>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
+  getStores: () => Promise<any[]>;
 }
 
 const SupabaseAuthContext = createContext<SupabaseAuthContextType | undefined>(undefined);
@@ -124,6 +125,15 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const getStores = async (): Promise<any[]> => {
+    try {
+      return await SupabaseService.getStores();
+    } catch (error) {
+      console.error('Get stores error:', error);
+      return [];
+    }
+  };
+
   return (
     <SupabaseAuthContext.Provider value={{
       user,
@@ -132,7 +142,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       signOut,
-      resetPassword
+      resetPassword,
+      getStores
     }}>
       {children}
     </SupabaseAuthContext.Provider>

@@ -255,7 +255,7 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
   // Filtered receivables
   const filteredReceivables = useMemo(() => {
     let filtered = raw.accountsReceivable
-      .filter(ar => ((ar.customerName || ar.customer_name || '').toLowerCase().includes(receivablesSearchTerm.toLowerCase())))
+      .filter(ar => ((ar.customerName || '').toLowerCase().includes(receivablesSearchTerm.toLowerCase())))
       .filter(ar => !receivablesStatusFilter || ar.status === receivablesStatusFilter);
 
     filtered.sort((a, b) => {

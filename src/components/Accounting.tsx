@@ -6,7 +6,7 @@ import SearchableSelect from './common/SearchableSelect';
 import MoneyInput from './common/MoneyInput';
 import { cleanupAndValidateSaleItems } from '../utils/cleanupSaleItemsData';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { SupabaseService } from '../services/supabaseService';
+// Removed SupabaseService import - using offline-first context methods only
 import { 
   Calculator,
   DollarSign,
@@ -78,6 +78,8 @@ export default function Accounting() {
   const addTransaction = raw.addTransaction;
   const updateSale = raw.updateSale;
   const deleteSale = raw.deleteSale;
+  const updateInventoryBatch = raw.updateInventoryBatch;
+  const getStore = raw.getStore;
   const transactions = raw.transactions?.map(t => ({...t, createdAt: t.created_at})) || [];
   const customers = raw.customers?.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) || [];
   const suppliers = raw.suppliers?.map(s => ({...s, createdAt: s.created_at, lb_balance: s.lb_balance, usd_balance: s.usd_balance})) || [];
@@ -496,7 +498,7 @@ export default function Accounting() {
           createdBy: userProfile?.id || '',
           customerId: receiveForm.entityType === 'customer' ? receiveForm.entityId : undefined,
           supplierId: receiveForm.entityType === 'supplier' ? receiveForm.entityId : undefined
-        });
+        }, getStore);
       }
 
       // Use the transaction ID from cash drawer service if available, otherwise create one
@@ -670,7 +672,7 @@ export default function Accounting() {
           createdBy: userProfile?.id || '',
           customerId: payForm.entityType === 'customer' ? payForm.entityId : undefined,
           supplierId: payForm.entityType === 'supplier' ? payForm.entityId : undefined
-        });
+        }, getStore);
       }
 
       // Use the transaction ID from cash drawer service if available, otherwise create one
@@ -788,7 +790,7 @@ export default function Accounting() {
           reference: expenseForm.reference || `EXP-${Date.now()}`,
           storeId: userProfile.store_id,
           createdBy: userProfile?.id || ''
-        });
+        }, getStore);
         if (!updateResult.success && updateResult.error?.includes('No cash drawer account exists')) {
           showToast('A cash drawer account has not been created yet. Please create it to track cash expenses.', 'error');
           return;
@@ -1659,13 +1661,13 @@ export default function Accounting() {
         }
       }
 
-      // Persist closed flag onto the inventory item by appending a marker in status
+      // Persist closed flag onto the inventory batch by updating status
       try {
-        const existingNotes = bill.status || '';
-        const closedNote = existingNotes.includes('[CLOSED]') ? existingNotes : `${existingNotes ? existingNotes + ' ' : ''}[CLOSED]`;
-        await SupabaseService.updateInventoryItem(bill.id, { notes: closedNote });
+        const existingStatus = bill.status || '';
+        const closedStatus = existingStatus.includes('[CLOSED]') ? existingStatus : `${existingStatus ? existingStatus + ' ' : ''}[CLOSED]`;
+        await updateInventoryBatch(bill.id, { status: closedStatus });
       } catch (e) {
-        console.warn('Failed to persist closed flag on inventory item:', e);
+        console.warn('Failed to persist closed flag on inventory batch:', e);
       }
 
       showToast('Bill closed successfully! All fees deducted and supplier balance updated.', 'success');

@@ -310,7 +310,6 @@ export interface Database {
           store_id: string;
           bill_number: string;
           customer_id: string | null;
-          customer_name: string | null;
           subtotal: number;
           total_amount: number;
           payment_method: 'cash' | 'card' | 'credit';
@@ -331,7 +330,6 @@ export interface Database {
           store_id: string;
           bill_number: string;
           customer_id?: string | null;
-          customer_name?: string | null;
           subtotal?: number;
           total_amount?: number;
           payment_method: 'cash' | 'card' | 'credit';
@@ -352,7 +350,6 @@ export interface Database {
           store_id?: string;
           bill_number?: string;
           customer_id?: string | null;
-          customer_name?: string | null;
           subtotal?: number;
           total_amount?: number;
           payment_method?: 'cash' | 'card' | 'credit';

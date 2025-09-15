@@ -21,6 +21,7 @@ export class CurrencyService {
 
   private constructor() {
     this.initializeExchangeRates();
+    this.loadExchangeRatesFromDatabase();
   }
 
   public static getInstance(): CurrencyService {
@@ -31,12 +32,37 @@ export class CurrencyService {
   }
 
   private initializeExchangeRates() {
-    // Initialize with fixed rates - in production, these would come from an API
+    // Initialize with fixed rates as fallback
     this.exchangeRates.set('USD_LBP', 89500);
     this.exchangeRates.set('LBP_USD', 1 / 89500);
     this.exchangeRates.set('USD_USD', 1);
     this.exchangeRates.set('LBP_LBP', 1);
     this.lastUpdate = new Date().toISOString();
+  }
+
+  private async loadExchangeRatesFromDatabase() {
+    try {
+      const { db } = await import('../lib/db');
+      const rates = await db.exchange_rates.toArray();
+      
+      // Update rates from database
+      for (const rate of rates) {
+        const rateKey = `${rate.from_currency}_${rate.to_currency}`;
+        this.exchangeRates.set(rateKey, rate.rate);
+      }
+      
+      if (rates.length > 0) {
+        // Use the most recent update time
+        const latestRate = rates.reduce((latest, current) => 
+          new Date(current.updated_at) > new Date(latest.updated_at) ? current : latest
+        );
+        this.lastUpdate = latestRate.updated_at;
+      }
+      
+      console.log(`💱 Loaded ${rates.length} exchange rates from database`);
+    } catch (error) {
+      console.warn('Failed to load exchange rates from database, using defaults:', error);
+    }
   }
 
   public convertCurrency(
@@ -136,10 +162,50 @@ export class CurrencyService {
     }
   }
 
-  public updateExchangeRate(fromCurrency: 'USD' | 'LBP', toCurrency: 'USD' | 'LBP', rate: number): void {
+  public async updateExchangeRate(fromCurrency: 'USD' | 'LBP', toCurrency: 'USD' | 'LBP', rate: number): Promise<void> {
     const rateKey = `${fromCurrency}_${toCurrency}`;
     this.exchangeRates.set(rateKey, rate);
     this.lastUpdate = new Date().toISOString();
+    
+    // Update database
+    try {
+      const { db } = await import('../lib/db');
+      const now = new Date().toISOString();
+      
+      // Check if rate already exists
+      const existingRate = await db.exchange_rates
+        .where(['from_currency', 'to_currency'])
+        .equals([fromCurrency, toCurrency])
+        .first();
+      
+      if (existingRate) {
+        // Update existing rate
+        await db.exchange_rates.update(existingRate.id, {
+          rate,
+          updated_at: now,
+          _synced: false
+        });
+      } else {
+        // Create new rate
+        await db.exchange_rates.add({
+          id: `rate_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          from_currency: fromCurrency,
+          to_currency: toCurrency,
+          rate,
+          created_at: now,
+          updated_at: now,
+          _synced: false
+        });
+      }
+      
+      console.log(`💱 Updated exchange rate ${rateKey}: ${rate}`);
+    } catch (error) {
+      console.error('Failed to update exchange rate in database:', error);
+    }
+  }
+
+  public async refreshExchangeRates(): Promise<void> {
+    await this.loadExchangeRatesFromDatabase();
   }
 
   public getLastUpdate(): string {

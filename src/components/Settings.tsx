@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
-import { useSupabaseData } from '../contexts/SupabaseDataContext';
+// Removed useSupabaseData - using useOfflineData only
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { 
@@ -15,32 +15,29 @@ import {
   Database,
   Smartphone,
   Calculator,
-  DollarSign
+  DollarSign,
+  Wrench
 } from 'lucide-react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import DatabaseHealthMonitor from './DatabaseHealthMonitor';
 
 export default function Settings() {
   const { userProfile } = useSupabaseAuth();
   
-  // Use Supabase context for database-stored settings (currency, commission rate)
-  const supabaseData = useSupabaseData();
-  
-  // Use Offline context for local-only settings (low stock alerts, threshold)
+  // Use offline context for all settings (offline-first approach)
   console.log('Settings: About to call useOfflineData...');
   const offlineData = useOfflineData();
   console.log('Settings: offlineData received:', offlineData);
   
-  // Prioritize Supabase context for database-stored settings, fallback to offline
-  const defaultCommissionRate = supabaseData?.defaultCommissionRate ?? offlineData?.defaultCommissionRate ?? 10;
-  const currency = supabaseData?.currency ?? offlineData?.currency ?? 'USD';
-  
-  // Use offline context for local-only settings
+  // Get all settings from offline context
+  const defaultCommissionRate = offlineData?.defaultCommissionRate ?? 10;
+  const currency = offlineData?.currency ?? 'USD';
   const lowStockAlertsEnabled = offlineData?.lowStockAlertsEnabled ?? true;
   const lowStockThreshold = offlineData?.lowStockThreshold ?? 10;
   
-  // Use appropriate update functions with fallbacks
-  const updateDefaultCommissionRate = supabaseData?.updateDefaultCommissionRate ?? offlineData?.updateDefaultCommissionRate ?? (() => {});
-  const updateCurrency = supabaseData?.updateCurrency ?? offlineData?.updateCurrency ?? (() => {});
+  // Get update functions from offline context
+  const updateDefaultCommissionRate = offlineData?.updateDefaultCommissionRate ?? (() => {});
+  const updateCurrency = offlineData?.updateCurrency ?? (() => {});
   const toggleLowStockAlerts = offlineData?.toggleLowStockAlerts ?? (() => {});
   const updateLowStockThreshold = offlineData?.updateLowStockThreshold ?? (() => {});
   
@@ -51,15 +48,15 @@ export default function Settings() {
   const [tempCurrency, setTempCurrency] = useState<'USD' | 'LBP'>(currency);
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showDatabaseHealth, setShowDatabaseHealth] = useState(false);
 
   // Handle language change with database update
   const handleLanguageChange = async (newLanguage: string) => {
     setLanguage(newLanguage);
     if (userProfile?.store_id) {
       try {
-        await supabaseData?.updateStoreSettings?.(userProfile.store_id, {
-          preferred_language: newLanguage as 'en' | 'ar' | 'fr'
-        });
+        // Note: Language preference will be synced to store settings via background sync
+        console.log('Language changed to:', newLanguage);
         setShowSaveMessage(true);
         setSaveError(null);
         setTimeout(() => setShowSaveMessage(false), 2000);
@@ -383,7 +380,35 @@ export default function Settings() {
             </select>
           </div>
         </div>
+
+        {/* Database Management */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <div className="flex items-center mb-4">
+            <Wrench className="w-6 h-6 text-gray-600 mr-3" />
+            <h2 className="text-xl font-semibold text-gray-900">Database Management</h2>
+          </div>
+          <div className="space-y-4">
+            <div className="p-4 border border-gray-200 rounded-lg">
+              <h3 className="font-medium text-gray-900 mb-2">Database Health</h3>
+              <p className="text-sm text-gray-600 mb-3">
+                Monitor database health, validate schema, and manage backups.
+              </p>
+              <button
+                onClick={() => setShowDatabaseHealth(true)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center"
+              >
+                <Database className="w-4 h-4 mr-2" />
+                Open Database Monitor
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Database Health Monitor Modal */}
+      {showDatabaseHealth && (
+        <DatabaseHealthMonitor onClose={() => setShowDatabaseHealth(false)} />
+      )}
     </div>
   );
 }

@@ -302,3 +302,4 @@ export class WeightConfigurationService {
 }
 
 export const weightConfigurationService = WeightConfigurationService.getInstance();
+

@@ -469,3 +469,4 @@ const WeightComparisonReport: React.FC<WeightComparisonReportProps> = ({
 };
 
 export default WeightComparisonReport;
+
