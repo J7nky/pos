@@ -20,7 +20,7 @@ const SYNC_CONFIG = {
 // CRITICAL: Order matters for foreign key dependencies
 const SYNC_TABLES = [
   // Store configuration (no dependencies)
-  // 'stores',
+  'stores',
   
   // Currency rates (no dependencies - global)
   // 'exchange_rates',
@@ -55,19 +55,18 @@ type SyncTable = typeof SYNC_TABLES[number];
 
 // Dependency mapping for sync validation
 const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
+  'products': [],
   'stores': [],
-  'exchange_rates': [],
-  'products': ['stores'],
-  'suppliers': ['stores'],
-  'customers': ['stores'],
-  'cash_drawer_accounts': ['stores'],
-  'inventory_bills': ['stores', 'suppliers'],
-  'inventory_items': ['stores', 'products', 'suppliers', 'inventory_bills'],
-  'transactions': ['stores'],
-  'bills': ['stores', 'customers'],
-  'bill_line_items': ['stores', 'bills', 'products', 'suppliers', 'inventory_items'],
-  'bill_audit_logs': ['stores', 'bills'],
-  'cash_drawer_sessions': ['stores', 'cash_drawer_accounts']
+  'suppliers': [],
+  'customers': [],
+  'cash_drawer_accounts': [],
+  'inventory_bills': ['suppliers'],
+  'inventory_items': ['products', 'suppliers', 'inventory_bills'],
+  'transactions': [],
+  'bills': ['customers'],
+  'bill_line_items': ['bills', 'products', 'suppliers', 'inventory_items'],
+  'bill_audit_logs': ['bills'],
+  'cash_drawer_sessions': ['cash_drawer_accounts']
 };
 
 export interface SyncResult {
@@ -116,26 +115,21 @@ export class SyncService {
     console.log(`🔄 Refreshing validation cache for store: ${storeId}`);
 
     try {
-      await databaseConnectionService.executeWithRetry(
-        async (client) => {
-          const [productsResult, suppliersResult, usersResult, batchesResult] = await Promise.all([
-            client.from('products').select('id').eq('store_id', storeId),
-            client.from('suppliers').select('id').eq('store_id', storeId),
-            client.from('users').select('id').eq('store_id', storeId),
-            client.from('inventory_bills').select('id').eq('store_id', storeId)
-          ]);
+      const [productsResult, suppliersResult, usersResult, batchesResult] = await Promise.all([
+        supabase.from('products').select('id').eq('store_id', storeId),
+        supabase.from('suppliers').select('id').eq('store_id', storeId),
+        supabase.from('users').select('id').eq('store_id', storeId),
+        supabase.from('inventory_bills').select('id').eq('store_id', storeId)
+      ]);
 
-          this.validationCache.products = new Set(productsResult.data?.map(p => p.id) || []);
-          this.validationCache.suppliers = new Set(suppliersResult.data?.map(s => s.id) || []);
-          this.validationCache.users = new Set(usersResult.data?.map(u => u.id) || []);
-          this.validationCache.batches = new Set(batchesResult.data?.map(b => b.id) || []);
-          this.validationCache.lastUpdated = new Date();
-          this.validationCache.storeId = storeId;
-          
-          console.log(`✅ Validation cache updated: ${this.validationCache.products.size} products, ${this.validationCache.suppliers.size} suppliers, ${this.validationCache.users.size} users, ${this.validationCache.batches.size} batches`);
-        },
-        'Validation cache refresh'
-      );
+      this.validationCache.products = new Set(productsResult.data?.map(p => p.id) || []);
+      this.validationCache.suppliers = new Set(suppliersResult.data?.map(s => s.id) || []);
+      this.validationCache.users = new Set(usersResult.data?.map(u => u.id) || []);
+      this.validationCache.batches = new Set(batchesResult.data?.map(b => b.id) || []);
+      this.validationCache.lastUpdated = new Date();
+      this.validationCache.storeId = storeId;
+      
+      console.log(`✅ Validation cache updated: ${this.validationCache.products.size} products, ${this.validationCache.suppliers.size} suppliers, ${this.validationCache.users.size} users, ${this.validationCache.batches.size} batches`);
 
     } catch (error) {
       console.warn('Failed to refresh validation cache:', error);
@@ -153,7 +147,27 @@ export class SyncService {
     }
 
     try {
-      // Check if all dependencies have been synced recently
+      // Check if this is the first sync (no sync metadata exists)
+      const hasAnySyncMetadata = await db.sync_metadata.count() > 0;
+      
+      if (!hasAnySyncMetadata) {
+        // First sync - use dependency order from SYNC_TABLES instead of strict validation
+        const tableIndex = SYNC_TABLES.indexOf(tableName);
+        const dependencyIndices = dependencies.map(dep => SYNC_TABLES.indexOf(dep));
+        
+        // Check if all dependencies come before this table in the sync order
+        const allDependenciesBefore = dependencyIndices.every(depIndex => depIndex < tableIndex);
+        
+        if (allDependenciesBefore) {
+          console.log(`✅ First sync: ${tableName} dependencies are in correct order`);
+          return true;
+        } else {
+          console.warn(`⚠️ First sync: ${tableName} dependencies not in correct order, skipping`);
+          return false;
+        }
+      }
+
+      // For subsequent syncs, be more lenient - only check if dependencies exist, not when they were last synced
       const dependencyChecks = await Promise.all(
         dependencies.map(async (depTable) => {
           const lastSynced = await db.sync_metadata
@@ -166,15 +180,9 @@ export class SyncService {
             return false;
           }
           
-          // Check if dependency was synced within the last hour
-          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-          const isRecent = new Date(lastSynced.last_synced_at) > oneHourAgo;
-          
-          if (!isRecent) {
-            console.warn(`⚠️ Dependency ${depTable} for ${tableName} was last synced ${lastSynced.last_synced_at}`);
-          }
-          
-          return isRecent;
+          // Just check if the dependency has been synced at least once, regardless of when
+          console.log(`✅ Dependency ${depTable} for ${tableName} was last synced ${lastSynced.last_synced_at}`);
+          return true;
         })
       );
 
@@ -191,6 +199,132 @@ export class SyncService {
       return false;
     }
   }
+
+  /**
+   * Ensure a store exists for the given storeId
+   */
+  private async ensureStoreExists(storeId: string) {
+    try {
+      // Check if store exists locally
+      const localStore = await db.stores.get(storeId);
+      if (localStore) {
+        console.log(`✅ Store ${storeId} exists locally`);
+        return;
+      }
+
+      // Check if store exists on server
+      const { data: remoteStore, error } = await supabase
+        .from('stores')
+        .select('*')
+        .eq('id', storeId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error(`❌ Error checking store on server:`, error);
+        return;
+      }
+
+      if (remoteStore) {
+        // Store exists on server, download it
+        console.log(`📥 Downloading store ${storeId} from server`);
+        await db.stores.put({
+          ...remoteStore,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      } else {
+        // Store doesn't exist, create a default one
+        console.log(`🏪 Creating default store ${storeId}`);
+        const defaultStore = {
+          id: storeId,
+          name: 'Default Store',
+          address: 'Default Address',
+          phone: '000-000-0000',
+          email: 'store@example.com',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          preferred_commission_rate: 0,
+          preferred_language: 'en',
+          preferred_currency: 'USD'
+        };
+
+        // Try to create on server first
+        const { error: createError } = await supabase
+          .from('stores')
+          .insert(defaultStore);
+
+        if (createError) {
+          console.warn(`⚠️ Failed to create store on server:`, createError);
+        }
+
+        // Store locally
+        await db.stores.put({
+          ...defaultStore,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error(`Error ensuring store exists:`, error);
+    }
+  }
+
+  /**
+   * Initialize sync metadata for empty tables to prevent dependency loops
+   */
+  private async initializeSyncMetadataForEmptyTables(storeId: string) {
+    const hasAnySyncMetadata = await db.sync_metadata.count() > 0;
+    
+    if (!hasAnySyncMetadata) {
+      console.log('🔄 Initializing sync metadata for first sync...');
+      
+      // Initialize sync metadata for all tables with current timestamp
+      // This prevents dependency validation loops on first sync
+      const currentTime = new Date().toISOString();
+      
+      for (const tableName of SYNC_TABLES) {
+        try {
+          // Check if table has any records
+          const table = (db as any)[tableName];
+          const recordCount = await table.count();
+          
+          if (recordCount === 0) {
+            // Initialize empty table with sync metadata
+            await db.updateSyncMetadata(tableName, currentTime);
+            console.log(`📝 Initialized sync metadata for empty table: ${tableName}`);
+          }
+        } catch (error) {
+          console.warn(`Failed to initialize sync metadata for ${tableName}:`, error);
+        }
+      }
+      
+      // Also initialize sync metadata for the sync management tables themselves
+      try {
+        await db.updateSyncMetadata('sync_metadata', currentTime);
+        await db.updateSyncMetadata('pending_syncs', currentTime);
+        console.log(`📝 Initialized sync metadata for sync management tables`);
+      } catch (error) {
+        console.warn(`Failed to initialize sync metadata for sync management tables:`, error);
+      }
+    } else {
+      // For subsequent syncs, ensure all tables have sync metadata
+      console.log('🔄 Ensuring all tables have sync metadata...');
+      const currentTime = new Date().toISOString();
+      
+      for (const tableName of SYNC_TABLES) {
+        try {
+          const existingMetadata = await db.sync_metadata.get(tableName);
+          if (!existingMetadata) {
+            await db.updateSyncMetadata(tableName, currentTime);
+            console.log(`📝 Added missing sync metadata for table: ${tableName}`);
+          }
+        } catch (error) {
+          console.warn(`Failed to ensure sync metadata for ${tableName}:`, error);
+        }
+      }
+    }
+  }
+
 
   /**
    * Main sync function - performs bi-directional sync
@@ -213,6 +347,12 @@ export class SyncService {
     try {
       // Initialize connection service if not already done
       await databaseConnectionService.initialize();
+      
+      // Ensure store exists before syncing
+      await this.ensureStoreExists(storeId);
+      
+      // Initialize sync metadata for empty tables to prevent dependency loops
+      await this.initializeSyncMetadataForEmptyTables(storeId);
       
       // Check connectivity using connection service
       await databaseConnectionService.executeWithRetry(
@@ -715,20 +855,9 @@ export class SyncService {
             console.log(`🧹 After cleaning - First bill record has _synced:`, cleanedBatch[0].hasOwnProperty('_synced'));
           }
 
-          const { error, data } = await databaseConnectionService.executeWithRetry(
-            async (client) => {
-              const { error, data } = await client
-                .from(tableName as any)
-                .upsert(cleanedBatch, { onConflict: 'id' });
-              
-              if (error) {
-                throw new Error(`Upload failed for ${tableName}: ${error.message}`);
-              }
-              
-              return { error, data };
-            },
-            `Upload batch for ${tableName}`
-          );
+          const { error, data } = await supabase
+            .from(tableName as any)
+            .upsert(cleanedBatch, { onConflict: 'id' });
 
           if (error) {
             console.error(`❌ Upload failed for ${tableName}:`, error);
@@ -741,25 +870,20 @@ export class SyncService {
               console.log(`🔍 Attempting individual uploads to identify problem records...`);
               for (const record of cleanedBatch) {
                 try {
-                  await databaseConnectionService.executeWithRetry(
-                    async (client) => {
-                      const { error: individualError } = await client
-                        .from(tableName as any)
-                        .upsert([record], { onConflict: 'id' });
-                      
-                      if (individualError) {
-                        throw new Error(`Individual record failed: ${individualError.message}`);
-                      }
-                    },
-                    `Individual upload for ${tableName} record ${record.id}`
-                  );
+                  const { error: individualError } = await supabase
+                    .from(tableName as any)
+                    .upsert([record], { onConflict: 'id' });
                   
-                  // Mark successful individual record as synced
-                  await db.markAsSynced(tableName, record.id);
+                  if (individualError) {
+                    console.error(`❌ Individual record failed:`, record, individualError);
+                    // Mark this record as problematic
+                    await db.addPendingSync(tableName, record.id, 'update', record);
+                  } else {
+                    // Mark successful individual record as synced
+                    await db.markAsSynced(tableName, record.id);
+                  }
                 } catch (e) {
-                  console.error(`❌ Individual record failed:`, record, e);
-                  // Mark this record as problematic
-                  await db.addPendingSync(tableName, record.id, 'update', record);
+                  console.error(`❌ Critical error with record:`, record, e);
                 }
               }
             }
@@ -835,27 +959,32 @@ export class SyncService {
         const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
 
         // Get remote changes since last sync
-        const { data: remoteRecords, error } = await databaseConnectionService.executeWithRetry(
-          async (client) => {
-            let query = client.from(tableName as any).select('*');
-            
-            // Add store_id filter for tables that have it (all except transactions)
-            if (tableName !== 'transactions') {
-              query = query.eq('store_id', storeId);
-            }
-            
-            const { data, error } = await query
-              .gt(timestampField, lastSyncAt)
-              .order(timestampField, { ascending: true });
-            
-            if (error) {
-              throw new Error(`Download failed for ${tableName}: ${error.message}`);
-            }
-            
-            return { data, error: null };
-          },
-          `Download changes for ${tableName}`
-        );
+        let query = supabase.from(tableName as any).select('*');
+        
+        // Add store_id filter for tables that have it (all except transactions and stores)
+        if (tableName !== 'transactions' && tableName !== 'stores') {
+          query = query.eq('store_id', storeId);
+        } else if (tableName === 'stores') {
+          // For stores, filter by the specific store ID
+          query = query.eq('id', storeId);
+        }
+        
+        // Apply timestamp filtering (stores might need special handling)
+        let remoteRecords, error;
+        if (tableName === 'stores') {
+          // For stores, download all records if no sync metadata exists, otherwise use timestamp
+          console.log(`🔍 Downloading stores for storeId: ${storeId}`);
+          const result = await query.order(timestampField, { ascending: true });
+          remoteRecords = result.data;
+          error = result.error;
+          console.log(`📊 Stores query result: ${remoteRecords?.length || 0} records, error: ${error?.message || 'none'}`);
+        } else {
+          const result = await query
+            .gt(timestampField, lastSyncAt)
+            .order(timestampField, { ascending: true });
+          remoteRecords = result.data;
+          error = result.error;
+        }
 
         if (error) {
           result.errors.push(`Download failed for ${tableName}: ${error.message}`);
@@ -1443,38 +1572,20 @@ export class SyncService {
               console.warn(`⚠️ Skipping pending sync ${pendingSync.id} - invalid payload`);
               success = false;
             } else {
-              await databaseConnectionService.executeWithRetry(
-                async (client) => {
-                  const { error } = await client
-                    .from(pendingSync.table_name as any)
-                    .upsert(cleanedPayload)
-                    .select();
-                  
-                  if (error) {
-                    throw new Error(`Pending sync failed: ${error.message}`);
-                  }
-                },
-                `Pending sync ${pendingSync.operation} for ${pendingSync.table_name}`
-              );
-              success = true;
+              const { error } = await supabase
+                .from(pendingSync.table_name as any)
+                .upsert(cleanedPayload)
+                .select();
+              success = !error;
             }
             break;
             
           case 'delete':
-            await databaseConnectionService.executeWithRetry(
-              async (client) => {
-                const { error } = await client
-                  .from(pendingSync.table_name as any)
-                  .delete()
-                  .eq('id', pendingSync.record_id);
-                
-                if (error) {
-                  throw new Error(`Pending delete failed: ${error.message}`);
-                }
-              },
-              `Pending sync delete for ${pendingSync.table_name} record ${pendingSync.record_id}`
-            );
-            success = true;
+            const { error: deleteError } = await supabase
+              .from(pendingSync.table_name as any)
+              .delete()
+              .eq('id', pendingSync.record_id);
+            success = !deleteError;
             break;
         }
 
@@ -1822,26 +1933,20 @@ export class SyncService {
 
       // Download all data from server
       for (const tableName of SYNC_TABLES) {
-        try {
-          const { data: remoteRecords, error } = await databaseConnectionService.executeWithRetry(
-            async (client) => {
-              const { data, error } = await client
-                .from(tableName as any)
-                .select('*')
-                .eq('store_id', storeId);
-              
-              if (error) {
-                throw new Error(`Download failed for ${tableName}: ${error.message}`);
-              }
-              
-              return { data, error: null };
-            },
-            `Full resync download for ${tableName}`
-          );
+        let query = supabase.from(tableName as any).select('*');
+        
+        // Stores table doesn't have store_id, so we filter by the specific store ID
+        if (tableName === 'stores') {
+          query = query.eq('id', storeId);
+        } else {
+          query = query.eq('store_id', storeId);
+        }
+        
+        const { data: remoteRecords, error } = await query;
 
-          if (error) {
-            result.errors.push(`Download failed for ${tableName}: ${error.message}`);
-          } else if (remoteRecords) {
+        if (error) {
+          result.errors.push(`Download failed for ${tableName}: ${error.message}`);
+        } else if (remoteRecords) {
           const recordsWithSync = remoteRecords.map(record => ({
             ...record,
             _synced: true,
@@ -1850,9 +1955,6 @@ export class SyncService {
           
           await (db as any)[tableName].bulkPut(recordsWithSync);
           result.synced.downloaded += remoteRecords.length;
-        }
-        } catch (error) {
-          result.errors.push(`Failed to download ${tableName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       }
 

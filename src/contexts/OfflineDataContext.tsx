@@ -233,6 +233,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         if (existingStore.preferred_commission_rate !== undefined) {
           setDefaultCommissionRate(existingStore.preferred_commission_rate);
         }
+        
+        // Initialize exchange_rate if not set
+        if (!existingStore.exchange_rate) {
+          console.log('💱 Initializing exchange rate for store...');
+          await db.stores.update(storeId, { 
+            exchange_rate: 89500,
+            updated_at: new Date().toISOString()
+          });
+        }
       } else {
         // Store not found locally - will be synced when connection is available
         console.log('📴 Store data not found locally - will sync when online');
@@ -245,48 +254,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Initialize default exchange rates
-  const initializeExchangeRates = async () => {
-    try {
-      const existingRates = await db.exchange_rates.toArray();
-      
-      if (existingRates.length === 0) {
-        console.log('💱 Initializing default exchange rates...');
-        const now = new Date().toISOString();
-        
-        // Add default exchange rates
-        const defaultRates = [
-          { from_currency: 'USD', to_currency: 'LBP', rate: 89500 },
-          { from_currency: 'LBP', to_currency: 'USD', rate: 1 / 89500 },
-          { from_currency: 'USD', to_currency: 'USD', rate: 1 },
-          { from_currency: 'LBP', to_currency: 'LBP', rate: 1 }
-        ];
-        
-        for (const rate of defaultRates) {
-          await db.exchange_rates.add({
-            id: `rate_${rate.from_currency}_${rate.to_currency}_${Date.now()}`,
-            from_currency: rate.from_currency,
-            to_currency: rate.to_currency,
-            rate: rate.rate,
-            created_at: now,
-            updated_at: now,
-            _synced: false
-          });
-        }
-        
-        console.log('✅ Default exchange rates initialized');
-      }
-    } catch (error) {
-      console.error('❌ Error initializing exchange rates:', error);
-    }
-  };
 
   // Initialize data when store is available
   useEffect(() => {
     if (storeId) {
       loadStoreData();
       initializeData();
-      // initializeExchangeRates();
       // Check undo validity after data is loaded
       setTimeout(() => checkUndoValidity(), 1000);
     }

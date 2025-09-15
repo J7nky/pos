@@ -48,6 +48,7 @@ export interface Store extends BaseEntity {
   preferred_currency: 'USD' | 'LBP';
   preferred_language: 'en' | 'ar' | 'fr';
   preferred_commission_rate: number;
+  exchange_rate: number; // USD to LBP exchange rate (e.g., 89500)
 }
 export interface Supplier extends BaseEntity {
   name: string;
@@ -221,14 +222,7 @@ export interface inventory_bills extends BaseEntity {
   type?:string
 }
 
-export interface ExchangeRate extends BaseEntity {
-  id: string;
-  from_currency: 'USD' | 'LBP';
-  to_currency: 'USD' | 'LBP';
-  rate: number;
-  created_at: string;
-  updated_at: string;
-}
+
 
 class POSDatabase extends Dexie {
   // Store configuration
@@ -247,7 +241,6 @@ class POSDatabase extends Dexie {
   bill_line_items!: Table<BillLineItem, string>;
   bill_audit_logs!: Table<BillAuditLog, string>;
   // Currency management tables
-  exchange_rates!: Table<ExchangeRate, string>;
   
   // Sync management tables
   sync_metadata!: Table<SyncMetadata, string>;
@@ -259,9 +252,9 @@ class POSDatabase extends Dexie {
     
     console.log('🔧 Initializing POSDatabase...');
     
-    this.version(15).stores({
+    this.version(16).stores({
       // Store configuration
-      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, updated_at',
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
       
       // Cash drawer tables
       cash_drawer_accounts: 'id, &store_id, account_code, updated_at',
@@ -284,7 +277,6 @@ class POSDatabase extends Dexie {
       bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
 
       // Currency management
-      exchange_rates: 'id, from_currency, to_currency, rate, created_at, updated_at, _synced, _deleted',
       
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',

@@ -127,6 +127,7 @@ export interface Database {
           preferred_currency: 'USD' | 'LBP';
           preferred_language: 'en' | 'ar'|'fr';
           preferred_commission_rate: number;
+          exchange_rate: number;
           name: string;
           address: string;
           phone: string;
@@ -139,6 +140,7 @@ export interface Database {
           preferred_currency?: 'USD' | 'LBP';
           preferred_language?: 'en' | 'ar'|'fr';
           preferred_commission_rate?: number;
+          exchange_rate?: number;
           name: string;
           address: string;
           phone: string;
@@ -150,6 +152,7 @@ export interface Database {
           preferred_currency?: 'USD' | 'LBP';
           preferred_language?: 'en' | 'ar'|'fr';
           preferred_commission_rate?: number;
+          exchange_rate?: number;
           id?: string;
           name?: string;
           address?: string;

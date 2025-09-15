@@ -46,6 +46,7 @@ export default function Settings() {
   const [tempThreshold, setTempThreshold] = useState(lowStockThreshold?.toString() || '10');
   const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate?.toString() || '10');
   const [tempCurrency, setTempCurrency] = useState<'USD' | 'LBP'>(currency);
+  const [tempExchangeRate, setTempExchangeRate] = useState('89500');
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showDatabaseHealth, setShowDatabaseHealth] = useState(false);
@@ -112,6 +113,30 @@ export default function Settings() {
       setTimeout(() => setSaveError(null), 3000);
       // Fallback to local storage - update the temp state to reflect the change
       setTempCurrency(tempCurrency);
+    }
+  };
+
+  const handleExchangeRateSave = async () => {
+    try {
+      const exchangeRate = parseFloat(tempExchangeRate);
+      if (isNaN(exchangeRate) || exchangeRate <= 0) {
+        setSaveError('Please enter a valid exchange rate');
+        setTimeout(() => setSaveError(null), 3000);
+        return;
+      }
+
+      // Update the currency service
+      const { currencyService } = await import('../services/currencyService');
+      await currencyService.updateExchangeRate(exchangeRate);
+      
+      console.log('Settings: Exchange rate saved successfully:', exchangeRate);
+      setShowSaveMessage(true);
+      setSaveError(null);
+      setTimeout(() => setShowSaveMessage(false), 2000);
+    } catch (error) {
+      console.error('Settings: Error saving exchange rate:', error);
+      setSaveError('Failed to save exchange rate');
+      setTimeout(() => setSaveError(null), 3000);
     }
   };
 
@@ -314,6 +339,37 @@ export default function Settings() {
                 </button>
               </div>
               <p className="text-xs text-gray-500 mt-2">{t('settings.currentCurrency', { value: currency === 'USD' ? 'USD ($)' : 'LBP (ل.ل)' })}</p>
+            </div>
+
+            <div className="p-4 border border-gray-200 rounded-lg">
+              <div className="flex items-center mb-3">
+                <DollarSign className="w-5 h-5 text-green-500 mr-3" />
+                <h3 className="font-medium text-gray-900">Exchange Rate (USD to LBP)</h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-3">
+                Set the exchange rate for converting between USD and LBP (e.g., 1 USD = 89500 LBP)
+              </p>
+              <div className="flex items-center space-x-3">
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={tempExchangeRate}
+                  onChange={(e) => setTempExchangeRate(e.target.value)}
+                  className="w-32 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="89500"
+                />
+                <span className="text-gray-600">LBP per USD</span>
+                <button
+                  onClick={handleExchangeRateSave}
+                  disabled={tempExchangeRate === '89500'}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  {t('settings.save')}
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">Current rate: 1 USD = {tempExchangeRate} LBP</p>
             </div>
           </div>
         </div>

@@ -16,12 +16,11 @@ export interface CurrencyConversion {
 
 export class CurrencyService {
   private static instance: CurrencyService;
-  private exchangeRates: Map<string, number> = new Map();
+  private exchangeRate: number = 89500; // Default USD to LBP rate
   private lastUpdate: string = '';
 
   private constructor() {
-    this.initializeExchangeRates();
-    this.loadExchangeRatesFromDatabase();
+    this.loadExchangeRateFromStore();
   }
 
   public static getInstance(): CurrencyService {
@@ -31,37 +30,40 @@ export class CurrencyService {
     return CurrencyService.instance;
   }
 
-  private initializeExchangeRates() {
-    // Initialize with fixed rates as fallback
-    this.exchangeRates.set('USD_LBP', 89500);
-    this.exchangeRates.set('LBP_USD', 1 / 89500);
-    this.exchangeRates.set('USD_USD', 1);
-    this.exchangeRates.set('LBP_LBP', 1);
-    this.lastUpdate = new Date().toISOString();
+  private async loadExchangeRateFromStore(): Promise<void> {
+    try {
+      // Try to get the current store's exchange rate
+      const storeId = localStorage.getItem('currentStoreId');
+      if (storeId) {
+        const { db } = await import('../lib/db');
+        const store = await db.stores.get(storeId);
+        if (store && store.exchange_rate) {
+          this.exchangeRate = store.exchange_rate;
+          this.lastUpdate = store.updated_at;
+        }
+      }
+    } catch (error) {
+      console.warn('Could not load exchange rate from store, using default:', error);
+    }
   }
 
-  private async loadExchangeRatesFromDatabase() {
+  public async updateExchangeRate(rate: number): Promise<void> {
     try {
-      const { db } = await import('../lib/db');
-      const rates = await db.exchange_rates.toArray();
+      this.exchangeRate = rate;
+      this.lastUpdate = new Date().toISOString();
       
-      // Update rates from database
-      for (const rate of rates) {
-        const rateKey = `${rate.from_currency}_${rate.to_currency}`;
-        this.exchangeRates.set(rateKey, rate.rate);
+      // Update the store's exchange rate
+      const storeId = localStorage.getItem('currentStoreId');
+      if (storeId) {
+        const { db } = await import('../lib/db');
+        await db.stores.update(storeId, { 
+          exchange_rate: rate,
+          updated_at: this.lastUpdate
+        });
       }
-      
-      if (rates.length > 0) {
-        // Use the most recent update time
-        const latestRate = rates.reduce((latest, current) => 
-          new Date(current.updated_at) > new Date(latest.updated_at) ? current : latest
-        );
-        this.lastUpdate = latestRate.updated_at;
-      }
-      
-      console.log(`💱 Loaded ${rates.length} exchange rates from database`);
     } catch (error) {
-      console.warn('Failed to load exchange rates from database, using defaults:', error);
+      console.error('Failed to update exchange rate:', error);
+      throw error;
     }
   }
 
@@ -73,14 +75,13 @@ export class CurrencyService {
     if (amount === 0) return 0;
     if (fromCurrency === toCurrency) return amount;
 
-    const rateKey = `${fromCurrency}_${toCurrency}`;
-    const rate = this.exchangeRates.get(rateKey);
-    
-    if (!rate) {
-      throw new Error(`Exchange rate not found for ${fromCurrency} to ${toCurrency}`);
+    if (fromCurrency === 'USD' && toCurrency === 'LBP') {
+      return amount * this.exchangeRate;
+    } else if (fromCurrency === 'LBP' && toCurrency === 'USD') {
+      return amount / this.exchangeRate;
     }
 
-    return amount * rate;
+    throw new Error(`Unsupported currency conversion: ${fromCurrency} to ${toCurrency}`);
   }
 
   public formatCurrency(amount: number, currency: 'USD' | 'LBP'): string {
@@ -127,9 +128,8 @@ export class CurrencyService {
     return true;
   }
 
-  public getExchangeRate(fromCurrency: 'USD' | 'LBP', toCurrency: 'USD' | 'LBP'): number {
-    const rateKey = `${fromCurrency}_${toCurrency}`;
-    return this.exchangeRates.get(rateKey) || 1;
+  public getExchangeRate(): number {
+    return this.exchangeRate;
   }
 
   /**
@@ -138,74 +138,26 @@ export class CurrencyService {
    */
   public safeConvertForDatabase(amount: number, currency: 'USD' | 'LBP'): { amount: number; currency: 'USD' | 'LBP'; wasConverted: boolean } {
     const MAX_DB_AMOUNT = 99999999.99;
-    const USD_TO_LBP_RATE = 89500;
     
     if (amount >= MAX_DB_AMOUNT) {
       return { amount, currency, wasConverted: false };
     }
     
     if (currency === 'USD') {
-      // Convert  USD to LBP
-      const convertedAmount = amount * USD_TO_LBP_RATE;
+      // Convert USD to LBP
+      const convertedAmount = amount * this.exchangeRate;
       return { 
         amount: Math.round(convertedAmount * 100) / 100, // Round to 2 decimal places
         currency: 'LBP', 
         wasConverted: true 
       };
     } else {
-      
       return { 
         amount: amount, 
         currency: 'LBP', 
         wasConverted: true 
       };
     }
-  }
-
-  public async updateExchangeRate(fromCurrency: 'USD' | 'LBP', toCurrency: 'USD' | 'LBP', rate: number): Promise<void> {
-    const rateKey = `${fromCurrency}_${toCurrency}`;
-    this.exchangeRates.set(rateKey, rate);
-    this.lastUpdate = new Date().toISOString();
-    
-    // Update database
-    try {
-      const { db } = await import('../lib/db');
-      const now = new Date().toISOString();
-      
-      // Check if rate already exists
-      const existingRate = await db.exchange_rates
-        .where(['from_currency', 'to_currency'])
-        .equals([fromCurrency, toCurrency])
-        .first();
-      
-      if (existingRate) {
-        // Update existing rate
-        await db.exchange_rates.update(existingRate.id, {
-          rate,
-          updated_at: now,
-          _synced: false
-        });
-      } else {
-        // Create new rate
-        await db.exchange_rates.add({
-          id: `rate_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          from_currency: fromCurrency,
-          to_currency: toCurrency,
-          rate,
-          created_at: now,
-          updated_at: now,
-          _synced: false
-        });
-      }
-      
-      console.log(`💱 Updated exchange rate ${rateKey}: ${rate}`);
-    } catch (error) {
-      console.error('Failed to update exchange rate in database:', error);
-    }
-  }
-
-  public async refreshExchangeRates(): Promise<void> {
-    await this.loadExchangeRatesFromDatabase();
   }
 
   public getLastUpdate(): string {
@@ -215,9 +167,14 @@ export class CurrencyService {
   public getSupportedCurrencies(): CurrencyConfig[] {
     return [
       { code: 'USD', symbol: '$', name: 'US Dollar', exchangeRate: 1 },
-      { code: 'LBP', symbol: 'ل.ل', name: 'Lebanese Pound', exchangeRate: 1/89500 }
+      { code: 'LBP', symbol: 'ل.ل', name: 'Lebanese Pound', exchangeRate: 1/this.exchangeRate }
     ];
+  }
+
+  // Method to refresh exchange rate from store
+  public async refreshExchangeRate(): Promise<void> {
+    await this.loadExchangeRateFromStore();
   }
 }
 
-export const currencyService = CurrencyService.getInstance(); 
+export const currencyService = CurrencyService.getInstance();
