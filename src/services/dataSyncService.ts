@@ -41,7 +41,7 @@ export class DataSyncService {
   private initializeSyncStatus() {
     const tables = [
       'customers', 'suppliers', 'transactions', 
-      'inventory_items', 'sale_items'
+      'inventory_items', 'bill_line_items'
     ];
 
     tables.forEach(table => {

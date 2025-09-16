@@ -122,7 +122,7 @@ export class WeightManagementService {
         .toArray();
 
       // Get sales items (sold items)
-      let salesItems = await db.sale_items
+      let salesItems = await db.bill_line_items
         .where('product_id')
         .equals(productId)
         .filter(item => item.supplier_id === supplierId)
@@ -276,7 +276,7 @@ export class WeightManagementService {
           const product = products.find(p => p.id === inventoryItem.product_id);
           
           // Get sales for this specific inventory item
-          const salesForThisItem = await db.sale_items
+          const salesForThisItem = await db.bill_line_items
             .where('inventory_item_id')
             .equals(inventoryItem.id)
             .toArray();
@@ -437,7 +437,7 @@ export class WeightManagementService {
         }
 
         // Get existing sales for this inventory item
-        const existingSales = await db.sale_items
+        const existingSales = await db.bill_line_items
           .where('inventory_item_id')
           .equals(inventoryItemId)
           .toArray();

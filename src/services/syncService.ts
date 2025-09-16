@@ -3,8 +3,6 @@
 import { db } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/database';
-import { databaseConnectionService } from './databaseConnectionService';
-import { databasePerformanceService } from './databasePerformanceService';
 
 type Tables = Database['public']['Tables'];
 
@@ -345,25 +343,21 @@ export class SyncService {
     };
 
     try {
-      // Initialize connection service if not already done
-      await databaseConnectionService.initialize();
-      
       // Ensure store exists before syncing
       await this.ensureStoreExists(storeId);
       
       // Initialize sync metadata for empty tables to prevent dependency loops
       await this.initializeSyncMetadataForEmptyTables(storeId);
       
-      // Check connectivity using connection service
-      await databaseConnectionService.executeWithRetry(
-        async (client) => {
-          const { error } = await client.from('products').select('id').limit(1);
-          if (error) {
-            throw new Error(`Connection failed: ${error.message}`);
-          }
-        },
-        'Connectivity check'
-      );
+      // Check connectivity with a simple query
+      const { error: connectivityError } = await supabase
+        .from('products')
+        .select('id')
+        .limit(1);
+      
+      if (connectivityError) {
+        throw new Error(`Connection failed: ${connectivityError.message}`);
+      }
 
       // Track table dependencies to ensure proper sync order
       const tableDependencies: { [key: string]: string[] } = {
@@ -442,23 +436,7 @@ export class SyncService {
            const validSupplierIds = this.validationCache.suppliers;
            const validUserIds = this.validationCache.users;
            const validBatchIds = this.validationCache.batches;
-           
-           // Get local batch IDs to check against first (since batches are synced before items)
-           let localBatchIds: Set<string>;
-           try {
-             const localBatches = await databasePerformanceService.trackQuery(
-               'inventory_bills',
-               'select',
-               () => db.inventory_bills.toArray(),
-               { recordCount: 0 }
-             );
-             localBatchIds = new Set(localBatches.map(b => b.id));
-             console.log(`🔍 Found ${localBatchIds.size} local batch IDs for validation`);
-           } catch (error) {
-             console.warn('Failed to get local batch IDs for validation:', error);
-             localBatchIds = new Set();
-           }
-           
+        
            for (const record of activeRecordsFiltered) {
              // Check quantity constraint
              if (record.quantity < 0) {
@@ -1808,8 +1786,8 @@ export class SyncService {
   private getTableFromRecord(record: any): string {
     // Simple heuristic based on record properties
     if (record.product_id && record.supplier_id && record.received_at) return 'inventory_items';
-    if (record.inventory_item_id && record.product_id && record.supplier_id) return 'sale_items';
-    if (record.customer_id !== undefined && record.subtotal !== undefined) return 'sale_items'; // Assuming 'sale_items' for sales
+    if (record.inventory_item_id && record.product_id && record.supplier_id) return 'bill_line_items';
+    if (record.customer_id !== undefined && record.subtotal !== undefined) return 'bill_line_items'; // Assuming 'bill_line_items' for sales
     if (record.type && record.amount && record.currency) return 'transactions';
     if (record.category && !record.amount) return 'products';
     // Updated supplier detection to handle new type field and distinguish from transactions

@@ -447,7 +447,7 @@ export async function repairSaleItemsData(): Promise<{
  */
 export async function debugSaleItemsData(): Promise<void> {
   try {
-    const saleItems = await db.sale_items.limit(5).toArray();
+    const saleItems = await db.bill_line_items.limit(5).toArray();
     console.log('🔍 Sample sale_items data:', saleItems.map(item => ({
       id: item.id,
       fields: Object.keys(item),

@@ -449,7 +449,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     updateStockLevels();
   }, [inventoryItems, products, suppliers, lowStockAlertsEnabled, lowStockThreshold]);
 
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     if (!storeId) return;
 
     console.log('🔄 Refreshing data for store:', storeId);
@@ -567,9 +567,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('❌ Error loading data from Dexie:', error);
     }
-  };
+  }, [storeId]);
 
-  const updateUnsyncedCount = async () => {
+  const updateUnsyncedCount = useCallback(async () => {
     try {
       const counts = await Promise.all([
         db.products.filter(item => !item._synced).count(),
@@ -587,7 +587,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Error counting unsynced records:', error);
     }
-  };
+  }, []);
 
   // Helper function to get current unsynced count
   const getCurrentUnsyncedCount = async (): Promise<number> => {
@@ -686,7 +686,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setStockLevels(levels);
   };
 
-  const performSync = async (isAutomatic = false): Promise<SyncResult> => {
+  const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
     if (!storeId || isSyncing) {
       return { success: false, errors: ['No store ID or sync in progress'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
     }
@@ -718,7 +718,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setIsSyncing(false);
       setLoading(prev => ({ ...prev, sync: false }));
     }
-  };
+  }, [storeId, isSyncing, refreshData, updateUnsyncedCount]);
 
   // Debounced sync to batch rapid changes and prevent excessive sync calls
   const debouncedSync = () => {
@@ -1931,7 +1931,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   // Check undo validity after data changes
-  const checkUndoValidity = async () => {
+  const checkUndoValidity = useCallback(async () => {
     const undoData = localStorage.getItem('last_undo_action');
     if (!undoData) {
       setCanUndo(false);
@@ -1959,7 +1959,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('last_undo_action');
       setCanUndo(false);
     }
-  };
+  }, []);
 
   const openCashDrawer = async (amount: number, openedBy: string) => {
     if (!storeId) return;
@@ -2110,7 +2110,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return await db.getCurrentCashDrawerStatus(storeId);
   };
 
-  const refreshCashDrawerStatus = async () => {
+  const refreshCashDrawerStatus = useCallback(async () => {
     if (!storeId) return;
     
     try {
@@ -2143,7 +2143,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Error refreshing cash drawer status:', error);
     }
-  };
+  }, [storeId, currency]);
 
   const getCashDrawerSessionDetails = async (sessionId: string) => {
     if (!storeId) return null;
