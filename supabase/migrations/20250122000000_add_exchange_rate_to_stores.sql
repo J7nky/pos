@@ -6,3 +6,4 @@ UPDATE stores SET exchange_rate = 89500 WHERE exchange_rate IS NULL;
 
 -- Add comment to explain the column
 COMMENT ON COLUMN stores.exchange_rate IS 'USD to LBP exchange rate (e.g., 89500 means 1 USD = 89500 LBP)';
+
