@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
@@ -24,7 +25,10 @@ import {
   EyeOff,
   TrendingDown
 } from 'lucide-react';
-import CashDrawerMonitor from './CashDrawerMonitor';
+import CashDrawerMonitor from '../components/CashDrawerMonitor';
+import FastActionCard from '../components/cards/FastActionCard';
+import StatCard from '../components/cards/StatCard';
+import LowStockItem from '../components/LowStockItem';
 interface CashDrawerStatus {
   currentBalance: number;
   lastUpdated: string;
@@ -51,6 +55,7 @@ const getTransactionColor = (type: string) => {
 // Using local currency from context - no caching needed
 
 export default function Home() {
+  const navigate = useNavigate();
   const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
   const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
   const [storePreferredCurrency, setStorePreferredCurrency] = useState<'USD' | 'LBP'>('USD');
@@ -271,7 +276,7 @@ export default function Home() {
       icon: ShoppingCart,
       color: 'bg-green-500',
       hoverColor: 'hover:bg-green-600',
-      action: () => window.dispatchEvent(new CustomEvent('navigate', { detail: 'pos' })),
+      action: () => {navigate('/pos');},
       stats: `${todaySales.length} today`
     },
     {
@@ -281,7 +286,7 @@ export default function Home() {
       icon: Truck,
       color: 'bg-blue-500',
       hoverColor: 'hover:bg-blue-600',
-      action: () => window.dispatchEvent(new CustomEvent('navigate', { detail: 'inventory' })),
+      action: () => {navigate('/inventory')},
       stats: `${recentReceivesCount} recent receives`
     },
     {
@@ -291,7 +296,7 @@ export default function Home() {
       icon: UserPlus,
       color: 'bg-purple-500',
       hoverColor: 'hover:bg-purple-600',
-      action: () => window.dispatchEvent(new CustomEvent('navigate', { detail: 'customers' })),
+      action: () => {navigate('/customers')},
       stats: `${customers.filter(c => c.isActive).length} active`
     },
     {
@@ -301,7 +306,7 @@ export default function Home() {
       icon: Receipt,
       color: 'bg-amber-500',
       hoverColor: 'hover:bg-amber-600',
-      action: () => window.dispatchEvent(new CustomEvent('navigate', { detail: 'accounting' })),
+      action: () => {navigate('/accounting')},
       stats: `${formatCurrencyForStore(todayExpenses)} today (${storePreferredCurrency})`
     },
     {
@@ -311,7 +316,7 @@ export default function Home() {
       icon: Eye,
       color: 'bg-indigo-500',
       hoverColor: 'hover:bg-indigo-600',
-      action: () => window.dispatchEvent(new CustomEvent('navigate', { detail: 'reports' })),
+      action: () => {navigate('/reports')},
       stats: `${todaySales.length} sales`
     },
     {
@@ -321,7 +326,7 @@ export default function Home() {
       icon: Package,
       color: 'bg-teal-500',
       hoverColor: 'hover:bg-teal-600',
-      action: () => window.dispatchEvent(new CustomEvent('navigate', { detail: 'inventory' })),
+      action: () => {navigate('/inventory')},
       stats: lowStockAlertsEnabled ? `${lowStockItems.length} low stock` : `${products.length} products`
     }
   ];
@@ -399,30 +404,7 @@ export default function Home() {
         }`}>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {fastActions.map((action) => (
-              <button
-                key={action.id}
-                onClick={action.action}
-                className={`${action.color} ${action.hoverColor} text-white p-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-105 hover:shadow-xl group relative overflow-hidden`}
-              >
-                {/* Background decoration */}
-                <div className="absolute top-0 right-0 w-20 h-20 bg-white bg-opacity-10 rounded-full -translate-y-6 translate-x-6 group-hover:scale-150 transition-transform duration-300"></div>
-                <div className="absolute bottom-0 left-0 w-16 h-16 bg-white bg-opacity-5 rounded-full translate-y-4 -translate-x-4 group-hover:scale-125 transition-transform duration-300"></div>
-                
-                <div className="flex items-start justify-between mb-4">
-                  <div className="relative">
-                    <action.icon className="w-8 h-8 text-white group-hover:scale-110 transition-all duration-200 relative z-10" />
-                    {/* Popup glow effect */}
-                    <div className="absolute inset-0 w-8 h-8 bg-white rounded-full opacity-0 group-hover:opacity-20 group-hover:scale-150 transition-all duration-300 blur-sm"></div>
-                  </div>
-                  <span className="text-sm font-medium bg-white bg-opacity-20 px-2 py-1 rounded-full">
-                    {action.stats}
-                  </span>
-                </div>
-                <div className="relative z-10">
-                  <h3 className="text-lg font-bold mb-2 group-hover:translate-x-1 transition-transform duration-200">{action.title}</h3>
-                  <p className="text-sm opacity-90 group-hover:opacity-100 transition-opacity duration-200">{action.description}</p>
-                </div>
-              </button>
+              <FastActionCard key={action.id} action={action} />
             ))}
           </div>
         </div>
@@ -431,35 +413,13 @@ export default function Home() {
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {stats.map((stat, index) => (
-          <div key={index} className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600">{stat.title}</p>
-                <p className="text-2xl font-bold text-gray-900 mt-2">{stat.value}</p>
-                <p className="text-sm text-gray-500 mt-1">{stat.change}</p>
-              </div>
-              <div className={`p-3 rounded-full ${stat.color}`}>
-                <stat.icon className="w-6 h-6 text-white" />
-              </div>
-            </div>
-            {index === 0 && (() => {
-              const shouldShowButton = (!cashDrawerStatus || !cashDrawerStatus.openedAt);
-              console.log('🔍 Button visibility check:', {
-                index,
-                cashDrawerStatus,
-                openedAt: cashDrawerStatus?.openedAt,
-                shouldShowButton
-              });
-              return shouldShowButton;
-            })() && (
-              <button
-                onClick={handleOpenDrawer}
-                className="mt-3 w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm"
-              >
-                Open Cash Drawer
-              </button>
-            )}
-          </div>
+          <StatCard
+            key={index}
+            stat={stat}
+            index={index}
+            cashDrawerStatus={cashDrawerStatus}
+            handleOpenDrawer={handleOpenDrawer}
+          />
         ))}
       </div>
 
@@ -478,15 +438,15 @@ export default function Home() {
             {lowStockItems.length > 0 ? (
               <div className="space-y-3">
                 {lowStockItems.slice(0, 5).map(item => (
-                  <div key={item.productId} className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
-                    <div>
-                      <p className="font-medium text-gray-900">{item.productName}</p>
-                      <p className="text-sm text-gray-600">{item.currentStock} {item.unit} {t('inventory.remaining')}</p>
-                    </div>
-                    <span className="px-2 py-1 bg-amber-200 text-amber-800 text-xs rounded-full">
-                      {t('inventory.lowStock')}
-                    </span>
-                  </div>
+                  <LowStockItem
+                    key={item.productId}
+                    productId={item.productId}
+                    productName={item.productName}
+                    currentStock={item.currentStock}
+                    unit={item.unit}
+                    lowStockLabel={t("inventory.lowStock")}
+                    remainingLabel={t("inventory.remaining")}
+                  />
                 ))}
               </div>
             ) : (

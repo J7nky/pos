@@ -1,33 +1,28 @@
-import React, { ReactNode } from 'react';
-import KeyboardShortcutsHelp from './common/KeyboardShortcutsHelp';
+import React from 'react';
+import { ReactNode } from 'react';
+import { Link, Outlet, useLocation } from 'react-router-dom';
+import KeyboardShortcutsHelp from '../components/common/KeyboardShortcutsHelp';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useI18n } from '../i18n';
-import { 
-  LayoutDashboard, 
-  Package, 
-  ShoppingCart, 
-  Users, 
-  FileText, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Package,
+  ShoppingCart,
+  Users,
+  FileText,
+  Settings,
   LogOut,
   Wifi,
   WifiOff,
   Calculator
 } from 'lucide-react';
 
-interface LayoutProps {
-  children: ReactNode;
-  currentPage: string;
-  onPageChange: (page: string) => void;
-}
-
-export default function Layout({ children, currentPage, onPageChange }: LayoutProps) {
+export default function Layout() {
   const { userProfile, signOut } = useSupabaseAuth();
   const { t } = useI18n();
+  const location = useLocation();
 
-  // Only try to use offline data if userProfile is available
-  // This prevents the context error when the auth context is still loading
   if (!userProfile) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
@@ -39,27 +34,17 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
     );
   }
 
-  const { isOnline, products, customers, inventory, getSyncStatus } = useOfflineData();
-  const { unsyncedCount, isSyncing } = getSyncStatus();
-
-  // Listen for navigation events from Fast Actions
-  React.useEffect(() => {
-    const handleNavigate = (event: CustomEvent) => {
-      onPageChange(event.detail);
-    };
-    
-    window.addEventListener('navigate', handleNavigate as EventListener);
-    return () => window.removeEventListener('navigate', handleNavigate as EventListener);
-  }, [onPageChange]);
+  const { isOnline, getSyncStatus } = useOfflineData();
+  const { unsyncedCount } = getSyncStatus();
 
   const menuItems = [
-    { id: 'home', label: t('nav.home'), icon: LayoutDashboard },
-    { id: 'inventory', label: t('nav.inventory'), icon: Package },
-    { id: 'pos', label: t('nav.pos'), icon: ShoppingCart },
-    { id: 'customers', label: t('nav.customers'), icon: Users },
-    { id: 'accounting', label: t('nav.accounting'), icon: Calculator },
-    { id: 'reports', label: t('nav.reports'), icon: FileText },
-    { id: 'settings', label: t('nav.settings'), icon: Settings }
+    { id: 'home', label: t('nav.home'), icon: LayoutDashboard, path: '/' },
+    { id: 'inventory', label: t('nav.inventory'), icon: Package, path: '/inventory' },
+    { id: 'pos', label: t('nav.pos'), icon: ShoppingCart, path: '/pos' },
+    { id: 'customers', label: t('nav.customers'), icon: Users, path: '/customers' },
+    { id: 'accounting', label: t('nav.accounting'), icon: Calculator, path: '/accounting' },
+    { id: 'reports', label: t('nav.reports'), icon: FileText, path: '/reports' },
+    { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' }
   ];
 
   // Define shortcuts based on current page
@@ -82,7 +67,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
       }
     ];
 
-    if (currentPage === 'pos') {
+    if (location.pathname === '/pos') {
       baseShortcuts.push({
         title: 'POS Actions',
         shortcuts: {
@@ -98,7 +83,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
       });
     }
 
-    if (currentPage === 'accounting') {
+    if (location.pathname === '/accounting') {
       baseShortcuts.push({
         title: 'Accounting Actions',
         shortcuts: {
@@ -137,14 +122,14 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
             <KeyboardShortcutsHelp shortcuts={getShortcutsForPage()} />
           </div>
         </div>
-        
+
         <nav className="mt-6">
           {menuItems.map((item, index) => (
-            <button
+            <Link
               key={item.id}
-              onClick={() => onPageChange(item.id)}
+              to={item.path}
               className={`w-full flex items-center px-6 py-3 text-left hover:bg-blue-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset min-h-[48px] ${
-                currentPage === item.id ? 'bg-blue-50 border-r-2 border-blue-500 text-blue-600' : 'text-gray-600'
+                location.pathname === item.path ? 'bg-blue-50 border-r-2 border-blue-500 text-blue-600' : 'text-gray-600'
               }`}
               tabIndex={index + 1}
               accessKey={item.label.charAt(0).toLowerCase()}
@@ -152,7 +137,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
             >
               <item.icon className="w-5 h-5 mr-3" />
               {item.label}
-            </button>
+            </Link>
           ))}
         </nav>
 
@@ -176,7 +161,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
 
       {/* Main Content */}
       <div className="flex-1 overflow-auto">
-        {children}
+        <Outlet />
       </div>
     </div>
   );
