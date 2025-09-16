@@ -469,7 +469,6 @@ export default function ReceivedBills({
 
 
  
-
   return (
     <div className="space-y-0">
       <div className="flex justify-between items-center">
@@ -941,6 +940,14 @@ export default function ReceivedBills({
                       <p className="text-sm text-gray-900">{selectedReceivedBill.totalSoldQuantity} {selectedReceivedBill.unit}</p>
                     </div>
                     <div>
+                      <label className="block text-sm font-medium text-gray-700">Total Received Weight</label>
+                      <p className="text-sm text-gray-900">{selectedReceivedBill.weight ? `${selectedReceivedBill.weight} kg` : 'N/A'}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Total Sold Weight</label>
+                      <p className="text-sm text-gray-900">{selectedReceivedBill.relatedSales ? selectedReceivedBill.relatedSales.reduce((sum: number, sale: any) => sum + (sale.weight || 0), 0) : 0} kg</p>
+                    </div>
+                    <div>
                       <label className="block text-sm font-medium text-gray-700">Progress</label>
                       <div className="flex items-center mt-1">
                         <div className="w-full bg-gray-200 rounded-full h-2 mr-2">
@@ -1355,7 +1362,7 @@ function ReceivedBillSalesLogsModal({
         </div>
         <div className="p-6 overflow-y-auto flex-1">
           <div className="mb-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
               <div className="bg-blue-50 p-3 rounded-lg">
                 <p className="text-sm text-blue-700">Total Sales</p>
                 <p className="text-lg font-bold text-blue-900">{processedSalesData.length}</p>
@@ -1371,6 +1378,14 @@ function ReceivedBillSalesLogsModal({
               <div className="bg-orange-50 p-3 rounded-lg">
                 <p className="text-sm text-orange-700">Avg Price</p>
                 <p className="text-lg font-bold text-orange-900">{formatCurrency(processedSalesData.length > 0 ? processedSalesData.reduce((sum, item) => sum + (item.unitPrice || 0), 0) / processedSalesData.length : 0)}</p>
+              </div>
+              <div className="bg-indigo-50 p-3 rounded-lg">
+                <p className="text-sm text-indigo-700">Total Received Weight</p>
+                <p className="text-lg font-bold text-indigo-900">{selectedReceivedBill.weight ? `${selectedReceivedBill.weight} kg` : 'N/A'}</p>
+              </div>
+              <div className="bg-teal-50 p-3 rounded-lg">
+                <p className="text-sm text-teal-700">Total Sold Weight</p>
+                <p className="text-lg font-bold text-teal-900">{processedSalesData.reduce((sum, item) => sum + (item.weight || 0), 0)} kg</p>
               </div>
             </div>
           </div>

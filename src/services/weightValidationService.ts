@@ -84,7 +84,7 @@ export class WeightValidationService {
       // If weight is provided, validate it
       if (input.saleWeight && input.saleWeight > 0) {
         // Get existing sales for this inventory item
-        const existingSales = await db.sale_items
+        const existingSales = await db.bill_line_items
           .where('inventory_item_id')
           .equals(input.inventoryItemId)
           .toArray();

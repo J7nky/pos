@@ -19,7 +19,6 @@ import {
   Wrench
 } from 'lucide-react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import DatabaseHealthMonitor from './DatabaseHealthMonitor';
 
 export default function Settings() {
   const { userProfile } = useSupabaseAuth();
@@ -461,10 +460,6 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Database Health Monitor Modal */}
-      {showDatabaseHealth && (
-        <DatabaseHealthMonitor onClose={() => setShowDatabaseHealth(false)} />
-      )}
     </div>
   );
 }

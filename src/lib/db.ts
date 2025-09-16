@@ -1685,7 +1685,7 @@ if (typeof window !== 'undefined') {
       };
       
       console.log('📝 Adding test sale item:', testItem);
-      await db.sale_items.add(testItem);
+      await db.bill_line_items.add(testItem);
       console.log('✅ Test sale item added successfully');
     } catch (error) {
       console.error('❌ Test failed:', error);

@@ -37,6 +37,7 @@ interface UseInventoryFormsReturn {
     empty_plastic: boolean;
     plastic_count: string;
     plastic_price: string;
+    received_at: string;
   };
   setReceiveForm: (form: any) => void;
   receiveErrors: any;
@@ -76,7 +77,8 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
     status: '',
     empty_plastic: false,
     plastic_count: '',
-    plastic_price: ''
+    plastic_price: '',
+    received_at: new Date().toISOString().split('T')[0] // Today's date in YYYY-MM-DD format
   });
 
   // Error states
@@ -147,7 +149,8 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
       status: '',
       empty_plastic: false,
       plastic_count: '',
-      plastic_price: ''
+      plastic_price: '',
+      received_at: new Date().toISOString().split('T')[0] // Today's date in YYYY-MM-DD format
     });
     setReceiveErrors({});
   };

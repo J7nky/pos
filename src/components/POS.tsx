@@ -826,15 +826,8 @@ export default function POS() {
             removeFromCart={removeFromCart} 
             formatCurrency={formatCurrency} 
             inventory={inventory}
-            onCompleteSale={handleCheckout}
-            isProcessing={isProcessing}
-            completeSaleRef={completeSaleRef}
-            hasZeroPricedItem={hasZeroPricedItem}
-            isWalkInCustomer={isWalkInCustomer}
-            paymentMethod={activeTab.paymentMethod}
-            amountReceived={activeTab.amountReceived}
-            selectedCustomer={activeTab.selectedCustomer}
-            total={total}
+            products={products}
+            
           />
 
           {/* Totals and Payment */}
@@ -1209,7 +1202,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
     </div>
   );
 };
-const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, onCompleteSale, isProcessing, completeSaleRef, hasZeroPricedItem, isWalkInCustomer, paymentMethod, amountReceived, selectedCustomer, total }: any) => (
+const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, products }: any) => (
   <div className="bg-white rounded-lg shadow-sm relative">
     {/* Enhanced Cart Header */}
     {/* <div className="p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
@@ -1241,21 +1234,21 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
           {(activeTab?.cart || []).map((item: any, index: number)  => {
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
-
+            const product = products.find((p: any) => p.id === item.productId);
             return (
               <div key={item.id} className="p-4 hover:bg-gray-50 transition-colors duration-150">
                 {/* Product Header */}
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="flex items-center space-x-2 mb-1">
-                      <h4 className="font-semibold text-gray-900 text-base">{item.productName}</h4>
+                      <h4 className="font-semibold text-gray-900 text-base">{product.name}</h4>
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full font-medium">
                         #{index + 1}
                       </span>
                     </div>
                     <p className="text-sm text-gray-600 flex items-center">
                       <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
-                      {item.supplierName}
+                      {product.supplierName}
                     </p>
                 
                   </div>
@@ -1264,7 +1257,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     variant="ghost"
                     size="sm"
                     className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors duration-150 min-h-[44px]"
-                    ariaLabel={`Remove ${item.productName} from cart`}
+                    ariaLabel={`Remove ${product.name} from cart`}
                     tabIndex={-1}
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1296,7 +1289,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                         }}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
                         tabIndex={200 + index * 4 + 1}
-                        aria-label={`Quantity for ${item.productName}`}
+                        aria-label={`Quantity for ${product.name}`}
                       />
                       <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
                         units
@@ -1314,14 +1307,14 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                         value={item.weight ?? ''}
                         onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
                         className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
-                          item.productName?.toLowerCase().includes('plastic') 
+                          product.name?.toLowerCase().includes('plastic') 
                             ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
                             : 'bg-white'
                         }`}
                         placeholder="0.00"
-                        disabled={item.productName?.toLowerCase()==='plastic'}
+                        disabled={product.name?.toLowerCase()==='plastic'}
                         tabIndex={200 + index * 4 + 2}
-                        aria-label={`Weight for ${item.productName}`}
+                        aria-label={`Weight for ${product.name}`}
                       />
                       <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
                         kg
@@ -1340,7 +1333,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
                       placeholder="0.00"
                       tabIndex={200 + index * 4 + 3}
-                      ariaLabel={`Price for ${item.productName}`}
+                      ariaLabel={`Price for ${product.name}`}
                     />
                   </div>
 
@@ -1351,7 +1344,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 rounded-lg border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       tabIndex={200 + index * 4 + 4}
                       role="status"
-                      aria-label={`Total for ${item.productName} is ${formatCurrency(item.totalPrice)}`}
+                        aria-label={`Total for ${product.name} is ${formatCurrency(item.totalPrice)}`}
                     >
                       <div className="text-lg font-bold text-blue-700 text-center" aria-hidden="true">
                         {formatCurrency(item.totalPrice)}
