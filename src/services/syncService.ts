@@ -268,7 +268,7 @@ export class SyncService {
   }
 
   /**
-   * Initialize sync metadata for empty tables to prevent dependency loops
+   * Initialize sync metadata for all tables to prevent dependency loops
    */
   private async initializeSyncMetadataForEmptyTables(storeId: string) {
     const hasAnySyncMetadata = await db.sync_metadata.count() > 0;
@@ -282,15 +282,10 @@ export class SyncService {
       
       for (const tableName of SYNC_TABLES) {
         try {
-          // Check if table has any records
-          const table = (db as any)[tableName];
-          const recordCount = await table.count();
-          
-          if (recordCount === 0) {
-            // Initialize empty table with sync metadata
-            await db.updateSyncMetadata(tableName, currentTime);
-            console.log(`📝 Initialized sync metadata for empty table: ${tableName}`);
-          }
+          // Initialize sync metadata for ALL tables, regardless of whether they have data
+          // This ensures dependency validation works correctly
+          await db.updateSyncMetadata(tableName, currentTime);
+          console.log(`📝 Initialized sync metadata for table: ${tableName}`);
         } catch (error) {
           console.warn(`Failed to initialize sync metadata for ${tableName}:`, error);
         }
@@ -903,7 +898,7 @@ export class SyncService {
       }
     }
 
-    console.log(`📊 Sync upload summary: ${result.uploaded} records uploaded, ${result.errors.length} errors`);
+    console.log(`📊 Sync upload summary: ${result.uploaded} records uploaded, ${result.errors}`);
     return result;
   }
 
@@ -947,23 +942,7 @@ export class SyncService {
           query = query.eq('id', storeId);
         }
         
-        // Apply timestamp filtering (stores might need special handling)
-        let remoteRecords, error;
-        if (tableName === 'stores') {
-          // For stores, download all records if no sync metadata exists, otherwise use timestamp
-          console.log(`🔍 Downloading stores for storeId: ${storeId}`);
-          const result = await query.order(timestampField, { ascending: true });
-          remoteRecords = result.data;
-          error = result.error;
-          console.log(`📊 Stores query result: ${remoteRecords?.length || 0} records, error: ${error?.message || 'none'}`);
-        } else {
-          const result = await query
-            .gt(timestampField, lastSyncAt)
-            .order(timestampField, { ascending: true });
-          remoteRecords = result.data;
-          error = result.error;
-        }
-
+     
         if (error) {
           result.errors.push(`Download failed for ${tableName}: ${error.message}`);
           continue;

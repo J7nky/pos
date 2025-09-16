@@ -233,15 +233,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         if (existingStore.preferred_commission_rate !== undefined) {
           setDefaultCommissionRate(existingStore.preferred_commission_rate);
         }
-        
-        // Initialize exchange_rate if not set
-        if (!existingStore.exchange_rate) {
-          console.log('💱 Initializing exchange rate for store...');
-          await db.stores.update(storeId, { 
-            exchange_rate: 89500,
-            updated_at: new Date().toISOString()
-          });
-        }
       } else {
         // Store not found locally - will be synced when connection is available
         console.log('📴 Store data not found locally - will sync when online');
@@ -260,6 +251,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (storeId) {
       loadStoreData();
       initializeData();
+      // initializeExchangeRates();
       // Check undo validity after data is loaded
       setTimeout(() => checkUndoValidity(), 1000);
     }
@@ -449,7 +441,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     updateStockLevels();
   }, [inventoryItems, products, suppliers, lowStockAlertsEnabled, lowStockThreshold]);
 
-  const refreshData = useCallback(async () => {
+  const refreshData = async () => {
     if (!storeId) return;
 
     console.log('🔄 Refreshing data for store:', storeId);
@@ -567,40 +559,121 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('❌ Error loading data from Dexie:', error);
     }
-  }, [storeId]);
+  };
 
-  const updateUnsyncedCount = useCallback(async () => {
+  const updateUnsyncedCount = async () => {
     try {
+      const tableNames = [
+        'stores', 'products', 'suppliers', 'customers', 'cash_drawer_accounts',
+        'inventory_bills', 'inventory_items', 'transactions', 'bills',
+        'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions'
+      ];
+      
       const counts = await Promise.all([
+        db.stores.filter(item => !item._synced).count(),
         db.products.filter(item => !item._synced).count(),
         db.suppliers.filter(item => !item._synced).count(),
         db.customers.filter(item => !item._synced).count(),
-        db.inventory_items.filter(item => !item._synced).count(),
-        Promise.resolve(0), // sales not in current schema
-        db.bill_line_items.filter(item => !item._synced).count(),
-        db.transactions.filter(item => !item._synced).count(),
         db.cash_drawer_accounts.filter(item => !item._synced).count(),
+        db.inventory_bills.filter(item => !item._synced).count(),
+        db.inventory_items.filter(item => !item._synced).count(),
+        db.transactions.filter(item => !item._synced).count(),
+        db.bills.filter(item => !item._synced).count(),
+        db.bill_line_items.filter(item => !item._synced).count(),
+        db.bill_audit_logs.filter(item => !item._synced).count(),
         db.cash_drawer_sessions.filter(item => !item._synced).count(),
-
       ]);
+      
+      // Debug: Log which tables have unsynced records
+      const unsyncedByTable = tableNames.map((name, index) => ({ table: name, count: counts[index] }))
+        .filter(item => item.count > 0);
+      
+      if (unsyncedByTable.length > 0) {
+        console.log('🔍 Unsynced records by table:', unsyncedByTable);
+        
+        // Debug specific unsynced records for inventory_items
+        if (unsyncedByTable.some(item => item.table === 'inventory_items')) {
+          db.inventory_items.filter(item => !item._synced).toArray().then(async (unsyncedItems) => {
+            console.log('🔍 Unsynced inventory_items details:', unsyncedItems);
+            unsyncedItems.forEach((item, index) => {
+              console.log(`  Item ${index + 1}:`, {
+                id: item.id,
+                product_id: item.product_id,
+                supplier_id: item.supplier_id,
+                batch_id: item.batch_id,
+                quantity: item.quantity,
+                weight: item.weight,
+                price: item.price,
+                _synced: item._synced,
+                _deleted: item._deleted,
+                created_at: item.created_at
+              });
+            });
+            
+            // Check validation constraints for each unsynced item
+            for (const item of unsyncedItems) {
+              console.log(`🔍 Validating unsynced item ${item.id}:`);
+              
+              // Check quantity constraint
+              if (item.quantity < 0) {
+                console.log(`  ❌ Quantity validation failed: ${item.quantity} < 0`);
+              } else {
+                console.log(`  ✅ Quantity validation passed: ${item.quantity}`);
+              }
+              
+              // Check if product_id exists
+              const product = await db.products.get(item.product_id);
+              if (!product) {
+                console.log(`  ❌ Product validation failed: product_id ${item.product_id} not found`);
+              } else {
+                console.log(`  ✅ Product validation passed: ${product.name}`);
+              }
+              
+              // Check if supplier_id exists
+              const supplier = await db.suppliers.get(item.supplier_id);
+              if (!supplier) {
+                console.log(`  ❌ Supplier validation failed: supplier_id ${item.supplier_id} not found`);
+              } else {
+                console.log(`  ✅ Supplier validation passed: ${supplier.name}`);
+              }
+              
+              // Check if batch_id exists (if provided)
+              if (item.batch_id) {
+                const batch = await db.inventory_bills.get(item.batch_id);
+                if (!batch) {
+                  console.log(`  ❌ Batch validation failed: batch_id ${item.batch_id} not found`);
+                } else {
+                  console.log(`  ✅ Batch validation passed: ${batch.id}`);
+                }
+              } else {
+                console.log(`  ℹ️ No batch_id provided (optional)`);
+              }
+            }
+          });
+        }
+      }
+      
       setUnsyncedCount(counts.reduce((sum, count) => sum + count, 0));
     } catch (error) {
       console.error('Error counting unsynced records:', error);
     }
-  }, []);
+  };
 
   // Helper function to get current unsynced count
   const getCurrentUnsyncedCount = async (): Promise<number> => {
     try {
       const counts = await Promise.all([
+        db.stores.filter(item => !item._synced).count(),
         db.products.filter(item => !item._synced).count(),
         db.suppliers.filter(item => !item._synced).count(),
         db.customers.filter(item => !item._synced).count(),
-        db.inventory_items.filter(item => !item._synced).count(),
-        Promise.resolve(0), // sales not in current schema
-        db.bill_line_items.filter(item => !item._synced).count(),
-        db.transactions.filter(item => !item._synced).count(),
         db.cash_drawer_accounts.filter(item => !item._synced).count(),
+        db.inventory_bills.filter(item => !item._synced).count(),
+        db.inventory_items.filter(item => !item._synced).count(),
+        db.transactions.filter(item => !item._synced).count(),
+        db.bills.filter(item => !item._synced).count(),
+        db.bill_line_items.filter(item => !item._synced).count(),
+        db.bill_audit_logs.filter(item => !item._synced).count(),
         db.cash_drawer_sessions.filter(item => !item._synced).count(),
       ]);
       return counts.reduce((sum, count) => sum + count, 0);
@@ -686,7 +759,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setStockLevels(levels);
   };
 
-  const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
+  const performSync = async (isAutomatic = false): Promise<SyncResult> => {
     if (!storeId || isSyncing) {
       return { success: false, errors: ['No store ID or sync in progress'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
     }
@@ -718,7 +791,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setIsSyncing(false);
       setLoading(prev => ({ ...prev, sync: false }));
     }
-  }, [storeId, isSyncing, refreshData, updateUnsyncedCount]);
+  };
 
   // Debounced sync to batch rapid changes and prevent excessive sync calls
   const debouncedSync = () => {
@@ -1931,7 +2004,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   // Check undo validity after data changes
-  const checkUndoValidity = useCallback(async () => {
+  const checkUndoValidity = async () => {
     const undoData = localStorage.getItem('last_undo_action');
     if (!undoData) {
       setCanUndo(false);
@@ -1959,7 +2032,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('last_undo_action');
       setCanUndo(false);
     }
-  }, []);
+  };
 
   const openCashDrawer = async (amount: number, openedBy: string) => {
     if (!storeId) return;
@@ -2110,7 +2183,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return await db.getCurrentCashDrawerStatus(storeId);
   };
 
-  const refreshCashDrawerStatus = useCallback(async () => {
+  const refreshCashDrawerStatus = async () => {
     if (!storeId) return;
     
     try {
@@ -2143,7 +2216,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Error refreshing cash drawer status:', error);
     }
-  }, [storeId, currency]);
+  };
 
   const getCashDrawerSessionDetails = async (sessionId: string) => {
     if (!storeId) return null;
