@@ -155,7 +155,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const { isOnline, justCameOnline } = useNetworkStatus();
   const storeId = userProfile?.store_id;
 
-  // console.log('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline);
+  console.log('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline);
 
   // Data states - offline-first structure
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
@@ -2550,14 +2550,97 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   // Don't render context if userProfile is not available
+  // Instead of blocking here, let the App component handle authentication
   if (!userProfile) {
+    console.log('❌ No userProfile available, rendering empty context');
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
+      <OfflineDataContext.Provider value={{
+        // Minimal context with empty data
+        storeId: null,
+        products: [],
+        suppliers: [],
+        customers: [],
+        sales: [],
+        inventory: [],
+        inventoryBills: [],
+        transactions: [],
+        expenseCategories: [],
+        bills: [],
+        billLineItems: [],
+        billAuditLogs: [],
+        stockLevels: [],
+        setStockLevels: () => {},
+        lowStockAlertsEnabled: false,
+        lowStockThreshold: 10,
+        defaultCommissionRate: 10,
+        currency: 'USD',
+        cashDrawer: null,
+        openCashDrawer: async () => {},
+        closeCashDrawer: async () => {},
+        getCashDrawerBalanceReport: async () => [],
+        getCurrentCashDrawerStatus: async () => null,
+        getCashDrawerSessionDetails: async () => null,
+        getRecommendedOpeningAmount: async () => ({ amount: 0, source: 'default' as const }),
+        refreshCashDrawerStatus: async () => {},
+        isOnline: false,
+        loading: {
+          sync: false,
+          products: false,
+          suppliers: false,
+          customers: false,
+          sales: false,
+          inventory: false,
+          transactions: false,
+          expenseCategories: false,
+          bills: false
+        },
+        // Empty CRUD operations
+        addProduct: async () => {},
+        addSupplier: async () => {},
+        addCustomer: async () => {},
+        updateCustomer: async () => {},
+        updateSupplier: async () => {},
+        updateProduct: async () => {},
+        deleteProduct: async () => {},
+        addInventoryItem: async () => {},
+        updateInventoryItem: async () => {},
+        deleteInventoryItem: async () => {},
+        addInventoryBatch: async () => ({ batchId: '', financialResult: null }),
+        addSale: async () => {},
+        updateSale: async () => {},
+        deleteSale: async () => {},
+        updateBillsForSaleItem: async () => {},
+        addTransaction: async () => {},
+        addExpenseCategory: async () => {},
+        updateInventoryBatch: async () => {},
+        applyCommissionRateToBatch: async () => {},
+        createBill: async () => '',
+        updateBill: async () => {},
+        deleteBill: async () => {},
+        getBills: async () => [],
+        getBillDetails: async () => null,
+        createBillAuditLog: async () => {},
+        getStore: async () => null,
+        deductInventoryQuantity: async () => {},
+        restoreInventoryQuantity: async () => {},
+        refreshData: async () => {},
+        getStockLevels: () => [],
+        toggleLowStockAlerts: async () => {},
+        updateLowStockThreshold: () => {},
+        updateDefaultCommissionRate: async () => {},
+        updateCurrency: async () => {},
+        sync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
+        fullResync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
+        debouncedSync: () => {},
+        getSyncStatus: () => ({ isOnline: false, lastSync: null, unsyncedCount: 0, isSyncing: false, isAutoSyncing: false }),
+        validateAndCleanData: async () => ({ cleaned: 0, report: {} }),
+        canUndo: false,
+        undoLastAction: async () => false,
+        pushUndo: () => {},
+        testUndo: () => {}
+      }}>
+        {children}
+      </OfflineDataContext.Provider>
     );
   }
 

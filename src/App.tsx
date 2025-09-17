@@ -55,9 +55,9 @@ function AuthenticatedApp() {
 }
 
 function AppContent() {
-  // console.log('AppContent: Rendering AppContent component');
+  console.log('AppContent: Rendering AppContent component');
   const { userProfile, loading } = useSupabaseAuth();
-  // console.log('AppContent: userProfile:', userProfile, 'loading:', loading);
+  console.log('AppContent: userProfile:', userProfile, 'loading:', loading);
   const { t } = useI18n();
 
   if (loading) {
