@@ -40,23 +40,72 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load user profile when user changes
-  useEffect(() => {
-    async function loadUserProfile() {
-      if (user) {
-        try {
+  // Load user profile function
+  const loadUserProfile = async () => {
+    if (user) {
+      try {
+        // Check if we're online before making Supabase requests
+        if (navigator.onLine) {
           const profile = await SupabaseService.getUserProfile(user.id);
           setUserProfile(profile as any);
-        } catch (error) {
-          console.error('Error loading user profile:', error);
+        } else {
+          // Offline mode - try to load from localStorage
+          const cachedProfile = SupabaseService.getCachedUserProfile(user.id);
+          if (cachedProfile) {
+            console.log('📱 Using cached user profile (offline mode)');
+            setUserProfile(cachedProfile);
+          } else {
+            console.log('⚠️ No cached user profile available (offline mode)');
+            setUserProfile(null);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading user profile:', error);
+        
+        // If online request failed, try to load from cache
+        if (navigator.onLine) {
+          const cachedProfile = SupabaseService.getCachedUserProfile(user.id);
+          if (cachedProfile) {
+            console.log('📱 Fallback to cached user profile');
+            setUserProfile(cachedProfile);
+          } else {
+            setUserProfile(null);
+          }
+        } else {
           setUserProfile(null);
         }
-      } else {
-        setUserProfile(null);
       }
-      setLoading(false);
+    } else {
+      setUserProfile(null);
     }
+    setLoading(false);
+  };
 
+  // Handle online/offline transitions
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('🌐 Back online - refreshing user profile');
+      if (user) {
+        // Refresh user profile when back online
+        loadUserProfile();
+      }
+    };
+
+    const handleOffline = () => {
+      console.log('📱 Gone offline - using cached data');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [user]);
+
+  // Load user profile when user changes
+  useEffect(() => {
     if (!authLoading) {
       loadUserProfile();
     }
@@ -69,6 +118,23 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         console.error('Sign in error:', error);
         return false;
       }
+      
+      // Cache user profile for offline use
+      if (navigator.onLine) {
+        try {
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          if (currentUser) {
+            const profile = await SupabaseService.getUserProfile(currentUser.id);
+            if (profile) {
+              localStorage.setItem(`user_profile_${profile.id}`, JSON.stringify(profile));
+              console.log('📱 Cached user profile for offline use');
+            }
+          }
+        } catch (profileError) {
+          console.warn('Failed to cache user profile:', profileError);
+        }
+      }
+      
       return true;
     } catch (error) {
       console.error('Sign in error:', error);

@@ -123,10 +123,10 @@ interface OfflineDataContextType {
   // Utility functions - exact match
   refreshData: () => Promise<void>;
   getStockLevels: () => any[];
-  toggleLowStockAlerts: (enabled: boolean) => void;
+  toggleLowStockAlerts: (enabled: boolean) => Promise<void>;
   updateLowStockThreshold: (threshold: number) => void;
-  updateDefaultCommissionRate: (rate: number) => void;
-  updateCurrency: (newCurrency: 'USD' | 'LBP') => void;
+  updateDefaultCommissionRate: (rate: number) => Promise<void>;
+  updateCurrency: (newCurrency: 'USD' | 'LBP') => Promise<void>;
   
   // Additional offline-specific features
   sync: (isAutomatic?: boolean) => Promise<SyncResult>;
@@ -232,6 +232,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
         if (existingStore.preferred_commission_rate !== undefined) {
           setDefaultCommissionRate(existingStore.preferred_commission_rate);
+        }
+        if (existingStore.low_stock_alert !== undefined) {
+          setLowStockAlertsEnabled(existingStore.low_stock_alert);
         }
       } else {
         // Store not found locally - will be synced when connection is available
@@ -413,17 +416,30 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // Auto-sync on window focus when online (for when user returns to tab)
   useEffect(() => {
-    const handleFocus = () => {
+    let autoSyncTimeout: NodeJS.Timeout;
+
+    const debouncedAutoSync = () => {
       if (isOnline && storeId && !isSyncing && unsyncedCount > 0) {
-        console.log('👀 Window focused - auto-syncing...');
-        performSync(true);
+        // Clear any existing timeout
+        if (autoSyncTimeout) {
+          clearTimeout(autoSyncTimeout);
+        }
+        
+        // Debounce auto-sync calls
+        autoSyncTimeout = setTimeout(() => {
+          console.log('👀 Auto-syncing on focus/visibility change...');
+          performSync(true);
+        }, 1000); // 1 second debounce
       }
     };
 
+    const handleFocus = () => {
+      debouncedAutoSync();
+    };
+
     const handleVisibilityChange = () => {
-      if (!document.hidden && isOnline && storeId && !isSyncing && unsyncedCount > 0) {
-        console.log('👁️ Page became visible - auto-syncing...');
-        performSync(true);
+      if (!document.hidden) {
+        debouncedAutoSync();
       }
     };
 
@@ -433,6 +449,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (autoSyncTimeout) {
+        clearTimeout(autoSyncTimeout);
+      }
     };
   }, [isOnline, storeId, isSyncing, unsyncedCount]);
 
@@ -614,9 +633,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             for (const item of unsyncedItems) {
               console.log(`🔍 Validating unsynced item ${item.id}:`);
               
+              const validationErrors = [];
+              
               // Check quantity constraint
               if (item.quantity < 0) {
                 console.log(`  ❌ Quantity validation failed: ${item.quantity} < 0`);
+                validationErrors.push('Negative quantity');
               } else {
                 console.log(`  ✅ Quantity validation passed: ${item.quantity}`);
               }
@@ -625,6 +647,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               const product = await db.products.get(item.product_id);
               if (!product) {
                 console.log(`  ❌ Product validation failed: product_id ${item.product_id} not found`);
+                validationErrors.push('Missing product');
               } else {
                 console.log(`  ✅ Product validation passed: ${product.name}`);
               }
@@ -633,6 +656,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               const supplier = await db.suppliers.get(item.supplier_id);
               if (!supplier) {
                 console.log(`  ❌ Supplier validation failed: supplier_id ${item.supplier_id} not found`);
+                validationErrors.push('Missing supplier');
               } else {
                 console.log(`  ✅ Supplier validation passed: ${supplier.name}`);
               }
@@ -642,11 +666,78 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                 const batch = await db.inventory_bills.get(item.batch_id);
                 if (!batch) {
                   console.log(`  ❌ Batch validation failed: batch_id ${item.batch_id} not found`);
+                  validationErrors.push('Invalid batch reference');
                 } else {
                   console.log(`  ✅ Batch validation passed: ${batch.id}`);
                 }
               } else {
                 console.log(`  ℹ️ No batch_id provided (optional)`);
+              }
+              
+              // Auto-fix common issues
+              if (validationErrors.length > 0) {
+                console.log(`🔧 Attempting to auto-fix item ${item.id}...`);
+                try {
+                  const fixes = [];
+                  
+                  // Fix negative quantity
+                  if (item.quantity < 0) {
+                    await db.inventory_items.update(item.id, { 
+                      quantity: 0,
+                      _synced: false 
+                    });
+                    fixes.push('Fixed negative quantity (set to 0)');
+                  }
+                  
+                  // Fix missing product (use first available product)
+                  if (!product) {
+                    const validProduct = await db.products
+                      .where('store_id')
+                      .equals(item.store_id)
+                      .filter(p => !p._deleted)
+                      .first();
+                    if (validProduct) {
+                      await db.inventory_items.update(item.id, { 
+                        product_id: validProduct.id,
+                        _synced: false 
+                      });
+                      fixes.push(`Updated product_id to: ${validProduct.name}`);
+                    }
+                  }
+                  
+                  // Fix missing supplier (use first available supplier)
+                  if (!supplier) {
+                    const validSupplier = await db.suppliers
+                      .where('store_id')
+                      .equals(item.store_id)
+                      .filter(s => !s._deleted)
+                      .first();
+                    if (validSupplier) {
+                      await db.inventory_items.update(item.id, { 
+                        supplier_id: validSupplier.id,
+                        _synced: false 
+                      });
+                      fixes.push(`Updated supplier_id to: ${validSupplier.name}`);
+                    }
+                  }
+                  
+                  // Fix invalid batch reference
+                  if (item.batch_id && !await db.inventory_bills.get(item.batch_id)) {
+                    await db.inventory_items.update(item.id, { 
+                      batch_id: null,
+                      _synced: false 
+                    });
+                    fixes.push('Removed invalid batch_id reference');
+                  }
+                  
+                  if (fixes.length > 0) {
+                    console.log(`✅ Auto-fixes applied: ${fixes.join(', ')}`);
+                  } else {
+                    console.log(`⚠️ No auto-fixes available for item ${item.id}`);
+                  }
+                } catch (fixError) {
+                  console.error(`❌ Auto-fix failed for item ${item.id}:`, fixError);
+                }
               }
             }
           });
@@ -789,6 +880,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       };
     } finally {
       setIsSyncing(false);
+      setIsAutoSyncing(false);
       setLoading(prev => ({ ...prev, sync: false }));
     }
   };
@@ -931,7 +1023,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         
         const totalCashAmount = cashSaleItems.reduce((sum, item) => sum + (item.received_value || item.line_total || 0), 0);
         
-        console.log(`💰 Updating cash drawer for cash sales: $${totalCashAmount}`);
+        // console.log(`💰 Updating cash drawer for cash sales: $${totalCashAmount}`);
         
         const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
           type: 'sale',
@@ -1673,7 +1765,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         
         const totalCashAmount = cashSaleItemsForDrawer.reduce((sum, item) => sum + (item.received_value || 0), 0);
         
-        console.log(`💰 Updating cash drawer for cash sales: $${totalCashAmount}`);
+        // console.log(`💰 Updating cash drawer for cash sales: $${totalCashAmount}`);
         
         const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
           type: 'sale',
@@ -2230,20 +2322,125 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const getStockLevels = () => stockLevels;
 
-  const toggleLowStockAlerts = (enabled: boolean) => {
-    setLowStockAlertsEnabled(enabled);
+  const toggleLowStockAlerts = async (enabled: boolean) => {
+    if (!storeId) {
+      console.warn('No store ID available for low stock alert toggle');
+      return;
+    }
+
+    try {
+      // Update local state immediately
+      setLowStockAlertsEnabled(enabled);
+      
+      // Update IndexedDB
+      await db.stores
+        .where('id')
+        .equals(storeId)
+        .modify({ 
+          low_stock_alert: enabled,
+          _synced: false,
+          updated_at: new Date().toISOString()
+        });
+
+      console.log('✅ Low stock alert updated locally:', enabled);
+      
+      // Update unsynced count immediately
+      await updateUnsyncedCount();
+      
+      // Trigger immediate sync for settings changes
+      if (isOnline && !isSyncing) {
+        console.log('🔄 Triggering immediate sync for low stock alert change');
+        performSync(true);
+      } else {
+        debouncedSync();
+      }
+    } catch (error) {
+      console.error('❌ Error updating low stock alert:', error);
+      // Revert local state on error
+      setLowStockAlertsEnabled(!enabled);
+    }
   };
 
   const updateLowStockThreshold = (threshold: number) => {
     setLowStockThreshold(threshold);
   };
 
-  const updateDefaultCommissionRate = (rate: number) => {
-    setDefaultCommissionRate(rate);
+  const updateDefaultCommissionRate = async (rate: number) => {
+    if (!storeId) {
+      console.warn('No store ID available for commission rate update');
+      return;
+    }
+
+    try {
+      // Update local state immediately
+      setDefaultCommissionRate(rate);
+      
+      // Update IndexedDB
+      await db.stores
+        .where('id')
+        .equals(storeId)
+        .modify({ 
+          preferred_commission_rate: rate,
+          _synced: false,
+          updated_at: new Date().toISOString()
+        });
+
+      console.log('✅ Commission rate updated locally:', rate);
+      
+      // Update unsynced count immediately
+      // await updateUnsyncedCount();
+      
+      // Trigger immediate sync for settings changes
+      if (isOnline && !isSyncing) {
+        console.log('🔄 Triggering immediate sync for commission rate change');
+        performSync(true);
+      } else {
+        debouncedSync();
+      }
+    } catch (error) {
+      console.error('❌ Error updating commission rate:', error);
+      // Revert local state on error
+      setDefaultCommissionRate(defaultCommissionRate);
+    }
   };
 
-  const updateCurrency = (newCurrency: 'USD' | 'LBP') => {
-    setCurrency(newCurrency);
+  const updateCurrency = async (newCurrency: 'USD' | 'LBP') => {
+    if (!storeId) {
+      console.warn('No store ID available for currency update');
+      return;
+    }
+
+    try {
+      // Update local state immediately
+      setCurrency(newCurrency);
+      
+      // Update IndexedDB
+      await db.stores
+        .where('id')
+        .equals(storeId)
+        .modify({ 
+          preferred_currency: newCurrency,
+          _synced: false,
+          updated_at: new Date().toISOString()
+        });
+
+      console.log('✅ Currency updated locally:', newCurrency);
+      
+      // Update unsynced count immediately
+      await updateUnsyncedCount();
+      
+      // Trigger immediate sync for settings changes
+      if (isOnline && !isSyncing) {
+        console.log('🔄 Triggering immediate sync for currency change');
+        performSync(true);
+      } else {
+        debouncedSync();
+      }
+    } catch (error) {
+      console.error('❌ Error updating currency:', error);
+      // Revert local state on error
+      setCurrency(currency);
+    }
   };
 
 
@@ -2350,6 +2547,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       throw error;
     }
   };
+
+  // Don't render context if userProfile is not available
+  if (!userProfile) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <OfflineDataContext.Provider value={{

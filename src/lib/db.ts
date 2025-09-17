@@ -1661,86 +1661,11 @@ class POSDatabase extends Dexie {
 
 export const db = new POSDatabase();
 
-// Add test function to window for debugging
-if (typeof window !== 'undefined') {
-  (window as any).testSaleItemHook = async () => {
-    console.log('🧪 Testing sale item hook...');
-    try {
-      const testItem = {
-        id: 'test-' + Date.now(),
-        store_id: 'test-store',
-        inventory_item_id: 'test-inv',
-        product_id: 'test-product',
-        supplier_id: 'test-supplier',
-        quantity: 1,
-        weight: null,
-        unit_price: 100,
-        received_value: 100,
-        payment_method: 'cash',
-        notes: 'Test item',
-        customer_id: null,
-        created_at: new Date().toISOString(),
-        created_by: 'test-user',
-        _synced: false
-      };
-      
-      console.log('📝 Adding test sale item:', testItem);
-      await db.bill_line_items.add(testItem);
-      console.log('✅ Test sale item added successfully');
-    } catch (error) {
-      console.error('❌ Test failed:', error);
-    }
-  };
+
 
   // Hook testing function removed - hooks no longer used for sales
 
-  // Add cash drawer debugging function
-  (window as any).debugCashDrawer = async (storeId?: string) => {
-    console.log('🔍 === CASH DRAWER DEBUG REPORT ===');
-    
-    try {
-      // Get all cash drawer accounts
-      const allAccounts = await db.cash_drawer_accounts.toArray();
-      console.log('📊 Total cash drawer accounts:', allAccounts.length);
-      console.log('📊 All accounts:', allAccounts);
-      
-      // Check specific account if provided
-      if (storeId) {
-        console.log(`\n🏪 Accounts for store ${storeId}:`);
-        const storeAccounts = await db.cash_drawer_accounts
-          .where('store_id')
-          .equals(storeId)
-          .toArray();
-        console.log('📊 Store accounts (all):', storeAccounts);
-        
-        const activeAccounts = storeAccounts.filter(acc => !acc._deleted);
-        console.log('📊 Store accounts (active):', activeAccounts);
-        
-        // Get sessions for this store
-        const sessions = await db.cash_drawer_sessions
-          .where('store_id')
-          .equals(storeId)
-          .toArray();
-        console.log('📊 Cash drawer sessions:', sessions);
-      }
-      
-      // Check the specific account mentioned by user
-      const specificAccount = await db.cash_drawer_accounts.get('9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8');
-      console.log('\n🎯 Specific account 9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8:', specificAccount);
-      
-      // Database info
-      console.log('\n💾 Database info:');
-      console.log('Database name:', db.name);
-      console.log('Database version:', db.verno);
-      console.log('Is open:', db.isOpen());
-      
-    } catch (error) {
-      console.error('❌ Debug failed:', error);
-    }
-    
-    console.log('🔍 === END DEBUG REPORT ===');
-  };
-}
+ 
 
 // Export utility functions
 export const createId = () => uuidv4();

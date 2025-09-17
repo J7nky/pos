@@ -140,7 +140,6 @@ export default function ReceivedBills({
           supplierId: item.supplier_id,
           supplierName: supplier.name,
           type: item.type,
-          batchId: item.batch_id || null,
           batchPorterage: (item as any).batch_porterage ?? null,
           batchTransferFee: (item as any).batch_transfer_fee ?? null,
           batchNotes: (item as any).batch_notes ?? null,

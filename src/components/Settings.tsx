@@ -139,10 +139,17 @@ export default function Settings() {
     }
   };
 
-  const handleToggleAlerts = (enabled: boolean) => {
-    toggleLowStockAlerts(enabled);
-    setShowSaveMessage(true);
-    setTimeout(() => setShowSaveMessage(false), 2000);
+  const handleToggleAlerts = async (enabled: boolean) => {
+    try {
+      await toggleLowStockAlerts(enabled);
+      setShowSaveMessage(true);
+      setSaveError(null);
+      setTimeout(() => setShowSaveMessage(false), 2000);
+    } catch (error) {
+      console.error('Settings: Error toggling low stock alerts:', error);
+      setSaveError('Failed to save low stock alert setting to database');
+      setTimeout(() => setSaveError(null), 3000);
+    }
   };
 
   return (
@@ -436,28 +443,7 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Database Management */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <Wrench className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">Database Management</h2>
-          </div>
-          <div className="space-y-4">
-            <div className="p-4 border border-gray-200 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">Database Health</h3>
-              <p className="text-sm text-gray-600 mb-3">
-                Monitor database health, validate schema, and manage backups.
-              </p>
-              <button
-                onClick={() => setShowDatabaseHealth(true)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center"
-              >
-                <Database className="w-4 h-4 mr-2" />
-                Open Database Monitor
-              </button>
-            </div>
-          </div>
-        </div>
+   
       </div>
 
     </div>

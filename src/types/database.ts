@@ -128,6 +128,7 @@ export interface Database {
           preferred_language: 'en' | 'ar'|'fr';
           preferred_commission_rate: number;
           exchange_rate: number;
+          low_stock_alert: boolean;
           name: string;
           address: string;
           phone: string;
@@ -141,6 +142,7 @@ export interface Database {
           preferred_language?: 'en' | 'ar'|'fr';
           preferred_commission_rate?: number;
           exchange_rate?: number;
+          low_stock_alert?: boolean;
           name: string;
           address: string;
           phone: string;
@@ -153,6 +155,7 @@ export interface Database {
           preferred_language?: 'en' | 'ar'|'fr';
           preferred_commission_rate?: number;
           exchange_rate?: number;
+          low_stock_alert?: boolean;
           id?: string;
           name?: string;
           address?: string;

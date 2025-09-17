@@ -179,7 +179,7 @@ export class SyncService {
           }
           
           // Just check if the dependency has been synced at least once, regardless of when
-          console.log(`✅ Dependency ${depTable} for ${tableName} was last synced ${lastSynced.last_synced_at}`);
+          // console.log(`✅ Dependency ${depTable} for ${tableName} was last synced ${lastSynced.last_synced_at}`);
           return true;
         })
       );
@@ -431,6 +431,14 @@ export class SyncService {
            const validSupplierIds = this.validationCache.suppliers;
            const validUserIds = this.validationCache.users;
            const validBatchIds = this.validationCache.batches;
+           
+           // Get local batch IDs for validation
+           const localBatches = await db.inventory_bills
+             .where('store_id')
+             .equals(storeId)
+             .filter(batch => !batch._deleted)
+             .toArray();
+           const localBatchIds = new Set(localBatches.map(batch => batch.id));
         
            for (const record of activeRecordsFiltered) {
              // Check quantity constraint
@@ -1092,7 +1100,7 @@ export class SyncService {
           // Local balance doesn't match expected - use additive reconciliation
           finalBalance = Math.max(localBalance, remoteBalance, expectedBalance);
           reconciliationType = 'additive_reconciliation';
-          console.log(`💰 Using additive reconciliation: $${finalBalance.toFixed(2)} (max of local: $${localBalance.toFixed(2)}, remote: $${remoteBalance.toFixed(2)}, expected: $${expectedBalance.toFixed(2)})`);
+          // console.log(`💰 Using additive reconciliation: $${finalBalance.toFixed(2)} (max of local: $${localBalance.toFixed(2)}, remote: $${remoteBalance.toFixed(2)}, expected: $${expectedBalance.toFixed(2)})`);
         }
       } else {
         // No active session - use timestamp-based resolution with additive bias
@@ -1115,7 +1123,7 @@ export class SyncService {
       
       // Skip reconciliation transaction creation to prevent duplicates
       // The cash drawer service already handles transaction creation
-      console.log(`💰 Cash drawer balance reconciled: $${localBalance.toFixed(2)} → $${finalBalance.toFixed(2)} (${reconciliationType})`);
+      // console.log(`💰 Cash drawer balance reconciled: $${localBalance.toFixed(2)} → $${finalBalance.toFixed(2)} (${reconciliationType})`);
       
       // Update with reconciled balance
       await db.cash_drawer_accounts.update(localRecord.id, {
@@ -1499,7 +1507,7 @@ export class SyncService {
   ) {
     // DISABLED: This was creating duplicate transactions during sync
     // The cash drawer service already handles transaction creation
-    console.log(`💰 Balance reconciliation skipped to prevent duplicate transactions: $${oldBalance.toFixed(2)} → $${newBalance.toFixed(2)} (${reconciliationType || 'standard'})`);
+    // console.log(`💰 Balance reconciliation skipped to prevent duplicate transactions: $${oldBalance.toFixed(2)} → $${newBalance.toFixed(2)} (${reconciliationType || 'standard'})`);
     return;
   }
 

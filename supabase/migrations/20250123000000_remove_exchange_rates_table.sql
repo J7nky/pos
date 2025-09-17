@@ -18,3 +18,6 @@ DROP INDEX IF EXISTS idx_exchange_rates_updated_at;
 DROP INDEX IF EXISTS idx_exchange_rates_synced;
 DROP INDEX IF EXISTS idx_exchange_rates_deleted;
 
+
+
+

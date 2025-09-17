@@ -20,6 +20,11 @@ export class SupabaseService {
   // Authentication & User Management
   static async getUserProfile(userId: string) {
     try {
+      // Check if we're online before making the request
+      if (!navigator.onLine) {
+        throw new Error('Offline - cannot fetch user profile');
+      }
+
       const { data, error } = await supabase
         .from('users')
         .select(`
@@ -30,9 +35,27 @@ export class SupabaseService {
         .single();
       
       if (error) throw error;
+      
+      // Cache the profile for offline use
+      if (data) {
+        localStorage.setItem(`user_profile_${userId}`, JSON.stringify(data));
+        console.log('📱 Cached user profile for offline use');
+      }
+      
       return data;
     } catch (error) {
       handleSupabaseError(error);
+    }
+  }
+
+  // Get cached user profile for offline use
+  static getCachedUserProfile(userId: string) {
+    try {
+      const cached = localStorage.getItem(`user_profile_${userId}`);
+      return cached ? JSON.parse(cached) : null;
+    } catch (error) {
+      console.error('Error loading cached user profile:', error);
+      return null;
     }
   }
 
@@ -87,6 +110,7 @@ export class SupabaseService {
       preferred_language?: 'en' | 'ar' | 'fr';
       preferred_commission_rate?: number;
       exchange_rate?: number;
+      low_stock_alert?: boolean;
     }
   ) {
     try {

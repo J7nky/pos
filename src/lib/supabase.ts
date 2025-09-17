@@ -32,12 +32,37 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
       'X-Client-Info': `pos-app-${isOnline() ? 'online' : 'offline'}`
     },
     fetch: async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      // If offline, prevent auth refresh requests
-      if (!navigator.onLine && typeof input === "string" && input.includes('/auth/v1/token')) {
-        console.log('Skipping auth token refresh while offline');
-        throw new Error('Offline - skipping auth refresh');
+      // If offline, prevent all Supabase requests except auth token refresh
+      if (!navigator.onLine) {
+        const url = typeof input === 'string' ? input : input.toString();
+        
+        // Allow auth token refresh to prevent auth errors
+        if (url.includes('/auth/v1/token')) {
+          console.log('🔄 Attempting auth token refresh while offline');
+          try {
+            return await fetch(input, init);
+          } catch (error) {
+            console.log('⚠️ Auth token refresh failed while offline - this is expected');
+            throw new Error('Offline - auth refresh failed');
+          }
+        }
+        
+        // Block all other requests when offline
+        console.log('🚫 Blocking Supabase request while offline:', url);
+        throw new Error('Offline - request blocked');
       }
-      return fetch(input, init);
+      
+      // Online - proceed with request
+      try {
+        return await fetch(input, init);
+      } catch (error) {
+        // If request fails and we're now offline, provide a better error message
+        if (!navigator.onLine) {
+          console.log('🌐 Connection lost during request');
+          throw new Error('Connection lost - please check your internet connection');
+        }
+        throw error;
+      }
     }
   },
   db: {

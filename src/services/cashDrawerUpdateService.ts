@@ -509,16 +509,15 @@ export class CashDrawerUpdateService {
         )
         .toArray();
 
-      console.log(`💰 Found ${cashTransactions.length} cash drawer transactions since session start`);
+      // console.log(`💰 Found ${cashTransactions.length} cash drawer transactions since session start`);
 
       // Add all income transactions and subtract all expense transactions
       for (const trans of cashTransactions) {
         if (trans.type === 'income') {
           totalBalance += trans.amount;
-          console.log(`💰 Added income: ${trans.amount}, new balance: ${totalBalance}`);
+          // console.log(`💰 Added income: ${trans.amount}, new balance: ${totalBalance}`);
         } else if (trans.type === 'expense') {
           totalBalance -= trans.amount;
-          console.log(`💰 Subtracted expense: ${trans.amount}, new balance: ${totalBalance}`);
         }
       }
 
