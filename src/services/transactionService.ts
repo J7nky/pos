@@ -140,7 +140,7 @@ export class TransactionService {
           });
 
           if (cashDrawerResult.success) {
-            console.log(`💰 Cash drawer updated for customer payment: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
+            // console.log(`💰 Cash drawer updated for customer payment: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
           }
         } catch (error) {
           console.error('Error updating cash drawer for customer payment:', error);
@@ -331,7 +331,7 @@ export class TransactionService {
         });
 
         if (cashDrawerResult.success) {
-          console.log(`💰 Cash drawer updated for expense: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
+          // console.log(`💰 Cash drawer updated for expense: $${cashDrawerResult.previousBalance.toFixed(2)} → $${cashDrawerResult.newBalance.toFixed(2)}`);
         }
       } catch (error) {
         console.error('Error updating cash drawer for expense:', error);

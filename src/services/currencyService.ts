@@ -16,11 +16,11 @@ export interface CurrencyConversion {
 
 export class CurrencyService {
   private static instance: CurrencyService;
-  private exchangeRates: Map<string, number> = new Map();
+  private exchangeRate: number = 89500; // Default USD to LBP rate
   private lastUpdate: string = '';
 
   private constructor() {
-    this.initializeExchangeRates();
+    this.loadExchangeRateFromStore();
   }
 
   public static getInstance(): CurrencyService {
@@ -30,13 +30,41 @@ export class CurrencyService {
     return CurrencyService.instance;
   }
 
-  private initializeExchangeRates() {
-    // Initialize with fixed rates - in production, these would come from an API
-    this.exchangeRates.set('USD_LBP', 89500);
-    this.exchangeRates.set('LBP_USD', 1 / 89500);
-    this.exchangeRates.set('USD_USD', 1);
-    this.exchangeRates.set('LBP_LBP', 1);
-    this.lastUpdate = new Date().toISOString();
+  private async loadExchangeRateFromStore(): Promise<void> {
+    try {
+      // Try to get the current store's exchange rate
+      const storeId = localStorage.getItem('currentStoreId');
+      if (storeId) {
+        const { db } = await import('../lib/db');
+        const store = await db.stores.get(storeId);
+        if (store && store.exchange_rate) {
+          this.exchangeRate = store.exchange_rate;
+          this.lastUpdate = store.updated_at;
+        }
+      }
+    } catch (error) {
+      console.warn('Could not load exchange rate from store, using default:', error);
+    }
+  }
+
+  public async updateExchangeRate(rate: number): Promise<void> {
+    try {
+      this.exchangeRate = rate;
+      this.lastUpdate = new Date().toISOString();
+      
+      // Update the store's exchange rate
+      const storeId = localStorage.getItem('currentStoreId');
+      if (storeId) {
+        const { db } = await import('../lib/db');
+        await db.stores.update(storeId, { 
+          exchange_rate: rate,
+          updated_at: this.lastUpdate
+        });
+      }
+    } catch (error) {
+      console.error('Failed to update exchange rate:', error);
+      throw error;
+    }
   }
 
   public convertCurrency(
@@ -47,14 +75,13 @@ export class CurrencyService {
     if (amount === 0) return 0;
     if (fromCurrency === toCurrency) return amount;
 
-    const rateKey = `${fromCurrency}_${toCurrency}`;
-    const rate = this.exchangeRates.get(rateKey);
-    
-    if (!rate) {
-      throw new Error(`Exchange rate not found for ${fromCurrency} to ${toCurrency}`);
+    if (fromCurrency === 'USD' && toCurrency === 'LBP') {
+      return amount * this.exchangeRate;
+    } else if (fromCurrency === 'LBP' && toCurrency === 'USD') {
+      return amount / this.exchangeRate;
     }
 
-    return amount * rate;
+    throw new Error(`Unsupported currency conversion: ${fromCurrency} to ${toCurrency}`);
   }
 
   public formatCurrency(amount: number, currency: 'USD' | 'LBP'): string {
@@ -101,9 +128,8 @@ export class CurrencyService {
     return true;
   }
 
-  public getExchangeRate(fromCurrency: 'USD' | 'LBP', toCurrency: 'USD' | 'LBP'): number {
-    const rateKey = `${fromCurrency}_${toCurrency}`;
-    return this.exchangeRates.get(rateKey) || 1;
+  public getExchangeRate(): number {
+    return this.exchangeRate;
   }
 
   /**
@@ -112,34 +138,26 @@ export class CurrencyService {
    */
   public safeConvertForDatabase(amount: number, currency: 'USD' | 'LBP'): { amount: number; currency: 'USD' | 'LBP'; wasConverted: boolean } {
     const MAX_DB_AMOUNT = 99999999.99;
-    const USD_TO_LBP_RATE = 89500;
     
     if (amount >= MAX_DB_AMOUNT) {
       return { amount, currency, wasConverted: false };
     }
     
     if (currency === 'USD') {
-      // Convert  USD to LBP
-      const convertedAmount = amount * USD_TO_LBP_RATE;
+      // Convert USD to LBP
+      const convertedAmount = amount * this.exchangeRate;
       return { 
         amount: Math.round(convertedAmount * 100) / 100, // Round to 2 decimal places
         currency: 'LBP', 
         wasConverted: true 
       };
     } else {
-      
       return { 
         amount: amount, 
         currency: 'LBP', 
         wasConverted: true 
       };
     }
-  }
-
-  public updateExchangeRate(fromCurrency: 'USD' | 'LBP', toCurrency: 'USD' | 'LBP', rate: number): void {
-    const rateKey = `${fromCurrency}_${toCurrency}`;
-    this.exchangeRates.set(rateKey, rate);
-    this.lastUpdate = new Date().toISOString();
   }
 
   public getLastUpdate(): string {
@@ -149,9 +167,14 @@ export class CurrencyService {
   public getSupportedCurrencies(): CurrencyConfig[] {
     return [
       { code: 'USD', symbol: '$', name: 'US Dollar', exchangeRate: 1 },
-      { code: 'LBP', symbol: 'ل.ل', name: 'Lebanese Pound', exchangeRate: 1/89500 }
+      { code: 'LBP', symbol: 'ل.ل', name: 'Lebanese Pound', exchangeRate: 1/this.exchangeRate }
     ];
+  }
+
+  // Method to refresh exchange rate from store
+  public async refreshExchangeRate(): Promise<void> {
+    await this.loadExchangeRateFromStore();
   }
 }
 
-export const currencyService = CurrencyService.getInstance(); 
+export const currencyService = CurrencyService.getInstance();

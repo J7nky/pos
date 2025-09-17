@@ -281,30 +281,30 @@ export class AccountBalanceService {
     entityId: string,
     startDate?: string,
     endDate?: string
-  ): Promise<LocalSaleItem[]> {
+  ): Promise<any[]> {
     if (entityType === 'supplier') {
       // For suppliers, we need sales that generate commissions
-      let query = db.sale_items.where('supplier_id').equals(entityId);
+      let query = db.bill_line_items.where('supplier_id').equals(entityId);
       
       if (startDate) {
-        query = query.and(sale => sale.created_at && new Date(sale.created_at) >= new Date(startDate));
+        query = query.and(sale => Boolean(sale.created_at) && new Date(sale.created_at!) >= new Date(startDate));
       }
       
       if (endDate) {
-        query = query.and(sale => sale.created_at && new Date(sale.created_at) <= new Date(endDate));
+        query = query.and(sale => Boolean(sale.created_at) && new Date(sale.created_at!) <= new Date(endDate));
       }
 
       return await query.toArray();
     } else {
       // For customers, we need credit sales
-      let query = db.sale_items.where('customer_id').equals(entityId);
+      let query = db.bill_line_items.where('customer_id').equals(entityId);
       
       if (startDate) {
-        query = query.and(sale => sale.created_at && new Date(sale.created_at) >= new Date(startDate));
+        query = query.and(sale => Boolean(sale.created_at) && new Date(sale.created_at!) >= new Date(startDate));
       }
       
       if (endDate) {
-        query = query.and(sale => sale.created_at && new Date(sale.created_at) <= new Date(endDate));
+        query = query.and(sale => Boolean(sale.created_at) && new Date(sale.created_at!) <= new Date(endDate));
       }
 
       return await query.toArray();

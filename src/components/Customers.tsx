@@ -12,7 +12,7 @@ import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 
 export default function Customers() {
   const raw = useOfflineData();
-  const { pushUndo } = raw;
+  const { pushUndo, getStore } = raw;
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0, email: c.email || '', address: c.address || ''})) : [];
   const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at || 'commission', email: s.email || '', address: s.address || ''})) : [];
   const addCustomer = raw.addCustomer;
@@ -172,7 +172,7 @@ export default function Customers() {
       storeId: userProfile.store_id,
       createdBy: userProfile?.id || '',
       ...(isCustomer ? { customerId: paymentForm.customerId } : { supplierId: paymentForm.supplierId })
-    });
+    }, getStore);
   };
 
   // Unified payment handler
@@ -198,7 +198,7 @@ export default function Customers() {
         const currentBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile?.store_id || '');
         
         // Convert payment amount to store currency for comparison
-        const storeCurrency = await cashDrawerUpdateService.getStorePreferredCurrency(userProfile?.store_id || '');
+        const storeCurrency = await cashDrawerUpdateService.getStorePreferredCurrency(userProfile?.store_id || '', getStore);
         const normalizedPaymentAmount = cashDrawerUpdateService.normalizeAmountToStoreCurrency(
           safeAmount.amount,
           currency,

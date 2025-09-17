@@ -7,6 +7,7 @@ export function useNetworkStatus() {
 
   useEffect(() => {
     const goOnline = () => {
+      console.log('🌐 Browser online event triggered - updating state');
       setIsOnline(true);
       // Detect transition from offline to online
       if (!previousOnlineStatus.current) {
@@ -18,6 +19,7 @@ export function useNetworkStatus() {
     };
     
     const goOffline = () => {
+      console.log('📴 Browser offline event triggered - updating state');
       setIsOnline(false);
       previousOnlineStatus.current = false;
       setJustCameOnline(false);

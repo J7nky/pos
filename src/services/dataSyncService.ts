@@ -41,7 +41,7 @@ export class DataSyncService {
   private initializeSyncStatus() {
     const tables = [
       'customers', 'suppliers', 'transactions', 
-      'inventory_items', 'sale_items'
+      'inventory_items', 'bill_line_items'
     ];
 
     tables.forEach(table => {
@@ -132,18 +132,20 @@ export class DataSyncService {
         return mappedInventory.length;
       });
 
-      // Sync sale_items
-      await this.syncTable('sale_items', storeId, async () => {
-        const saleItems = await db.sale_items.toArray();
+      // Sync bill_line_items (replaces sale_items)
+      await this.syncTable('bill_line_items', storeId, async () => {
+        const billLineItems = await db.bill_line_items.toArray();
         
-        const mappedSaleItems = saleItems.map(item => ({
+        const mappedBillLineItems = billLineItems.map(item => ({
           id: item.id,
+          billId: item.bill_id,
           quantity: item.quantity,
           inventoryItemId: item.inventory_item_id,
           productId: item.product_id,
           supplierId: item.supplier_id,
           weight: item.weight,
           unitPrice: item.unit_price,
+          lineTotal: item.line_total,
           receivedValue: item.received_value,
           paymentMethod: item.payment_method,
           notes: item.notes,
@@ -151,8 +153,8 @@ export class DataSyncService {
           createdAt: item.created_at,
           createdBy: item.created_by
         }));
-        localStorage.setItem('erp_sale_items', JSON.stringify(mappedSaleItems));
-        return mappedSaleItems.length;
+        localStorage.setItem('erp_bill_line_items', JSON.stringify(mappedBillLineItems));
+        return mappedBillLineItems.length;
       });
 
       // Sync bills
@@ -276,7 +278,7 @@ export class DataSyncService {
       const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
       const customers = await db.customers.where('store_id').equals(storeId).toArray();
       const inventory = await db.inventory_items.where('store_id').equals(storeId).toArray();
-      const saleItems = await db.sale_items.toArray();
+      const billLineItems = await db.bill_line_items.toArray();
 
       const productIds = new Set(products.map(p => p.id));
       const supplierIds = new Set(suppliers.map(s => s.id));
@@ -294,16 +296,16 @@ export class DataSyncService {
         issues: orphanedInventory.length > 0 ? ['Inventory items with invalid product or supplier references'] : []
       });
 
-      // Check orphaned sale items
-      const orphanedSaleItems = saleItems.filter(item => 
+      // Check orphaned bill line items
+      const orphanedBillLineItems = billLineItems.filter(item => 
         !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
       );
       checks.push({
-        table: 'orphaned_sale_items',
-        totalRecords: saleItems.length,
-        validRecords: saleItems.length - orphanedSaleItems.length,
-        orphanedRecords: orphanedSaleItems.length,
-        issues: orphanedSaleItems.length > 0 ? ['Sale items with invalid product or supplier references'] : []
+        table: 'orphaned_bill_line_items',
+        totalRecords: billLineItems.length,
+        validRecords: billLineItems.length - orphanedBillLineItems.length,
+        orphanedRecords: orphanedBillLineItems.length,
+        issues: orphanedBillLineItems.length > 0 ? ['Bill line items with invalid product or supplier references'] : []
       });
 
     } catch (error) {
@@ -323,7 +325,7 @@ export class DataSyncService {
       const products = await db.products.where('store_id').equals(storeId).toArray();
       const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
       const inventory = await db.inventory_items.where('store_id').equals(storeId).toArray();
-      const saleItems = await db.sale_items.toArray();
+      const billLineItems = await db.bill_line_items.toArray();
 
       const productIds = new Set(products.map(p => p.id));
       const supplierIds = new Set(suppliers.map(s => s.id));
@@ -338,14 +340,14 @@ export class DataSyncService {
         console.log(`🗑️ Removed ${orphanedInventory.length} orphaned inventory items`);
       }
 
-      // Clean up orphaned sale items
-      const orphanedSaleItems = saleItems.filter(item => 
+      // Clean up orphaned bill line items
+      const orphanedBillLineItems = billLineItems.filter(item => 
         !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
       );
-      if (orphanedSaleItems.length > 0) {
-        await db.sale_items.bulkDelete(orphanedSaleItems.map(item => item.id));
-        cleanedCount += orphanedSaleItems.length;
-        console.log(`🗑️ Removed ${orphanedSaleItems.length} orphaned sale items`);
+      if (orphanedBillLineItems.length > 0) {
+        await db.bill_line_items.bulkDelete(orphanedBillLineItems.map(item => item.id));
+        cleanedCount += orphanedBillLineItems.length;
+        console.log(`🗑️ Removed ${orphanedBillLineItems.length} orphaned bill line items`);
       }
 
       console.log(`✅ Cleanup completed: ${cleanedCount} records removed`);

@@ -109,7 +109,7 @@ const WeightComparisonReport: React.FC<WeightComparisonReportProps> = ({
 
   const formatWeight = (weight: number | null) => {
     if (weight === null || weight === undefined) return 'N/A';
-    return config.formatWeight(weight);
+    return weightConfigurationService.formatWeight(weight);
   };
 
   const formatPercentage = (percentage: number) => {
@@ -469,3 +469,4 @@ const WeightComparisonReport: React.FC<WeightComparisonReportProps> = ({
 };
 
 export default WeightComparisonReport;
+

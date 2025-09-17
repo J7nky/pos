@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { ShoppingCart, Eye, EyeOff } from 'lucide-react';
 import SearchableSelect from './common/SearchableSelect';
-import { SupabaseService } from '../services/supabaseService';
+// Removed SupabaseService import - using auth context methods only
 import { useI18n } from '../i18n';
 
 export default function SupabaseLogin() {
@@ -11,7 +11,7 @@ export default function SupabaseLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn, signUp } = useSupabaseAuth();
+  const { signIn, signUp, getStores } = useSupabaseAuth();
   const [showSignUp, setShowSignUp] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState<'admin' | 'manager' | 'cashier'>('manager');
@@ -23,13 +23,17 @@ export default function SupabaseLogin() {
   useEffect(() => {
     if (showSignUp) {
       setStoresLoading(true);
-      SupabaseService.getStores().then((data) => {
+      getStores().then((data) => {
         setStores(data || []);
         setStoresLoading(false);
         console.log('STORES:', data);
+      }).catch((error) => {
+        console.error('Error loading stores:', error);
+        setStores([]);
+        setStoresLoading(false);
       });
     }
-  }, [showSignUp]);
+  }, [showSignUp, getStores]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

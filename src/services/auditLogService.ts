@@ -3,7 +3,7 @@ import {
   Supplier, 
   Transaction, 
 
-  SaleItem,
+  BillLineItem,
   InventoryItem
 } from '../types';
 
@@ -315,7 +315,7 @@ export class AuditLogService {
 
   public logSaleTransaction(params: {
     sale: any; // Add sale parameter
-    items: SaleItem[];
+    items: BillLineItem[];
     customerId?: string;
     customerName?: string;
     userId: string;

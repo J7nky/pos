@@ -18,34 +18,54 @@ const SYNC_CONFIG = {
 // CRITICAL: Order matters for foreign key dependencies
 const SYNC_TABLES = [
   // Store configuration (no dependencies)
-  // 'stores',
+  'stores',
   
-  // Core entities (no dependencies)
+  // Currency rates (no dependencies - global)
+  // 'exchange_rates',
+  
+  // Core entities (depend on stores)
   'products',
   'suppliers', 
   'customers',
   'cash_drawer_accounts',
   
-  // Inventory (depends on products, suppliers)
+  // Inventory bills (depends on stores, suppliers)
   'inventory_bills',
+  
+  // Inventory items (depends on stores, products, suppliers, inventory_bills)
   'inventory_items',
   
-  // Sales (depends on products, suppliers, customers)
-  'sale_items',
+  // Transactions (depends on stores)
   'transactions',
   
-  // Bills (depends on customers, users)
+  // Bills (depends on stores, customers)
   'bills',
   
   // Bill dependencies (MUST come after bills)
-  'bill_line_items',    // depends on bills, products, suppliers
-  'bill_audit_logs',    // depends on bills, users
+  'bill_line_items',    // depends on stores, bills, products, suppliers, inventory_items
+  'bill_audit_logs',    // depends on stores, bills
   
-  // Cash drawer sessions (depends on accounts)
+  // Cash drawer sessions (depends on stores, cash_drawer_accounts)
   'cash_drawer_sessions'
 ] as const;
 
 type SyncTable = typeof SYNC_TABLES[number];
+
+// Dependency mapping for sync validation
+const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
+  'products': [],
+  'stores': [],
+  'suppliers': [],
+  'customers': [],
+  'cash_drawer_accounts': [],
+  'inventory_bills': ['suppliers'],
+  'inventory_items': ['products', 'suppliers', 'inventory_bills'],
+  'transactions': [],
+  'bills': ['customers'],
+  'bill_line_items': ['bills', 'products', 'suppliers', 'inventory_items'],
+  'bill_audit_logs': ['bills'],
+  'cash_drawer_sessions': ['cash_drawer_accounts']
+};
 
 export interface SyncResult {
   success: boolean;
@@ -93,14 +113,11 @@ export class SyncService {
     console.log(`🔄 Refreshing validation cache for store: ${storeId}`);
 
     try {
-      const [productsResult, suppliersResult, usersResult,batchesResult] = await Promise.all([
+      const [productsResult, suppliersResult, usersResult, batchesResult] = await Promise.all([
         supabase.from('products').select('id').eq('store_id', storeId),
         supabase.from('suppliers').select('id').eq('store_id', storeId),
         supabase.from('users').select('id').eq('store_id', storeId),
-        supabase
-  .from('inventory_bills')
-  .select('id')
-  .eq('store_id', storeId)
+        supabase.from('inventory_bills').select('id').eq('store_id', storeId)
       ]);
 
       this.validationCache.products = new Set(productsResult.data?.map(p => p.id) || []);
@@ -116,6 +133,191 @@ export class SyncService {
       console.warn('Failed to refresh validation cache:', error);
     }
   }
+
+  /**
+   * Validate that all dependencies for a table are synced
+   */
+  private async validateDependencies(tableName: SyncTable, storeId: string): Promise<boolean> {
+    const dependencies = SYNC_DEPENDENCIES[tableName];
+    
+    if (dependencies.length === 0) {
+      return true; // No dependencies
+    }
+
+    try {
+      // Check if this is the first sync (no sync metadata exists)
+      const hasAnySyncMetadata = await db.sync_metadata.count() > 0;
+      
+      if (!hasAnySyncMetadata) {
+        // First sync - use dependency order from SYNC_TABLES instead of strict validation
+        const tableIndex = SYNC_TABLES.indexOf(tableName);
+        const dependencyIndices = dependencies.map(dep => SYNC_TABLES.indexOf(dep));
+        
+        // Check if all dependencies come before this table in the sync order
+        const allDependenciesBefore = dependencyIndices.every(depIndex => depIndex < tableIndex);
+        
+        if (allDependenciesBefore) {
+          console.log(`✅ First sync: ${tableName} dependencies are in correct order`);
+          return true;
+        } else {
+          console.warn(`⚠️ First sync: ${tableName} dependencies not in correct order, skipping`);
+          return false;
+        }
+      }
+
+      // For subsequent syncs, be more lenient - only check if dependencies exist, not when they were last synced
+      const dependencyChecks = await Promise.all(
+        dependencies.map(async (depTable) => {
+          const lastSynced = await db.sync_metadata
+            .where('table_name')
+            .equals(depTable)
+            .first();
+          
+          if (!lastSynced) {
+            console.warn(`⚠️ Dependency ${depTable} for ${tableName} has never been synced`);
+            return false;
+          }
+          
+          // Just check if the dependency has been synced at least once, regardless of when
+          // console.log(`✅ Dependency ${depTable} for ${tableName} was last synced ${lastSynced.last_synced_at}`);
+          return true;
+        })
+      );
+
+      const allDependenciesMet = dependencyChecks.every(check => check);
+      
+      if (!allDependenciesMet) {
+        console.warn(`❌ Dependencies not met for ${tableName}, skipping sync`);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error(`Error validating dependencies for ${tableName}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Ensure a store exists for the given storeId
+   */
+  private async ensureStoreExists(storeId: string) {
+    try {
+      // Check if store exists locally
+      const localStore = await db.stores.get(storeId);
+      if (localStore) {
+        console.log(`✅ Store ${storeId} exists locally`);
+        return;
+      }
+
+      // Check if store exists on server
+      const { data: remoteStore, error } = await supabase
+        .from('stores')
+        .select('*')
+        .eq('id', storeId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error(`❌ Error checking store on server:`, error);
+        return;
+      }
+
+      if (remoteStore) {
+        // Store exists on server, download it
+        console.log(`📥 Downloading store ${storeId} from server`);
+        await db.stores.put({
+          ...remoteStore,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      } else {
+        // Store doesn't exist, create a default one
+        console.log(`🏪 Creating default store ${storeId}`);
+        const defaultStore = {
+          id: storeId,
+          name: 'Default Store',
+          address: 'Default Address',
+          phone: '000-000-0000',
+          email: 'store@example.com',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          preferred_commission_rate: 0,
+          preferred_language: 'en',
+          preferred_currency: 'USD'
+        };
+
+        // Try to create on server first
+        const { error: createError } = await supabase
+          .from('stores')
+          .insert(defaultStore);
+
+        if (createError) {
+          console.warn(`⚠️ Failed to create store on server:`, createError);
+        }
+
+        // Store locally
+        await db.stores.put({
+          ...defaultStore,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error(`Error ensuring store exists:`, error);
+    }
+  }
+
+  /**
+   * Initialize sync metadata for all tables to prevent dependency loops
+   */
+  private async initializeSyncMetadataForEmptyTables(storeId: string) {
+    const hasAnySyncMetadata = await db.sync_metadata.count() > 0;
+    
+    if (!hasAnySyncMetadata) {
+      console.log('🔄 Initializing sync metadata for first sync...');
+      
+      // Initialize sync metadata for all tables with current timestamp
+      // This prevents dependency validation loops on first sync
+      const currentTime = new Date().toISOString();
+      
+      for (const tableName of SYNC_TABLES) {
+        try {
+          // Initialize sync metadata for ALL tables, regardless of whether they have data
+          // This ensures dependency validation works correctly
+          await db.updateSyncMetadata(tableName, currentTime);
+          console.log(`📝 Initialized sync metadata for table: ${tableName}`);
+        } catch (error) {
+          console.warn(`Failed to initialize sync metadata for ${tableName}:`, error);
+        }
+      }
+      
+      // Also initialize sync metadata for the sync management tables themselves
+      try {
+        await db.updateSyncMetadata('sync_metadata', currentTime);
+        await db.updateSyncMetadata('pending_syncs', currentTime);
+        console.log(`📝 Initialized sync metadata for sync management tables`);
+      } catch (error) {
+        console.warn(`Failed to initialize sync metadata for sync management tables:`, error);
+      }
+    } else {
+      // For subsequent syncs, ensure all tables have sync metadata
+      console.log('🔄 Ensuring all tables have sync metadata...');
+      const currentTime = new Date().toISOString();
+      
+      for (const tableName of SYNC_TABLES) {
+        try {
+          const existingMetadata = await db.sync_metadata.get(tableName);
+          if (!existingMetadata) {
+            await db.updateSyncMetadata(tableName, currentTime);
+            console.log(`📝 Added missing sync metadata for table: ${tableName}`);
+          }
+        } catch (error) {
+          console.warn(`Failed to ensure sync metadata for ${tableName}:`, error);
+        }
+      }
+    }
+  }
+
 
   /**
    * Main sync function - performs bi-directional sync
@@ -136,10 +338,20 @@ export class SyncService {
     };
 
     try {
-      // Check connectivity
-      const { error: connectionError } = await supabase.from('products').select('id').limit(1);
-      if (connectionError) {
-        throw new Error(`Connection failed: ${connectionError.message}`);
+      // Ensure store exists before syncing
+      await this.ensureStoreExists(storeId);
+      
+      // Initialize sync metadata for empty tables to prevent dependency loops
+      await this.initializeSyncMetadataForEmptyTables(storeId);
+      
+      // Check connectivity with a simple query
+      const { error: connectivityError } = await supabase
+        .from('products')
+        .select('id')
+        .limit(1);
+      
+      if (connectivityError) {
+        throw new Error(`Connection failed: ${connectivityError.message}`);
       }
 
       // Track table dependencies to ensure proper sync order
@@ -185,25 +397,11 @@ export class SyncService {
       try {
         console.log(`📤 Processing table: ${tableName} (${SYNC_TABLES.indexOf(tableName) + 1}/${SYNC_TABLES.length})`);
         
-        // Check if this table has dependencies that need to be processed first
-        const dependencies = tableDependencies[tableName] || [];
-        if (dependencies.length > 0) {
-          console.log(`🔗 Table ${tableName} has dependencies: ${dependencies.join(', ')}`);
-          
-          // Check if all dependencies have been processed in this sync cycle
-          let depsReady = true;
-          for (const depTable of dependencies) {
-            const depMetadata = await db.getSyncMetadata(depTable);
-            if (!depMetadata?.last_synced_at || 
-                new Date(depMetadata.last_synced_at) < this.lastSyncAttempt!) {
-              depsReady = false;
-              console.log(`⏳ Skipping ${tableName} - dependency ${depTable} not yet processed in this sync cycle`);
-              break;
-            }
-          }
-          if (!depsReady) {
-            continue; // Skip uploading this table for now
-          }
+        // Validate dependencies before processing
+        const dependenciesMet = await this.validateDependencies(tableName, storeId);
+        if (!dependenciesMet) {
+          console.log(`⏳ Skipping ${tableName} - dependencies not met`);
+          continue;
         }
         
                  // Get unsynced records for this table
@@ -234,17 +432,14 @@ export class SyncService {
            const validUserIds = this.validationCache.users;
            const validBatchIds = this.validationCache.batches;
            
-           // Get local batch IDs to check against first (since batches are synced before items)
-           let localBatchIds: Set<string>;
-           try {
-             const localBatches = await db.inventory_bills.toArray();
-             localBatchIds = new Set(localBatches.map(b => b.id));
-             console.log(`🔍 Found ${localBatchIds.size} local batch IDs for validation`);
-           } catch (error) {
-             console.warn('Failed to get local batch IDs for validation:', error);
-             localBatchIds = new Set();
-           }
-           
+           // Get local batch IDs for validation
+           const localBatches = await db.inventory_bills
+             .where('store_id')
+             .equals(storeId)
+             .filter(batch => !batch._deleted)
+             .toArray();
+           const localBatchIds = new Set(localBatches.map(batch => batch.id));
+        
            for (const record of activeRecordsFiltered) {
              // Check quantity constraint
              if (record.quantity < 0) {
@@ -660,11 +855,11 @@ export class SyncService {
                     .from(tableName as any)
                     .upsert([record], { onConflict: 'id' });
                   
-                                     if (individualError) {
-                     console.error(`❌ Individual record failed:`, record, individualError);
-                     // Mark this record as problematic
-                     await db.addPendingSync(tableName, record.id, 'update', record);
-                   } else {
+                  if (individualError) {
+                    console.error(`❌ Individual record failed:`, record, individualError);
+                    // Mark this record as problematic
+                    await db.addPendingSync(tableName, record.id, 'update', record);
+                  } else {
                     // Mark successful individual record as synced
                     await db.markAsSynced(tableName, record.id);
                   }
@@ -711,7 +906,7 @@ export class SyncService {
       }
     }
 
-    console.log(`📊 Sync upload summary: ${result.uploaded} records uploaded, ${result.errors.length} errors`);
+    console.log(`📊 Sync upload summary: ${result.uploaded} records uploaded, ${result.errors}`);
     return result;
   }
 
@@ -723,6 +918,13 @@ export class SyncService {
 
     for (const tableName of SYNC_TABLES) {
       try {
+        // Validate dependencies before processing
+        const dependenciesMet = await this.validateDependencies(tableName, storeId);
+        if (!dependenciesMet) {
+          console.log(`⏳ Skipping download for ${tableName} - dependencies not met`);
+          continue;
+        }
+
         const syncMetadata = await db.getSyncMetadata(tableName);
         let lastSyncAt = syncMetadata?.last_synced_at || '1970-01-01T00:00:00.000Z';
         
@@ -740,15 +942,15 @@ export class SyncService {
         // Get remote changes since last sync
         let query = supabase.from(tableName as any).select('*');
         
-        // Add store_id filter for tables that have it (all except transactions)
-        if (tableName !== 'transactions') {
+        // Add store_id filter for tables that have it (all except transactions and stores)
+        if (tableName !== 'transactions' && tableName !== 'stores') {
           query = query.eq('store_id', storeId);
+        } else if (tableName === 'stores') {
+          // For stores, filter by the specific store ID
+          query = query.eq('id', storeId);
         }
         
-        const { data: remoteRecords, error } = await query
-          .gt(timestampField, lastSyncAt)
-          .order(timestampField, { ascending: true });
-
+     
         if (error) {
           result.errors.push(`Download failed for ${tableName}: ${error.message}`);
           continue;
@@ -898,7 +1100,7 @@ export class SyncService {
           // Local balance doesn't match expected - use additive reconciliation
           finalBalance = Math.max(localBalance, remoteBalance, expectedBalance);
           reconciliationType = 'additive_reconciliation';
-          console.log(`💰 Using additive reconciliation: $${finalBalance.toFixed(2)} (max of local: $${localBalance.toFixed(2)}, remote: $${remoteBalance.toFixed(2)}, expected: $${expectedBalance.toFixed(2)})`);
+          // console.log(`💰 Using additive reconciliation: $${finalBalance.toFixed(2)} (max of local: $${localBalance.toFixed(2)}, remote: $${remoteBalance.toFixed(2)}, expected: $${expectedBalance.toFixed(2)})`);
         }
       } else {
         // No active session - use timestamp-based resolution with additive bias
@@ -921,7 +1123,7 @@ export class SyncService {
       
       // Skip reconciliation transaction creation to prevent duplicates
       // The cash drawer service already handles transaction creation
-      console.log(`💰 Cash drawer balance reconciled: $${localBalance.toFixed(2)} → $${finalBalance.toFixed(2)} (${reconciliationType})`);
+      // console.log(`💰 Cash drawer balance reconciled: $${localBalance.toFixed(2)} → $${finalBalance.toFixed(2)} (${reconciliationType})`);
       
       // Update with reconciled balance
       await db.cash_drawer_accounts.update(localRecord.id, {
@@ -1305,7 +1507,7 @@ export class SyncService {
   ) {
     // DISABLED: This was creating duplicate transactions during sync
     // The cash drawer service already handles transaction creation
-    console.log(`💰 Balance reconciliation skipped to prevent duplicate transactions: $${oldBalance.toFixed(2)} → $${newBalance.toFixed(2)} (${reconciliationType || 'standard'})`);
+    // console.log(`💰 Balance reconciliation skipped to prevent duplicate transactions: $${oldBalance.toFixed(2)} → $${newBalance.toFixed(2)} (${reconciliationType || 'standard'})`);
     return;
   }
 
@@ -1450,21 +1652,21 @@ export class SyncService {
       }
     }
 
-    const tablesWithoutUpdatedAt = ['inventory_items', 'sale_items', 'transactions', 'inventory_bills'];
+    const tablesWithoutUpdatedAt = ['inventory_items', 'transactions', 'inventory_bills'];
     
     if (tablesWithoutUpdatedAt.includes(tableName)) {
       delete cleanRecord.updated_at;
     }
     
     // Handle sale_items specific field cleanup
-    if (tableName === 'sale_items') {
+    if (tableName === 'bill_line_items') {
       // Ensure required fields are present and valid
       if (!cleanRecord.inventory_item_id) {
         cleanRecord.inventory_item_id = null; // Use null for UUID fields, not empty string
       }
       if (!cleanRecord.created_by) {
         // Instead of filtering out, log the issue and use a fallback
-        console.warn(`⚠️ Sale item ${cleanRecord.id} missing created_by field, using fallback`);
+        console.warn(`⚠️ Bill line item ${cleanRecord.id} missing created_by field, using fallback`);
         cleanRecord.created_by = '00000000-0000-0000-0000-000000000000'; // Fallback UUID
       }
       if (!cleanRecord.customer_id) {
@@ -1479,16 +1681,17 @@ export class SyncService {
       // Remove fields that don't exist in Supabase schema
       delete cleanRecord.tax_amount;
       delete cleanRecord.discount_amount;
-      delete cleanRecord.inventory_item_id; // Remove this field as it doesn't exist in bills table
+      delete cleanRecord.inventoryItemId; // Remove this field as it doesn't exist in bills table
       delete cleanRecord.due_date;
       delete cleanRecord.status;
       delete cleanRecord.last_modified_by;
       delete cleanRecord.last_modified_at;
       
       // CRITICAL: Remove any line item fields that might have been incorrectly added to bills
-      const lineItemFields = ['product_id', 'supplier_id', 'quantity', 'unit_price', 'line_total', 'weight', 'line_order'];
+      const lineItemFields = ['productId', 'supplierId', 'quantity', 'unitPrice', 'lineTotal', 'weight', 'line_order'];
       lineItemFields.forEach(field => {
         if (cleanRecord[field] !== undefined) {
+          console.warn(`🚫 Removing line item field '${field}' from bills data:`, cleanRecord[field]);
           console.warn(`🚫 Removing line item field '${field}' from bills data:`, cleanRecord[field]);
           delete cleanRecord[field];
         }
@@ -1507,8 +1710,7 @@ export class SyncService {
     if (tableName === 'bill_line_items') {
       // Ensure required fields for bill line items
       // Remove fields that don't exist in Supabase schema
-      delete cleanRecord.created_by;
-      delete cleanRecord.customer_id;
+   
       
       if (!cleanRecord.product_name) {
         cleanRecord.product_name = 'Unknown Product';
@@ -1571,8 +1773,8 @@ export class SyncService {
   private getTableFromRecord(record: any): string {
     // Simple heuristic based on record properties
     if (record.product_id && record.supplier_id && record.received_at) return 'inventory_items';
-    if (record.inventory_item_id && record.product_id && record.supplier_id) return 'sale_items';
-    if (record.customer_id !== undefined && record.subtotal !== undefined) return 'sale_items'; // Assuming 'sale_items' for sales
+    if (record.inventory_item_id && record.product_id && record.supplier_id) return 'bill_line_items';
+    if (record.customer_id !== undefined && record.subtotal !== undefined) return 'bill_line_items'; // Assuming 'bill_line_items' for sales
     if (record.type && record.amount && record.currency) return 'transactions';
     if (record.category && !record.amount) return 'products';
     // Updated supplier detection to handle new type field and distinguish from transactions
@@ -1696,10 +1898,16 @@ export class SyncService {
 
       // Download all data from server
       for (const tableName of SYNC_TABLES) {
-        const { data: remoteRecords, error } = await supabase
-          .from(tableName as any)
-          .select('*')
-          .eq('store_id', storeId);
+        let query = supabase.from(tableName as any).select('*');
+        
+        // Stores table doesn't have store_id, so we filter by the specific store ID
+        if (tableName === 'stores') {
+          query = query.eq('id', storeId);
+        } else {
+          query = query.eq('store_id', storeId);
+        }
+        
+        const { data: remoteRecords, error } = await query;
 
         if (error) {
           result.errors.push(`Download failed for ${tableName}: ${error.message}`);

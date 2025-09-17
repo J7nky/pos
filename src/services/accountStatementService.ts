@@ -1,5 +1,5 @@
-import { LocalSaleItem, Bill } from '../lib/db';
-import { Customer, Supplier, Transaction, SaleItem, InventoryItem, Product, inventory_bills } from '../types';
+import { LocalSaleItem, Bill, BillLineItem } from '../lib/db';
+import { Customer, Supplier, Transaction, BillLineItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
 
 export interface AccountStatement {
@@ -87,7 +87,7 @@ export class AccountStatementService {
    */
   private computeCustomerOpeningBalance(
     customerId: string,
-    allSales: LocalSaleItem[],
+    allSales: BillLineItem[],
     allTransactions: Transaction[],
     startDateISO: string
   ): { USD: number; LBP: number } {
@@ -376,7 +376,7 @@ export class AccountStatementService {
    */
   private buildSupplierPeriodTransactions(
     supplier: Supplier,
-    sales: SaleItem[],
+    sales: BillLineItem[],
     transactions: Transaction[],
     products: Product[],
     inventoryBills: inventory_bills[],
@@ -429,7 +429,7 @@ export class AccountStatementService {
     const creditPurchaseEvents: RawEvent[] = periodCreditPurchases.map(bill => {
       // Find related inventory items for this credit purchase bill
       const relatedInventoryItems = inventoryItems.filter(item => 
-        item.batch_id === bill.id
+        item.batchId === bill.id
       );
 
       // Calculate total amount from inventory items
@@ -460,13 +460,13 @@ export class AccountStatementService {
 
       // Calculate commission from sales of items in this bill
       billItems.forEach(item => {
-        const itemSales = sales.filter(sale => sale.inventoryItemId === item.id);
+        const itemSales = sales.filter(sale => sale.inventory_item_id === item.id);
         itemSales.forEach(sale => {
           const commissionRate = bill.commission_rate ? Number(bill.commission_rate) : 10;
-          totalCommission += (sale.totalPrice * commissionRate) / 100;
+          totalCommission += (sale.line_total * commissionRate) / 100;
           // Use the latest sale date as the bill date for statement purposes
-          if (new Date(sale.createdAt) > new Date(billDate)) {
-            billDate = sale.createdAt;
+          if (new Date(sale.created_at) > new Date(billDate)) {
+            billDate = sale.created_at;
           }
         });
       });
@@ -542,7 +542,7 @@ export class AccountStatementService {
           
           ev.inventoryItems.forEach((inventoryItem, index) => {
             console.log('inventoryItem', inventoryItem);
-            const product = products.find(p => p.id === inventoryItem.product_id);
+            const product = products.find(p => p.id === inventoryItem.productId);
             const totalPrice=inventoryItem.weight=== null ? inventoryItem.quantity * Number(inventoryItem.price) : Number(inventoryItem.weight )* Number(inventoryItem.price);
             console.log(totalPrice)
             
@@ -554,7 +554,7 @@ export class AccountStatementService {
             }
             
             const productDetails: StatementProductDetail[] = [{
-              productId: inventoryItem.product_id,
+              productId: inventoryItem.productId,
               productName: product?.name || 'Unknown Product',
               quantity: inventoryItem.receivedQuantity || 0,
               unit: inventoryItem.unit || 'piece',
@@ -612,8 +612,8 @@ export class AccountStatementService {
             const product = products.find(p => p.id === inventoryItem.productId);
             
             // Calculate commission for this specific item
-            const itemSales = sales.filter(sale => sale.inventoryItemId === inventoryItem.id);
-            const itemTotalRevenue = itemSales.reduce((sum, sale) => sum + sale.totalPrice, 0);
+            const itemSales = sales.filter(sale => sale.inventory_item_id === inventoryItem.id);
+            const itemTotalRevenue = itemSales.reduce((sum, sale) => sum + sale.line_total, 0);
             const itemCommission = (itemTotalRevenue * (ev.commissionRate || 10)) / 100;
 
             // Update running balance for this specific item
@@ -701,7 +701,7 @@ export class AccountStatementService {
    */
   public generateCustomerStatement(
     customer: Customer,
-    sales: LocalSaleItem[],
+    sales: BillLineItem[],
     transactions: Transaction[],
     products: Product[],
     inventory: InventoryItem[],
@@ -731,7 +731,7 @@ export class AccountStatementService {
 
     // Product summary based on period credit sales
     const periodCreditSales = sales.filter(s => s.customer_id === customer.id && s.payment_method === 'credit' && !!s.created_at && new Date(s.created_at) >= new Date(startDate) && new Date(s.created_at) <= new Date(endDate));
-    const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(periodCreditSales as unknown as SaleItem[], products) : undefined;
+    const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(periodCreditSales as unknown as BillLineItem[], products) : undefined;
 
     return {
       entityId: customer.id,
@@ -759,7 +759,7 @@ export class AccountStatementService {
    */
   public generateSupplierStatement(
     supplier: Supplier,
-    sales: SaleItem[],
+    sales: BillLineItem[],
     inventoryItems: InventoryItem[],
     transactions: Transaction[],
     products: Product[],
@@ -799,21 +799,26 @@ export class AccountStatementService {
     );
     
     // Create synthetic sales for product summary calculation
-    const syntheticSales: SaleItem[] = periodReceivedBillItems.map(item => ({
+    const syntheticSales: BillLineItem[] = periodReceivedBillItems.map(item => ({
       id: item.id,
-      storeId: 'default-store', // InventoryItem doesn't have store_id
+      storeId: 'default-store',
+      billId: item.batchId || 'synthetic-bill',
       inventoryItemId: item.id,
       productId: item.productId,
       supplierId: item.supplierId,
+      customerId: undefined,
       quantity: item.quantity,
       weight: item.weight,
       unitPrice: item.price || 0,
-      totalPrice: (item.quantity || 0) * (item.price || 0),
+      lineTotal: (item.quantity || 0) * (item.price || 0),
       receivedValue: (item.quantity || 0) * (item.price || 0),
       paymentMethod: 'credit' as const,
+      notes: undefined,
       createdAt: item.createdAt,
-      createdBy: 'system', // InventoryItem doesn't have created_by
-      synced: true
+      createdBy: 'system',
+      inventoryType: 'cash' as const,
+      synced: true,
+      deleted: false
     }));
 
     const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(syntheticSales, products) : undefined;
@@ -844,7 +849,7 @@ export class AccountStatementService {
   /**
    * Calculate product summary statistics
    */
-  private calculateProductSummary(sales: SaleItem[], products: Product[]): {
+  private calculateProductSummary(sales: BillLineItem[], products: Product[]): {
     totalProducts: number;
     topProducts: Array<{
       productName: string;
@@ -867,10 +872,10 @@ export class AccountStatementService {
 
     // Aggregate product data
     sales.forEach(sale => {
-      const product = products.find(p => p.id === sale.productId);
+      const product = products.find(p => p.id === sale.product_id);
       if (!product) return;
 
-      const existing = productStats.get(sale.productId) || {
+      const existing = productStats.get(sale.product_id) || {
         productName: product.name,
         category: product.category,
         totalQuantity: 0,
@@ -879,10 +884,10 @@ export class AccountStatementService {
       };
 
       existing.totalQuantity += sale.quantity;
-      existing.totalValue += sale.totalPrice;
+      existing.totalValue += sale.line_total;
       existing.transactionCount += 1;
 
-      productStats.set(sale.productId, existing);
+      productStats.set(sale.product_id, existing);
     });
 
     // Calculate top products

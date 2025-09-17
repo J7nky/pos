@@ -197,7 +197,7 @@ export async function generateCustomerStatement(customerId: string, dateRange?: 
   }
 
   const [sales, transactions, products, inventory] = await Promise.all([
-    db.sale_items.where('customer_id').equals(customerId).toArray(),
+    db.bill_line_items.where('customer_id').equals(customerId).toArray(),
     db.transactions.where('customer_id').equals(customerId).toArray(),
     db.products.toArray(),
     db.inventory_items.toArray()

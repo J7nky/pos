@@ -325,10 +325,16 @@ export class EnhancedTransactionService {
         id: this.generateId()
       }));
 
-      // Store sale items data directly since there's no sales table
-      const existingSaleItems = JSON.parse(localStorage.getItem('erp_sale_items') || '[]');
-      existingSaleItems.push(...completeSaleItems);
-      localStorage.setItem('erp_sale_items', JSON.stringify(existingSaleItems));
+      // Store sale items data in bill_line_items format
+      const existingBillLineItems = JSON.parse(localStorage.getItem('erp_bill_line_items') || '[]');
+      const billLineItems = completeSaleItems.map(item => ({
+        ...item,
+        bill_id: saleId, // Use saleId as bill_id for compatibility
+        line_total: item.totalPrice,
+        line_order: 1
+      }));
+      existingBillLineItems.push(...billLineItems);
+      localStorage.setItem('erp_bill_line_items', JSON.stringify(existingBillLineItems));
 
       // Process customer balance if credit sale
       let customerBalanceChange: BalanceSnapshot | undefined;

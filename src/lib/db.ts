@@ -48,6 +48,7 @@ export interface Store extends BaseEntity {
   preferred_currency: 'USD' | 'LBP';
   preferred_language: 'en' | 'ar' | 'fr';
   preferred_commission_rate: number;
+  exchange_rate: number; // USD to LBP exchange rate (e.g., 89500)
 }
 export interface Supplier extends BaseEntity {
   name: string;
@@ -80,6 +81,7 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
   created_at: string;
   received_quantity: number;
   batch_id: string | null;
+  selling_price: number | null;
 
 }
 
@@ -87,6 +89,7 @@ export interface InventoryItem extends Omit<BaseEntity, 'updated_at'> {
 
 // SaleItem interface moved to src/types/index.ts for consistency
 // Use SaleItemDbRow type for database operations and transform with SaleItemTransforms
+// DEPRECATED: Use BillLineItem instead - this interface is kept for backward compatibility
 export interface LocalSaleItem extends Omit<BaseEntity, 'updated_at'> {
   inventory_item_id: string;
   product_id: string;
@@ -106,7 +109,6 @@ export interface Bill extends BaseEntity {
   store_id: string;
   bill_number: string;
   customer_id: string | null;
-  customer_name: string | null;
   subtotal: number;
   total_amount: number;
   payment_method: 'cash' | 'card' | 'credit';
@@ -135,6 +137,10 @@ export interface BillLineItem extends BaseEntity {
   weight: number | null;
   notes: string | null;
   line_order: number;
+  payment_method: 'cash' | 'card' | 'credit';
+  customer_id: string | null;
+  created_by: string;
+  received_value: number;
 }
 
 // Bill audit trail for tracking all changes
@@ -216,6 +222,8 @@ export interface inventory_bills extends BaseEntity {
   type?:string
 }
 
+
+
 class POSDatabase extends Dexie {
   // Store configuration
   stores!: Table<Store, string>;
@@ -225,7 +233,6 @@ class POSDatabase extends Dexie {
   suppliers!: Table<Supplier, string>;
   customers!: Table<Customer, string>;
   inventory_items!: Table<InventoryItem, string>;
-  sale_items!: Table<LocalSaleItem, string>;
   transactions!: Table<Transaction, string>;
   inventory_bills!: Table<inventory_bills, string>;
 
@@ -233,6 +240,8 @@ class POSDatabase extends Dexie {
   bills!: Table<Bill, string>;
   bill_line_items!: Table<BillLineItem, string>;
   bill_audit_logs!: Table<BillAuditLog, string>;
+  // Currency management tables
+  
   // Sync management tables
   sync_metadata!: Table<SyncMetadata, string>;
   pending_syncs!: Table<PendingSync, string>;
@@ -243,31 +252,32 @@ class POSDatabase extends Dexie {
     
     console.log('🔧 Initializing POSDatabase...');
     
-    this.version(14).stores({
+    this.version(16).stores({
       // Store configuration
-      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, updated_at',
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
       
       // Cash drawer tables
       cash_drawer_accounts: 'id, &store_id, account_code, updated_at',
       cash_drawer_sessions: 'id, store_id, account_id, status, created_at',
       
-      // Core tables with enhanced indexing to match database schema
+      // Core tables with comprehensive indexing for performance
       // Tables WITH updated_at: products, suppliers, customers
-      products: 'id, store_id, name, category, updated_at',
-      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
-      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance', // Added lb_balance index
+      products: 'id, store_id, name, category, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance, _synced, _deleted',
 
-      // Tables WITHOUT updated_at: inventory_items, sale_items, transactions
-      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id', // Added received_quantity and batch_id index
-      sale_items: 'id, inventory_item_id, product_id, supplier_id, customer_id, payment_method, created_at, created_by', // Added payment_method, customer_id, and created_by indexes
-      transactions: 'id, store_id, type, category, created_at, created_by, currency', // Added currency index
-      inventory_bills: 'id, store_id, supplier_id, received_at, created_by',
+      // Tables WITHOUT updated_at: inventory_items, transactions
+      inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, _synced, _deleted',
   
-      // Bill management tables
-      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at',
-      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, line_order, created_at',
-      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at',
+      // Bill management tables (now includes sale functionality)
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, customer_id, payment_method, created_by, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
 
+      // Currency management
+      
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
       pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count'
@@ -356,9 +366,8 @@ class POSDatabase extends Dexie {
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
 
-    // Tables WITHOUT updated_at: inventory_items, sale_items, inventory_bills
+    // Tables WITHOUT updated_at: inventory_items, inventory_bills
     this.inventory_items.hook('creating', this.addCreateFields);
-    (this.sale_items as any).hook('creating', this.addCreateFields);
     this.inventory_bills.hook('creating', this.addCreateFields);
 
     // Add hooks for automatic cash drawer updates (after basic field hooks)
@@ -413,6 +422,16 @@ class POSDatabase extends Dexie {
     this.version(13).upgrade(trans => {
       console.log('🔄 Running migration v13: Ensuring hooks are properly registered');
       console.log('✅ Migration v13 completed - hooks should be active');
+    });
+
+    // Migration for version 15 - remove sale_items table and migrate to bill_line_items
+    this.version(15).upgrade(trans => {
+      console.log('🔄 Running migration v15: Removing sale_items table and migrating to bill_line_items');
+      
+      // The sale_items table will be automatically removed from the schema
+      // Any existing sale_items data should be migrated to bill_line_items
+      // This is handled by the Supabase migration
+      console.log('✅ Migration v15 completed - sale_items removed, use bill_line_items instead');
     });
     
     console.log('✅ POSDatabase initialization completed');
@@ -538,7 +557,7 @@ class POSDatabase extends Dexie {
       const sessionEndTime = session.closed_at ? new Date(session.closed_at) : new Date();
       
       // Get cash sales during this session period
-      const cashSales = await this.sale_items
+      const cashSales = await this.bill_line_items
         .filter(item => 
           item.payment_method === 'cash' &&
           new Date(item.created_at) >= sessionStartTime &&
@@ -651,7 +670,7 @@ class POSDatabase extends Dexie {
       }
 
       // Get all cash transactions for this session
-      const cashSales = await this.sale_items
+      const cashSales = await this.bill_line_items
         .where('created_by')
         .equals(sessionId)
         .filter(item => item.payment_method === 'cash')
@@ -897,7 +916,7 @@ class POSDatabase extends Dexie {
     const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
     const customers = await this.customers.where('store_id').equals(storeId).toArray();
     const inventory = await this.inventory_items.where('store_id').equals(storeId).toArray();
-    const saleItems = await this.sale_items.toArray();
+    const billLineItems = await this.bill_line_items.toArray();
     const transactions = await this.transactions.where('store_id').equals(storeId).toArray();
     
     const productIds = new Set(products.map(p => p.id));
@@ -909,7 +928,7 @@ class POSDatabase extends Dexie {
       !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
     );
     
-    const orphanedSaleItems = saleItems.filter(item => 
+    const orphanedBillLineItems = billLineItems.filter(item => 
       !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id)
     );
     
@@ -920,13 +939,13 @@ class POSDatabase extends Dexie {
     
     console.log('📊 Data integrity report:', {
       orphanedInventory: orphanedInventory.length,
-      orphanedSaleItems: orphanedSaleItems.length,
+      orphanedBillLineItems: orphanedBillLineItems.length,
       orphanedTransactions: orphanedTransactions.length
     });
     
     return {
       orphanedInventory,
-      orphanedSaleItems,
+      orphanedBillLineItems,
       orphanedTransactions
     };
   }
@@ -942,18 +961,18 @@ class POSDatabase extends Dexie {
       console.log(`🗑️ Removed ${integrity.orphanedInventory.length} orphaned inventory items`);
     }
     
-    // Clean up orphaned sale items
-    if (integrity.orphanedSaleItems.length > 0) {
-      await this.sale_items.bulkDelete(integrity.orphanedSaleItems.map(item => item.id));
-      cleaned += integrity.orphanedSaleItems.length;
-      console.log(`🗑️ Removed ${integrity.orphanedSaleItems.length} orphaned sale items`);
+    // Clean up orphaned bill line items
+    if (integrity.orphanedBillLineItems.length > 0) {
+      await this.bill_line_items.bulkDelete(integrity.orphanedBillLineItems.map(item => item.id));
+      cleaned += integrity.orphanedBillLineItems.length;
+      console.log(`🗑️ Removed ${integrity.orphanedBillLineItems.length} orphaned bill line items`);
     }
     
     return cleaned;
   }
 
   // Bill management methods
-  async createBillFromSaleItems(saleItems: LocalSaleItem[], billData: Partial<Bill>, useSupabase: boolean = true): Promise<string> {
+  async createBillFromLineItems(lineItems: Omit<BillLineItem, 'id' | 'bill_id' | keyof BaseEntity>[], billData: Partial<Bill>, useSupabase: boolean = true): Promise<string> {
     // If using Supabase, delegate to SupabaseService
     if (useSupabase) {
       console.log('Using Supabase for bill creation - delegating to SupabaseService');
@@ -974,7 +993,6 @@ class POSDatabase extends Dexie {
         _synced: false,
         bill_number: billData.bill_number || `BILL-${Date.now()}`,
         customer_id: billData.customer_id || null,
-        customer_name: billData.customer_name || null,
         subtotal: billData.subtotal || 0,
         total_amount: billData.total_amount || 0,
         payment_method: billData.payment_method || 'cash',
@@ -991,28 +1009,32 @@ class POSDatabase extends Dexie {
       
       await this.bills.add(bill);
       
-      // Create bill line items from sale items
-      const lineItems: BillLineItem[] = saleItems.map((saleItem, index) => ({
+      // Create bill line items with proper field mapping
+      const billLineItems: BillLineItem[] = lineItems.map((item, index) => ({
         id: uuidv4(),
         store_id: billData.store_id!,
         created_at: now,
         updated_at: now,
         _synced: false,
         bill_id: billId,
-        product_id: saleItem.product_id,
-        product_name: '', // Will be populated from product lookup
-        supplier_id: saleItem.supplier_id,
-        supplier_name: '', // Will be populated from supplier lookup
-        inventory_item_id: saleItem.inventory_item_id,
-        quantity: saleItem.quantity,
-        unit_price: saleItem.unit_price,
-        line_total: saleItem.received_value,
-        weight: saleItem.weight,
-        notes: saleItem.notes,
-        line_order: index + 1
+        product_id: item.product_id,
+        product_name: item.product_name,
+        supplier_id: item.supplier_id,
+        supplier_name: item.supplier_name,
+        inventory_item_id: item.inventory_item_id,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        line_total: item.line_total,
+        weight: item.weight,
+        notes: item.notes,
+        line_order: item.line_order || index + 1,
+        payment_method: item.payment_method,
+        customer_id: item.customer_id,
+        created_by: item.created_by,
+        received_value: item.received_value
       }));
       
-      await this.bill_line_items.bulkAdd(lineItems);
+      await this.bill_line_items.bulkAdd(billLineItems);
       
       // Create audit log entry
       await this.bill_audit_logs.add({
@@ -1301,43 +1323,29 @@ class POSDatabase extends Dexie {
     }
   }
 
-  // New method to find and update bills related to a sale item
-  async updateBillsForSaleItem(saleItemId: string): Promise<void> {
+  // New method to find and update bills related to a bill line item
+  async updateBillsForLineItem(lineItemId: string): Promise<void> {
     try {
-      // Find all bill line items that reference this sale item
-      // We need to match by product_id, supplier_id, and inventory_item_id
-      const saleItem = await this.sale_items.get(saleItemId);
-      if (!saleItem) {
-        console.warn('Sale item not found for bill update:', saleItemId);
+      // Find the bill line item
+      const lineItem = await this.bill_line_items.get(lineItemId);
+      if (!lineItem) {
+        console.warn('Bill line item not found for update:', lineItemId);
         return;
       }
 
-      // Find bill line items that match this sale item
-      const relatedLineItems = await this.bill_line_items
-        .filter(item => 
-          item.product_id === saleItem.product_id &&
-          item.supplier_id === saleItem.supplier_id &&
-          item.inventory_item_id === saleItem.inventory_item_id
-        )
-        .toArray();
+      // Update the line item totals
+      await this.bill_line_items.update(lineItemId, {
+        line_total: lineItem.quantity * lineItem.unit_price,
+        received_value: lineItem.quantity * lineItem.unit_price,
+        _synced: false
+      });
 
-      // Update each related bill line item with new values
-      for (const lineItem of relatedLineItems) {
-        await this.bill_line_items.update(lineItem.id, {
-          quantity: saleItem.quantity,
-          unit_price: saleItem.unit_price,
-          line_total: saleItem.received_value,
-          weight: saleItem.weight,
-          _synced: false
-        });
+      // Recalculate the bill totals
+      await this.recalculateBillTotals(lineItem.bill_id);
 
-        // Recalculate the bill totals
-        await this.recalculateBillTotals(lineItem.bill_id);
-      }
-
-      console.log(`Updated ${relatedLineItems.length} bill line items for sale item ${saleItemId}`);
+      console.log(`Updated bill line item ${lineItemId} and recalculated bill totals`);
     } catch (error) {
-      console.error('Error updating bills for sale item:', error);
+      console.error('Error updating bill line item:', error);
     }
   }
 
@@ -1367,7 +1375,7 @@ class POSDatabase extends Dexie {
       const searchLower = searchTerm.toLowerCase();
       bills = bills.filter(bill => 
         bill.bill_number.toLowerCase().includes(searchLower) ||
-        (bill.customer_name && bill.customer_name.toLowerCase().includes(searchLower)) ||
+        (bill.id && bill.id.toLowerCase().includes(searchLower)) ||
         (bill.notes && bill.notes.toLowerCase().includes(searchLower))
       );
     }
@@ -1476,7 +1484,7 @@ class POSDatabase extends Dexie {
       const searchLower = filters.searchTerm.toLowerCase();
       bills = bills.filter(bill => 
         bill.bill_number.toLowerCase().includes(searchLower) ||
-        (bill.customer_name && bill.customer_name.toLowerCase().includes(searchLower)) ||
+        (bill.id && bill.id.toLowerCase().includes(searchLower)) ||
         (bill.notes && bill.notes.toLowerCase().includes(searchLower))
       );
     }
@@ -1653,86 +1661,11 @@ class POSDatabase extends Dexie {
 
 export const db = new POSDatabase();
 
-// Add test function to window for debugging
-if (typeof window !== 'undefined') {
-  (window as any).testSaleItemHook = async () => {
-    console.log('🧪 Testing sale item hook...');
-    try {
-      const testItem = {
-        id: 'test-' + Date.now(),
-        store_id: 'test-store',
-        inventory_item_id: 'test-inv',
-        product_id: 'test-product',
-        supplier_id: 'test-supplier',
-        quantity: 1,
-        weight: null,
-        unit_price: 100,
-        received_value: 100,
-        payment_method: 'cash',
-        notes: 'Test item',
-        customer_id: null,
-        created_at: new Date().toISOString(),
-        created_by: 'test-user',
-        _synced: false
-      };
-      
-      console.log('📝 Adding test sale item:', testItem);
-      await db.sale_items.add(testItem);
-      console.log('✅ Test sale item added successfully');
-    } catch (error) {
-      console.error('❌ Test failed:', error);
-    }
-  };
+
 
   // Hook testing function removed - hooks no longer used for sales
 
-  // Add cash drawer debugging function
-  (window as any).debugCashDrawer = async (storeId?: string) => {
-    console.log('🔍 === CASH DRAWER DEBUG REPORT ===');
-    
-    try {
-      // Get all cash drawer accounts
-      const allAccounts = await db.cash_drawer_accounts.toArray();
-      console.log('📊 Total cash drawer accounts:', allAccounts.length);
-      console.log('📊 All accounts:', allAccounts);
-      
-      // Check specific account if provided
-      if (storeId) {
-        console.log(`\n🏪 Accounts for store ${storeId}:`);
-        const storeAccounts = await db.cash_drawer_accounts
-          .where('store_id')
-          .equals(storeId)
-          .toArray();
-        console.log('📊 Store accounts (all):', storeAccounts);
-        
-        const activeAccounts = storeAccounts.filter(acc => !acc._deleted);
-        console.log('📊 Store accounts (active):', activeAccounts);
-        
-        // Get sessions for this store
-        const sessions = await db.cash_drawer_sessions
-          .where('store_id')
-          .equals(storeId)
-          .toArray();
-        console.log('📊 Cash drawer sessions:', sessions);
-      }
-      
-      // Check the specific account mentioned by user
-      const specificAccount = await db.cash_drawer_accounts.get('9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8');
-      console.log('\n🎯 Specific account 9e2bf88b-0dd2-4ab3-8119-824a4fc65fb8:', specificAccount);
-      
-      // Database info
-      console.log('\n💾 Database info:');
-      console.log('Database name:', db.name);
-      console.log('Database version:', db.verno);
-      console.log('Is open:', db.isOpen());
-      
-    } catch (error) {
-      console.error('❌ Debug failed:', error);
-    }
-    
-    console.log('🔍 === END DEBUG REPORT ===');
-  };
-}
+ 
 
 // Export utility functions
 export const createId = () => uuidv4();

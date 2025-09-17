@@ -60,6 +60,16 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     }
   }, [open]);
 
+  // Set today's date when modal opens
+  useEffect(() => {
+    if (open) {
+      const today = new Date().toISOString().split('T')[0];
+      if (form.received_at !== today) {
+        setForm({ ...form, received_at: today });
+      }
+    }
+  }, [open]);
+
   // Keyboard support - Escape to close
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -111,9 +121,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           if (!form.supplier_id) {
             errors.supplier_id = 'Supplier is required for credit purchases.';
           }
-          if (!item || !item.price || isNaN(Number(item.price)) || Number(item.price) <= 0) {
-            errors[`price_${pid}`] = 'Price is required and must be greater than 0 for credit purchases.';
-          }
+         
         }
       }
     }
@@ -128,6 +136,18 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     }
     if (form.empty_plastic) {
    
+    }
+    
+    // Received date validation
+    if (!form.received_at) {
+      errors.received_at = 'Received date is required.';
+    } else {
+      const receivedDate = new Date(form.received_at);
+      const today = new Date();
+      today.setHours(23, 59, 59, 999); // Set to end of today
+      if (receivedDate > today) {
+        errors.received_at = 'Received date cannot be in the future.';
+      }
     }
     
     // Fees validation applies once per batch
@@ -177,6 +197,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           commission_rate: form.type === 'commission' && form.commission_rate ? parseFloat(form.commission_rate) : undefined,
           type: form.type,
           plastic_fee: plasticFee,
+          received_at: form.received_at,
           items
         }
       });
@@ -191,7 +212,8 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         status: '',
         empty_plastic: false,
         plastic_count: '',
-        plastic_price: ''
+        plastic_price: '',
+        received_at: new Date().toISOString().split('T')[0] // Today's date in YYYY-MM-DD format
       });
       setBulkProducts([]);
       setBulkItems({});
@@ -489,6 +511,17 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                 </h3>
 
                 <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Received Date *</label>
+                    <input
+                      type="date"
+                      value={form.received_at}
+                      onChange={(e) => setForm({ ...form, received_at: e.target.value })}
+                      className={`w-full border ${errors.received_at ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                    />
+                    {errors.received_at && <p className="text-xs text-red-600 mt-1">{errors.received_at}</p>}
+                  </div>
+                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Notes (optional)</label>
                     <textarea

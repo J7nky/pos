@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthContext';
 import { OfflineDataProvider } from './contexts/OfflineDataContext';
-import { SupabaseDataProvider } from './contexts/SupabaseDataContext';
+// Removed SupabaseDataProvider - using OfflineDataProvider directly
 import SupabaseLogin from './components/SupabaseLogin';
 import Layout from './components/Layout';
 import Home from './components/Home';
@@ -13,6 +13,7 @@ import Customers from './components/Customers';
 import Accounting from './components/Accounting';
 import Settings from './components/Settings';
 import UndoToastManager from './components/common/UndoToastManager';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import { I18nProvider, useI18n } from './i18n';
 
 function AuthenticatedApp() {
@@ -42,17 +43,21 @@ function AuthenticatedApp() {
   };
 
   return (
-    <Layout currentPage={currentPage} onPageChange={setCurrentPage}>
-      {renderPage()}
-      <UndoToastManager />
-    </Layout>
+    <ErrorBoundary>
+      <Layout currentPage={currentPage} onPageChange={setCurrentPage}>
+        <ErrorBoundary>
+          {renderPage()}
+        </ErrorBoundary>
+        <UndoToastManager />
+      </Layout>
+    </ErrorBoundary>
   );
 }
 
 function AppContent() {
-  // console.log('AppContent: Rendering AppContent component');
+  console.log('AppContent: Rendering AppContent component');
   const { userProfile, loading } = useSupabaseAuth();
-  // console.log('AppContent: userProfile:', userProfile, 'loading:', loading);
+  console.log('AppContent: userProfile:', userProfile, 'loading:', loading);
   const { t } = useI18n();
 
   if (loading) {
@@ -76,15 +81,15 @@ function AppContent() {
 function App() {
   console.log('App: Rendering App component');
   return (
-    <I18nProvider>
-      <SupabaseAuthProvider>
-        <SupabaseDataProvider>
+    <ErrorBoundary>
+      <I18nProvider>
+        <SupabaseAuthProvider>
           <OfflineDataProvider>
             <AppContent />
           </OfflineDataProvider>
-        </SupabaseDataProvider>
-      </SupabaseAuthProvider>
-    </I18nProvider>
+        </SupabaseAuthProvider>
+      </I18nProvider>
+    </ErrorBoundary>
   );
 }
 
