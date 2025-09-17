@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
-import SearchableSelect from './common/SearchableSelect';
-import MoneyInput from './common/MoneyInput';
+import SearchableSelect from '../components/common/SearchableSelect';
+import MoneyInput from '../components/common/MoneyInput';
 import { cleanupAndValidateSaleItems } from '../utils/cleanupSaleItemsData';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 // Removed SupabaseService import - using offline-first context methods only
@@ -52,10 +52,10 @@ import {
   Calculator as CalculatorIcon,
   X
 } from 'lucide-react';
-import Toast from './common/Toast';
+import Toast from '../components/common/Toast';
 import { CurrencyService } from '../services/currencyService';
-import ReceivedBills from './accountingTabs/ReceivedBills';
-import InventoryLogs from './accountingTabs/InventoryLogs';
+import ReceivedBills from '../components/accountingTabs/ReceivedBills';
+import InventoryLogs from '../components/accountingTabs/InventoryLogs';
 import { createId } from '../lib/db';
 import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 

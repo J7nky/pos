@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { usePOSKeyboard } from '../hooks/usePOSKeyboard';
 import { useFocusManagement } from '../hooks/useFocusManagement';
-import AccessibleModal from './common/AccessibleModal';
-import AccessibleButton from './common/AccessibleButton';
+import AccessibleModal from '../components/common/AccessibleModal';
+import AccessibleButton from '../components/common/AccessibleButton';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
-import SearchableSelect from './common/SearchableSelect';
-import MoneyInput from './common/MoneyInput';
+import SearchableSelect from '../components/common/SearchableSelect';
+import MoneyInput from '../components/common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { 
   Plus, 

@@ -3,11 +3,11 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText } from 'lucide-react';
 import { Customer, Supplier } from '../types';
-import Toast from './common/Toast';
-import SearchableSelect from './common/SearchableSelect';
-import SupplierFormModal from './common/SupplierFormModal';
+import Toast from '../components/common/Toast';
+import SearchableSelect from '../components/common/SearchableSelect';
+import SupplierFormModal from '../components/common/SupplierFormModal';
 import { CurrencyService } from '../services/currencyService';
-import AccountStatementModal from './AccountStatementModal';
+import AccountStatementModal from '../components/AccountStatementModal';
 import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 
 export default function Customers() {

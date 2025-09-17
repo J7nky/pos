@@ -8,14 +8,14 @@ import { Plus, Search, Package, Truck } from 'lucide-react';
 // Removed SupabaseService import - using offline-first context methods only
 
 // Import components
-import ReceiveFormModal from './inventory/ReceiveFormModal';
-import AddProductModal from './inventory/AddProductModal';
-import EditProductModal from './inventory/EditProductModal';
-import DeleteProductConfirm from './inventory/DeleteProductConfirm';
-import EditInventoryModal from './inventory/EditInventoryModal';
-import DeleteInventoryConfirm from './inventory/DeleteInventoryConfirm';
-import RecentReceivesTable from './inventory/RecentReceivesTable';
-import ProductTable from './inventory/ProductTable';
+import ReceiveFormModal from '../components/inventory/ReceiveFormModal';
+import AddProductModal from '../components/inventory/AddProductModal';
+import EditProductModal from '../components/inventory/EditProductModal';
+import DeleteProductConfirm from '../components/inventory/DeleteProductConfirm';
+import EditInventoryModal from '../components/inventory/EditInventoryModal';
+import DeleteInventoryConfirm from '../components/inventory/DeleteInventoryConfirm';
+import RecentReceivesTable from '../components/inventory/RecentReceivesTable';
+import ProductTable from '../components/inventory/ProductTable';
 
 // Import types
 import { Product, Supplier, InventoryItem } from '../types/inventory';

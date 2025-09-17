@@ -1,64 +1,14 @@
-import React, { useState } from 'react';
+// src/App.jsx
 import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthContext';
 import { OfflineDataProvider } from './contexts/OfflineDataContext';
-// Removed SupabaseDataProvider - using OfflineDataProvider directly
 import SupabaseLogin from './components/SupabaseLogin';
-import Layout from './components/Layout';
-import Home from './components/Home';
-import Inventory from './components/Inventory';
-
-import POS from './components/POS';
-import Reports from './components/Reports';
-import Customers from './components/Customers';
-import Accounting from './components/Accounting';
-import Settings from './components/Settings';
-import UndoToastManager from './components/common/UndoToastManager';
-import ErrorBoundary from './components/common/ErrorBoundary';
 import { I18nProvider, useI18n } from './i18n';
-
-function AuthenticatedApp() {
-  const { userProfile } = useSupabaseAuth();
-  const [currentPage, setCurrentPage] = useState('home');
-
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'home':
-        return <Home />;
-      case 'inventory':
-        return <Inventory />;
-      case 'pos':
-        return <POS />;
-      case 'reports':
-        return <Reports />;
-      case 'accounting':
-        return <Accounting />;
-      case 'customers':
-        return <Customers />;
-      case 'settings':
-        console.log('AuthenticatedApp: Rendering Settings page');
-        return <Settings />;
-      default:
-        return <Home />;
-    }
-  };
-
-  return (
-    <ErrorBoundary>
-      <Layout currentPage={currentPage} onPageChange={setCurrentPage}>
-        <ErrorBoundary>
-          {renderPage()}
-        </ErrorBoundary>
-        <UndoToastManager />
-      </Layout>
-    </ErrorBoundary>
-  );
-}
+import { Outlet, useLocation } from 'react-router-dom';
 
 function AppContent() {
-  console.log('AppContent: Rendering AppContent component');
   const { userProfile, loading } = useSupabaseAuth();
-  console.log('AppContent: userProfile:', userProfile, 'loading:', loading);
   const { t } = useI18n();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -71,26 +21,23 @@ function AppContent() {
     );
   }
 
-  if (!userProfile) {
+  // If user is not authenticated and not on login page, show SupabaseLogin
+  if (!userProfile && location.pathname !== '/login') {
     return <SupabaseLogin />;
   }
-
-  return <AuthenticatedApp />;
+  
+  // Render the nested routes (which will be the Login page or Layout and its children)
+  return <Outlet />;
 }
 
-function App() {
-  console.log('App: Rendering App component');
+export default function App() {
   return (
-    <ErrorBoundary>
-      <I18nProvider>
-        <SupabaseAuthProvider>
-          <OfflineDataProvider>
-            <AppContent />
-          </OfflineDataProvider>
-        </SupabaseAuthProvider>
-      </I18nProvider>
-    </ErrorBoundary>
+    <I18nProvider>
+      <SupabaseAuthProvider>
+        <OfflineDataProvider>
+          <AppContent />
+        </OfflineDataProvider>
+      </SupabaseAuthProvider>
+    </I18nProvider>
   );
 }
-
-export default App;
