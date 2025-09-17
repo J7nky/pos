@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import Toast from './common/Toast';
 
@@ -10,9 +10,15 @@ export function OfflineIndicator() {
     visible: false
   });
 
+  // Debug logging
+  useEffect(() => {
+    console.log('🔍 OfflineIndicator: isOnline =', isOnline, 'justCameOnline =', justCameOnline);
+  }, [isOnline, justCameOnline]);
+
   // Show toast when going offline
   useEffect(() => {
     if (!isOnline && !justCameOnline) {
+      console.log('🔍 Showing offline toast');
       setToast({
         message: '🚫🌐 Offline mode',
         type: 'error',
@@ -24,6 +30,7 @@ export function OfflineIndicator() {
   // Show toast when coming back online and hide offline toast
   useEffect(() => {
     if (justCameOnline) {
+      console.log('🔍 Showing online toast');
       // Hide any existing offline toast immediately
       setToast(prev => ({ ...prev, visible: false }));
       

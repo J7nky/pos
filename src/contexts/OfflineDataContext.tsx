@@ -155,7 +155,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const { isOnline, justCameOnline } = useNetworkStatus();
   const storeId = userProfile?.store_id;
 
-  console.log('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline);
+  console.log('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline, 'justCameOnline:', justCameOnline);
 
   // Data states - offline-first structure
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
