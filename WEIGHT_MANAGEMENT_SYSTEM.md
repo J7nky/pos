@@ -343,3 +343,4 @@ weightConfigurationService.updateConfiguration({
 The Weight Management System provides a comprehensive solution for tracking and comparing weights across different transaction types. It balances flexibility (optional weight for commission items) with accuracy (required weight for cash/credit items) while providing robust validation and reporting capabilities.
 
 The system helps detect discrepancies, prevent over-selling, and maintain accurate inventory records while accommodating different business requirements for weight tracking.
+

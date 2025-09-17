@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sync Debug Tool</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .error { color: #d32f2f; }
+        .warning { color: #f57c00; }
+        .success { color: #388e3c; }
+        .info { color: #1976d2; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 3px; overflow-x: auto; }
+        button { padding: 10px 15px; margin: 5px; background: #1976d2; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #1565c0; }
+        .record { margin: 10px 0; padding: 10px; background: #f9f9f9; border-left: 3px solid #1976d2; }
+        .invalid { border-left-color: #d32f2f; }
+        .valid { border-left-color: #388e3c; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Sync Debug Tool</h1>
+        <p>This tool helps debug unsynced objects in your POS system.</p>
+        
+        <div class="section">
+            <h2>Instructions</h2>
+            <ol>
+                <li>Open your POS application in another tab</li>
+                <li>Open browser developer tools (F12)</li>
+                <li>Go to the Console tab</li>
+                <li>Copy and paste the script below into the console</li>
+                <li>Press Enter to run the debug analysis</li>
+            </ol>
+        </div>
+        
+        <div class="section">
+            <h2>Debug Script</h2>
+            <p>Copy this script and run it in your browser console:</p>
+            <pre id="debugScript">
+// Enhanced sync debug script
+async function debugSyncIssues() {
+  console.log('🔍 Starting comprehensive sync debug analysis...');
+  
+  // Check if we can access the database
+  const db = window.db || (window.OfflineDataContext && window.OfflineDataContext.db);
+  if (!db) {
+    console.error('❌ Cannot access database. Make sure the app is loaded and try again.');
+    return;
+  }
+  
+  const tableNames = [
+    'stores', 'products', 'suppliers', 'customers', 'cash_drawer_accounts',
+    'inventory_bills', 'inventory_items', 'transactions', 'bills',
+    'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions'
+  ];
+  
+  const results = {};
+  let totalUnsynced = 0;
+  const validationErrors = [];
+  
+  console.log('📊 Checking each table for unsynced records...');
+  
+  for (const tableName of tableNames) {
+    try {
+      const table = db[tableName];
+      if (!table) {
+        console.log(`⚠️ Table ${tableName} not found`);
+        continue;
+      }
+      
+      const unsyncedRecords = await table.filter(item => !item._synced).toArray();
+      const count = unsyncedRecords.length;
+      
+      if (count > 0) {
+        results[tableName] = {
+          count,
+          records: unsyncedRecords
+        };
+        totalUnsynced += count;
+        
+        console.log(`📋 ${tableName}: ${count} unsynced records`);
+        
+        // Validate each record
+        for (const record of unsyncedRecords) {
+          const validation = await validateRecord(tableName, record, db);
+          if (!validation.valid) {
+            validationErrors.push({
+              table: tableName,
+              recordId: record.id,
+              errors: validation.errors
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`❌ Error checking ${tableName}:`, error);
+    }
+  }
+  
+  console.log(`\n📈 Summary:`);
+  console.log(`Total unsynced records: ${totalUnsynced}`);
+  console.log(`Validation errors: ${validationErrors.length}`);
+  
+  if (validationErrors.length > 0) {
+    console.log('\n❌ Validation Errors Found:');
+    validationErrors.forEach(error => {
+      console.log(`  ${error.table}.${error.recordId}: ${error.errors.join(', ')}`);
+    });
+  }
+  
+  // Check sync service status
+  console.log('\n🔄 Checking sync service status...');
+  try {
+    const syncService = window.syncService || (window.OfflineDataContext && window.OfflineDataContext.syncService);
+    if (syncService) {
+      console.log('Sync service is available');
+      if (syncService.isCurrentlyRunning) {
+        console.log('Sync is currently running');
+      } else {
+        console.log('Sync is not running');
+      }
+    } else {
+      console.log('Sync service not accessible');
+    }
+  } catch (error) {
+    console.error('Error checking sync service:', error);
+  }
+  
+  return { results, validationErrors, totalUnsynced };
+}
+
+async function validateRecord(tableName, record, db) {
+  const errors = [];
+  
+  try {
+    switch (tableName) {
+      case 'inventory_items':
+        if (!record.product_id) errors.push('Missing product_id');
+        if (!record.supplier_id) errors.push('Missing supplier_id');
+        if (record.quantity < 0) errors.push('Negative quantity');
+        if (record.quantity === undefined || record.quantity === null) errors.push('Missing quantity');
+        
+        // Check if referenced product exists
+        if (record.product_id) {
+          const product = await db.products.get(record.product_id);
+          if (!product) errors.push(`Referenced product ${record.product_id} not found`);
+        }
+        
+        // Check if referenced supplier exists
+        if (record.supplier_id) {
+          const supplier = await db.suppliers.get(record.supplier_id);
+          if (!supplier) errors.push(`Referenced supplier ${record.supplier_id} not found`);
+        }
+        
+        // Check if referenced batch exists (if provided)
+        if (record.batch_id) {
+          const batch = await db.inventory_bills.get(record.batch_id);
+          if (!batch) errors.push(`Referenced batch ${record.batch_id} not found`);
+        }
+        break;
+        
+      case 'bill_line_items':
+        if (!record.bill_id) errors.push('Missing bill_id');
+        if (!record.product_id) errors.push('Missing product_id');
+        if (!record.supplier_id) errors.push('Missing supplier_id');
+        if (!record.quantity || record.quantity <= 0) errors.push('Invalid quantity');
+        
+        // Check if referenced bill exists
+        if (record.bill_id) {
+          const bill = await db.bills.get(record.bill_id);
+          if (!bill) errors.push(`Referenced bill ${record.bill_id} not found`);
+        }
+        
+        // Check if referenced product exists
+        if (record.product_id) {
+          const product = await db.products.get(record.product_id);
+          if (!product) errors.push(`Referenced product ${record.product_id} not found`);
+        }
+        
+        // Check if referenced supplier exists
+        if (record.supplier_id) {
+          const supplier = await db.suppliers.get(record.supplier_id);
+          if (!supplier) errors.push(`Referenced supplier ${record.supplier_id} not found`);
+        }
+        break;
+        
+      case 'bills':
+        if (!record.bill_number) errors.push('Missing bill_number');
+        if (!record.status) errors.push('Missing status');
+        if (record.total_amount === undefined || record.total_amount === null) errors.push('Missing total_amount');
+        break;
+        
+      case 'transactions':
+        if (!record.amount) errors.push('Missing amount');
+        if (!record.type) errors.push('Missing type');
+        break;
+    }
+  } catch (error) {
+    errors.push(`Validation error: ${error.message}`);
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+// Make functions available globally
+window.debugSyncIssues = debugSyncIssues;
+window.validateRecord = validateRecord;
+
+console.log('🔧 Enhanced debug script loaded. Run debugSyncIssues() to analyze sync issues.');
+            </pre>
+        </div>
+        
+        <div class="section">
+            <h2>Quick Fixes</h2>
+            <p>If you find validation errors, here are some quick fixes:</p>
+            <ul>
+                <li><strong>Missing foreign keys:</strong> The referenced record might have been deleted. Check if the parent record exists.</li>
+                <li><strong>Negative quantities:</strong> This might be from a calculation error. Check the inventory deduction logic.</li>
+                <li><strong>Missing required fields:</strong> The record might be incomplete. Check the creation logic.</li>
+            </ul>
+        </div>
+        
+        <div class="section">
+            <h2>Manual Sync Trigger</h2>
+            <p>If you want to manually trigger a sync after fixing issues:</p>
+            <pre>
+// In browser console:
+// Get the offline data context
+const offlineData = window.OfflineDataContext || document.querySelector('[data-offline-context]');
+if (offlineData && offlineData.sync) {
+  offlineData.sync().then(result => {
+    console.log('Manual sync result:', result);
+  });
+} else {
+  console.log('Cannot access sync function. Make sure the app is fully loaded.');
+}
+            </pre>
+        </div>
+    </div>
+    
+    <script>
+        // Auto-copy script to clipboard when clicked
+        document.getElementById('debugScript').addEventListener('click', function() {
+            this.select();
+            document.execCommand('copy');
+            alert('Debug script copied to clipboard!');
+        });
+    </script>
+</body>
+</html>
