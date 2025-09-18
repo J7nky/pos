@@ -3,7 +3,7 @@
 import { db } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/database';
-// import { queryMonitor } from './queryMonitorService';
+import { queryMonitor } from './queryMonitorService';
 
 type Tables = Database['public']['Tables'];
 

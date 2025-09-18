@@ -3,6 +3,7 @@ import { User } from '@supabase/supabase-js';
 import { useSupabase } from '../hooks/useSupabase';
 import { SupabaseService } from '../services/supabaseService';
 import { supabase } from '../lib/supabase';
+import { AuthUtils } from '../utils/authUtils';
 
 interface UserProfile {
   preferred_currency: 'USD' | 'LBP';
@@ -26,11 +27,14 @@ interface SupabaseAuthContextType {
   user: User | null;
   userProfile: UserProfile | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<boolean>;
-  signUp: (email: string, password: string, profile: Omit<UserProfile, 'id' | 'email'>) => Promise<boolean>;
+  error: string | null;
+  signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signUp: (email: string, password: string, profile: Omit<UserProfile, 'id' | 'email'>) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<boolean>;
+  resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   getStores: () => Promise<any[]>;
+  refreshSession: () => Promise<boolean>;
+  clearError: () => void;
 }
 
 const SupabaseAuthContext = createContext<SupabaseAuthContextType | undefined>(undefined);
@@ -39,6 +43,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading, signIn: supabaseSignIn, signUp: supabaseSignUp, signOut: supabaseSignOut, resetPassword: supabaseResetPassword } = useSupabase();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Load user profile function
   const loadUserProfile = async () => {
@@ -126,20 +131,13 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   }, [user, authLoading]);
 
   // Check for cached user profile on mount if no user is available
+  // DISABLED: This was causing the app to think user is logged in when they're not
+  // Only load cached profile when there's an actual authenticated user
   useEffect(() => {
     if (!user && !authLoading) {
-      console.log('🔍 No user available, checking for cached profile');
-      // Try to get any cached user profile
-      const keys = Object.keys(localStorage).filter(key => key.startsWith('user_profile_'));
-      if (keys.length > 0) {
-        const cachedKey = keys[0];
-        const cachedProfile = JSON.parse(localStorage.getItem(cachedKey) || '{}');
-        if (cachedProfile && cachedProfile.id) {
-          console.log('📱 Found cached user profile:', cachedProfile);
-          setUserProfile(cachedProfile);
-          setLoading(false);
-        }
-      }
+      console.log('🔍 No user available, not loading cached profile to prevent false authentication');
+      setUserProfile(null);
+      setLoading(false);
     }
   }, [user, authLoading]);
 
@@ -164,20 +162,13 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   }, [user, authLoading]);
 
   // Add a fallback for offline mode - create a minimal user profile if we have a cached session
+  // DISABLED: This was causing the app to think user is logged in when they're not
+  // Only use cached profiles when there's an actual authenticated user
   useEffect(() => {
     if (!user && !authLoading && !userProfile) {
-      console.log('🔍 No user or profile, checking for offline fallback');
-      // Check if we have any cached user data
-      const keys = Object.keys(localStorage).filter(key => key.startsWith('user_profile_'));
-      if (keys.length > 0) {
-        const cachedKey = keys[0];
-        const cachedProfile = JSON.parse(localStorage.getItem(cachedKey) || '{}');
-        if (cachedProfile && cachedProfile.id) {
-          console.log('📱 Using cached profile as offline fallback:', cachedProfile);
-          setUserProfile(cachedProfile);
-          setLoading(false);
-        }
-      }
+      console.log('🔍 No user or profile, not using cached profile to prevent false authentication');
+      setUserProfile(null);
+      setLoading(false);
     }
   }, [user, authLoading, userProfile]);
 
@@ -201,34 +192,46 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     }
   }, [user, authLoading, userProfile]);
 
-  const signIn = async (email: string, password: string): Promise<boolean> => {
+  const signIn = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      setError(null);
+      setLoading(true);
+      
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      
       if (error) {
         console.error('Sign in error:', error);
-        return false;
+        setError(error.message);
+        return { success: false, error: error.message };
+      }
+      
+      if (!data.user) {
+        setError('No user data returned');
+        return { success: false, error: 'No user data returned' };
       }
       
       // Cache user profile for offline use
       if (navigator.onLine) {
         try {
-          const { data: { user: currentUser } } = await supabase.auth.getUser();
-          if (currentUser) {
-            const profile = await SupabaseService.getUserProfile(currentUser.id);
-            if (profile) {
-              localStorage.setItem(`user_profile_${profile.id}`, JSON.stringify(profile));
-              console.log('📱 Cached user profile for offline use');
-            }
+          const profile = await SupabaseService.getUserProfile(data.user.id);
+          if (profile) {
+            localStorage.setItem(`user_profile_${profile.id}`, JSON.stringify(profile));
+            console.log('📱 Cached user profile for offline use');
           }
         } catch (profileError) {
           console.warn('Failed to cache user profile:', profileError);
         }
       }
       
-      return true;
-    } catch (error) {
+      setError(null);
+      return { success: true };
+    } catch (error: any) {
       console.error('Sign in error:', error);
-      return false;
+      const errorMessage = error?.message || 'An unexpected error occurred';
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -236,12 +239,22 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     email: string, 
     password: string, 
     profile: Omit<UserProfile, 'id' | 'email'>
-  ): Promise<boolean> => {
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
+      setError(null);
+      setLoading(true);
+      
       const { data, error } = await supabaseSignUp({ email, password });
-      if (error || !data.user) {
+      
+      if (error) {
         console.error('Sign up error:', error);
-        return false;
+        setError(error.message);
+        return { success: false, error: error.message };
+      }
+      
+      if (!data.user) {
+        setError('No user data returned');
+        return { success: false, error: 'No user data returned' };
       }
 
       // Create user profile
@@ -251,34 +264,64 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         ...profile
       });
 
-      return true;
-    } catch (error) {
+      setError(null);
+      return { success: true };
+    } catch (error: any) {
       console.error('Sign up error:', error);
-      return false;
+      const errorMessage = error?.message || 'An unexpected error occurred';
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
     }
   };
 
   const signOut = async (): Promise<void> => {
     try {
+      setError(null);
       await supabaseSignOut();
       setUserProfile(null);
-    } catch (error) {
+      // Clear all cached data
+      AuthUtils.clearAuthData();
+    } catch (error: any) {
       console.error('Sign out error:', error);
+      setError(error?.message || 'Sign out failed');
     }
   };
 
-  const resetPassword = async (email: string): Promise<boolean> => {
+  const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
     try {
+      setError(null);
       const { error } = await supabaseResetPassword(email);
+      
       if (error) {
         console.error('Reset password error:', error);
-        return false;
+        setError(error.message);
+        return { success: false, error: error.message };
       }
-      return true;
-    } catch (error) {
+      
+      return { success: true };
+    } catch (error: any) {
       console.error('Reset password error:', error);
+      const errorMessage = error?.message || 'An unexpected error occurred';
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  };
+
+  const refreshSession = async (): Promise<boolean> => {
+    try {
+      setError(null);
+      return await AuthUtils.refreshSessionIfNeeded();
+    } catch (error: any) {
+      console.error('Session refresh error:', error);
+      setError(error?.message || 'Session refresh failed');
       return false;
     }
+  };
+
+  const clearError = () => {
+    setError(null);
   };
 
   const getStores = async (): Promise<any[]> => {
@@ -295,11 +338,14 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       user,
       userProfile,
       loading: loading || authLoading,
+      error,
       signIn,
       signUp,
       signOut,
       resetPassword,
-      getStores
+      getStores,
+      refreshSession,
+      clearError
     }}>
       {children}
     </SupabaseAuthContext.Provider>
