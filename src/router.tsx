@@ -1,8 +1,8 @@
 // src/router.tsx
+import React from "react";
 import { createBrowserRouter } from "react-router-dom";
 import App from "./App";
 import Layout from "./layouts/Layout";
-import Login from "./components/Login";
 import Home from './pages/Home';
 import Inventory from './pages/Inventory';
 import POS from './pages/POS';
@@ -16,10 +16,6 @@ export const router = createBrowserRouter([
     path: "/",
     element: <App />, // This is the root component that handles auth and providers
     children: [
-      {
-        path: "login",
-        element: <Login />,
-      },
       {
         element: <Layout />, // This is the nested layout for authenticated users
         children: [
