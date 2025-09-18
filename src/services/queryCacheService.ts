@@ -1,10 +1,19 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
 
-// Cache configuration
+// Cache configuration - OPTIMIZED for cost efficiency
 interface CacheConfig {
   defaultTTL: number; // Time to live in milliseconds
   maxSize: number; // Maximum number of cached items
   cleanupInterval: number; // Cleanup interval in milliseconds
+  
+  // New: Smart TTL configuration per table type
+  tableTTLs: {
+    [key: string]: number;
+  };
+  
+  // New: Cost-aware caching
+  maxCostPerQuery: number;
+  enableSmartEviction: boolean;
 }
 
 // Cache item structure
@@ -26,9 +35,34 @@ export class QueryCacheService {
   constructor(supabase: SupabaseClient, config?: Partial<CacheConfig>) {
     this.supabase = supabase;
     this.config = {
-      defaultTTL: 5 * 60 * 1000, // 5 minutes default
-      maxSize: 1000, // Maximum 1000 cached items
-      cleanupInterval: 60 * 1000, // Cleanup every minute
+      defaultTTL: 10 * 60 * 1000, // Increased to 10 minutes default
+      maxSize: 2000, // Increased to 2000 cached items
+      cleanupInterval: 5 * 60 * 1000, // Cleanup every 5 minutes (was 1 minute)
+      
+      // Smart TTL configuration per table type
+      tableTTLs: {
+        // Static/rarely changing data - long TTL
+        'products': 30 * 60 * 1000,      // 30 minutes
+        'suppliers': 30 * 60 * 1000,     // 30 minutes
+        'customers': 20 * 60 * 1000,     // 20 minutes
+        'stores': 60 * 60 * 1000,        // 1 hour
+        'users': 45 * 60 * 1000,         // 45 minutes
+        
+        // Semi-dynamic data - medium TTL
+        'inventory_bills': 15 * 60 * 1000,   // 15 minutes
+        'bills': 10 * 60 * 1000,             // 10 minutes
+        'bill_line_items': 10 * 60 * 1000,   // 10 minutes
+        
+        // Dynamic data - short TTL
+        'inventory_items': 5 * 60 * 1000,        // 5 minutes
+        'transactions': 3 * 60 * 1000,           // 3 minutes
+        'cash_drawer_sessions': 2 * 60 * 1000,   // 2 minutes
+        'cash_drawer_accounts': 2 * 60 * 1000,   // 2 minutes
+      },
+      
+      // Cost-aware caching
+      maxCostPerQuery: 100,
+      enableSmartEviction: true,
       ...config
     };
 
@@ -179,7 +213,7 @@ export class QueryCacheService {
     totalMisses: number;
   } {
     let totalHits = 0;
-    let totalMisses = 0;
+    const totalMisses = 0; // Will be calculated from access patterns in future
 
     for (const item of this.cache.values()) {
       totalHits += item.accessCount;
@@ -197,37 +231,67 @@ export class QueryCacheService {
   }
 
   /**
-   * Preload frequently accessed data
+   * Preload frequently accessed data - OPTIMIZED for cost efficiency
+   * Only preload essential data with smart limits and longer TTLs
    */
-  async preloadData(): Promise<void> {
-    console.log('🔄 Preloading frequently accessed data...');
+  async preloadData(storeId?: string): Promise<void> {
+    console.log('🔄 Preloading essential data with cost optimization...');
     
+    // OPTIMIZATION: Only preload essential, frequently accessed data
     const preloadQueries = [
       {
-        key: 'stores:all',
-        query: () => this.supabase.from('stores').select('*'),
-        ttl: 10 * 60 * 1000 // 10 minutes
+        key: `stores:${storeId || 'current'}`,
+        query: async () => {
+          const query = storeId 
+            ? this.supabase.from('stores').select('id, name, preferred_currency, preferred_language').eq('id', storeId).single()
+            : this.supabase.from('stores').select('id, name, preferred_currency, preferred_language').limit(10);
+          const { data, error } = await query;
+          if (error) throw error;
+          return data;
+        },
+        ttl: 60 * 60 * 1000 // 1 hour (stores rarely change)
       },
       {
-        key: 'users:all',
-        query: () => this.supabase.from('users').select('*'),
-        ttl: 5 * 60 * 1000 // 5 minutes
+        key: `products:active:${storeId || 'all'}`,
+        query: async () => {
+          const query = storeId
+            ? this.supabase.from('products').select('id, name, category, unit_price').eq('store_id', storeId).eq('is_active', true).limit(1000)
+            : this.supabase.from('products').select('id, name, category, unit_price').eq('is_active', true).limit(500);
+          const { data, error } = await query;
+          if (error) throw error;
+          return data;
+        },
+        ttl: 30 * 60 * 1000 // 30 minutes
       },
       {
-        key: 'products:all',
-        query: () => this.supabase.from('products').select('*'),
-        ttl: 15 * 60 * 1000 // 15 minutes
+        key: `suppliers:active:${storeId || 'all'}`,
+        query: async () => {
+          const query = storeId
+            ? this.supabase.from('suppliers').select('id, name, phone, type').eq('store_id', storeId).limit(500)
+            : this.supabase.from('suppliers').select('id, name, phone, type').limit(200);
+          const { data, error } = await query;
+          if (error) throw error;
+          return data;
+        },
+        ttl: 30 * 60 * 1000 // 30 minutes
       }
     ];
 
-    for (const preload of preloadQueries) {
+    // Process preloads with error isolation
+    const preloadPromises = preloadQueries.map(async (preload) => {
       try {
         await this.getOrFetch(preload.key, preload.query, { ttl: preload.ttl });
         console.log(`✅ Preloaded: ${preload.key}`);
+        return { key: preload.key, success: true };
       } catch (error) {
         console.warn(`⚠️  Failed to preload ${preload.key}:`, error);
+        return { key: preload.key, success: false, error };
       }
-    }
+    });
+
+    const results = await Promise.allSettled(preloadPromises);
+    const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+    console.log(`📊 Preload completed: ${successful}/${preloadQueries.length} successful`);
   }
 
   /**
