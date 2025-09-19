@@ -1104,6 +1104,9 @@ export default function ReceivedBills({
         errors={batchEditErrors}
         setErrors={setBatchEditErrors}
         addSupplier={addSupplier}
+        isEditMode={true}
+        editingBatchId={editingBatchId}
+        existingBatchItems={editingBatchId ? inventory.filter((item: any) => item.batch_id === editingBatchId) : []}
       />
 
       {showReceivedBillSalesLogs && selectedReceivedBill && (
