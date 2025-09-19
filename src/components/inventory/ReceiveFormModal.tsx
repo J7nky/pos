@@ -401,7 +401,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         min="0"
                         max="100"
                         value={form.commission_rate}
-                        onChange={(e) => setForm({ ...form, commission_rate: e.target.value })}
+                        onChange={(e) => setForm({ ...form, commission_rate: e.target.value.toString() })}
                         className={`w-full border ${errors.commission_rate ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                         placeholder={`Default: ${defaultCommissionRate}%`}
                       />

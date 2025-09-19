@@ -49,6 +49,7 @@ export interface Store extends BaseEntity {
   preferred_language: 'en' | 'ar' | 'fr';
   preferred_commission_rate: number;
   exchange_rate: number; // USD to LBP exchange rate (e.g., 89500)
+  low_stock_alert: boolean;
 }
 export interface Supplier extends BaseEntity {
   name: string;

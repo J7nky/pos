@@ -5,18 +5,19 @@ import {
   Activity,
   CheckCircle,
   DollarSign,
-  RefreshCw,
   Trash2,
-  AlertCircle,
   ChevronRight,
   X,
   Edit,
   Scale
 } from 'lucide-react';
 import WeightComparisonReport from '../WeightComparisonReport';
+import ReceiveFormModal from '../inventory/ReceiveFormModal';
+import { Bill } from '../../lib/db';
 
 type ReceivedBillsProps = {
   inventory: any[];
+  bills: Bill[];
   products: any[];
   suppliers: any[];
   sales: any[];
@@ -28,10 +29,16 @@ type ReceivedBillsProps = {
   onUpdateBatch?: (batchId: string, updates: { porterage?: number | null; transfer_fee?: number | null; notes?: string | null }) => Promise<void>;
   onApplyBatchCommission?: (batchId: string, commissionRate: number) => Promise<void>;
   onCloseBill?: (bill: any, fees: { commission: number; porterage: number; transfer: number; supplierAmount: number }) => Promise<void>;
+  // Additional props for ReceiveFormModal
+  defaultCommissionRate: number;
+  recentSuppliers: string[];
+  setRecentSuppliers: (suppliers: string[]) => void;
+  addSupplier?: (supplier: any) => Promise<void>;
 };
 
 export default function ReceivedBills({
   inventory,
+  bills: _bills,
   products,
   suppliers,
   sales,
@@ -42,106 +49,159 @@ export default function ReceivedBills({
   onDeleteSale,
   onUpdateBatch,
   onApplyBatchCommission,
-  onCloseBill
+  onCloseBill,
+  defaultCommissionRate,
+  recentSuppliers,
+  setRecentSuppliers,
+  addSupplier
 }: ReceivedBillsProps) {
   const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
+  // const [receivedBills, setReceivedBills] = useState<Bill[]>([]);
   const [receivedBillsSupplierFilter, setReceivedBillsSupplierFilter] = useState('');
   const [receivedBillsProductFilter, setReceivedBillsProductFilter] = useState('');
   const [receivedBillsPage, setReceivedBillsPage] = useState(1);
   const [receivedBillsSort, setReceivedBillsSort] = useState<'date' | 'supplier' | 'product' | 'amount' | 'progress' | 'revenue' | 'status'>('date');
   const [receivedBillsSortDir, setReceivedBillsSortDir] = useState<'asc' | 'desc'>('desc');
   const [receivedBillsStatusFilter, setReceivedBillsStatusFilter] = useState<string>('all');
+  const [receivedBillsTypeFilter, setReceivedBillsTypeFilter] = useState<string>('all');
   const [selectedReceivedBill, setSelectedReceivedBill] = useState<any>(null);
   const [showReceivedBillDetails, setShowReceivedBillDetails] = useState(false);
   const [showReceivedBillSalesLogs, setShowReceivedBillSalesLogs] = useState(false);
   const [showBatchEdit, setShowBatchEdit] = useState(false);
-  const [batchEditForm, setBatchEditForm] = useState<{ porterage?: string; transfer_fee?: string; notes?: string; commission_rate?: string }>({});
+  const [batchEditForm, setBatchEditForm] = useState<{ 
+    supplier_id?: string;
+    type?: string;
+    porterage_fee?: string;
+    transfer_fee?: string;
+    commission_rate?: string;
+    status?: string;
+    empty_plastic?: boolean;
+    plastic_count?: string;
+    plastic_price?: string;
+    received_at?: string;
+  }>({});
+  const [batchEditErrors, setBatchEditErrors] = useState<any>({});
+  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [closedBillIds, setClosedBillIds] = useState<Set<string>>(new Set());
   const [showWeightComparison, setShowWeightComparison] = useState(false);
 
+  // Initialize batch edit form with current batch data
+  const initializeBatchEdit = (group: any) => {
+    const first = group.items[0];
+    const batchId = group.batchId || first?.batch_id;
+    
+    if (!batchId || batchId === null) {
+      return;
+    }
+
+    // Initialize form with current batch data for ReceiveFormModal
+    setBatchEditForm({
+      supplier_id: first?.supplier_id || '',
+      type: first?.type || 'commission',
+      porterage_fee: (group.batchPorterage ?? '').toString(),
+      transfer_fee: (group.batchTransferFee ?? '').toString(),
+      commission_rate: (first?.commissionRate ?? '').toString(),
+      status: group.batchNotes ?? '',
+      empty_plastic: !!group.batchPlasticFee,
+      plastic_count: (group.batchPlasticCount ?? '').toString(),
+      plastic_price: (group.batchPlasticPrice ?? '').toString(),
+      received_at: first?.received_at || new Date().toISOString().split('T')[0]
+    });
+
+    setBatchEditErrors({});
+    setEditingBatchId(batchId);
+    setShowBatchEdit(true);
+  };
+
+  // Handle batch edit success
+  const handleBatchEditSuccess = async (data: any) => {
+    try {
+      if (editingBatchId && onUpdateBatch) {
+        await onUpdateBatch(editingBatchId, {
+          porterage: data.batch?.porterage_fee ? parseFloat(data.batch.porterage_fee) : null,
+          transfer_fee: data.batch?.transfer_fee ? parseFloat(data.batch.transfer_fee) : null,
+          notes: data.batch?.status || null
+        });
+      }
+      
+      if (editingBatchId && onApplyBatchCommission && data.batch?.commission_rate) {
+        await onApplyBatchCommission(editingBatchId, parseFloat(data.batch.commission_rate));
+      }
+      
+      setShowBatchEdit(false);
+      setEditingBatchId(null);
+      showToast('Batch updated successfully', 'success');
+    } catch (e) {
+      showToast('Failed to update batch', 'error');
+    }
+  };
 
   const getReceivedBills = useMemo(() => {
     const bills: any[] = [];
     try {
-      const allInventoryItems = inventory.filter(item => item.product_id && item.supplier_id);
-      allInventoryItems.forEach(item => {
+      const allInventoryItems = inventory.filter(item => item && item.product_id && item.supplier_id);
+      for (const item of allInventoryItems) {
         const product = products.find(p => p.id === item.product_id);
         const supplier = suppliers.find(s => s.id === item.supplier_id);
-        if (!product || !supplier) return;
+        if (!product || !supplier) continue;
 
-        const relatedSales = sales.filter((sale: any) =>
-          sale &&
-          sale.product_id === item.product_id &&
-          sale.supplier_id === item.supplier_id &&
-          new Date(sale.created_at).getTime() >= new Date(item.received_at || item.created_at).getTime()
-        );
+        // Link sales by inventory_item_id, then infer the bill (batch) via item's batch_id
+        const relatedSales = (sales || []).filter((sale: any) => sale && sale.inventory_item_id === item.id);
+        const sortedSales = relatedSales.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
         let totalSoldQuantity = 0;
         let totalRevenue = 0;
         let saleCount = 0;
-        const sortedSales = relatedSales.sort((a: any, b: any) =>
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
-        let totalSoldFromThisItem = 0;
         for (const sale of sortedSales) {
-          if (
-            sale &&
-            sale.product_id === item.product_id &&
-            sale.supplier_id === item.supplier_id &&
-            typeof sale.quantity === 'number' &&
-            typeof sale.unit_price === 'number'
-          ) {
-            totalSoldFromThisItem += sale.quantity;
-            totalRevenue += sale.unit_price * sale.quantity;
-            saleCount++;
-          }
+          const qty = typeof sale.quantity === 'number' ? sale.quantity : 0;
+          const unitPrice = typeof sale.unit_price === 'number' ? sale.unit_price : 0;
+          const receivedValue = typeof sale.received_value === 'number' ? sale.received_value : undefined;
+          totalSoldQuantity += qty;
+          totalRevenue += receivedValue !== undefined ? receivedValue : (unitPrice * qty);
+          saleCount++;
         }
 
-        let originalReceivedQuantity = 0;
-        if (item.received_quantity !== null && item.received_quantity !== undefined && item.received_quantity > 0) {
-          originalReceivedQuantity = item.received_quantity;
-        } else {
-          originalReceivedQuantity = item.quantity + totalSoldFromThisItem;
-        }
+        const originalReceivedQuantity = (item.received_quantity !== null && item.received_quantity !== undefined && item.received_quantity > 0)
+          ? item.received_quantity
+          : (item.quantity + totalSoldQuantity);
         const remainingQuantity = item.quantity;
 
-        const avgUnitPrice = totalSoldFromThisItem > 0 ? totalRevenue / totalSoldFromThisItem : (item.price || 0);
+        const avgUnitPrice = totalSoldQuantity > 0 ? (totalRevenue / totalSoldQuantity) : (item.price || 0);
         const estimatedTotalValue = originalReceivedQuantity * avgUnitPrice;
         const soldFromThisItem = Math.max(originalReceivedQuantity - remainingQuantity, 0);
         const progress = originalReceivedQuantity > 0 ? (soldFromThisItem / originalReceivedQuantity) * 100 : 0;
 
         const validOriginalQuantity = Math.max(originalReceivedQuantity, 0);
-        const validSoldQuantity = Math.max(totalSoldFromThisItem, 0);
+        const validSoldQuantity = Math.max(totalSoldQuantity, 0);
         const validRemainingQuantity = Math.max(remainingQuantity, 0);
         const validProgress = isNaN(progress) || !isFinite(progress) ? 0 : Math.max(0, Math.min(100, progress));
 
         let status = 'pending';
-        if (progress >= 100) status = 'completed';
-        else if (progress >= 75) status = 'nearly-complete';
-        else if (progress >= 50) status = 'halfway';
-        else if (progress > 0) status = 'in-progress';
+        if (validProgress >= 100) status = 'completed';
+        else if (validProgress >= 75) status = 'nearly-complete';
+        else if (validProgress >= 50) status = 'halfway';
+        else if (validProgress > 0) status = 'in-progress';
 
-        // Determine closed status from local state or possible item fields
         const isClosed = closedBillIds.has(item.id) || (item as any).status === 'closed' || (item as any).is_closed === true;
-        if (isClosed) {
-          status = 'closed';
-        }
+        if (isClosed) status = 'closed';
 
-        const totalCost = item.type === 'commission'
-          ? (item.porterage || 0) + (item.transfer_fee || 0)
-          : (item.price || 0) * originalReceivedQuantity;
+        const batchType = (item as any).batch_type || (item as any).type || 'commission';
+        const totalCost = batchType === 'commission'
+          ? (((item as any).porterage || 0) + ((item as any).transfer_fee || 0) + (((item as any).batch_porterage || 0) + ((item as any).batch_transfer_fee || 0)))
+          : (item.price || 0) * validOriginalQuantity;
         const totalProfit = totalRevenue - totalCost;
 
         bills.push({
           id: item.id,
+          batchId: item.batch_id || null,
           productId: item.product_id,
           productName: product.name,
           supplierId: item.supplier_id,
           supplierName: supplier.name,
-          type: item.type,
-          batchPorterage: (item as any).batch_porterage ?? null,
-          batchTransferFee: (item as any).batch_transfer_fee ?? null,
+          type: batchType,
+          batchPorterage: (item as any).batch_porterage ?? (item as any).porterage ?? null,
+          batchTransferFee: (item as any).batch_transfer_fee ?? (item as any).transfer_fee ?? null,
           batchNotes: (item as any).batch_notes ?? null,
           originalQuantity: validOriginalQuantity,
           remainingQuantity: validRemainingQuantity,
@@ -155,18 +215,18 @@ export default function ReceivedBills({
           status,
           isClosed,
           saleCount,
-          receivedAt: item.received_at || item.created_at,
-          receivedBy: item.received_by,
+          receivedAt: (item as any).received_at || item.created_at,
+          receivedBy: (item as any).received_by,
           notes: item.notes,
           unit: item.unit,
           weight: item.weight,
-          porterage: item.porterage,
-          transferFee: item.transfer_fee,
+          porterage: (item as any).porterage,
+          transferFee: (item as any).transfer_fee,
           price: item.price,
-          commissionRate: item.commission_rate,
+          commissionRate: (item as any).commission_rate,
           relatedSales: sortedSales
         });
-      });
+      }
     } catch (error) {
       console.error('Error processing received bills:', error);
       showToast('Error processing received bills data', 'error');
@@ -177,6 +237,7 @@ export default function ReceivedBills({
   const filteredReceivedBills = useMemo(() => {
     try {
       let filtered = getReceivedBills;
+
       if (receivedBillsSearchTerm) {
         const searchLower = receivedBillsSearchTerm.toLowerCase();
         filtered = filtered.filter(bill =>
@@ -194,6 +255,10 @@ export default function ReceivedBills({
       if (receivedBillsStatusFilter !== 'all') {
         filtered = filtered.filter(bill => bill.status === receivedBillsStatusFilter);
       }
+      if (receivedBillsTypeFilter !== 'all') {
+        filtered = filtered.filter(bill => bill.type === receivedBillsTypeFilter);
+      }
+
       filtered.sort((a, b) => {
         let aValue: any, bValue: any;
         switch (receivedBillsSort) {
@@ -240,7 +305,7 @@ export default function ReceivedBills({
       console.error('Error filtering received bills:', error);
       return [];
     }
-  }, [getReceivedBills, receivedBillsSearchTerm, receivedBillsSupplierFilter, receivedBillsProductFilter, receivedBillsStatusFilter, receivedBillsSort, receivedBillsSortDir]);
+  }, [getReceivedBills, receivedBillsSearchTerm, receivedBillsSupplierFilter, receivedBillsProductFilter, receivedBillsStatusFilter, receivedBillsTypeFilter, receivedBillsSort, receivedBillsSortDir]);
 
   // Group received bills by batch (bulk) so a batch appears as a single bill with expandable sub-items
   const groupedReceivedBills = useMemo(() => {
@@ -252,7 +317,7 @@ export default function ReceivedBills({
         if (!groupMap.has(key)) {
           groupMap.set(key, {
             groupId: key,
-            isBatch: !!bill.batchId,
+            isBatch: bill.batchId,
             supplierId: bill.supplierId,
             supplierName: bill.supplierName,
             batchId: bill.batchId || null,
@@ -372,7 +437,6 @@ export default function ReceivedBills({
     const endIndex = startIndex + itemsPerPage;
     return groupedReceivedBills.slice(startIndex, endIndex);
   }, [groupedReceivedBills, receivedBillsPage]);
-
   const groupTotalPages = Math.ceil(groupedReceivedBills.length / 10);
 
   const toggleGroup = (groupId: string) => {
@@ -586,7 +650,7 @@ export default function ReceivedBills({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
-            <select value={receivedBillsStatusFilter} onChange={(e) => setReceivedBillsStatusFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+            <select value={receivedBillsTypeFilter} onChange={(e) => setReceivedBillsTypeFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
               <option value="all">All Types</option>
               <option value="commission">Commission</option>
               <option value="cash">Cash</option>
@@ -699,23 +763,7 @@ export default function ReceivedBills({
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent row click
                                 // Use first item to prefill batch edit
-                                const first = group.items[0];
-                                const synthetic = {
-                                  ...first,
-                                  batchId: group.batchId,
-                                  batchPorterage: group.batchPorterage,
-                                  batchTransferFee: group.batchTransferFee,
-                                  batchNotes: group.batchNotes,
-                                  supplierName: group.supplierName,
-                                };
-                                setSelectedReceivedBill(synthetic);
-                                setBatchEditForm({
-                                  porterage: (group.batchPorterage ?? '').toString(),
-                                  transfer_fee: (group.batchTransferFee ?? '').toString(),
-                                  notes: group.batchNotes ?? '',
-                                  commission_rate: (first?.commissionRate ?? '').toString()
-                                });
-                                setShowBatchEdit(true);
+                                initializeBatchEdit(group);
                               }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
@@ -730,6 +778,23 @@ export default function ReceivedBills({
                             >
                               <FileText className="w-3.5 h-3.5 text-gray-500" />
                               <span>Details</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent row click
+                                const first = group.items[0];
+                                setSelectedReceivedBill({
+                                  ...first,
+                                  batchId: group.batchId,
+                                  supplierName: group.supplierName,
+                                  productName: group.productName
+                                });
+                                setShowReceivedBillSalesLogs(true);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                            >
+                              <Activity className="w-3.5 h-3.5 text-gray-500" />
+                              <span>Sales Logs</span>
                             </button>
                             <button
                               onClick={(e) => {
@@ -1021,62 +1086,25 @@ export default function ReceivedBills({
         </div>
       )}
 
-      {showBatchEdit && selectedReceivedBill?.batchId && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Edit Batch</h2>
-              <button onClick={() => setShowBatchEdit(false)} className="text-gray-400 hover:text-gray-600"><X className="w-6 h-6" /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Commission Rate (%)</label>
-                <input type="number" value={batchEditForm.commission_rate || ''} onChange={(e) => setBatchEditForm(f => ({ ...f, commission_rate: e.target.value }))} min="0" max="100" step="0.1" className="w-full border border-gray-300 rounded px-3 py-2" />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Porterage</label>
-                  <input type="number" value={batchEditForm.porterage || ''} onChange={(e) => setBatchEditForm(f => ({ ...f, porterage: e.target.value }))} min="0" step="0.01" className="w-full border border-gray-300 rounded px-3 py-2" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Transfer Fee</label>
-                  <input type="number" value={batchEditForm.transfer_fee || ''} onChange={(e) => setBatchEditForm(f => ({ ...f, transfer_fee: e.target.value }))} min="0" step="0.01" className="w-full border border-gray-300 rounded px-3 py-2" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                <textarea value={batchEditForm.notes || ''} onChange={(e) => setBatchEditForm(f => ({ ...f, notes: e.target.value }))} rows={3} className="w-full border border-gray-300 rounded px-3 py-2" />
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t flex justify-end gap-2">
-              <button onClick={() => setShowBatchEdit(false)} className="px-4 py-2 border rounded">Cancel</button>
-              <button
-                onClick={async () => {
-                  try {
-                    if (onUpdateBatch) {
-                      await onUpdateBatch(selectedReceivedBill.batchId, {
-                        porterage: batchEditForm.porterage ? parseFloat(batchEditForm.porterage) : null,
-                        transfer_fee: batchEditForm.transfer_fee ? parseFloat(batchEditForm.transfer_fee) : null,
-                        notes: batchEditForm.notes || null
-                      });
-                    }
-                    if (onApplyBatchCommission && batchEditForm.commission_rate) {
-                      await onApplyBatchCommission(selectedReceivedBill.batchId, parseFloat(batchEditForm.commission_rate));
-                    }
-                    setShowBatchEdit(false);
-                    showToast('Batch updated', 'success');
-                  } catch (e) {
-                    showToast('Failed to update batch', 'error');
-                  }
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Batch Edit Modal using ReceiveFormModal */}
+      <ReceiveFormModal
+        open={showBatchEdit}
+        onClose={() => {
+          setShowBatchEdit(false);
+          setEditingBatchId(null);
+        }}
+        onSuccess={handleBatchEditSuccess}
+        products={products}
+        suppliers={suppliers}
+        defaultCommissionRate={defaultCommissionRate}
+        recentSuppliers={recentSuppliers}
+        setRecentSuppliers={setRecentSuppliers}
+        form={batchEditForm}
+        setForm={setBatchEditForm}
+        errors={batchEditErrors}
+        setErrors={setBatchEditErrors}
+        addSupplier={addSupplier}
+      />
 
       {showReceivedBillSalesLogs && selectedReceivedBill && (
         <ReceivedBillSalesLogsModal
@@ -1168,11 +1196,15 @@ function ReceivedBillSalesLogsModal({
   const [showCloseBillModal, setShowCloseBillModal] = useState(false);
   const [closeBillFees, setCloseBillFees] = useState<{ commission: number; porterage: number; transfer: number; supplierAmount: number } | null>(null);
   const processedSalesData = useMemo(() => {
-    if (!selectedReceivedBill.relatedSales || !Array.isArray(selectedReceivedBill.relatedSales)) {
-      return [];
-    }
     const salesDetails: any[] = [];
-    const matchingSales = sales.filter((sale: any) => sale.inventory_item_id === selectedReceivedBill.id);
+    let matchingSales: any[] = [];
+    if (selectedReceivedBill.batchId) {
+      const itemIdsInBatch = (inventory || []).filter((it: any) => it.batch_id === selectedReceivedBill.batchId).map((it: any) => it.id);
+      const itemIdSet = new Set(itemIdsInBatch);
+      matchingSales = (sales || []).filter((sale: any) => sale && sale.inventory_item_id && itemIdSet.has(sale.inventory_item_id));
+    } else {
+      matchingSales = (sales || []).filter((sale: any) => sale && sale.inventory_item_id === selectedReceivedBill.id);
+    }
     matchingSales.forEach((sale: any) => {
       salesDetails.push({
         ...sale,
@@ -1191,7 +1223,7 @@ function ReceivedBillSalesLogsModal({
       });
     });
     return salesDetails.sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
-  }, [selectedReceivedBill, sales, customers]);
+  }, [selectedReceivedBill, sales, customers, inventory]);
 
   const closeBill = async () => {
     try {
@@ -1368,7 +1400,7 @@ function ReceivedBillSalesLogsModal({
               </div>
               <div className="bg-green-50 p-3 rounded-lg">
                 <p className="text-sm text-green-700">Total Revenue</p>
-                <p className="text-lg font-bold text-green-900">{formatCurrency(processedSalesData.reduce((sum, item) => sum + (item.totalPrice || 0), 0))}</p>
+                <p className="text-lg font-bold text-green-900">{formatCurrency(processedSalesData.reduce((sum, item) => sum + (item.receivedValue ?? ((item.unitPrice || 0) * (item.quantity || 0))), 0))}</p>
               </div>
               <div className="bg-purple-50 p-3 rounded-lg">
                 <p className="text-sm text-purple-700">Sold Quantity</p>
@@ -1425,7 +1457,7 @@ function ReceivedBillSalesLogsModal({
                         <div className="text-sm text-gray-900">{formatCurrency(item.unitPrice || 0)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{formatCurrency(item.weight*item.unitPrice || 0)}</div>
+                        <div className="text-sm font-medium text-gray-900">{formatCurrency(item.receivedValue ?? ((item.unitPrice || 0) * (item.quantity || 0)))}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.paymentMethod === 'cash' ? 'bg-green-100 text-green-800' : item.paymentMethod === 'card' ? 'bg-blue-100 text-blue-800' : item.paymentMethod === 'credit' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>

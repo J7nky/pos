@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 // Removed useSupabaseData - using useOfflineData only
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
@@ -16,9 +16,7 @@ import {
   Smartphone,
   Calculator,
   DollarSign,
-  Wrench
 } from 'lucide-react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
 
 export default function Settings() {
   const { userProfile } = useSupabaseAuth();
@@ -33,22 +31,40 @@ export default function Settings() {
   const currency = offlineData?.currency ?? 'USD';
   const lowStockAlertsEnabled = offlineData?.lowStockAlertsEnabled ?? true;
   const lowStockThreshold = offlineData?.lowStockThreshold ?? 10;
+  const exchangeRate = offlineData?.exchangeRate ?? 89500;
   
   // Get update functions from offline context
   const updateDefaultCommissionRate = offlineData?.updateDefaultCommissionRate ?? (() => {});
   const updateCurrency = offlineData?.updateCurrency ?? (() => {});
   const toggleLowStockAlerts = offlineData?.toggleLowStockAlerts ?? (() => {});
   const updateLowStockThreshold = offlineData?.updateLowStockThreshold ?? (() => {});
+  const updateExchangeRate = offlineData?.updateExchangeRate ?? (() => {});
   
   const { t, language, setLanguage } = useI18n();
 
   const [tempThreshold, setTempThreshold] = useState(lowStockThreshold?.toString() || '10');
   const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate?.toString() || '10');
   const [tempCurrency, setTempCurrency] = useState<'USD' | 'LBP'>(currency);
-  const [tempExchangeRate, setTempExchangeRate] = useState('89500');
+  const [tempExchangeRate, setTempExchangeRate] = useState(exchangeRate?.toString() || '89500');
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [showDatabaseHealth, setShowDatabaseHealth] = useState(false);
+
+  // Update temp states when context values change
+  useEffect(() => {
+    setTempThreshold(lowStockThreshold?.toString() || '10');
+  }, [lowStockThreshold]);
+
+  useEffect(() => {
+    setTempCommissionRate(defaultCommissionRate?.toString() || '10');
+  }, [defaultCommissionRate]);
+
+  useEffect(() => {
+    setTempCurrency(currency);
+  }, [currency]);
+
+  useEffect(() => {
+    setTempExchangeRate(exchangeRate?.toString() || '89500');
+  }, [exchangeRate]);
 
   // Handle language change with database update
   const handleLanguageChange = async (newLanguage: string) => {
@@ -117,24 +133,20 @@ export default function Settings() {
 
   const handleExchangeRateSave = async () => {
     try {
-      const exchangeRate = parseFloat(tempExchangeRate);
-      if (isNaN(exchangeRate) || exchangeRate <= 0) {
+      const newExchangeRate = parseFloat(tempExchangeRate);
+      if (isNaN(newExchangeRate) || newExchangeRate <= 0) {
         setSaveError('Please enter a valid exchange rate');
         setTimeout(() => setSaveError(null), 3000);
         return;
       }
 
-      // Update the currency service
-      const { currencyService } = await import('../services/currencyService');
-      await currencyService.updateExchangeRate(exchangeRate);
-      
-      console.log('Settings: Exchange rate saved successfully:', exchangeRate);
+      await updateExchangeRate(newExchangeRate);
       setShowSaveMessage(true);
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
     } catch (error) {
       console.error('Settings: Error saving exchange rate:', error);
-      setSaveError('Failed to save exchange rate');
+      setSaveError('Failed to save exchange rate to database');
       setTimeout(() => setSaveError(null), 3000);
     }
   };
@@ -368,14 +380,14 @@ export default function Settings() {
                 <span className="text-gray-600">LBP per USD</span>
                 <button
                   onClick={handleExchangeRateSave}
-                  disabled={tempExchangeRate === '89500'}
+                  disabled={tempExchangeRate === (exchangeRate?.toString() || '89500')}
                   className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
                 >
                   <Save className="w-4 h-4 mr-2" />
                   {t('settings.save')}
                 </button>
               </div>
-              <p className="text-xs text-gray-500 mt-2">Current rate: 1 USD = {tempExchangeRate} LBP</p>
+              <p className="text-xs text-gray-500 mt-2">Current rate: 1 USD = {exchangeRate} LBP</p>
             </div>
           </div>
         </div>

@@ -89,9 +89,9 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
   // Update commission rate when form opens or supplier changes
   useEffect(() => {
     if (receiveForm.type === 'commission' && receiveForm.supplier_id) {
-      // Always use the global default commission rate
+      // Only set default commission rate if it's empty, don't override user input
       const expectedRate = defaultCommissionRate?.toString() || '10';
-      if (receiveForm.commission_rate !== expectedRate) {
+      if (!receiveForm.commission_rate || receiveForm.commission_rate === '') {
         setReceiveForm(prev => ({ ...prev, commission_rate: expectedRate }));
       }
     } else if (receiveForm.type === 'cash') {
@@ -100,7 +100,7 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
         setReceiveForm(prev => ({ ...prev, commission_rate: '' }));
       }
     }
-  }, [receiveForm.supplier_id, receiveForm.type, defaultCommissionRate, receiveForm.commission_rate]);
+  }, [receiveForm.supplier_id, receiveForm.type, defaultCommissionRate]);
 
   // Validation functions
   const validateProductForm = () => {

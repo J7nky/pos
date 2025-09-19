@@ -80,6 +80,8 @@ export default function Accounting() {
   const deleteSale = raw.deleteSale;
   const updateInventoryBatch = raw.updateInventoryBatch;
   const getStore = raw.getStore;
+  const addSupplier = raw.addSupplier;
+  const defaultCommissionRate = raw.defaultCommissionRate;
   const transactions = raw.transactions?.map(t => ({...t, createdAt: t.created_at})) || [];
   const customers = raw.customers?.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) || [];
   const suppliers = raw.suppliers?.map(s => ({...s, createdAt: s.created_at, lb_balance: s.lb_balance, usd_balance: s.usd_balance})) || [];
@@ -87,6 +89,7 @@ export default function Accounting() {
   const inventory = raw.inventory || [];
   const sales = raw.sales || [];
   const products = raw.products || [];
+  const bills = raw.bills || [];
 
   let userProfile;
   try {
@@ -1674,6 +1677,26 @@ export default function Accounting() {
     } catch (error) {
       console.error('Error closing received bill:', error);
       throw new Error('Failed to close bill. Please try again.');
+    }
+  };
+
+  const handleUpdateBatch = async (batchId: string, updates: { porterage?: number | null; transfer_fee?: number | null; notes?: string | null }) => {
+    try {
+      // Update batch information
+      await updateInventoryBatch(batchId, updates);
+      showToast('Batch updated successfully', 'success');
+    } catch (error) {
+      showToast('Error updating batch', 'error');
+    }
+  };
+
+  const handleApplyBatchCommission = async (batchId: string, commissionRate: number) => {
+    try {
+      // Apply commission rate to batch
+      await updateInventoryBatch(batchId, { commission_rate: commissionRate });
+      showToast('Commission rate applied successfully', 'success');
+    } catch (error) {
+      showToast('Error applying commission rate', 'error');
     }
   };
 
@@ -3266,6 +3289,7 @@ export default function Accounting() {
       {activeTab === 'received-bills' && (
         <ReceivedBills
           inventory={inventory}
+          bills={bills}
           products={products}
           suppliers={suppliers}
           sales={sales}
@@ -3275,6 +3299,12 @@ export default function Accounting() {
           onEditSale={handleEditSale}
           onDeleteSale={handleDeleteSale}
           onCloseBill={handleCloseReceivedBill}
+          onUpdateBatch={handleUpdateBatch}
+          onApplyBatchCommission={handleApplyBatchCommission}
+          defaultCommissionRate={defaultCommissionRate}
+          recentSuppliers={recentSuppliers}
+          setRecentSuppliers={setRecentSuppliers}
+          addSupplier={addSupplier}
         />
       )}
 
@@ -3933,7 +3963,7 @@ export default function Accounting() {
                       <p className="text-sm text-gray-900">{formatCurrency(selectedReceivedBill.transferFee || 0)}</p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Commission Rate</label>
+                      <label className="block text-sm font-medium text-gray-700">Commission Rat</label>
                       <p className="text-sm text-gray-900">{selectedReceivedBill.commissionRate ? `${selectedReceivedBill.commissionRate}%` : 'N/A'}</p>
                     </div>
                     <div>

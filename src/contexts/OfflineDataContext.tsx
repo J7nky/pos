@@ -45,6 +45,7 @@ interface OfflineDataContextType {
   lowStockThreshold: number;
   defaultCommissionRate: number;
   currency: 'USD' | 'LBP';
+  exchangeRate: number;
   cashDrawer: any;
   openCashDrawer: (amount: number, openedBy: string) => void;
   closeCashDrawer: (actualAmount: number, closedBy: string, notes?: string) => void;
@@ -127,6 +128,7 @@ interface OfflineDataContextType {
   updateLowStockThreshold: (threshold: number) => void;
   updateDefaultCommissionRate: (rate: number) => Promise<void>;
   updateCurrency: (newCurrency: 'USD' | 'LBP') => Promise<void>;
+  updateExchangeRate: (rate: number) => Promise<void>;
 
   // Additional offline-specific features
   sync: (isAutomatic?: boolean) => Promise<SyncResult>;
@@ -209,7 +211,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useLocalStorage<boolean>('lowStockAlertsEnabled', true);
   const [lowStockThreshold, setLowStockThreshold] = useLocalStorage<number>('lowStockThreshold', 10);
   const [defaultCommissionRate, setDefaultCommissionRate] = useLocalStorage<number>('defaultCommissionRate', 10);
-  const [currency, setCurrency] = useLocalStorage<'USD' | 'LBP'>('currency', 'USD');
+  const [currency, setCurrency] = useLocalStorage<'USD' | 'LBP'>('currency', 'LBP');
+  const [exchangeRate, setExchangeRate] = useLocalStorage<number>('exchangeRate', 89500);
   const [cashDrawer, setCashDrawer] = useState<any>(() => {
     const stored = localStorage.getItem('erp_cash_drawer');
     return stored ? JSON.parse(stored) : null;
@@ -236,12 +239,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         if (existingStore.low_stock_alert !== undefined) {
           setLowStockAlertsEnabled(existingStore.low_stock_alert);
         }
+        if (existingStore.exchange_rate !== undefined) {
+          setExchangeRate(existingStore.exchange_rate);
+        }
       } else {
         // Store not found locally - will be synced when connection is available
         console.log('📴 Store data not found locally - will sync when online');
         // Use default values for now
-        setCurrency('USD');
+        setCurrency('LBP');
         setDefaultCommissionRate(10);
+        setExchangeRate(89500);
       }
     } catch (error) {
       console.error('❌ Error loading store data:', error);
@@ -2444,6 +2451,45 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateExchangeRate = async (rate: number) => {
+    if (!storeId) {
+      console.warn('No store ID available for exchange rate update');
+      return;
+    }
+
+    try {
+      // Update local state immediately
+      setExchangeRate(rate);
+      
+      // Update IndexedDB
+      await db.stores
+        .where('id')
+        .equals(storeId)
+        .modify({ 
+          exchange_rate: rate,
+          _synced: false,
+          updated_at: new Date().toISOString()
+        });
+
+      console.log('✅ Exchange rate updated locally:', rate);
+      
+      // Update unsynced count immediately
+      await updateUnsyncedCount();
+      
+      // Trigger immediate sync for settings changes
+      if (isOnline && !isSyncing) {
+        console.log('🔄 Triggering immediate sync for exchange rate change');
+        performSync(true);
+      } else {
+        debouncedSync();
+      }
+    } catch (error) {
+      console.error('❌ Error updating exchange rate:', error);
+      // Revert local state on error
+      setExchangeRate(exchangeRate);
+    }
+  };
+
 
 
   const deductInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
@@ -2573,7 +2619,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         lowStockAlertsEnabled: false,
         lowStockThreshold: 10,
         defaultCommissionRate: 10,
-        currency: 'USD',
+        currency: 'LBP',
+        exchangeRate: 89500,
         cashDrawer: null,
         openCashDrawer: async () => {},
         closeCashDrawer: async () => {},
@@ -2629,6 +2676,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateLowStockThreshold: () => {},
         updateDefaultCommissionRate: async () => {},
         updateCurrency: async () => {},
+        updateExchangeRate: async () => {},
         sync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
         fullResync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
         debouncedSync: () => {},
@@ -2668,6 +2716,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       lowStockThreshold,
       defaultCommissionRate,
       currency,
+      exchangeRate,
       cashDrawer,
       closeCashDrawer,
       getCashDrawerBalanceReport,
@@ -2722,6 +2771,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateLowStockThreshold,
       updateDefaultCommissionRate,
       updateCurrency,
+      updateExchangeRate,
 
       // Additional offline-specific features
       sync: performSync,
