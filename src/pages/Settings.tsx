@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
-// Removed useSupabaseData - using useOfflineData only
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { 
@@ -16,18 +15,13 @@ import {
   Smartphone,
   Calculator,
   DollarSign,
-  Wrench
 } from 'lucide-react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
 
 export default function Settings() {
   const { userProfile } = useSupabaseAuth();
   
   // Use offline context for all settings (offline-first approach)
-  console.log('Settings: About to call useOfflineData...');
-  const offlineData = useOfflineData();
-  console.log('Settings: offlineData received:', offlineData);
-  
+  const offlineData = useOfflineData();  
   // Get all settings from offline context
   const defaultCommissionRate = offlineData?.defaultCommissionRate ?? 10;
   const currency = offlineData?.currency ?? 'USD';
@@ -48,7 +42,6 @@ export default function Settings() {
   const [tempExchangeRate, setTempExchangeRate] = useState('89500');
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [showDatabaseHealth, setShowDatabaseHealth] = useState(false);
 
   // Handle language change with database update
   const handleLanguageChange = async (newLanguage: string) => {
@@ -56,7 +49,6 @@ export default function Settings() {
     if (userProfile?.store_id) {
       try {
         // Note: Language preference will be synced to store settings via background sync
-        console.log('Language changed to:', newLanguage);
         setShowSaveMessage(true);
         setSaveError(null);
         setTimeout(() => setShowSaveMessage(false), 2000);
@@ -82,10 +74,7 @@ export default function Settings() {
     const newRate = parseFloat(tempCommissionRate);
     if (newRate >= 0 && newRate <= 100) {
       try {
-        console.log('Settings: Saving commission rate:', newRate);
-        console.log('Settings: updateDefaultCommissionRate function:', updateDefaultCommissionRate);
         await updateDefaultCommissionRate(newRate);
-        console.log('Settings: Commission rate saved successfully');
         setShowSaveMessage(true);
         setSaveError(null);
         setTimeout(() => setShowSaveMessage(false), 2000);
@@ -99,10 +88,7 @@ export default function Settings() {
 
   const handleCurrencySave = async () => {
     try {
-      console.log('Settings: Saving currency:', tempCurrency);
-      console.log('Settings: updateCurrency function:', updateCurrency);
       await updateCurrency(tempCurrency);
-      console.log('Settings: Currency saved successfully');
       setShowSaveMessage(true);
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
@@ -128,7 +114,6 @@ export default function Settings() {
       const { currencyService } = await import('../services/currencyService');
       await currencyService.updateExchangeRate(exchangeRate);
       
-      console.log('Settings: Exchange rate saved successfully:', exchangeRate);
       setShowSaveMessage(true);
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
@@ -442,10 +427,7 @@ export default function Settings() {
             </select>
           </div>
         </div>
-
-   
       </div>
-
     </div>
   );
 }

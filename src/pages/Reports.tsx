@@ -1,21 +1,20 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { 
   BarChart3, 
   TrendingUp, 
   DollarSign, 
-  Calendar,
   Download,
   Users,
   Package
 } from 'lucide-react';
+import SalesOverviewCard from '../components/cards/SalesOverviewCard';
 
 export default function Reports() {
   const raw = useOfflineData();
   // Map all arrays to camelCase for compatibility
   const products = raw.products.map(p => ({...p, createdAt: p.created_at})) as Array<{id: string, name: string, createdAt: string}>;
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<{id: string, name: string, isActive: boolean, createdAt: string, lb_balance: number, usd_balance: number, phone: string, email?: string, address?: string}>;
-  const suppliers = raw.suppliers.map(s => ({...s,  createdAt: s.created_at, type: s.type || 'commission'})) as Array<{id: string, name: string, createdAt: string, type: string}>;
   const sales = raw.sales.map(s => ({...s, createdAt: s.created_at})) as Array<any>;
   const stockLevels = raw.stockLevels as Array<any>;
   const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
@@ -135,47 +134,31 @@ export default function Reports() {
         <div className="space-y-6">
           {/* Sales Overview */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Revenue</p>
-                  <p className="text-2xl font-bold text-gray-900">${totalRevenue.toLocaleString()}</p>
-                </div>
-                <DollarSign className="w-8 h-8 text-green-500" />
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Sales</p>
-                  <p className="text-2xl font-bold text-gray-900">{totalSales}</p>
-                </div>
-                <BarChart3 className="w-8 h-8 text-blue-500" />
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Average Sale</p>
-                  <p className="text-2xl font-bold text-gray-900">${averageSale.toFixed(2)}</p>
-                </div>
-                <TrendingUp className="w-8 h-8 text-purple-500" />
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Customer Debt</p>
-                  <p className="text-2xl font-bold text-gray-900">${customerDebtSummary.totalDebt.toLocaleString()}</p>
-                </div>
-                <Users className="w-8 h-8 text-amber-500" />
-              </div>
-            </div>
+            <SalesOverviewCard
+              title="Total Revenue"
+              value={`$${totalRevenue.toLocaleString()}`}
+              icon={<DollarSign className="w-8 h-8" />}
+              iconColor="text-green-500"
+            />
+            <SalesOverviewCard
+              title="Total Sales"
+              value={totalSales}
+              icon={<BarChart3 className="w-8 h-8" />}
+              iconColor="text-blue-500"
+            />
+            <SalesOverviewCard
+              title="Average Sale"
+              value={`$${averageSale.toFixed(2)}`}
+              icon={<TrendingUp className="w-8 h-8" />}
+              iconColor="text-purple-500"
+            />
+            <SalesOverviewCard
+              title="Customer Debt"
+              value={`$${customerDebtSummary.totalDebt.toLocaleString()}`}
+              icon={<Users className="w-8 h-8" />}
+              iconColor="text-amber-500"
+            />
           </div>
-
           {/* Payment Methods */}
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Sales by Payment Method</h2>

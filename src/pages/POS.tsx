@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { usePOSKeyboard } from '../hooks/usePOSKeyboard';
-import { useFocusManagement } from '../hooks/useFocusManagement';
 import AccessibleModal from '../components/common/AccessibleModal';
 import AccessibleButton from '../components/common/AccessibleButton';
 import { useOfflineData } from '../contexts/OfflineDataContext';
@@ -10,8 +9,6 @@ import SearchableSelect from '../components/common/SearchableSelect';
 import MoneyInput from '../components/common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { 
-  Plus, 
-  Minus, 
   Search, 
   ShoppingCart, 
   CreditCard, 
@@ -20,11 +17,11 @@ import {
   Trash2,
   X,
   PlusCircle,
-  Package
 } from 'lucide-react';
 import { Customer, BillLineItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
+import EnhancedProductCard from '../components/EnhancedProductCard';
 
 
 interface BillTab {
@@ -48,11 +45,10 @@ export default function POS() {
   const completeSaleRef = React.useRef<HTMLButtonElement>(null);
   
   const products = (raw.products || []).map(p => ({...p, createdAt: p.created_at})) as Array<any>;
+  console.log("------- products -------", products);
   const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
-  const stockLevels = (raw.stockLevels || []) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
-  const addSale = raw.addSale;
   const addCustomer = raw.addCustomer;
 
   const { userProfile } = useSupabaseAuth();
@@ -186,22 +182,8 @@ export default function POS() {
   };
 
   const activeTab = activeTabs.find(tab => tab.id === activeTabId);
+  console.log("------- activeTab -------", activeTab);
   if (!activeTab) return null;
-
-  // Get all inventory items for a product-supplier combination
-  const getInventoryItems = (productId: string, supplierId: string) => {
-    return inventory.filter(item => 
-      item.product_id === productId && 
-      item.supplier_id === supplierId && 
-      item.quantity > 0
-    );
-  };
-
-  // Get total available stock for a product-supplier combination
-  const getSupplierStock = (productId: string, supplierId: string) => {
-    const items = getInventoryItems(productId, supplierId);
-    return items.reduce((total, item) => total + item.quantity, 0);
-  };
 
   // Get total available stock for a product across all suppliers (subtract reservations across all tabs)
   const getProductStock = (productId: string) => {
@@ -398,52 +380,8 @@ export default function POS() {
       setCustomerError('Please set a price or select a customer. Walk-in sales cannot include zero-priced items.');
       return;
     }
-    // Check for non-priced items
-    // if (hasNonPriced) {
-    //   if (!activeTab.selectedCustomer) {
-    //     setCustomerError('Customer is required for non-priced items.');
-    //     return;
-    //   }
-    //   setCustomerError(null);
-    //   setIsProcessing(true);
-    //   try {
-    //     // Store each non-priced item for later pricing
-    //     for (const item of activeTab.cart.filter(i => !i.unitPrice || i.unitPrice === 0)) {
-    //       await addNonPricedItem({
-    //         id: uuidv4(),
-    //         customerId: activeTab.selectedCustomer,
-    //         productId: item.productId,
-    //         productName: item.productName,
-    //         supplierId: item.supplierId,
-    //         supplierName: item.supplierName,
-    //         quantity: item.quantity,
-    //         weight: item.weight,
-    //         notes: item.notes,
-    //         inventoryItemId: item.inventoryItemId, // Add the specific inventory item ID
-    //         createdAt: new Date().toISOString(),
-    //         status: 'non-priced',
-    //       });
-    //     }
-    //     // Remove non-priced items from cart and proceed with regular sale if any
-    //     const pricedCart = activeTab.cart.filter(i => i.unitPrice && i.unitPrice > 0);
-    //     if (pricedCart.length > 0) {
-    //       updateActiveTab({ cart: pricedCart });
-    //       showToast('success', 'Non-priced items stored. Please complete sale for priced items.');
-    //     } else {
-    //       // All items were non-priced, clear cart
-    //       updateActiveTab({ cart: [], selectedCustomer: '', amountReceived: '', notes: '', paymentMethod: 'cash' });
-    //       showToast('success', 'Non-priced items stored for later pricing.');
-    //     }
-    //   } catch (error) {
-    //     showToast('error', 'Failed to store non-priced items!');
-    //   }
-    //   setIsProcessing(false);
-    //   return;
-    // }
-  
   
     // Validation: if credit, require customer; if not credit and amountReceived < total, require customer
-    console.log(activeTab.paymentMethod, activeTab.amountReceived, total);
     if (
       (activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||  
       (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived) < total && !activeTab.selectedCustomer)
@@ -455,12 +393,8 @@ export default function POS() {
     setIsProcessing(true);
     try {
       // Auto open cash drawer if not open
-      const currentCashDrawerStatus = await raw.getCurrentCashDrawerStatus();
-      console.log(currentCashDrawerStatus,'currentCashDrawerStatus')
-      console.log('Current cash drawer status:', currentCashDrawerStatus);
-      
+      const currentCashDrawerStatus = await raw.getCurrentCashDrawerStatus();      
       if (!currentCashDrawerStatus || currentCashDrawerStatus.status !== 'active') {
-        console.log('Auto opening cash drawer - no active session found');
         let openingAmount = 0;
         if (activeTab.paymentMethod === 'cash') {
           openingAmount = parseFloat(activeTab.amountReceived) || total;
@@ -478,52 +412,7 @@ export default function POS() {
       } else {
         console.log('Active cash drawer session found:', currentCashDrawerStatus.sessionId);
       }
-
-      // Create comprehensive bill record for accounting integration
-      const billData = {
-        store_id: raw.storeId,
-        bill_number: `BILL-${Date.now()}`,
-        customer_id: activeTab.selectedCustomer || null,
-        subtotal: total,
-        total_amount: total,
-        payment_method: activeTab.paymentMethod,
-        payment_status: activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived || '0') < total ? 'partial' : 'paid',
-        amount_paid: parseFloat(activeTab.amountReceived || '0'),
-        amount_due: Math.max(0, total - parseFloat(activeTab.amountReceived || '0')),
-        bill_date: new Date().toISOString(),
-        notes: activeTab.notes || null,
-        created_by: userProfile?.id || ''
-        ,_synced:false
-      };
-
-      // Create bill line items data
-      const lineItemsData = activeTab.cart.map((item, i) => {
-        const supplier = suppliers.find(s => s.id === item.supplierId);
-        const product = products.find(p => p.id === item.productId);
-        
-        return {
-          created_at: new Date().toISOString(),
-          created_by: userProfile?.id || '',
-          store_id: raw.storeId,
-          product_id: item.productId,
-          product_name: product?.name || 'Unknown Product',
-          supplier_id: item.supplierId,
-          supplier_name: supplier?.name || 'Unknown Supplier',
-          inventory_item_id: item.inventoryItemId || null,
-          quantity: item.quantity,
-          unit_price: item.unitPrice || 0,
-          line_total: item.lineTotal || 0,
-          weight: item.weight || null,
-          notes: item.notes || null,
-          line_order: i + 1,
-          payment_method: activeTab.paymentMethod,
-          customer_id: activeTab.selectedCustomer || null,
-          received_value: item.receivedValue || 0
-        };
-      });
-      // Use offline-first bill creation from OfflineDataContext
-      const createdBillId = await raw.createBill(billData, lineItemsData);
-    
+ 
       // Update customer balance if credit sale or partial payment
       if (activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived) < total) {
         const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
@@ -535,16 +424,8 @@ export default function POS() {
           });
         }
       }
-
-      // The sale is now handled entirely through the bill creation above
-      // No need for separate sale_items creation since bill_line_items now contains all sale data
-      // Inventory deductions and cash drawer updates are handled in the createBill function
-      
-      await raw.refreshData(); // Ensure UI is in sync with backend
-      
-      // Trigger immediate sync after sale completion for critical data
+      await raw.refreshData();
       raw.debouncedSync?.();
-      
       if (activeTabs.length > 1) {
         closeTab(activeTabId);
       } else {
@@ -827,7 +708,6 @@ export default function POS() {
             formatCurrency={formatCurrency} 
             inventory={inventory}
             products={products}
-            
           />
 
           {/* Totals and Payment */}
@@ -1023,7 +903,6 @@ export default function POS() {
 }
 
 const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryItems, addToCart }: any) => {
-  const { t } = useI18n();
   const { formatCurrency } = useCurrency();
   const [showSalePrice, setShowSalePrice] = useState<{ [key: string]: boolean }>({});
 
@@ -1086,117 +965,21 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
 
       {/* Enhanced Product Grid */}
       <div className="p-3">
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3">
-          {(filteredProducts || []).map((product: any) => {
-            const stock = getProductStock(product.id);
-            const productInventoryItems = getProductInventoryItems(product.id) || [];
-
-            return (
-              <div key={product.id} className="group border border-gray-200 rounded-xl p-3 hover:shadow-lg hover:border-blue-300 transition-all duration-200 bg-white">
-                {/* Product Image */}
-                <div className="relative mb-3">
-                  <img 
-                    src={product.image} 
-                    alt={product.name} 
-                    className="w-full h-20 object-cover rounded-lg group-hover:scale-105 transition-transform duration-200" 
-                  />
-                
-                </div>
-
-                {/* Product Info */}
-                <div className="space-y-2 mb-3">
-                  <h3 className="font-semibold text-gray-900 text-xs leading-tight group-hover:text-blue-600 transition-colors duration-200">
-                    {product.name}
-                  </h3>
-                  <div className="flex items-center justify-between">
-                  
-                    {product.category && (
-                      <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                        {product.category}
-                      </span>
-                    )}
-
-
-                    
-                  </div>
-                </div>
-
-                {/* Inventory Items */}
-                {productInventoryItems.length > 0 ? (
-                  <div className="space-y-2">
-                    {productInventoryItems.map((inventoryItem: any, index: number) => (
-                      <AccessibleButton
-                        key={inventoryItem.inventoryItemId}
-                        onClick={() => addToCart(product.id, inventoryItem.inventoryItemId)}
-                        onMouseDown={(e) => handleLongPress(e, inventoryItem.inventoryItemId, inventoryItem.sellingPrice)}
-                        onTouchStart={(e) => handleTouchStart(e, inventoryItem.inventoryItemId, inventoryItem.sellingPrice)}
-                        variant="ghost"
-                        size="sm"
-                        touchOptimized
-                        disabled={inventoryItem.quantity === 0}
-                        className={`w-full p-2 rounded-lg border transition-all duration-200 text-left relative ${
-                          inventoryItem.quantity === 0
-                            ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
-                            : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 hover:shadow-md'
-                        }`}
-                        ariaLabel={`Add ${product.name} from ${inventoryItem.supplierName}`}
-                        tabIndex={100 + index}
-                      >
-                        <div className="space-y-1">
-                          <div className="font-medium text-xs">{inventoryItem.supplierName}</div>
-                          <div className="flex items-center justify-between text-[10px]">
-                            <span className={`px-1.5 py-0.5 rounded-full ${
-                              inventoryItem.quantity === 0 
-                                ? 'bg-red-100 text-red-700' 
-                                : 'bg-green-100 text-green-700'
-                            }`}>
-                              {inventoryItem.quantity} available
-                            </span>
-                            <div className="flex items-center space-x-1">
-                              {inventoryItem.sellingPrice && inventoryItem.sellingPrice > 0 && (
-                                <span className="text-[8px] text-yellow-600 bg-yellow-100 px-1 py-0.5 rounded-full">
-                                  Price
-                                </span>
-                              )}
-                            
-                            </div>
-                          </div>
-                          <div className="text-[10px] text-gray-500">
-                            Received: {inventoryItem.receivedQuantity}
-                          </div>
-                          
-                          {/* Sale Price Tooltip */}
-                          {showSalePrice[inventoryItem.inventoryItemId] && inventoryItem.sellingPrice && inventoryItem.sellingPrice > 0 && (
-                            <div 
-                              className="absolute top-0 left-0 right-0 bg-yellow-100 border border-yellow-300 rounded-lg p-2 shadow-lg z-10 cursor-pointer"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                hideSalePrice(inventoryItem.inventoryItemId);
-                              }}
-                            >
-                              <div className="text-xs font-semibold text-yellow-800 text-center">
-                                Sale Price: {formatCurrency(inventoryItem.sellingPrice)}
-                              </div>
-                              <div className="text-[10px] text-yellow-600 text-center mt-1">
-                                Click to hide
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </AccessibleButton>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2">
-                      <Package className="w-6 h-6 text-gray-400" />
-                    </div>
-                    <p className="text-[10px] text-gray-500">Out of Stock</p>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-3">
+          {(filteredProducts || []).map((product: any) => (
+            <EnhancedProductCard
+              key={product.id}
+              product={product}
+              inventoryItems={getProductInventoryItems(product.id) || []}
+              stock={getProductStock(product.id)}
+              showSalePrice={showSalePrice}
+              addToCart={addToCart}
+              handleLongPress={handleLongPress}
+              handleTouchStart={handleTouchStart}
+              hideSalePrice={hideSalePrice}
+              formatCurrency={formatCurrency}
+            />
+          ))}
         </div>
       </div>
     </div>
@@ -1232,9 +1015,12 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
       {(activeTab?.cart || []).length > 0 ? (
         <div className="divide-y divide-gray-100">
           {(activeTab?.cart || []).map((item: any, index: number)  => {
+            console.log("------- cart item -------", item);
+            console.log("------- activetab -------",activeTab)
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
             const product = products.find((p: any) => p.id === item.productId);
+            console.log("------- product -------", product);
             return (
               <div key={item.id} className="p-4 hover:bg-gray-50 transition-colors duration-150">
                 {/* Product Header */}
@@ -1265,7 +1051,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                 </div>
 
                 {/* Enhanced Input Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   {/* Quantity */}
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Quantity</label>
@@ -1341,19 +1127,18 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Total</label>
                     <div
-                      className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 rounded-lg border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       tabIndex={200 + index * 4 + 4}
+                      style={{ padding: '8px'}}
                       role="status"
-                        aria-label={`Total for ${product.name} is ${formatCurrency(item.totalPrice)}`}
+                        aria-label={`Total for ${product.name} is ${formatCurrency(item.lineTotal)}`}
                     >
-                      <div className="text-lg font-bold text-blue-700 text-center" aria-hidden="true">
-                        {formatCurrency(item.totalPrice)}
+                      <div className="text-lg font-bold text-blue-700 text-center" aria-hidden="true" style={{ height: '26.4px' }}>
+                        {formatCurrency(item.lineTotal)}
                       </div>
                     </div>
                   </div>
                 </div>
-
-        
               </div>
             );
           })}

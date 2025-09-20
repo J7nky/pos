@@ -5,9 +5,6 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useInventoryForms } from '../hooks/useInventoryForms';
 import { useInventoryModals } from '../hooks/useInventoryModals';
 import { Plus, Search, Package, Truck } from 'lucide-react';
-// Removed SupabaseService import - using offline-first context methods only
-
-// Import components
 import ReceiveFormModal from '../components/inventory/ReceiveFormModal';
 import AddProductModal from '../components/inventory/AddProductModal';
 import EditProductModal from '../components/inventory/EditProductModal';
@@ -16,8 +13,6 @@ import EditInventoryModal from '../components/inventory/EditInventoryModal';
 import DeleteInventoryConfirm from '../components/inventory/DeleteInventoryConfirm';
 import RecentReceivesTable from '../components/inventory/RecentReceivesTable';
 import ProductTable from '../components/inventory/ProductTable';
-
-// Import types
 import { Product, Supplier, InventoryItem } from '../types/inventory';
 
 
