@@ -787,9 +787,9 @@ export default function POS() {
         <div className={`fixed top-4 right-4 px-4 py-2 rounded shadow-lg z-50 text-white ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.message}</div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
         {/* Product Selection */}
-        <div className="lg:col-span-3 space-y-6">
+        <div className="lg:col-span-5 space-y-6">
           {/* Search */}
           <div className="bg-white p-4 rounded-lg shadow-sm">
             <div className="relative">
@@ -818,7 +818,7 @@ export default function POS() {
         </div>
 
         {/* Cart and Checkout */}
-        <div className="space-y-6">
+        <div className="lg:col-span-2 space-y-6">
           {/* Cart */}
           <Cart
             activeTab={activeTab} 
@@ -1202,33 +1202,36 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
     </div>
   );
 };
-const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, products }: any) => (
-  <div className="bg-white rounded-lg shadow-sm relative">
+const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, products }: any) => {
+  const total = activeTab.cart.reduce((sum: number, item: any) => sum + (item.lineTotal ?? 0), 0);
+  
+  return (
+    <div className="bg-white rounded-lg shadow-sm relative">
     {/* Enhanced Cart Header */}
     {/* <div className="p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center">
-          <div className="bg-blue-100 p-2 rounded-lg mr-3">
-            <ShoppingCart className="w-6 h-6 text-blue-600" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <div className="bg-blue-100 p-2 rounded-lg mr-3">
+              <ShoppingCart className="w-6 h-6 text-blue-600" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Shopping Cart</h2>
+              <p className="text-sm text-gray-600">
+                {(activeTab?.cart || []).length} item{(activeTab?.cart || []).length !== 1 ? 's' : ''} • Total: {formatCurrency(total)}
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Shopping Cart</h2>
-            <p className="text-sm text-gray-600">
-              {(activeTab?.cart || []).length} item{(activeTab?.cart || []).length !== 1 ? 's' : ''} • Total: {formatCurrency(total)}
-            </p>
-          </div>
+          {(activeTab?.cart || []).length > 0 && (
+            <div className="text-right">
+              <div className="text-2xl font-bold text-blue-600">{formatCurrency(total)}</div>
+              <div className="text-xs text-gray-500">Total Amount</div>
+            </div>
+          )}
         </div>
-        {(activeTab?.cart || []).length > 0 && (
-          <div className="text-right">
-            <div className="text-2xl font-bold text-blue-600">{formatCurrency(total)}</div>
-            <div className="text-xs text-gray-500">Total Amount</div>
-          </div>
-        )}
       </div>
-    </div> */}
 
     {/* Enhanced Cart Items */}
-    <div className="max-h-96 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto min-h-0">
       {(activeTab?.cart || []).length > 0 ? (
         <div className="divide-y divide-gray-100">
           {(activeTab?.cart || []).map((item: any, index: number)  => {
@@ -1265,7 +1268,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                 </div>
 
                 {/* Enhanced Input Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-[1fr_2fr_3fr_3fr] gap-3">
                   {/* Quantity */}
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Quantity</label>
@@ -1359,14 +1362,16 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
           })}
         </div>
       ) : (
-        <div className="p-12 text-center text-gray-500">
-          <div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
-            <ShoppingCart className="w-10 h-10 text-gray-400" />
+        <div className="flex-1 flex items-center justify-center p-12 text-center text-gray-500">
+          <div>
+            <div className="bg-gray-100 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6">
+              <ShoppingCart className="w-12 h-12 text-gray-400" />
+            </div>
+            <h3 className="text-xl font-medium text-gray-900 mb-3">Your cart is empty</h3>
+            <p className="text-gray-600 text-lg">Start adding products to begin your sale</p>
           </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
-          <p className="text-gray-600">Start adding products to begin your sale</p>
         </div>
       )}
     </div>
   </div>
-);
+);}
