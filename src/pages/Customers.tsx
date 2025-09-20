@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { Plus, Search, Edit, Trash2, CheckCircle, XCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText } from 'lucide-react';
+import { Plus, Search, Edit, CheckCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText } from 'lucide-react';
 import { Customer, Supplier } from '../types';
 import Toast from '../components/common/Toast';
 import SearchableSelect from '../components/common/SearchableSelect';

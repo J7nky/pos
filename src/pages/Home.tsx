@@ -1,20 +1,14 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-// Removed cashDrawerUpdateService and db imports - using local data only
-import { useCurrency } from '../hooks/useCurrency';
 import { useI18n } from '../i18n';
 import { 
   DollarSign, 
   Package, 
-  Users, 
-  TrendingUp, 
   AlertTriangle,
-  Clock,
   ShoppingCart,
-  Plus,
   Receipt,
   Eye,
   Truck,
@@ -23,48 +17,28 @@ import {
   ChevronUp,
   ChevronDown,
   EyeOff,
-  TrendingDown
 } from 'lucide-react';
 import CashDrawerMonitor from '../components/CashDrawerMonitor';
 import FastActionCard from '../components/cards/FastActionCard';
 import StatCard from '../components/cards/StatCard';
 import LowStockItem from '../components/LowStockItem';
+
 interface CashDrawerStatus {
   currentBalance: number;
   lastUpdated: string;
   transactionCount: number;
   openedAt:string
 }
-const getTransactionIcon = (type: string) => {
-  if (type.includes('sale') || type.includes('payment')) {
-    return <TrendingUp className="w-4 h-4 text-green-600" />;
-  } else if (type.includes('expense') || type.includes('refund')) {
-    return <TrendingDown className="w-4 h-4 text-red-600" />;
-  }
-  return <Clock className="w-4 h-4 text-gray-600" />;
-};
-
-const getTransactionColor = (type: string) => {
-  if (type.includes('sale') || type.includes('payment')) {
-    return 'text-green-600';
-  } else if (type.includes('expense') || type.includes('refund')) {
-    return 'text-red-600';
-  }
-  return 'text-gray-600';
-};
-// Using local currency from context - no caching needed
 
 export default function Home() {
   const navigate = useNavigate();
   const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
-  const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
   const [storePreferredCurrency, setStorePreferredCurrency] = useState<'USD' | 'LBP'>('USD');
   const [isLoadingCashDrawer, setIsLoadingCashDrawer] = useState(false);
 
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) : [];
-  // const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at})) : [];
   const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({...s, createdAt: s.createdAt})) : [];
   const stockLevels = Array.isArray(raw.stockLevels) ? raw.stockLevels : [];
   const cashDrawer = raw.cashDrawer;
@@ -73,7 +47,6 @@ export default function Home() {
   const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
   const lowStockThreshold = raw.lowStockThreshold;
   const { userProfile } = useSupabaseAuth();
-  const { formatCurrency, getConvertedAmount } = useCurrency();
   const [showFastActions, setShowFastActions] = useState(true);
   const { t } = useI18n();
   const inventory = Array.isArray(raw.inventory) ? raw.inventory : [];
@@ -85,13 +58,9 @@ export default function Home() {
   const todaySales = sales.filter(sale => 
     sale.createdAt && sale.createdAt.split('T')[0] 
   );
-  const todayRevenue = todaySales.reduce((sum, sale) => sum + (sale.receivedValue || 0), 0);
   const todayExpenses = transactions.filter(t => 
     t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today
-  ).reduce((sum, t) => {
-    const convertedAmount = getConvertedAmount(t.amount, t.currency || 'USD');
-    return sum + convertedAmount;
-  }, 0);
+  )
 
   // Helper function to get local cash drawer session from context
   const getLocalCurrentSession = () => {
@@ -101,36 +70,9 @@ export default function Home() {
   // Helper function to calculate cash drawer balance from local transactions
   const calculateLocalCashDrawerBalance = (currentSession: any): number => {
     if (!currentSession) {
-      console.log('💰 No active session found, balance is 0');
       return 0;
     }
-
-    // Start with the current session's opening amount or current balance
     let totalBalance = currentSession.opening_amount || currentSession.currentBalance || 0;
-    console.log(`💰 Starting balance from current session: ${totalBalance}`);
-
-    // Get all cash drawer transactions from local data for this specific session
-    const cashTransactions = transactions.filter(trans =>
-      trans.store_id === raw.storeId &&
-      trans.category?.startsWith('cash_drawer_') &&
-      (!currentSession.id || trans.reference?.includes(`_SESSION_${currentSession.id}`) ||
-       new Date(trans.created_at) >= new Date(currentSession.opened_at || currentSession.lastUpdated))
-    );
-
-    console.log(`💰 Found ${cashTransactions.length} cash drawer transactions since session start`);
-
-    // Add all income transactions and subtract all expense transactions
-    // for (const trans of cashTransactions) {
-    //   if (trans.type === 'income') {
-    //     totalBalance += trans.amount;
-    //     console.log(`💰 Added income: ${trans.amount}, new balance: ${totalBalance}`);
-    //   } else if (trans.type === 'expense') {
-    //     totalBalance -= trans.amount;
-    //     console.log(`💰 Subtracted expense: ${trans.amount}, new balance: ${totalBalance}`);
-    //   }
-    // }
-
-    console.log(`💰 Final calculated balance: ${totalBalance}`);
     return totalBalance;
   };
 
@@ -143,38 +85,26 @@ export default function Home() {
       )
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, limit);
-
-    console.log(`💰 Found ${cashDrawerTransactions.length} local cash drawer transactions`);
     return cashDrawerTransactions;
   };
 
   const loadCashDrawerStatus = async () => {
     if (!raw.storeId) return;
-
     setIsLoadingCashDrawer(true);
     try {
       // Use ONLY local data - completely offline-capable
       const currentSession = getLocalCurrentSession();
       const localBalance = calculateLocalCashDrawerBalance(currentSession);
       const localHistory = getLocalCashDrawerHistory();
-
       // Use local currency from context (stored in localStorage)
       const localCurrency = raw.currency || 'USD';
       setStorePreferredCurrency(localCurrency);
-
-      console.log('🔍 loadCashDrawerStatus - currentSession:', currentSession);
-      console.log('🔍 loadCashDrawerStatus - localBalance:', localBalance);
-      console.log('🔍 loadCashDrawerStatus - localHistory count:', localHistory.length);
-      console.log('🔍 loadCashDrawerStatus - localCurrency:', localCurrency);
-
       setCashDrawerStatus({
         currentBalance: localBalance,
         lastUpdated: new Date().toISOString(),
         transactionCount: localHistory.length,
         openedAt: currentSession?.opened_at || currentSession?.lastUpdated || ''
       });
-
-      setTransactionHistory(localHistory);
     } catch (error) {
       console.error('Error loading cash drawer status:', error);
     } finally {
@@ -195,11 +125,6 @@ export default function Home() {
       return `${amount.toLocaleString()} ل.ل`;
     }
     return `$${amount.toLocaleString()}`;
-  };
-
-  // Helper function to get currency symbol for store's preferred currency
-  const getStoreCurrencySymbol = (): string => {
-    return storePreferredCurrency === 'LBP' ? 'ل.ل' : '$';
   };
 
   useEffect(() => {
@@ -244,18 +169,11 @@ export default function Home() {
     const openingAmount = prompt('Enter opening cash amount:');
     if (openingAmount && userProfile) {
       try {
-        console.log('🔍 Opening cash drawer with amount:', openingAmount);
-        await openCashDrawer(parseFloat(openingAmount), userProfile.id);
-        console.log('🔍 Cash drawer opened successfully');
-        
+        await openCashDrawer(parseFloat(openingAmount), userProfile.id);        
         // Wait a moment for the database to be updated
         await new Promise(resolve => setTimeout(resolve, 100));
-        
         // Immediately refresh local status
-        console.log('🔍 Refreshing cash drawer status...');
-        await loadCashDrawerStatus();
-        console.log('🔍 Cash drawer status refreshed');
-        
+        await loadCashDrawerStatus();        
         // Notify any listeners
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
@@ -355,11 +273,6 @@ export default function Home() {
     }
   ];
 
-  const recentSales = sales
-    .filter(sale => sale.createdAt)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, 5);
-
   return (
     <div className="p-6">
       <div className="mb-8">
@@ -397,16 +310,12 @@ export default function Home() {
           </button>
         </div>
         
-        <div className={`transition-all duration-300 ease-in-out overflow-hidden ${
-          showFastActions 
-            ? 'max-h-96 opacity-100 mb-8' 
-            : 'max-h-0 opacity-0 mb-0'
-        }`}>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {fastActions.map((action) => (
-              <FastActionCard key={action.id} action={action} />
-            ))}
-          </div>
+        <div className={`transition-all duration-300 ease-in-out ${showFastActions ? "max-h-[999px] opacity-100" : "max-h-0 opacity-0 overflow-hidden"}`}>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {fastActions.map((action) => (
+                <FastActionCard key={action.id} action={action} />
+              ))}
+            </div>
         </div>
       </div>
 

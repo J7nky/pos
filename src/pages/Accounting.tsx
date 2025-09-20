@@ -4,11 +4,8 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from '../components/common/SearchableSelect';
 import MoneyInput from '../components/common/MoneyInput';
-import { cleanupAndValidateSaleItems } from '../utils/cleanupSaleItemsData';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-// Removed SupabaseService import - using offline-first context methods only
 import { 
-  Calculator,
   DollarSign,
   CreditCard,
   Receipt,
@@ -16,7 +13,6 @@ import {
   TrendingDown,
   Plus,
   Search,
-  Calendar,
   FileText,
   AlertCircle,
   CheckCircle,
@@ -24,31 +20,20 @@ import {
   Edit,
   Trash2,
   Download,
-  Upload,
   RefreshCw,
   Filter,
   BarChart3,
-  PieChart,
   Activity,
   Target,
-  Zap,
-  Eye,
-  EyeOff,
-  ChevronRight,
   ArrowUpRight,
   ArrowDownRight,
   TrendingDown as TrendingDownIcon,
   Wallet,
   CreditCard as CreditCardIcon,
-  Building2,
   Users,
   User,
-  ShoppingCart,
-  Award,
   AlertTriangle,
   Package,
-  FileSpreadsheet,
-  ClipboardList,
   Calculator as CalculatorIcon,
   X
 } from 'lucide-react';
@@ -3756,6 +3741,7 @@ export default function Accounting() {
               <form onSubmit={handleExpenseSubmit} className="p-6 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
                     <SearchableSelect
                       options={expenseCategories.filter(c => c.is_active).map(category => ({
                         id: category.id,

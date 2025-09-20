@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
-// Removed useSupabaseData - using useOfflineData only
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { 
@@ -22,10 +21,7 @@ export default function Settings() {
   const { userProfile } = useSupabaseAuth();
   
   // Use offline context for all settings (offline-first approach)
-  console.log('Settings: About to call useOfflineData...');
-  const offlineData = useOfflineData();
-  console.log('Settings: offlineData received:', offlineData);
-  
+  const offlineData = useOfflineData();  
   // Get all settings from offline context
   const defaultCommissionRate = offlineData?.defaultCommissionRate ?? 10;
   const currency = offlineData?.currency ?? 'USD';
@@ -49,30 +45,12 @@ export default function Settings() {
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Update temp states when context values change
-  useEffect(() => {
-    setTempThreshold(lowStockThreshold?.toString() || '10');
-  }, [lowStockThreshold]);
-
-  useEffect(() => {
-    setTempCommissionRate(defaultCommissionRate?.toString() || '10');
-  }, [defaultCommissionRate]);
-
-  useEffect(() => {
-    setTempCurrency(currency);
-  }, [currency]);
-
-  useEffect(() => {
-    setTempExchangeRate(exchangeRate?.toString() || '89500');
-  }, [exchangeRate]);
-
   // Handle language change with database update
   const handleLanguageChange = async (newLanguage: string) => {
     setLanguage(newLanguage);
     if (userProfile?.store_id) {
       try {
         // Note: Language preference will be synced to store settings via background sync
-        console.log('Language changed to:', newLanguage);
         setShowSaveMessage(true);
         setSaveError(null);
         setTimeout(() => setShowSaveMessage(false), 2000);
@@ -98,10 +76,7 @@ export default function Settings() {
     const newRate = parseFloat(tempCommissionRate);
     if (newRate >= 0 && newRate <= 100) {
       try {
-        console.log('Settings: Saving commission rate:', newRate);
-        console.log('Settings: updateDefaultCommissionRate function:', updateDefaultCommissionRate);
         await updateDefaultCommissionRate(newRate);
-        console.log('Settings: Commission rate saved successfully');
         setShowSaveMessage(true);
         setSaveError(null);
         setTimeout(() => setShowSaveMessage(false), 2000);
@@ -115,10 +90,7 @@ export default function Settings() {
 
   const handleCurrencySave = async () => {
     try {
-      console.log('Settings: Saving currency:', tempCurrency);
-      console.log('Settings: updateCurrency function:', updateCurrency);
       await updateCurrency(tempCurrency);
-      console.log('Settings: Currency saved successfully');
       setShowSaveMessage(true);
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
@@ -140,7 +112,10 @@ export default function Settings() {
         return;
       }
 
-      await updateExchangeRate(newExchangeRate);
+      // Update the currency service
+      const { currencyService } = await import('../services/currencyService');
+      await currencyService.updateExchangeRate(exchangeRate);
+      
       setShowSaveMessage(true);
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
@@ -454,10 +429,7 @@ export default function Settings() {
             </select>
           </div>
         </div>
-
-   
       </div>
-
     </div>
   );
 }

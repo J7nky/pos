@@ -107,7 +107,6 @@ export default function CashDrawerMonitor() {
       });
     }
   })();
-
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString();
   };
@@ -200,12 +199,6 @@ export default function CashDrawerMonitor() {
             <p className="text-gray-500 text-center py-4">{t('home.noRecentSales')}</p>
           )}
         </div>
-      
-
- 
-      
-
-
     </div>
   );
 }
