@@ -22,7 +22,7 @@ export default function MoneyInput({
   onChange,
   placeholder = "0.00",
   className = "text-xs text-gray-500",
-  step = "0.01",
+  step = "1000",
   min = "",
   disabled = false,
   label,
@@ -55,7 +55,7 @@ export default function MoneyInput({
 
     if (stringValue && stringValue.trim() !== '' && !hasUsedAutoComplete) {
       const numericValue = parseFloat(stringValue);
-      if (!isNaN(numericValue) && numericValue > 0 && !hasUsedRecommendation) {
+      if (!isNaN(numericValue) && numericValue > 0 && !hasUsedRecommendation &&numericValue<=1000) {
         const recommended = (numericValue * 1000).toString();
         setRecommendedValue(recommended);
         setShowRecommendation(true);

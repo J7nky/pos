@@ -8,7 +8,11 @@ import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from '../components/common/SearchableSelect';
 import MoneyInput from '../components/common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import EnhancedProductCard from '../components/EnhancedProductCard';
+
 import { 
+  Plus, 
+  Minus, 
   Search, 
   ShoppingCart, 
   CreditCard, 
@@ -17,11 +21,11 @@ import {
   Trash2,
   X,
   PlusCircle,
+  Package
 } from 'lucide-react';
 import { Customer, BillLineItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
-import EnhancedProductCard from '../components/EnhancedProductCard';
 
 
 interface BillTab {
@@ -43,12 +47,13 @@ export default function POS() {
   const customerSelectRef = React.useRef<HTMLDivElement>(null);
   const amountInputRef = React.useRef<HTMLInputElement>(null);
   const completeSaleRef = React.useRef<HTMLButtonElement>(null);
-  
+
   const products = (raw.products || []).map(p => ({...p, createdAt: p.created_at})) as Array<any>;
-  console.log("------- products -------", products);
   const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
+  const stockLevels = (raw.stockLevels || []) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
+  const addSale = raw.addSale;
   const addCustomer = raw.addCustomer;
 
   const { userProfile } = useSupabaseAuth();
@@ -182,8 +187,22 @@ export default function POS() {
   };
 
   const activeTab = activeTabs.find(tab => tab.id === activeTabId);
-  console.log("------- activeTab -------", activeTab);
   if (!activeTab) return null;
+
+  // Get all inventory items for a product-supplier combination
+  const getInventoryItems = (productId: string, supplierId: string) => {
+    return inventory.filter(item => 
+      item.product_id === productId && 
+      item.supplier_id === supplierId && 
+      item.quantity > 0
+    );
+  };
+
+  // Get total available stock for a product-supplier combination
+  const getSupplierStock = (productId: string, supplierId: string) => {
+    const items = getInventoryItems(productId, supplierId);
+    return items.reduce((total, item) => total + item.quantity, 0);
+  };
 
   // Get total available stock for a product across all suppliers (subtract reservations across all tabs)
   const getProductStock = (productId: string) => {
@@ -250,7 +269,7 @@ export default function POS() {
 
     // Search by supplier names for this product
     const productInventoryItems = getProductInventoryItems(product.id);
-    const hasMatchingSupplier = productInventoryItems.some(item =>
+    const hasMatchingSupplier = productInventoryItems.some(item => 
       item.supplierName.toLowerCase().includes(searchLower)
     );
 
@@ -277,7 +296,7 @@ export default function POS() {
     const available = Math.max(0, (inventoryItem.quantity || 0) - reserved);
 
     // Check if we already have this specific addToCart item in the cart
-    const existingItem = activeTab.cart.find(item =>
+    const existingItem = activeTab.cart.find(item => 
       item.inventoryItemId === inventoryItemId
     );
 
@@ -306,7 +325,7 @@ export default function POS() {
         supplierId: inventoryItem.supplier_id,
         quantity: 1,
         weight: undefined, // Weight will be entered manually during sale
-        unitPrice: 0.00, // Use price from this specific inventory item
+        unitPrice:0.00, // Use price from this specific inventory item
         paymentMethod: activeTab.paymentMethod, // Set payment method from current tab
         notes: inventoryItem.notes || null,
         inventoryType: inventoryItem.type || 'cash', // Track the inventory type
@@ -380,10 +399,54 @@ export default function POS() {
       setCustomerError('Please set a price or select a customer. Walk-in sales cannot include zero-priced items.');
       return;
     }
-  
+    // Check for non-priced items
+    // if (hasNonPriced) {
+    //   if (!activeTab.selectedCustomer) {
+    //     setCustomerError('Customer is required for non-priced items.');
+    //     return;
+    //   }
+    //   setCustomerError(null);
+    //   setIsProcessing(true);
+    //   try {
+    //     // Store each non-priced item for later pricing
+    //     for (const item of activeTab.cart.filter(i => !i.unitPrice || i.unitPrice === 0)) {
+    //       await addNonPricedItem({
+    //         id: uuidv4(),
+    //         customerId: activeTab.selectedCustomer,
+    //         productId: item.productId,
+    //         productName: item.productName,
+    //         supplierId: item.supplierId,
+    //         supplierName: item.supplierName,
+    //         quantity: item.quantity,
+    //         weight: item.weight,
+    //         notes: item.notes,
+    //         inventoryItemId: item.inventoryItemId, // Add the specific inventory item ID
+    //         createdAt: new Date().toISOString(),
+    //         status: 'non-priced',
+    //       });
+    //     }
+    //     // Remove non-priced items from cart and proceed with regular sale if any
+    //     const pricedCart = activeTab.cart.filter(i => i.unitPrice && i.unitPrice > 0);
+    //     if (pricedCart.length > 0) {
+    //       updateActiveTab({ cart: pricedCart });
+    //       showToast('success', 'Non-priced items stored. Please complete sale for priced items.');
+    //     } else {
+    //       // All items were non-priced, clear cart
+    //       updateActiveTab({ cart: [], selectedCustomer: '', amountReceived: '', notes: '', paymentMethod: 'cash' });
+    //       showToast('success', 'Non-priced items stored for later pricing.');
+    //     }
+    //   } catch (error) {
+    //     showToast('error', 'Failed to store non-priced items!');
+    //   }
+    //   setIsProcessing(false);
+    //   return;
+    // }
+
+
     // Validation: if credit, require customer; if not credit and amountReceived < total, require customer
+    console.log(activeTab.paymentMethod, activeTab.amountReceived, total);
     if (
-      (activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
+      (activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||  
       (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived) < total && !activeTab.selectedCustomer)
     ) {
       setCustomerError('Customer is required for credit sales or when amount received is less than total.');
@@ -393,8 +456,12 @@ export default function POS() {
     setIsProcessing(true);
     try {
       // Auto open cash drawer if not open
-      const currentCashDrawerStatus = await raw.getCurrentCashDrawerStatus();      
+      const currentCashDrawerStatus = await raw.getCurrentCashDrawerStatus();
+      console.log(currentCashDrawerStatus,'currentCashDrawerStatus')
+      console.log('Current cash drawer status:', currentCashDrawerStatus);
+
       if (!currentCashDrawerStatus || currentCashDrawerStatus.status !== 'active') {
+        console.log('Auto opening cash drawer - no active session found');
         let openingAmount = 0;
         if (activeTab.paymentMethod === 'cash') {
           openingAmount = parseFloat(activeTab.amountReceived) || total;
@@ -411,8 +478,9 @@ export default function POS() {
         }
       } else {
         console.log('Active cash drawer session found:', currentCashDrawerStatus.sessionId);
-      }
- 
+      }// Use offline-first bill creation from OfflineDataContext
+      // const createdBillId = await raw.createBill(billData, lineItemsData);
+
       // Update customer balance if credit sale or partial payment
       if (activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived) < total) {
         const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
@@ -424,8 +492,16 @@ export default function POS() {
           });
         }
       }
-      await raw.refreshData();
+
+      // The sale is now handled entirely through the bill creation above
+      // No need for separate sale_items creation since bill_line_items now contains all sale data
+      // Inventory deductions and cash drawer updates are handled in the createBill function
+
+      await raw.refreshData(); // Ensure UI is in sync with backend
+
+      // Trigger immediate sync after sale completion for critical data
       raw.debouncedSync?.();
+
       if (activeTabs.length > 1) {
         closeTab(activeTabId);
       } else {
@@ -509,10 +585,11 @@ export default function POS() {
           {activeTabs.map((tab) => (
             <div
               key={tab.id}
-              className={`flex items-center px-4 py-2 border-t border-l border-r rounded-t-lg cursor-pointer ${tab.id === activeTabId
+              className={`flex items-center px-4 py-2 border-t border-l border-r rounded-t-lg cursor-pointer ${
+                tab.id === activeTabId
                   ? 'bg-white border-gray-300 border-b-white -mb-px'
                   : 'bg-gray-100 border-gray-200 hover:bg-gray-50'
-                }`}
+              }`}
               onClick={() => setActiveTabId(tab.id)}
             >
               <span className="mr-2">{tab.name}</span>
@@ -672,8 +749,6 @@ export default function POS() {
         <div className="lg:col-span-5 space-y-6">
           {/* Search */}
           <div className="bg-white p-4 rounded-lg shadow-sm">
-
-
             <div className="relative">
               <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
@@ -691,11 +766,11 @@ export default function POS() {
           </div>
 
           {/* Products Grid */}
-          <ProductGrid
-            filteredProducts={filteredProducts}
-            getProductStock={getProductStock}
-            getProductInventoryItems={getProductInventoryItems}
-            addToCart={addToCart}
+          <ProductGrid 
+            filteredProducts={filteredProducts} 
+            getProductStock={getProductStock} 
+            getProductInventoryItems={getProductInventoryItems} 
+            addToCart={addToCart} 
           />
         </div>
 
@@ -703,12 +778,13 @@ export default function POS() {
         <div className="lg:col-span-2 space-y-6">
           {/* Cart */}
           <Cart
-            activeTab={activeTab}
-            updateCartItem={updateCartItem}
-            removeFromCart={removeFromCart}
-            formatCurrency={formatCurrency}
+            activeTab={activeTab} 
+            updateCartItem={updateCartItem} 
+            removeFromCart={removeFromCart} 
+            formatCurrency={formatCurrency} 
             inventory={inventory}
             products={products}
+
           />
 
           {/* Totals and Payment */}
@@ -729,15 +805,15 @@ export default function POS() {
                 </label>
                 <div ref={customerSelectRef}>
                   <SearchableSelect
-                    options={
-                      activeTab.paymentMethod === 'credit'
-                        ? customers.filter(c => c.isActive).map(customer => ({
+                  options={
+                    activeTab.paymentMethod === 'credit'
+                      ? customers.filter(c => c.isActive).map(customer => ({
                           id: customer.id,
                           label: customer.name,
                           value: customer.id,
                           category: 'Customer'
                         }))
-                        : [
+                      : [
                           { id: '', label: 'Walk-in Customer', value: '', category: 'Customer' },
                           ...customers.filter(c => c.isActive).map(customer => ({
                             id: customer.id,
@@ -746,22 +822,22 @@ export default function POS() {
                             category: 'Customer'
                           }))
                         ]
-                    }
-                    value={activeTab.selectedCustomer}
-                    onChange={(value) => {
-                      updateActiveTab({ selectedCustomer: value as string });
-                      setCustomerError(null);
-                    }}
-                    searchPlaceholder="Search customers..."
-                    placeholder={activeTab.paymentMethod === 'credit' ? 'Select Customer' : 'Walk-in Customer'}
+                  }
+                  value={activeTab.selectedCustomer}
+                  onChange={(value) => {
+                    updateActiveTab({ selectedCustomer: value as string });
+                    setCustomerError(null);
+                  }}
+                  searchPlaceholder="Search customers..."
+                  placeholder={activeTab.paymentMethod === 'credit' ? 'Select Customer' : 'Walk-in Customer'}
 
-                    recentSelections={recentCustomers}
-                    onRecentUpdate={setRecentCustomers}
-                    showAddOption={true}
-                    addOptionText="Add New Customer"
-                    onAddNew={() => setShowAddCustomerForm(true)}
-                    className={`w-full ${customerError ? 'border border-red-500' : ''}`}
-                    tabIndex={10000}
+                  recentSelections={recentCustomers}
+                  onRecentUpdate={setRecentCustomers}
+                  showAddOption={true}
+                  addOptionText="Add New Customer"
+                  onAddNew={() => setShowAddCustomerForm(true)}
+                  className={`w-full ${customerError ? 'border border-red-500' : ''}`}
+                  tabIndex={10000}
                   />
                 </div>
                 {customerError && (
@@ -777,10 +853,11 @@ export default function POS() {
                   <button
                     type="button"
                     onClick={() => updateActiveTab({ paymentMethod: 'cash' })}
-                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${activeTab.paymentMethod === 'cash'
-                        ? 'bg-blue-50 border-blue-500 text-blue-700'
+                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${
+                      activeTab.paymentMethod === 'cash' 
+                        ? 'bg-blue-50 border-blue-500 text-blue-700' 
                         : 'bg-gray-50 border-gray-300'
-                      }`}
+                    }`}
                     tabIndex={10001}
                     accessKey="1"
                     aria-label="Cash payment (Ctrl+1)"
@@ -791,10 +868,11 @@ export default function POS() {
                   <button
                     type="button"
                     onClick={() => updateActiveTab({ paymentMethod: 'card' })}
-                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${activeTab.paymentMethod === 'card'
-                        ? 'bg-blue-50 border-blue-500 text-blue-700'
+                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${
+                      activeTab.paymentMethod === 'card' 
+                        ? 'bg-blue-50 border-blue-500 text-blue-700' 
                         : 'bg-gray-50 border-gray-300'
-                      }`}
+                    }`}
                     tabIndex={10002}
                     aria-label="Card payment"
                   >
@@ -804,10 +882,11 @@ export default function POS() {
                   <button
                     type="button"
                     onClick={() => updateActiveTab({ paymentMethod: 'credit' })}
-                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${activeTab.paymentMethod === 'credit'
-                        ? 'bg-blue-50 border-blue-500 text-blue-700'
+                    className={`p-3 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] ${
+                      activeTab.paymentMethod === 'credit' 
+                        ? 'bg-blue-50 border-blue-500 text-blue-700' 
                         : 'bg-gray-50 border-gray-300'
-                      }`}
+                    }`}
                     tabIndex={10003}
                     accessKey="2"
                     aria-label="Credit payment (Ctrl+2)"
@@ -827,7 +906,7 @@ export default function POS() {
                       value={activeTab.amountReceived}
                       onChange={(value) => updateActiveTab({ amountReceived: value })}
                       placeholder="0.00"
-                      step="0.01"
+                      step="1000"
                       min="0"
                       autoCompleteValue={total}
                       className="focus:ring-2 focus:ring-blue-500"
@@ -865,32 +944,32 @@ export default function POS() {
                   tabIndex={10005}
                 />
               </div>
-              {/* Fixed Complete Sale Button at Bottom of Cart */}
-              <div className="sticky bottom-0 bg-white p-4 shadow-md">
-                <AccessibleButton
-                  ref={completeSaleRef}
-                  onClick={handleCheckout}
-                  disabled={
-                    isProcessing ||
-                    activeTab.cart.length === 0 ||
-                    // Block walk-in sales when any item has price 0
-                    (isWalkInCustomer && hasZeroPricedItem) ||
-                    (activeTab.paymentMethod !== 'credit' && !activeTab.amountReceived) ||
-                    ((activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
-                      (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived || '0') < total && !activeTab.selectedCustomer))
-                  }
-                  variant="success"
-                  size="lg"
-                  touchOptimized
-                  loading={isProcessing}
-                  shortcut="Ctrl+Enter"
-                  ariaLabel="Complete sale"
-                  tabIndex={10006}
-                  className="w-full"
-                >
-                  Complete Sale
-                </AccessibleButton>
-              </div>
+ {/* Fixed Complete Sale Button at Bottom of Cart */}
+ <div className="sticky bottom-0 bg-white p-4 shadow-md">
+      <AccessibleButton
+        ref={completeSaleRef}
+        onClick={handleCheckout}
+        disabled={  
+          isProcessing ||
+          activeTab.cart.length === 0 ||
+          // Block walk-in sales when any item has price 0
+          (isWalkInCustomer && hasZeroPricedItem) ||
+          (activeTab.paymentMethod !== 'credit' && !activeTab.amountReceived) ||
+          ((activeTab.paymentMethod === 'credit' && !activeTab.selectedCustomer) ||
+          (activeTab.paymentMethod !== 'credit' && parseFloat(activeTab.amountReceived || '0') < total && !activeTab.selectedCustomer))
+        }
+        variant="success"
+        size="lg"
+        touchOptimized
+        loading={isProcessing}
+        shortcut="Ctrl+Enter"
+        ariaLabel="Complete sale"
+        tabIndex={10006}
+        className="w-full"
+      >
+        Complete Sale
+      </AccessibleButton>
+    </div>
               {/* Complete Sale button moved to Cart component */}
             </div>
           )}
@@ -959,25 +1038,28 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-
-
       {/* Enhanced Product Grid */}
       <div className="p-3">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-3">
-          {(filteredProducts || []).map((product: any) => (
-            <EnhancedProductCard
-              key={product.id}
-              product={product}
-              inventoryItems={getProductInventoryItems(product.id) || []}
-              stock={getProductStock(product.id)}
-              showSalePrice={showSalePrice}
-              addToCart={addToCart}
-              handleLongPress={handleLongPress}
-              handleTouchStart={handleTouchStart}
-              hideSalePrice={hideSalePrice}
-              formatCurrency={formatCurrency}
-            />
-          ))}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3">
+          {(filteredProducts || []).map((product: any) => {
+            const stock = getProductStock(product.id);
+            const productInventoryItems = getProductInventoryItems(product.id) || [];
+
+            return (
+              <EnhancedProductCard
+                key={product.id}
+                product={product}
+                inventoryItems={productInventoryItems}
+                stock={stock}
+                showSalePrice={showSalePrice}
+                addToCart={addToCart}
+                handleLongPress={handleLongPress}
+                handleTouchStart={handleTouchStart}
+                hideSalePrice={hideSalePrice}
+                formatCurrency={formatCurrency}
+              />
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1009,19 +1091,23 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
             </div>
           )}
         </div>
+
+
+
+
+
+
       </div>
+
 
     {/* Enhanced Cart Items */}
     <div className="flex-1 overflow-y-auto min-h-0">
       {(activeTab?.cart || []).length > 0 ? (
         <div className="divide-y divide-gray-100">
           {(activeTab?.cart || []).map((item: any, index: number)  => {
-            console.log("------- cart item -------", item);
-            console.log("------- activetab -------",activeTab)
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
             const product = products.find((p: any) => p.id === item.productId);
-            console.log("------- product -------", product);
             return (
               <div key={item.id} className="p-4 hover:bg-gray-50 transition-colors duration-150">
                 {/* Product Header */}
@@ -1037,7 +1123,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
                       {product.supplierName}
                     </p>
-                
+
                   </div>
                   <AccessibleButton
                     onClick={() => removeFromCart(item.id)}
@@ -1052,7 +1138,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                 </div>
 
                 {/* Enhanced Input Grid */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-[1fr_2fr_3fr_3fr] gap-3">
                   {/* Quantity */}
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Quantity</label>
@@ -1084,44 +1170,45 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     </div>
                   </div>
 
-                    {/* Weight */}
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Weight</label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={item.weight ?? ''}
-                          onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
-                          className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${product.name?.toLowerCase().includes('plastic')
-                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                              : 'bg-white'
-                            }`}
-                          placeholder="0.00"
-                          disabled={product.name?.toLowerCase() === 'plastic'}
-                          tabIndex={200 + index * 4 + 2}
-                          aria-label={`Weight for ${product.name}`}
-                        />
-                        <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
-                          kg
-                        </div>
+                  {/* Weight */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Weight</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={item.weight ?? ''}
+                        onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
+                        className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
+                          product.name?.toLowerCase().includes('plastic') 
+                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                            : 'bg-white'
+                        }`}
+                        placeholder="0.00"
+                        disabled={product.name?.toLowerCase()==='plastic'}
+                        tabIndex={200 + index * 4 + 2}
+                        aria-label={`Weight for ${product.name}`}
+                      />
+                      <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
+                        kg
                       </div>
                     </div>
+                  </div>
 
-                    {/* Unit Price */}
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Unit Price</label>
-                      <MoneyInput
-                        step="0.01"
-                        min="0"
-                        value={item.unitPrice ?? ''}
-                        onChange={(value) => updateCartItem(item.id, 'unitPrice', value ? parseFloat(value) : undefined)}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
-                        placeholder="0.00"
-                        tabIndex={200 + index * 4 + 3}
-                        ariaLabel={`Price for ${product.name}`}
-                      />
-                    </div>
+                  {/* Unit Price */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Unit Price</label>
+                    <MoneyInput
+                      step='1000'
+                      min="0"
+                      value={item.unitPrice ?? ''}
+                      onChange={(value) => updateCartItem(item.id, 'unitPrice', value ? parseFloat(value) : undefined)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
+                      placeholder="0.00"
+                      tabIndex={200 + index * 4 + 3}
+                      ariaLabel={`Price for ${product.name}`}
+                    />
+                  </div>
 
                   {/* Total Price */}
                   <div className="space-y-1">
@@ -1138,18 +1225,24 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       </div>
                     </div>
                   </div>
-                </div>
+
+
               </div>
+            </div>
             );
           })}
         </div>
       ) : (
-        <div className="p-12 text-center text-gray-500">
-          <div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
-            <ShoppingCart className="w-10 h-10 text-gray-400" />
+        <div className="flex-1 flex items-center justify-center p-12 text-center text-gray-500">
+          <div>
+            <div className="bg-gray-100 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6">
+              <ShoppingCart className="w-12 h-12 text-gray-400" />
+            </div>
+            <h3 className="text-xl font-medium text-gray-900 mb-3">Your cart is empty</h3>
+            <p className="text-gray-600 text-lg">Start adding products to begin your sale</p>
           </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
-          <p className="text-gray-600">Start adding products to begin your sale</p>
+
+
         </div>
       )}
     </div>
