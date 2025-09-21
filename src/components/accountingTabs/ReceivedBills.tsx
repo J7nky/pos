@@ -73,7 +73,7 @@ export default function ReceivedBills({
     type?: string;
     porterage_fee?: string;
     transfer_fee?: string;
-    commission_rate?: string;
+    commission_rate?: number | null;
     status?: string;
     empty_plastic?: boolean;
     plastic_count?: string;
@@ -1104,6 +1104,9 @@ export default function ReceivedBills({
         errors={batchEditErrors}
         setErrors={setBatchEditErrors}
         addSupplier={addSupplier}
+        isEditMode={true}
+        editingBatchId={editingBatchId}
+        existingBatchItems={editingBatchId ? inventory.filter((item: any) => item.batch_id === editingBatchId) : []}
       />
 
       {showReceivedBillSalesLogs && selectedReceivedBill && (

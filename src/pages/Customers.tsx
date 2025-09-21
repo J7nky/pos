@@ -150,30 +150,6 @@ export default function Customers() {
   };
 
 
-  const updateCashDrawer = async (
-    entity: Customer | Supplier,
-    safeAmount: any,
-    paymentForm: any,
-    transactionType: 'payment' | 'expense',
-    isCustomer: boolean
-  ) => {
-    if (!userProfile?.store_id) {
-      console.warn('Missing store_id: cannot update cash drawer');
-      return null;
-    }
-
-    const direction = isCustomer ? 'received from' : 'sent to';
-    return await cashDrawerUpdateService.updateCashDrawerForTransaction({
-      type: transactionType,
-      amount: safeAmount.amount,
-      currency: safeAmount.currency,
-      description: `Payment ${direction} ${entity.name}`,
-      reference: paymentForm.reference || `PAY-${Date.now()}`,
-      storeId: userProfile.store_id,
-      createdBy: userProfile?.id || '',
-      ...(isCustomer ? { customerId: paymentForm.customerId } : { supplierId: paymentForm.supplierId })
-    }, getStore);
-  };
 
   // Unified payment handler
   const processPayment = async (
@@ -237,68 +213,44 @@ export default function Customers() {
       // Update entity balance
       await updateEntityBalance(entity, entityId, Number(amount), currency, isCustomer);
 
-      // Update cash drawer (this also creates the transaction record)
+      // Use the general cash drawer transaction utility
       const cashDrawerType = isCustomer ? 'payment' : 'expense';
-      const cashDrawerResult = await updateCashDrawer(entity, safeAmount, { amount, currency, description, reference, customerId: isCustomer ? entityId : '', supplierId: isCustomer ? '' : entityId }, cashDrawerType, isCustomer);
+      const cashDrawerResult = await raw.processCashDrawerTransaction({
+        type: cashDrawerType,
+        amount: safeAmount.amount,
+        currency: safeAmount.currency,
+        description: `${isCustomer ? 'Payment from' : 'Payment to'} ${entity.name}${description ? ': ' + description : ''}`,
+        reference: reference || `PAY-${Date.now()}`,
+        ...(isCustomer ? { customerId: entityId } : { supplierId: entityId })
+      });
 
-      // Store undo data for payment only if we have a valid cash drawer result
-      if (cashDrawerResult?.success) {
-        console.log(entity.lb_balance,amount,(entity.lb_balance || 0) + Number(amount) ,123123123);
-        // Calculate original balance before payment was made
-        const originalLbBalance = (entity.lb_balance || 0);
-        const originalUsdBalance = (entity.usd_balance || 0);
-        
-        const paymentUndoData = {
-          type: isCustomer ? 'customer_payment_received' : 'supplier_payment_sent',
-          affected: [
-            { table: isCustomer ? 'customers' : 'suppliers', id: entityId }
-          ],
-          steps: [
-            // Restore entity balance to original value before payment
-            {
-              op: 'update',
-              table: isCustomer ? 'customers' : 'suppliers',
-              id: entityId,
-              changes: currency === 'LBP'
-                ? { lb_balance: originalLbBalance, _synced: false }
-                : { usd_balance: originalUsdBalance, _synced: false }
-            }
-          ]
-        };
-
-        // Add transaction cleanup if we have a transaction ID
-        if (cashDrawerResult.transactionId) {
-          paymentUndoData.affected.push({ table: 'transactions', id: cashDrawerResult.transactionId });
-          paymentUndoData.steps.push({
-            op: 'delete',
-            table: 'transactions',
-            id: cashDrawerResult.transactionId
-          } as any);
-
-          // Add cash drawer restoration
-          const { db } = await import('../lib/db');
-          const account = await db.getCashDrawerAccount(userProfile?.store_id || '');
-          if (account) {
-            const cashAmount = safeAmount.amount;
-            // For undo: reverse the original cash drawer change
-            // Customer payment (received): originally increased cash, so undo decreases
-            // Supplier payment (sent): originally decreased cash, so undo increases
-            const cashChange = isCustomer ? -cashAmount : cashAmount;
-            paymentUndoData.steps.push({
-              op: 'update',
-              table: 'cash_drawer_accounts',
-              id: account.id,
-              changes: {
-                current_balance: (account.current_balance || 0) + cashChange,
-                _synced: false
-              } as any
-            });
-            paymentUndoData.affected.push({ table: 'cash_drawer_accounts', id: account.id });
+      // Create undo data for the payment
+      const baseUndoData = {
+        affected: [
+          { table: isCustomer ? 'customers' : 'suppliers', id: entityId }
+        ],
+        steps: [
+          // Restore entity balance to original value before payment
+          {
+            op: 'update',
+            table: isCustomer ? 'customers' : 'suppliers',
+            id: entityId,
+            changes: currency === 'LBP'
+              ? { lb_balance: (entity.lb_balance || 0), _synced: false }
+              : { usd_balance: (entity.usd_balance || 0), _synced: false }
           }
-        }
+        ]
+      };
 
-        pushUndo(paymentUndoData);
-      }
+      // Create comprehensive undo data including cash drawer
+      const undoData = raw.createCashDrawerUndoData(
+        cashDrawerResult.transactionId, 
+        cashDrawerResult.previousBalance, 
+        cashDrawerResult.accountId,
+        baseUndoData
+      );
+
+      raw.pushUndo(undoData);
 
       // Refresh data to show new transaction in Recent Activity
       await raw.refreshData();

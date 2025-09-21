@@ -83,7 +83,7 @@ export interface inventory_bills { id: string;
   status?: string;
   created_at:string;
   notes?:string;
-  commission_rate?:string;
+  commission_rate?:number | null;
   plastic_fee?:string;
   type:string
   }

@@ -17,6 +17,10 @@ interface ReceiveFormModalProps {
   errors: any;
   setErrors: (errors: any) => void;
   addSupplier?: (supplier: any) => Promise<void>;
+  // Edit mode props
+  isEditMode?: boolean;
+  editingBatchId?: string | null;
+  existingBatchItems?: any[];
 }
 
 const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
@@ -33,6 +37,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   errors,
   setErrors,
   addSupplier,
+  isEditMode = false,
+  editingBatchId = null,
+  existingBatchItems = [],
 }) => {
   const [loading, setLoading] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
@@ -69,6 +76,33 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       }
     }
   }, [open]);
+
+  // Populate existing batch items when in edit mode
+  useEffect(() => {
+    if (open && isEditMode && existingBatchItems.length > 0) {
+      const newBulkProducts: string[] = [];
+      const newBulkItems: Record<string, any> = {};
+      
+      existingBatchItems.forEach((item, index) => {
+        const productId = `edit_${item.id || index}`;
+        newBulkProducts.push(productId);
+        newBulkItems[productId] = {
+          product_id: item.product_id || '',
+          quantity: (item.received_quantity || item.quantity || '').toString(),
+          unit: item.unit || 'kg',
+          price: item.price ? item.price.toString() : '',
+          selling_price: item.selling_price ? item.selling_price.toString() : '',
+          weight: item.weight ? item.weight.toString() : ''
+        };
+      });
+      
+      setBulkProducts(newBulkProducts);
+      setBulkItems(newBulkItems);
+    } else if (open && !isEditMode && bulkProducts.length === 0) {
+      // Only add default product row for new entries
+      addProductRow();
+    }
+  }, [open, isEditMode, existingBatchItems]);
 
   // Keyboard support - Escape to close
   useEffect(() => {
@@ -270,8 +304,19 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         <div className="p-6 border-b border-gray-200 dark:border-slate-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Receive Products</h2>
-              <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">Add new inventory items to your stock</p>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
+                {isEditMode ? 'Edit Batch' : 'Receive Products'}
+              </h2>
+              <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">
+                {isEditMode ? 'Update batch information and inventory items' : 'Add new inventory items to your stock'}
+              </p>
+              {isEditMode && editingBatchId && (
+                <div className="mt-2">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                    Editing Batch: {editingBatchId}
+                  </span>
+                </div>
+              )}
             </div>
             <button
               onClick={onClose}
@@ -550,6 +595,11 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                 <div className="flex items-center">
                   <Truck className="w-5 h-5 mr-2 text-green-600" />
                   Products
+                  {isEditMode && (
+                    <span className="ml-2 text-sm text-orange-600 font-normal">
+                      (Edit existing items or add new ones)
+                    </span>
+                  )}
                 </div>
               </h3>
 
@@ -576,38 +626,44 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         const product = products.find((p: any) => p.id === item.product_id);
                         const productName = product?.name || '';
                         
+                        const isEditingExisting = isEditMode && productId.startsWith('edit_');
                         return (
-                          <tr key={productId} className="hover:bg-gray-50 transition-colors duration-150">
+                          <tr key={productId} className={`hover:bg-gray-50 transition-colors duration-150 ${isEditingExisting ? 'bg-orange-50' : ''}`}>
                             <td className="py-3 px-2">
                               <div ref={selectRef}>
-                                <SearchableSelect
-                                  options={products.map((product: any) => ({
-                                    id: product.id,
-                                    label: product.name,
-                                    value: product.id,
-                                    category: product.category
-                                  }))}
-                                  value={item.product_id || ''}
-                                  onChange={(value: any) => {
-                                    const selectedId = value as string;
-                                    setBulkItems(prev => ({
-                                      ...prev,
-                                      [productId]: { ...item, product_id: selectedId, unit: 'kg' }
-                                    }));
-                                  }}
-                                  placeholder="Select Product *"
-                                  searchPlaceholder="Search products..."
-                                  categories={['Fruits', 'Vegetables']}
-                                  showAddOption={true}
-                                  addOptionText="Add New Product"
-                                  className="w-full min-w-[200px]"
-                                  portal={false}
-                                  onOpenChange={(open: boolean) => {
-                                    if (open && selectRef.current) {
-                                      selectRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-                                    }
-                                  }}
-                                />
+                                <div className="flex items-center gap-2">
+                                  <SearchableSelect
+                                    options={products.map((product: any) => ({
+                                      id: product.id,
+                                      label: product.name,
+                                      value: product.id,
+                                      category: product.category
+                                    }))}
+                                    value={item.product_id || ''}
+                                    onChange={(value: any) => {
+                                      const selectedId = value as string;
+                                      setBulkItems(prev => ({
+                                        ...prev,
+                                        [productId]: { ...item, product_id: selectedId, unit: 'kg' }
+                                      }));
+                                    }}
+                                    placeholder="Select Product *"
+                                    searchPlaceholder="Search products..."
+                                    categories={['Fruits', 'Vegetables']}
+                                    showAddOption={true}
+                                    addOptionText="Add New Product"
+                                    className="w-full min-w-[200px]"
+                                    portal={false}
+                                    onOpenChange={(open: boolean) => {
+                                      if (open && selectRef.current) {
+                                        selectRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                                      }
+                                    }}
+                                  />
+                                  {isEditingExisting && (
+                                    <span className="text-xs text-orange-600 font-medium">(Existing)</span>
+                                  )}
+                                </div>
                               </div>
                               {errors[`product_${productId}`] && (
                                 <p className="text-xs text-red-600 mt-1">{errors[`product_${productId}`]}</p>
@@ -701,7 +757,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                             </td>
                           
                             <td className="py-3 px-2 flex items-center gap-2 mt-2">
-                              {(bulkProducts.length > 1 || !bulkProducts[0]) ? (
+                              {(bulkProducts.length > 1 || !bulkProducts[0]) && !isEditingExisting ? (
                                 <button
                                   type="button"
                                   onClick={() => removeProductRow(productId)}
@@ -710,6 +766,8 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 >
                                   <X className="w-4 h-4" />
                                 </button>
+                              ) : isEditingExisting ? (
+                                <span className="text-xs text-gray-500 italic">Cannot remove existing item</span>
                               ) : (
                                 <div></div>
                               )}
@@ -748,12 +806,12 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
               {loading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                  Receiving...
+                  {isEditMode ? 'Updating...' : 'Receiving...'}
                 </>
               ) : (
                 <>
                   <Truck className="w-4 h-4 mr-2" />
-                  Receive Products
+                  {isEditMode ? 'Update Batch' : 'Receive Products'}
                 </>
               )}
             </button>

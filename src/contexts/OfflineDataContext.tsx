@@ -1,18 +1,16 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { Database } from '../types/database';
-import {BillLineItem , BillLineItemDbUpdate, BillLineItemTransforms } from '../types';
+import { BillLineItem, BillLineItemTransforms } from '../types';
 import { 
   db, 
   Product, 
   Supplier, 
   Customer, 
   InventoryItem, 
-  LocalSaleItem, 
   Transaction, 
-  ExpenseCategory,
   createBaseEntity,
   createId,
 } from '../lib/db';
@@ -92,7 +90,7 @@ interface OfflineDataContextType {
     porterage_fee?: number | null;
     transfer_fee?: number | null;
     received_at?: string;
-    commission_rate?:string,
+    commission_rate?:number,
     type:string,
     plastic_fee?:number|null;
     items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
@@ -107,7 +105,7 @@ interface OfflineDataContextType {
   applyCommissionRateToBatch: (batchId: string, commissionRate: number) => Promise<void>;
 
   // Bill management operations
-  createBill: (billData: any, lineItems: any[]) => Promise<string>;
+  createBill: (billData: any, lineItems: any[], customerBalanceUpdate?: { customerId: string; amountDue: number; originalBalance: number }) => Promise<string>;
   updateBill: (billId: string, updates: any, changedBy: string, changeReason?: string) => Promise<void>;
   deleteBill: (billId: string, deletedBy: string, deleteReason?: string, softDelete?: boolean) => Promise<void>;
   getBills: (filters?: any) => Promise<any[]>;
@@ -148,6 +146,36 @@ interface OfflineDataContextType {
   undoLastAction: () => Promise<boolean>;
   pushUndo: (undoData: any) => void;
   testUndo?: () => void; // Debug function
+
+  // Cash drawer transaction utility
+  processCashDrawerTransaction: (
+    transactionData: {
+      type: 'sale' | 'payment' | 'expense' | 'refund';
+      amount: number;
+      currency: 'USD' | 'LBP';
+      description: string;
+      reference: string;
+      customerId?: string;
+      supplierId?: string;
+    }
+  ) => Promise<{
+    success: boolean;
+    transactionId?: string;
+    previousBalance?: number;
+    newBalance?: number;
+    accountId?: string;
+  }>;
+
+  // Helper function to create cash drawer undo data
+  createCashDrawerUndoData: (
+    transactionId: string | undefined,
+    previousBalance: number | undefined,
+    accountId: string | undefined,
+    additionalUndoData?: {
+      affected: Array<{ table: string; id: string }>;
+      steps: Array<{ op: string; table: string; id: string; changes?: any }>;
+    }
+  ) => any;
 }
 
 const OfflineDataContext = createContext<OfflineDataContextType | undefined>(undefined);
@@ -166,12 +194,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [sales, setSales] = useState<BillLineItem[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<Tables['transactions']['Row'][]>([]);
-  const [expenseCategories, setExpenseCategories] = useState<any[]>([]);
+  const [expenseCategories] = useState<any[]>([]);
 
   // Raw internal data
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [inventoryBills, setInventoryBills] = useState<any[]>([]);
-  const [saleItems, setSaleItems] = useState<BillLineItem[]>([]);
   const [bills, setBills] = useState<any[]>([]);
   const [billLineItems, setBillLineItems] = useState<any[]>([]);
   const [billAuditLogs, setBillAuditLogs] = useState<any[]>([]);
@@ -296,8 +323,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       console.log('📊 Loading local data...');
       // Load local data first
-      await refreshData();
-      await updateUnsyncedCount();
+      await refreshDataAndUpdateCount();
 
       // Check if local database is empty (no essential data)
       const [productCount, supplierCount, customerCount] = await Promise.all([
@@ -320,8 +346,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
           if (syncResult.success) {
             console.log(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
-            await refreshData();
-            await updateUnsyncedCount();
+            await refreshDataAndUpdateCount();
           } else {
             console.error('❌ Initial sync failed:', syncResult.errors);
           }
@@ -345,8 +370,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('❌ Data initialization failed:', error);
       // Still try to load what we can from local storage
-      await refreshData();
-      await updateUnsyncedCount();
+      await refreshDataAndUpdateCount();
     }
 
     // Run migration for existing transactions after data loads
@@ -402,8 +426,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
           if (syncResult.success) {
             console.log(`✅ Full sync after connection restore completed: downloaded ${syncResult.synced.downloaded} records`);
-            await refreshData();
-            await updateUnsyncedCount();
+            await refreshDataAndUpdateCount();
           } else {
             console.error('❌ Full sync after connection restore failed:', syncResult.errors);
           }
@@ -474,14 +497,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     console.log('🔄 Refreshing data for store:', storeId);
 
     try {
-      // Load all data from Dexie
-      const [
+      // Load all data from IndexedDB using optimized batch loading
+      const {
         productsData,
         suppliersData,
         customersData,
         inventoryData,
-        salesData,
-        saleItemsData,
         transactionsData,
         batchesData,
         billsData,
@@ -489,29 +510,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         billAuditLogsData,
         cashDrawerAccountsData,
         cashDrawerSessionsData,
-      ] = await Promise.all([
-        db.products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.inventory_items.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        Promise.resolve([]), // sales not in current schema
-        Promise.resolve([]), // sale_items table removed - sales now come from bill_line_items
-        db.transactions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.inventory_bills.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.bills.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.bill_line_items.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.bill_audit_logs.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.cash_drawer_accounts.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-        db.cash_drawer_sessions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+      } = await loadAllStoreData(storeId);
 
-      ]);
-
-      console.log(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${saleItemsData.length} sale items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
+      console.log(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
 
       // Transform data for offline-first structure
       setProducts(productsData as Tables['products']['Row'][]);
-      setSuppliers(suppliersData.map(s => ({ ...s, lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0 })) as Tables['suppliers']['Row'][]);
-      setCustomers(customersData.map(c => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
+      setSuppliers(suppliersData.map((s: any) => ({ ...s, lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0 })) as Tables['suppliers']['Row'][]);
+      setCustomers(customersData.map((c: any) => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
       setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
 
       // Store raw data
@@ -551,8 +557,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         })
       );
 
-      setSaleItems(transformedSaleItems);
-      setSales(transformedSaleItems); // Update the main sales state as well
+      setSales(transformedSaleItems); // Update the main sales state
       setBills(billsData);
       setBillLineItems(billLineItemsData);
       setBillAuditLogs(billAuditLogsData);
@@ -563,20 +568,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         return acc;
       }, {});
 
-      setInventory(inventoryData.map(item => {
+      setInventory(inventoryData.map((item: any) => {
         const batch = item.batch_id ? batchById[item.batch_id] : null;
         return {
           ...item,
-          commission_rate:batch? batch.commission_rate:null,
-          batch_type:batch?batch.type:null,
+          commission_rate: batch ? batch.commission_rate : null,
+          batch_type: batch ? batch.type : null,
           batch_porterage: batch ? batch.porterage : null,
           batch_transfer_fee: batch ? batch.transfer_fee : null,
           batch_status: batch ? batch.status : 'Created',
         };
       }));
-
-      // Set sales directly as sale_items (no transformation needed)
-      setSales(saleItemsData);
 
       // Refresh cash drawer status
       await refreshCashDrawerStatus();
@@ -782,6 +784,115 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Helper function to refresh data and update unsynced count
+  const refreshDataAndUpdateCount = async () => {
+    await refreshData();
+    await updateUnsyncedCount();
+  };
+
+  // Optimized IndexedDB query helpers for better performance
+
+  const getProductsByStore = async (storeId: string) => {
+    return await db.products
+      .where('store_id')
+      .equals(storeId)
+      .filter(item => !item._deleted)
+      .toArray();
+  };
+
+  const getSuppliersByStore = async (storeId: string) => {
+    return await db.suppliers
+      .where('store_id')
+      .equals(storeId)
+      .filter(item => !item._deleted)
+      .toArray();
+  };
+
+  const getCustomersByStore = async (storeId: string) => {
+    return await db.customers
+      .where('store_id')
+      .equals(storeId)
+      .filter(item => !item._deleted)
+      .toArray();
+  };
+
+  const getInventoryItemsByStore = async (storeId: string) => {
+    return await db.inventory_items
+      .where('store_id')
+      .equals(storeId)
+      .filter(item => !item._deleted)
+      .toArray();
+  };
+
+  const getBillsByStore = async (storeId: string) => {
+    return await db.bills
+      .where('store_id')
+      .equals(storeId)
+      .filter(item => !item._deleted)
+      .toArray();
+  };
+
+  const getBillLineItemsByStore = async (storeId: string) => {
+    return await db.bill_line_items
+      .where('store_id')
+      .equals(storeId)
+      .filter(item => !item._deleted)
+      .toArray();
+  };
+
+  const getTransactionsByStore = async (storeId: string) => {
+    return await db.transactions
+      .where('store_id')
+      .equals(storeId)
+      .filter(item => !item._deleted)
+      .toArray();
+  };
+
+  // Performance optimization: Batch IndexedDB operations
+  const batchIndexedDBOperations = async (operations: (() => Promise<any>)[]) => {
+    return await db.transaction('r', db.tables, async () => {
+      return await Promise.all(operations.map(op => op()));
+    });
+  };
+
+  // Optimized data loading with batching
+  const loadAllStoreData = async (storeId: string) => {
+    const startTime = Date.now();
+    
+    const operations = [
+      () => getProductsByStore(storeId),
+      () => getSuppliersByStore(storeId),
+      () => getCustomersByStore(storeId),
+      () => getInventoryItemsByStore(storeId),
+      () => getTransactionsByStore(storeId),
+      () => db.inventory_bills.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+      () => getBillsByStore(storeId),
+      () => getBillLineItemsByStore(storeId),
+      () => db.bill_audit_logs.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+      () => db.cash_drawer_accounts.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+      () => db.cash_drawer_sessions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+    ];
+
+    const results = await batchIndexedDBOperations(operations);
+    const loadTime = Date.now() - startTime;
+    
+    console.log(`⚡ IndexedDB batch load completed in ${loadTime}ms`);
+    
+    return {
+      productsData: results[0],
+      suppliersData: results[1],
+      customersData: results[2],
+      inventoryData: results[3],
+      transactionsData: results[4],
+      batchesData: results[5],
+      billsData: results[6],
+      billLineItemsData: results[7],
+      billAuditLogsData: results[8],
+      cashDrawerAccountsData: results[9],
+      cashDrawerSessionsData: results[10],
+    };
+  };
+
   // Reset auto-sync timer on every data change
   const resetAutoSyncTimer = useCallback(() => {
     // Clear existing timer
@@ -802,12 +913,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.log(`📊 Current unsynced count: ${currentUnsyncedCount}`);
 
         if (!syncService.isCurrentlyRunning() && currentUnsyncedCount > 0) {
-          console.log('⏰ Auto-sync triggered after 8-second delay');
+          console.log('⏰ Auto-sync triggered after 30-second delay');
           performSync(true);
         } else {
           console.log('⏰ No unsynced data or sync already running, skipping auto-sync');
         }
-      }, 8000); // 8 seconds - same as undo window
+      }, 30000); // 30 seconds - same as undo window
     } else {
       console.log('⏰ Not setting auto-sync timer - offline, no store, or syncing');
     }
@@ -915,7 +1026,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   // Bill management functions
-  const createBill = async (billData: any, lineItems: any[]): Promise<string> => {
+  const createBill = async (billData: any, lineItems: any[], customerBalanceUpdate?: { customerId: string; amountDue: number; originalBalance: number }): Promise<string> => {
     if (!storeId) throw new Error('No store ID available');
 
     const billId = createId();
@@ -959,6 +1070,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Log the final bill data for debugging
     console.log('📋 Final line items data before storage:', mappedLineItems, 'items');
 
+    // Store original inventory states for undo
+    const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
+    
     // Use transaction to ensure atomicity for all operations including inventory and cash drawer
     await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items], async () => {
       // Add bill and line items
@@ -973,6 +1087,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           // Use the specific inventory item ID if provided
           const inventoryItem = await db.inventory_items.get(item.inventory_item_id);
           if (inventoryItem && inventoryItem.quantity >= item.quantity) {
+            // Store original state for undo
+            inventoryStates.push({
+              id: item.inventory_item_id,
+              originalQuantity: inventoryItem.quantity
+            });
+            
             const newQuantity = inventoryItem.quantity - item.quantity;
 
             if (newQuantity <= 0) {
@@ -1001,6 +1121,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           for (const inv of inventoryRecords) {
             if (qtyToDeduct <= 0) break;
 
+            // Store original state for undo
+            inventoryStates.push({
+              id: inv.id,
+              originalQuantity: inv.quantity
+            });
+
             const deduct = Math.min(inv.quantity, qtyToDeduct);
             const newQuantity = inv.quantity - deduct;
 
@@ -1023,37 +1149,64 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // Update cash drawer for cash sales
+    // Process cash drawer transaction for cash sales using the general utility
     const cashSaleItems = mappedLineItems.filter(item => item.payment_method === 'cash');
+    let cashDrawerResult = null;
     if (cashSaleItems.length > 0) {
       try {
-        const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-
         const totalCashAmount = cashSaleItems.reduce((sum, item) => sum + (item.received_value || item.line_total || 0), 0);
 
-        // console.log(`💰 Updating cash drawer for cash sales: $${totalCashAmount}`);
-
-        const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
+        cashDrawerResult = await processCashDrawerTransaction({
           type: 'sale',
           amount: totalCashAmount,
           currency: 'LBP', // Assuming LBP for now, could be made dynamic
           description: `Cash sale - ${cashSaleItems.length} items`,
           reference: `SALE-${Date.now()}`,
-          storeId: storeId,
-          createdBy: currentUserId,
-          customerId: cashSaleItems[0]?.customer_id || undefined,
-          allowAutoSessionOpen: true
-        }, getStore);
+          customerId: cashSaleItems[0]?.customer_id || undefined
+        });
 
-        if (cashDrawerResult.success) {
-          console.log(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
-        } else {
-          console.error('❌ Failed to update cash drawer:', cashDrawerResult.error);
-        }
+        console.log(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
       } catch (error) {
         console.error('❌ Error updating cash drawer for sales:', error);
       }
     }
+
+    // Store undo data for the complete checkout action
+    const baseUndoData = {
+      affected: [
+        { table: 'bills', id: billId },
+        ...mappedLineItems.map(item => ({ table: 'bill_line_items', id: item.id })),
+        ...inventoryStates.map(state => ({ table: 'inventory_items', id: state.id })),
+        ...(customerBalanceUpdate ? [{ table: 'customers', id: customerBalanceUpdate.customerId }] : [])
+      ],
+      steps: [
+        // Delete the bill
+        { op: 'delete', table: 'bills', id: billId },
+        // Delete all line items
+        ...mappedLineItems.map(item => ({ op: 'delete', table: 'bill_line_items', id: item.id })),
+        // Restore inventory quantities
+        ...inventoryStates.map(state => ({ 
+          op: 'update', 
+          table: 'inventory_items', 
+          id: state.id, 
+          changes: { quantity: state.originalQuantity, _synced: false } 
+        })),
+        // Restore customer balance if applicable
+        ...(customerBalanceUpdate ? [{
+          op: 'update',
+          table: 'customers',
+          id: customerBalanceUpdate.customerId,
+          changes: { lb_balance: customerBalanceUpdate.originalBalance, _synced: false }
+        }] : [])
+      ]
+    };
+
+    // Create comprehensive undo data including cash drawer if applicable
+    const undoData = cashDrawerResult 
+      ? createCashDrawerUndoData(cashDrawerResult.transactionId, cashDrawerResult.previousBalance, cashDrawerResult.accountId, baseUndoData)
+      : { type: 'complete_checkout', ...baseUndoData };
+
+    pushUndo(undoData);
 
     await refreshData();
     await updateUnsyncedCount();
@@ -1480,8 +1633,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             quantity: item.quantity || 0,
             unit: item.unit || '',
             weight: item.weight || undefined,
-            price: item.price,
-            selling_price: item.selling_price
+            price: item.price || undefined,
+            selling_price: item.selling_price || undefined
           })),
           porterage_fee: porterage_fee || undefined,
           transfer_fee: transfer_fee || undefined,
@@ -1503,19 +1656,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const batchRecord = {
       id: batchId,
       supplier_id: actualSupplierId,
-      status,
+      status: status || undefined,
       porterage_fee,
       transfer_fee,
       received_at: received_at || new Date().toISOString(),
-      commission_rate:commission_rate,
+      commission_rate: commission_rate || null,
       store_id: storeId,
       created_by,
-      plastic_fee,
+      plastic_fee: plastic_fee ? String(plastic_fee) : undefined,
       type,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       _synced: false
-    } as any;
+    };
 
     // Both batch and items are persisted locally and will be synced to Supabase.
     // The sync service ensures inventory_bills are uploaded before inventory_items
@@ -1734,9 +1887,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Cash drawer updates are handled automatically by the database hook (handleSaleItemCreated)
     // when sale items are created, so no manual update is needed here
 
-    // Filter cash sale items for undo data
-    const cashSaleItems = lineItems.filter(item => item.payment_method === 'cash');
-
     await refreshData();
     await updateUnsyncedCount();
 
@@ -1914,7 +2064,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     debouncedSync();
   };
 
-  const addExpenseCategory = async (categoryData: any): Promise<void> => {
+  const addExpenseCategory = async (_categoryData: any): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
     // Expense categories not supported in current schema
@@ -1923,7 +2073,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateInventoryBatch = async (id: string, updates: Tables['inventory_bills']['Update']): Promise<void> => {
-    await db.inventory_bills.update(id, { ...updates, _synced: false });
+    // Ensure commission_rate is properly typed as number | null
+    const processedUpdates = {
+      ...updates,
+      commission_rate: updates.commission_rate !== undefined 
+        ? (typeof updates.commission_rate === 'string' ? parseFloat(updates.commission_rate) || null : updates.commission_rate)
+        : undefined,
+      _synced: false
+    };
+    
+    await db.inventory_bills.update(id, processedUpdates);
     await refreshData();
     await updateUnsyncedCount();
 
@@ -1934,8 +2093,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const applyCommissionRateToBatch = async (batchId: string, commissionRate: number): Promise<void> => {
-    const bill = await db.inventory_bills.where('batch_id').equals(batchId);
-    // bill is a Collection, not an id or object; need to update by batch_id
+    // Update commission rate for the batch
     await db.inventory_bills
       .where('id')
       .equals(batchId)
@@ -2014,6 +2172,102 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     isAutoSyncing
   });
 
+  // General utility function for cash drawer transactions (without undo data storage)
+  const processCashDrawerTransaction = async (
+    transactionData: {
+      type: 'sale' | 'payment' | 'expense' | 'refund';
+      amount: number;
+      currency: 'USD' | 'LBP';
+      description: string;
+      reference: string;
+      customerId?: string;
+      supplierId?: string;
+    }
+  ) => {
+    if (!storeId || !userProfile?.id) {
+      throw new Error('Store ID or user ID not available');
+    }
+
+    try {
+      const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+      
+      const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
+        ...transactionData,
+        storeId,
+        createdBy: userProfile.id,
+        allowAutoSessionOpen: true
+      }, getStore);
+
+      if (!cashDrawerResult.success) {
+        throw new Error(cashDrawerResult.error || 'Failed to update cash drawer');
+      }
+
+      // Get the cash drawer account ID for undo purposes
+      const account = await db.getCashDrawerAccount(storeId);
+      const accountId = account?.id;
+
+      return {
+        success: true,
+        transactionId: cashDrawerResult.transactionId,
+        previousBalance: cashDrawerResult.previousBalance,
+        newBalance: cashDrawerResult.newBalance,
+        accountId: accountId
+      };
+    } catch (error) {
+      console.error('Cash drawer transaction failed:', error);
+      throw error;
+    }
+  };
+
+  // Helper function to create cash drawer undo data
+  const createCashDrawerUndoData = (
+    transactionId: string | undefined,
+    previousBalance: number | undefined,
+    accountId: string | undefined,
+    additionalUndoData?: {
+      affected: Array<{ table: string; id: string }>;
+      steps: Array<{ op: string; table: string; id: string; changes?: any }>;
+    }
+  ) => {
+    console.log('🔧 Creating cash drawer undo data:', {
+      transactionId,
+      previousBalance,
+      accountId,
+      additionalUndoData
+    });
+
+    const undoData = {
+      type: 'cash_drawer_transaction',
+      affected: [
+        ...(additionalUndoData?.affected || []),
+        ...(transactionId ? [{ table: 'transactions', id: transactionId }] : []),
+        ...(accountId ? [{ table: 'cash_drawer_accounts', id: accountId }] : [])
+      ],
+      steps: [
+        ...(additionalUndoData?.steps || []),
+        // Add transaction cleanup if we have a transaction ID
+        ...(transactionId ? [{
+          op: 'delete',
+          table: 'transactions',
+          id: transactionId
+        }] : []),
+        // Add cash drawer restoration
+        ...(previousBalance !== undefined && accountId ? [{
+          op: 'update',
+          table: 'cash_drawer_accounts',
+          id: accountId,
+          changes: {
+            current_balance: previousBalance,
+            _synced: false
+          }
+        }] : [])
+      ]
+    };
+
+    console.log('🔧 Created undo data:', undoData);
+    return undoData;
+  };
+
   // Undo functionality - simple single-level undo
   const pushUndo = (undoData: any) => {
     const undoWithTimestamp = {
@@ -2044,6 +2298,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Check if any affected records are synced
       // Exception: cash_drawer_accounts can be synced and still allow undo (only balance changes)
       for (const item of action.affected || []) {
+        console.log(`🔍 Checking record: ${item.table} with ID: ${item.id}`);
         const record = await (db as any)[item.table].get(item.id);
         if (!record) {
           console.log(`❌ Cannot undo: record ${item.id} in ${item.table} is missing`);
@@ -2051,18 +2306,20 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           setCanUndo(false);
           return false;
         }
+        console.log(`✅ Record found: ${item.table} with ID: ${item.id}`);
 
-        // Allow undo for cash_drawer_accounts even if synced (only balance changes)
-        if (record._synced && item.table !== 'cash_drawer_accounts') {
-          console.log(`❌ Cannot undo: record ${item.id} in ${item.table} is synced`);
-          localStorage.removeItem('last_undo_action');
-          setCanUndo(false);
-          return false;
-        }
+        // // Allow undo for cash_drawer_accounts even if synced (only balance changes)
+        // if (record._synced && item.table !== 'cash_drawer_accounts') {
+        //   console.log(`❌ Cannot undo: record ${item.id} in ${item.table} is synced`);
+        //   localStorage.removeItem('last_undo_action');
+        //   setCanUndo(false);
+        //   return false;
+        // }
       }
 
       // Execute undo steps
       await db.transaction('rw', [...db.tables, db.pending_syncs], async () => {
+        console.log('12312312', action.steps);
         for (const step of action.steps || []) {
           console.log('🔄 Executing undo step:', step);
 
@@ -2086,6 +2343,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
         // Remove any pending syncs for affected records
         for (const item of action.affected || []) {
+          console.log('12312312', item);
           await db.pending_syncs.where('table_name').equals(item.table)
             .filter(pending => pending.record_id === item.id).delete();
         }
@@ -2685,7 +2943,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         canUndo: false,
         undoLastAction: async () => false,
         pushUndo: () => {},
-        testUndo: () => {}
+        testUndo: () => {},
+        processCashDrawerTransaction: async () => ({ success: false }),
+        createCashDrawerUndoData: () => ({})
       }}>
         {children}
       </OfflineDataContext.Provider>
@@ -2785,6 +3045,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       undoLastAction,
       pushUndo,
       testUndo,
+
+      // Cash drawer transaction utility
+      processCashDrawerTransaction,
+      createCashDrawerUndoData,
 
       openCashDrawer,
 

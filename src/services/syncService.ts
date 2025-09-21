@@ -3,21 +3,21 @@
 import { db } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/database';
-import { queryMonitor } from './queryMonitorService';
+// Removed query monitoring - using IndexedDB only approach
 
 type Tables = Database['public']['Tables'];
 
-// Sync configuration - OPTIMIZED for cost efficiency
+// Sync configuration - OPTIMIZED for IndexedDB-only approach
 const SYNC_CONFIG = {
-  batchSize: 100, // Increased from 10 to reduce API calls (90% fewer requests)
-  maxRetries: 2, // Reduced from 3 to minimize failed request costs
-  retryDelay: 2000, // Increased to 2s to avoid rate limiting
-  syncInterval: 30000, // Increased to 30s (was 1s) for 97% reduction in sync frequency
+  batchSize: 100, // Batch size for efficient API calls
+  maxRetries: 2, // Retry attempts for failed requests
+  retryDelay: 2000, // Delay between retries
+  syncInterval: 30000, // Sync interval (30 seconds)
   
-  // New: Smart sync thresholds
+  // Sync thresholds
   maxRecordsPerSync: 1000, // Limit records per sync to control costs
   incrementalSyncThreshold: 50, // Use incremental sync if fewer than 50 changes
-  validationCacheExpiry: 900000, // 15 minutes (was 5 minutes)
+  validationCacheExpiry: 900000, // 15 minutes validation cache
 };
 
 // Table mapping for sync operations
@@ -992,15 +992,7 @@ export class SyncService {
         const { data: remoteRecords, error } = await query;
         const responseTime = Date.now() - startTime;
         
-        // Track query metrics for cost optimization
-        queryMonitor.trackQuery(
-          tableName, 
-          'download_incremental', 
-          responseTime,
-          remoteRecords?.length || 0, // Cost based on records returned
-          false, // Not cached
-          error || undefined
-        );
+        // Query monitoring removed - using IndexedDB only approach
         
         if (error) {
           result.errors.push(`Download failed for ${tableName}: ${error.message}`);
@@ -2049,15 +2041,7 @@ export class SyncService {
         const { data: remoteRecords, error } = await query;
         const responseTime = Date.now() - startTime;
         
-        // Track query metrics
-        queryMonitor.trackQuery(
-          tableName, 
-          'full_resync', 
-          responseTime,
-          remoteRecords?.length || 0,
-          false,
-          error || undefined
-        );
+        // Query monitoring removed - using IndexedDB only approach
 
         if (error) {
           console.error(`❌ Full resync failed for ${tableName}:`, error);
