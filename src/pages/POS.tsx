@@ -478,20 +478,55 @@ export default function POS() {
         }
       } else {
         console.log('Active cash drawer session found:', currentCashDrawerStatus.sessionId);
-      }// Use offline-first bill creation from OfflineDataContext
-      // const createdBillId = await raw.createBill(billData, lineItemsData);
+      }
 
-      // Update customer balance if credit sale or partial payment
-      if (activeTab.paymentMethod === 'credit' || parseFloat(activeTab.amountReceived) < total) {
+      // Prepare bill data
+      const amountReceived = parseFloat(activeTab.amountReceived) || 0;
+      const amountDue = Math.max(0, total - amountReceived);
+      const paymentStatus = amountDue === 0 ? 'paid' : (amountReceived > 0 ? 'partial' : 'pending');
+      
+      const billData = {
+        bill_number: `BILL-${Date.now()}`, // Generate unique bill number
+        customer_id: activeTab.selectedCustomer || null,
+        subtotal: total, // Same as total for now
+        total_amount: total,
+        payment_method: activeTab.paymentMethod,
+        payment_status: paymentStatus,
+        amount_paid: amountReceived,
+        amount_due: amountDue,
+        bill_date: new Date().toISOString(),
+        notes: activeTab.notes || null,
+        status: 'active', // Use 'active' instead of 'completed'
+        created_by: userProfile?.id
+      };
+
+      // Prepare line items data
+      const lineItemsData = activeTab.cart.map(item => ({
+        inventory_item_id: item.inventoryItemId,
+        product_id: item.productId,
+        supplier_id: item.supplierId,
+        quantity: item.quantity,
+        unit_price: item.unitPrice || 0,
+        line_total: item.lineTotal || 0,
+        weight: item.weight || null,
+        line_order: activeTab.cart.indexOf(item) + 1
+      }));
+
+      // Prepare customer balance update if needed
+      let customerBalanceUpdate = null;
+      if (activeTab.paymentMethod === 'credit' || amountDue > 0) {
         const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
         if (customer) {
-          const amountDue = Math.max(0, total - parseFloat(activeTab.amountReceived || '0'));
-          // RULE 3 FIX: For credit sales, INCREASE customer balance (debt they owe us)
-          await raw.updateCustomer(customer.id, {
-            lb_balance: (customer.lb_balance || 0) + amountDue,
-          });
+          customerBalanceUpdate = {
+            customerId: customer.id,
+            amountDue: amountDue,
+            originalBalance: customer.lb_balance || 0
+          };
         }
       }
+
+      // Use offline-first bill creation from OfflineDataContext
+      const createdBillId = await raw.createBill(billData, lineItemsData, customerBalanceUpdate || undefined);
 
       // The sale is now handled entirely through the bill creation above
       // No need for separate sale_items creation since bill_line_items now contains all sale data

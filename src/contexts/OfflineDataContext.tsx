@@ -2343,7 +2343,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
         // Remove any pending syncs for affected records
         for (const item of action.affected || []) {
-          console.log('12312312', item);
           await db.pending_syncs.where('table_name').equals(item.table)
             .filter(pending => pending.record_id === item.id).delete();
         }
