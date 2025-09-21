@@ -1051,7 +1051,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                 </div>
 
                 {/* Enhanced Input Grid */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-4 gap-3">
                   {/* Quantity */}
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Quantity</label>

@@ -13,7 +13,7 @@ import {
   Edit,
   Scale
 } from 'lucide-react';
-import WeightComparisonReport from '../WeightComparisonReport';
+import WeightComparisonReport from '../../WeightComparisonReport';
 
 type ReceivedBillsProps = {
   inventory: any[];
@@ -469,7 +469,7 @@ export default function ReceivedBills({
 
  
   return (
-    <div className="space-y-0">
+    <div>
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Received Bills</h2>
