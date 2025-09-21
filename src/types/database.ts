@@ -497,7 +497,7 @@ export interface Database {
           status?: string;
           created_at:string;
           notes?:string;
-          commission_rate?:string;
+          commission_rate?:number | null;
           type:string
         };
         Insert: {
@@ -511,7 +511,7 @@ export interface Database {
           created_by: string;
           status?: string;
           created_at:string;
-          commission_rate?:string;
+          commission_rate?:number | null;
           type?:string
           notes?:string
         };
@@ -525,7 +525,7 @@ export interface Database {
           store_id: string;
           created_by: string;
           status?: string;
-          commission_rate?:string;
+          commission_rate?:number | null;
           created_at:string;
           type?:string
           notes?:string

@@ -73,7 +73,7 @@ export default function ReceivedBills({
     type?: string;
     porterage_fee?: string;
     transfer_fee?: string;
-    commission_rate?: string;
+    commission_rate?: number | null;
     status?: string;
     empty_plastic?: boolean;
     plastic_count?: string;
