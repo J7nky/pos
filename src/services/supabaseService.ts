@@ -207,21 +207,21 @@ export class SupabaseService {
     }
   }
 
-  static async createBill(billData: any, lineItems: any[]) {
-    try {
-      const cleanBillData = cleanDataForSupabase(billData) as Tables['bills']['Insert'];
-      const cleanLineItems = cleanArrayForSupabase(lineItems) as Tables['bill_line_items']['Insert'][];
-      const { data: bill, error: billError } = await supabase
-        .rpc('create_bill_with_line_items', {
-          bill_data: cleanBillData,
-          line_items_data: cleanLineItems
-        } as any);
-      if (billError) throw billError;
-      return bill;
-    } catch (error) {
-      throw error;
-    }
-  }
+  // static async createBill(billData: any, lineItems: any[]) {
+  //   try {
+  //     const cleanBillData = cleanDataForSupabase(billData) as Tables['bills']['Insert'];
+  //     const cleanLineItems = cleanArrayForSupabase(lineItems) as Tables['bill_line_items']['Insert'][];
+  //     const { data: bill, error: billError } = await supabase
+  //       .rpc('create_bill_with_line_items', {
+  //         bill_data: cleanBillData,
+  //         line_items_data: cleanLineItems
+  //       } as any);
+  //     if (billError) throw billError;
+  //     return bill;
+  //   } catch (error) {
+  //     throw error;
+  //   }
+  // }
 
   static async updateBill(billId: string, updates: any) {
     try {

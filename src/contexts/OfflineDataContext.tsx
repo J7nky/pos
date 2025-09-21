@@ -1073,15 +1073,43 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Store original inventory states for undo
     const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
     
-    // Use transaction to ensure atomicity for all operations including inventory and cash drawer
-    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items], async () => {
+    // Use transaction to ensure atomicity for all operations including inventory, cash drawer, and customer balance
+    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.customers, db.transactions], async () => {
       // Add bill and line items
       await db.bills.add(bill);
       if (mappedLineItems.length > 0) {
         await db.bill_line_items.bulkAdd(mappedLineItems);
       }
 
-      // Deduct from specific inventory items
+      // Update customer balance if needed
+      if (customerBalanceUpdate) {
+        const customer = await db.customers.get(customerBalanceUpdate.customerId);
+        if (customer) {
+          const newBalance = customerBalanceUpdate.originalBalance + customerBalanceUpdate.amountDue;
+          await db.customers.update(customerBalanceUpdate.customerId, {
+            lb_balance: newBalance,
+            _synced: false
+          });
+
+          // Record the transaction for financial tracking
+          const transaction = {
+            id: createId(),
+            store_id: storeId,
+            created_at: now,
+            updated_at: now,
+            _synced: false,
+            type: 'income' , // Credit sale creates accounts receivable (income)
+            amount: customerBalanceUpdate.amountDue,
+            currency: 'LBP',
+            description: `Credit sale - Bill ${bill.bill_number}`,
+            reference: bill.bill_number,
+            customer_id: customerBalanceUpdate.customerId,
+            supplier_id:null,
+            category:"sale",
+            created_by: currentUserId,
+            status: 'active' as const
+          };
+          await db.transactions.add(transaction as any);
       for (const item of mappedLineItems) {
         if (item.inventory_item_id) {
           // Use the specific inventory item ID if provided
@@ -1147,10 +1175,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           }
         }
       }
-    });
+    }
+  }
+}
+);
 
     // Process cash drawer transaction for cash sales using the general utility
     const cashSaleItems = mappedLineItems.filter(item => item.payment_method === 'cash');
+    console.log('💰 Cash sale items:', cashSaleItems);
     let cashDrawerResult = null;
     if (cashSaleItems.length > 0) {
       try {
@@ -1165,6 +1197,27 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           customerId: cashSaleItems[0]?.customer_id || undefined
         });
 
+        // Record cash sale transaction for financial tracking
+        await db.transaction('rw', [db.transactions], async () => {
+          const cashTransaction = {
+            id: createId(),
+            store_id: storeId,
+            created_at: now,
+            updated_at: now,
+            _synced: false,
+            type: 'income', // Cash sale is income
+            amount: totalCashAmount,
+            currency: 'LBP',
+            description: `Cash sale - Bill ${bill.bill_number}`,
+            reference: bill.bill_number,
+            customer_id: cashSaleItems[0]?.customer_id || null,
+            supplier_id:null,
+            category:"sale",
+            created_by: currentUserId,
+          };
+          await db.transactions.add(cashTransaction as any);
+        });
+
         console.log(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
       } catch (error) {
         console.error('❌ Error updating cash drawer for sales:', error);
@@ -1177,7 +1230,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         { table: 'bills', id: billId },
         ...mappedLineItems.map(item => ({ table: 'bill_line_items', id: item.id })),
         ...inventoryStates.map(state => ({ table: 'inventory_items', id: state.id })),
-        ...(customerBalanceUpdate ? [{ table: 'customers', id: customerBalanceUpdate.customerId }] : [])
+        ...(customerBalanceUpdate ? [
+          { table: 'customers', id: customerBalanceUpdate.customerId },
+          { table: 'transactions', id: `credit-sale-${billId}` }
+        ] : []),
+        // Only include cash-sale transaction if we don't have a cash drawer result
+        // (cash drawer result will handle its own transaction)
+        ...(cashSaleItems.length > 0 && !cashDrawerResult ? [
+          { table: 'transactions', id: `cash-sale-${billId}` }
+        ] : [])
       ],
       steps: [
         // Delete the bill
@@ -1197,6 +1258,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           table: 'customers',
           id: customerBalanceUpdate.customerId,
           changes: { lb_balance: customerBalanceUpdate.originalBalance, _synced: false }
+        }] : []),
+        // Delete the credit transaction if applicable
+        ...(customerBalanceUpdate ? [{
+          op: 'delete',
+          table: 'transactions',
+          id: `credit-sale-${billId}`
+        }] : []),
+        // Delete the cash transaction if applicable (only if no cash drawer result)
+        ...(cashSaleItems.length > 0 && !cashDrawerResult ? [{
+          op: 'delete',
+          table: 'transactions',
+          id: `cash-sale-${billId}`
         }] : [])
       ]
     };

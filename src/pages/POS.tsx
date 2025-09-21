@@ -392,7 +392,7 @@ export default function POS() {
   const hasZeroPricedItem = activeTab.cart.some(i => (i.unitPrice ?? 0) === 0);
 
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
-  const handleCheckout = async () => {
+  const handleCheckout = async () => {handleCheckout
     if (activeTab.cart.length === 0) return;
     // Disallow completing sale if walk-in customer and any item has zero price
     if (!activeTab.selectedCustomer && activeTab.cart.some(i => (i.unitPrice ?? 0) === 0)) {
@@ -493,7 +493,6 @@ export default function POS() {
         payment_method: activeTab.paymentMethod,
         payment_status: paymentStatus,
         amount_paid: amountReceived,
-        amount_due: amountDue,
         bill_date: new Date().toISOString(),
         notes: activeTab.notes || null,
         status: 'active', // Use 'active' instead of 'completed'
@@ -504,6 +503,7 @@ export default function POS() {
       const lineItemsData = activeTab.cart.map(item => ({
         inventory_item_id: item.inventoryItemId,
         product_id: item.productId,
+        payment_method:item.paymentMethod,
         supplier_id: item.supplierId,
         quantity: item.quantity,
         unit_price: item.unitPrice || 0,

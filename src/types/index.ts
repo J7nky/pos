@@ -296,7 +296,7 @@ export interface Payment {
 export interface Transaction {
   
   id: string;
-  type: 'income' | 'expense';
+  type: 'income' | 'expense' | 'sale' | 'payment' | 'credit_sale';
   category: string;
   amount: number;
   currency: 'USD' | 'LBP';
