@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
-import { useOfflineData } from '../../contexts/OfflineDataContext';
-import { useCurrency } from '../../hooks/useCurrency';
-import SearchableSelect from '../common/SearchableSelect';
-import MoneyInput from '../common/MoneyInput';
-import { CashDrawerBalanceReport } from '../CashDrawerBalanceReport';
-import { CurrentCashDrawerStatus } from '../CurrentCashDrawerStatus';
+import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
+import { useOfflineData } from '../../../contexts/OfflineDataContext';
+import { useCurrency } from '../../../hooks/useCurrency';
+import SearchableSelect from '../../common/SearchableSelect';
+import MoneyInput from '../../common/MoneyInput';
+import { CashDrawerBalanceReport } from '../../CashDrawerBalanceReport';
+import { CurrentCashDrawerStatus } from '../../CurrentCashDrawerStatus';
 import { 
   FileText, 
   Search, 
@@ -42,7 +42,7 @@ import {
   BarChart3,
   
 } from 'lucide-react';
-import { createId } from '../../lib/db';
+import { createId } from '../../../lib/db';
 
 interface Bill {
   id: string;
@@ -483,7 +483,7 @@ export default function InventoryLogs() {
     );
   }
   return (
-    <div className="space-y-6">
+    <div>
       {/* Toast */}
       {toast && (
         <div className={`fixed top-4 right-4 px-4 py-2 rounded shadow-lg z-50 text-white ${
