@@ -4,7 +4,7 @@ import { useOfflineData } from '../../contexts/OfflineDataContext';
 
 const UndoToastManager: React.FC = () => {
   const { canUndo, undoLastAction } = useOfflineData();
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(false); 
   const [undoing, setUndoing] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [progress, setProgress] = useState(100);
