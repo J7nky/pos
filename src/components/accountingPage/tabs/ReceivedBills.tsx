@@ -12,8 +12,8 @@ import {
   Scale
 } from 'lucide-react';
 import { Bill } from '../../../lib/db';
-import WeightComparisonReport from '../../../components/WeightComparisonReport';
-import ReceiveFormModal from '../../../components/inventory/ReceiveFormModal';
+import WeightComparisonReport from '../../WeightComparisonReport';
+import ReceiveFormModal from '../../inventory/ReceiveFormModal';
 
 type ReceivedBillsProps = {
   inventory: any[];

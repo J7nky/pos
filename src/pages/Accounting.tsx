@@ -25,19 +25,19 @@ import {
 } from 'lucide-react';
 import Toast from '../components/common/Toast';
 import { CurrencyService } from '../services/currencyService';
-import ReceivedBills from '../components/accountingTabs/tabs/ReceivedBills';
-import InventoryLogs from '../components/accountingTabs/tabs/InventoryLogs';
+import ReceivedBills from '../components/accountingPage/tabs/ReceivedBills';
+import InventoryLogs from '../components/accountingPage/tabs/InventoryLogs';
 import { createId } from '../lib/db';
 import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
-import DashboardOverview from '../components/accountingTabs/tabs/DashboardOverview';
-import ExpenseManagement from '../components/accountingTabs/tabs/ExpenseManagement';
-import NonPricedItems from '../components/accountingTabs/tabs/NonPricedItems';
-import EditNonPricedModal from '../components/accountingTabs/modals/EditNonPricedModal';
-import { PaymentsModal } from '../components/accountingTabs/modals/PaymentsModal';
-import ReceivedBillDetailsModal from '../components/accountingTabs/modals/ReceivedBillDetailsModal';
-import EditSaleModal from '../components/accountingTabs/modals/EditSaleModal';
-import DeleteSaleModal from '../components/accountingTabs/modals/DeleteSaleModal';
-import ActionTabsBar from '../components/accountingTabs/tabs/ActionTabsBar';
+import DashboardOverview from '../components/accountingPage/tabs/DashboardOverview';
+import ExpenseManagement from '../components/accountingPage/tabs/ExpenseManagement';
+import NonPricedItems from '../components/accountingPage/tabs/NonPricedItems';
+import EditNonPricedModal from '../components/accountingPage/modals/EditNonPricedModal';
+import { PaymentsModal } from '../components/accountingPage/modals/PaymentsModal';
+import ReceivedBillDetailsModal from '../components/accountingPage/modals/ReceivedBillDetailsModal';
+import EditSaleModal from '../components/accountingPage/modals/EditSaleModal';
+import DeleteSaleModal from '../components/accountingPage/modals/DeleteSaleModal';
+import ActionTabsBar from '../components/accountingPage/tabs/ActionTabsBar';
 
 export default function Accounting() {
   let raw;

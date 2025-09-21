@@ -1,44 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, User, DollarSign, AlertTriangle, CheckCircle, Wallet, X } from 'lucide-react';
+import { Clock, User, AlertTriangle, CheckCircle, Wallet, X } from 'lucide-react';
 import { db } from '../lib/db';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 import { CashDrawerFlowTracker } from './CashDrawerFlowTracker';
+import { InventoryVerificationModal } from './InventoryVerificationModal';
 
 interface CurrentCashDrawerStatusProps {
   storeId: string;
   getCurrentStatus: () => Promise<any>;
 }
 
-interface CloseCashDrawerModalProps {
+
+// Simple Cash Balance Modal
+const CashBalanceModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
   onConfirm: (actualAmount: number) => void;
   expectedAmount: number;
-  sessionId: string | undefined;
   loading: boolean;
-  closingResult?: {
-    success: boolean;
-    expectedAmount: number;
-    actualAmount: number;
-    variance: number;
-    error?: string;
-  };
   error?: string;
-}
-
-const CloseCashDrawerModal: React.FC<CloseCashDrawerModalProps> = ({
-  isOpen,
-  onClose,
-  onConfirm,
-  expectedAmount,
-  sessionId,
-  loading,
-  closingResult,
-  error
-}) => {
+}> = ({ isOpen, onClose, onConfirm, expectedAmount, loading, error }) => {
   const [actualAmount, setActualAmount] = useState(expectedAmount);
-  const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setActualAmount(expectedAmount);
+    }
+  }, [isOpen, expectedAmount]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -47,79 +36,13 @@ const CloseCashDrawerModal: React.FC<CloseCashDrawerModalProps> = ({
     }).format(amount);
   };
 
-  // Reset form when modal opens
-  useEffect(() => {
-    if (isOpen && !closingResult) {
-      setActualAmount(expectedAmount);
-      setNotes('');
-    }
-  }, [isOpen, expectedAmount, closingResult]);
-
   if (!isOpen) return null;
-
-  // Show success state if closing was successful
-  if (closingResult?.success) {
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 w-full h-full max-w-md mx-4">
-          <div className="text-center">
-            <div className="mb-4">
-              <CheckCircle className="w-16 h-16 text-green-600 mx-auto" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Cash Drawer Closed</h3>
-            <div className="space-y-3 mb-6">
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <span className="text-sm font-medium text-gray-600">Final Actual Amount:</span>
-                <span className="ml-2 text-sm text-gray-900 font-semibold">
-                  {formatCurrency(closingResult.actualAmount)}
-                </span>
-              </div>
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <span className="text-sm font-medium text-gray-600">Expected Amount:</span>
-                <span className="ml-2 text-sm text-gray-900 font-semibold">
-                  {formatCurrency(closingResult.expectedAmount)}
-                </span>
-              </div>
-              <div className={`p-3 rounded-lg ${
-                closingResult.variance === 0 
-                  ? 'bg-green-50 border border-green-200' 
-                  : closingResult.variance > 0 
-                    ? 'bg-yellow-50 border border-yellow-200'
-                    : 'bg-red-50 border border-red-200'
-              }`}>
-                <span className="text-sm font-medium text-gray-600">Variance:</span>
-                <span className={`ml-2 text-sm font-semibold ${
-                  closingResult.variance === 0 
-                    ? 'text-green-800' 
-                    : closingResult.variance > 0 
-                      ? 'text-yellow-800'
-                      : 'text-red-800'
-                }`}>
-                  {formatCurrency(Math.abs(closingResult.variance))}
-                  {closingResult.variance === 0 ? ' (Balanced)' : closingResult.variance > 0 ? ' (Over)' : ' (Short)'}
-                </span>
-              </div>
-            </div>
-            <div className="mb-4 text-blue-700 text-sm font-medium">
-              The final cash drawer value is the actual counted amount you entered above.
-            </div>
-            <button
-              onClick={onClose}
-              className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Close Cash Drawer</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Verify Cash Balance</h3>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600"
@@ -128,7 +51,6 @@ const CloseCashDrawerModal: React.FC<CloseCashDrawerModalProps> = ({
           </button>
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-center">
@@ -144,7 +66,7 @@ const CloseCashDrawerModal: React.FC<CloseCashDrawerModalProps> = ({
               <strong>Expected Amount:</strong> {formatCurrency(expectedAmount)}
             </p>
             <p className="text-sm text-blue-600 mt-1">
-              Please count the actual cash in the drawer and enter the amount below.
+              Count the actual cash in the drawer and enter the amount below.
             </p>
           </div>
 
@@ -167,19 +89,6 @@ const CloseCashDrawerModal: React.FC<CloseCashDrawerModalProps> = ({
                 Please enter a valid amount greater than 0
               </p>
             )}
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Notes (Optional)
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              rows={3}
-              placeholder="Add any notes about the closing"
-            />
           </div>
 
           {actualAmount !== expectedAmount && (
@@ -229,10 +138,11 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
 }) => {
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showInventoryModal, setShowInventoryModal] = useState(false);
+  const [showCashBalanceModal, setShowCashBalanceModal] = useState(false);
   const [closingLoading, setClosingLoading] = useState(false);
-  const [closingResult, setClosingResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [, setInventoryVerificationData] = useState<any>(null);
   const { userProfile } = useSupabaseAuth();
 
   useEffect(() => {
@@ -278,8 +188,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
             _synced: false
           });
         }
-        // Set the closing result to show success state
-        setClosingResult(result);
+        // Closing successful
         
         // Refresh the status
         await loadStatus();
@@ -303,10 +212,25 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
     }
   };
 
-  const handleCloseModal = () => {
-    setShowCloseModal(false);
-    setClosingResult(null);
-    setError(null); // Clear error when closing modal
+
+  const handleInventoryVerificationComplete = (verificationData: any) => {
+    setInventoryVerificationData(verificationData);
+    setShowInventoryModal(false);
+    setShowCashBalanceModal(true); // Move to cash balance step
+    console.log('Inventory verification completed:', verificationData);
+  };
+
+  const handleInventoryModalClose = () => {
+    setShowInventoryModal(false);
+  };
+
+  const handleCashBalanceComplete = (actualAmount: number) => {
+    setShowCashBalanceModal(false);
+    handleCloseCashDrawer(actualAmount);
+  };
+
+  const handleCashBalanceModalClose = () => {
+    setShowCashBalanceModal(false);
   };
 
   const formatCurrency = (amount: number) => {
@@ -403,8 +327,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
             <div className="mt-6 flex justify-between items-center">
               <button
                 onClick={() => {
-                    setShowCloseModal(true);
-                  
+                  setShowInventoryModal(true); // Start with inventory verification
                 }}
                 className="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 text-sm font-medium"
               >
@@ -457,16 +380,22 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
         </div>
       )}
 
-      {/* Close Cash Drawer Modal */}
-      <CloseCashDrawerModal
-        isOpen={showCloseModal}
-        onClose={handleCloseModal}
-        onConfirm={handleCloseCashDrawer}
+      {/* Inventory Verification Modal */}
+      <InventoryVerificationModal
+        isOpen={showInventoryModal}
+        onClose={handleInventoryModalClose}
+        onConfirm={handleInventoryVerificationComplete}
+        loading={false}
+      />
+
+      {/* Cash Balance Modal */}
+      <CashBalanceModal
+        isOpen={showCashBalanceModal}
+        onClose={handleCashBalanceModalClose}
+        onConfirm={handleCashBalanceComplete}
         expectedAmount={status.currentBalance || 0}
-        sessionId={status.sessionId ?? undefined}
         loading={closingLoading}
-        closingResult={closingResult}
-        error={error}
+        error={error || undefined}
       />
     </>
   );
