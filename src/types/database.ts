@@ -570,6 +570,40 @@ export interface Database {
           customer_id?: string | null;
         };
       };
+      missed_products: {
+        Row: {
+          id: string;
+          session_id: string;
+          inventory_item_id: string;
+          system_quantity: number;
+          physical_quantity: number;
+          variance: number;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          inventory_item_id: string;
+          system_quantity: number;
+          physical_quantity: number;
+          variance: number;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          inventory_item_id?: string;
+          system_quantity?: number;
+          physical_quantity?: number;
+          variance?: number;
+          notes?: string | null;
+          updated_at?: string;
+        };
+      };
+      
     };
     Views: {
       [_ in never]: never;

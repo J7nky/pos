@@ -25,7 +25,14 @@ export interface CashDrawerAccount extends BaseEntity {
   is_active: boolean; // boolean not null default true
   current_balance: number | null; // numeric null
 }
-
+export interface MissedProduct extends BaseEntity {
+  session_id: string;
+  inventory_item_id: string;
+  system_quantity: number;
+  physical_quantity: number;
+  variance: number;
+  notes?: string;
+}
 export interface CashDrawerSession extends BaseEntity {
   account_id: string;
   opened_by: string;
@@ -248,6 +255,7 @@ class POSDatabase extends Dexie {
   pending_syncs!: Table<PendingSync, string>;
   cash_drawer_accounts!: Table<CashDrawerAccount, string>;
   cash_drawer_sessions!: Table<CashDrawerSession, string>;
+  missed_products!: Table<MissedProduct, string>;
   constructor() {
     super('POSDatabase');
     
@@ -281,7 +289,10 @@ class POSDatabase extends Dexie {
       
       // Sync management
       sync_metadata: 'id, table_name, last_synced_at',
-      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count'
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Cash drawer management
+      missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted'
     });
 
     // Migration for version 5 - update existing records to match new schema
@@ -360,6 +371,8 @@ class POSDatabase extends Dexie {
     this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.cash_drawer_sessions.hook('creating', this.addCreateFields);
     this.cash_drawer_accounts.hook('updating', this.addUpdateFields);
+    this.missed_products.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.missed_products.hook('updating', this.addUpdateFields);
 
     // Add hooks for automatic timestamping and ID generation
     // Tables WITH updated_at: products, suppliers, customers

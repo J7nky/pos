@@ -60,7 +60,7 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
           <img
             src={product.image}
             alt={product.name}
-            className="w-full max-h-64 object-cover rounded-lg group-hover:scale-105 transition-transform duration-200"
+            className="w-full h-40 object-cover rounded-lg group-hover:scale-105 transition-transform duration-200"
           />
         ) : (
           <div className="w-full h-40 flex items-center justify-center bg-gray-100 rounded-lg">

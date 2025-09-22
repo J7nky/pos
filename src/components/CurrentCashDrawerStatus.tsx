@@ -2,9 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Clock, User, AlertTriangle, CheckCircle, Wallet, X } from 'lucide-react';
 import { db } from '../lib/db';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 import { CashDrawerFlowTracker } from './CashDrawerFlowTracker';
 import { InventoryVerificationModal } from './accountingPage/modals/InventoryVerificationModal';
+import { MissedProductsSummary } from './MissedProductsSummary';
+import { missedProductsService } from '../services/missedProductsService';
 
 interface CurrentCashDrawerStatusProps {
   storeId: string;
@@ -142,8 +145,9 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
   const [showCashBalanceModal, setShowCashBalanceModal] = useState(false);
   const [closingLoading, setClosingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [, setInventoryVerificationData] = useState<any>(null);
+  const [inventoryVerificationData, setInventoryVerificationData] = useState<any>(null);
   const { userProfile } = useSupabaseAuth();
+  const { sync } = useOfflineData();
 
   useEffect(() => {
     loadStatus();
@@ -188,10 +192,42 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
             _synced: false
           });
         }
-        // Closing successful
+        
+        // Process inventory verification data if available
+        if (inventoryVerificationData) {
+          console.log('📊 Processing inventory verification data for session:', status.sessionId);
+          try {
+            const missedProductsResult = await missedProductsService.recordMissedProducts(
+              status.sessionId, 
+              storeId,
+              inventoryVerificationData
+            );
+            
+            if (missedProductsResult.success) {
+              console.log(`📊 Recorded ${missedProductsResult.recordedCount} missed products for session ${status.sessionId}`);
+            } else {
+              console.error('Failed to record missed products:', missedProductsResult.error);
+            }
+          } catch (error) {
+            console.error('Error recording missed products:', error);
+          }
+        }
         
         // Refresh the status
         await loadStatus();
+        
+        // Trigger sync to upload missed products and cash drawer data to cloud
+        try {
+          console.log('🔄 Triggering sync after cash drawer closing...');
+          await sync(false); // Manual sync
+          console.log('✅ Sync completed after cash drawer closing');
+        } catch (syncError) {
+          console.error('❌ Sync failed after cash drawer closing:', syncError);
+          // Don't fail the cash drawer closing if sync fails
+        }
+        
+        // Clear the verification data since it's been processed
+        setInventoryVerificationData(null);
         
         // Show success message with variance information
         console.log('Cash drawer closed successfully', {
@@ -213,15 +249,19 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
   };
 
 
-  const handleInventoryVerificationComplete = (verificationData: any) => {
+  const handleInventoryVerificationComplete = async (verificationData: any) => {
+    // Store verification data for later processing when cash drawer is actually closed
     setInventoryVerificationData(verificationData);
+    
     setShowInventoryModal(false);
     setShowCashBalanceModal(true); // Move to cash balance step
-    console.log('Inventory verification completed:', verificationData);
+    console.log('Inventory verification completed, moving to cash balance verification:', verificationData);
   };
 
   const handleInventoryModalClose = () => {
     setShowInventoryModal(false);
+    // Clear verification data if user cancels the process
+    setInventoryVerificationData(null);
   };
 
   const handleCashBalanceComplete = (actualAmount: number) => {
@@ -231,6 +271,8 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
 
   const handleCashBalanceModalClose = () => {
     setShowCashBalanceModal(false);
+    // Clear verification data if user cancels the process
+    setInventoryVerificationData(null);
   };
 
   const formatCurrency = (amount: number) => {
@@ -322,17 +364,60 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
                 </div>
               </div>
             </div>
+
+            {/* Missed Products Summary */}
+            <MissedProductsSummary sessionId={status.sessionId} storeId={storeId} />
+            
+            {/* Process Status Indicator */}
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="text-sm font-medium text-blue-800 mb-2">Cash Drawer Closing Process</h4>
+              <div className="flex items-center space-x-6">
+                <div className={`flex items-center ${inventoryVerificationData ? 'text-green-600' : 'text-gray-500'}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                    inventoryVerificationData ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {inventoryVerificationData ? '✓' : '1'}
+                  </div>
+                  <span className="ml-2 text-sm font-medium">Inventory Check</span>
+                </div>
+                <div className="text-gray-300">→</div>
+                <div className={`flex items-center ${inventoryVerificationData ? 'text-blue-600' : 'text-gray-400'}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                    inventoryVerificationData ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'
+                  }`}>
+                    2
+                  </div>
+                  <span className="ml-2 text-sm font-medium">Cash Balance</span>
+                </div>
+                <div className="text-gray-300">→</div>
+                <div className="flex items-center text-gray-400">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold bg-gray-100 text-gray-400">
+                    3
+                  </div>
+                  <span className="ml-2 text-sm font-medium">Close Drawer</span>
+                </div>
+              </div>
+              {inventoryVerificationData && (
+                <p className="mt-2 text-xs text-blue-600">✓ Inventory verification completed. You can cancel and restart if needed.</p>
+              )}
+            </div>
             
             {/* Close Cash Drawer Button */}
             <div className="mt-6 flex justify-between items-center">
-              <button
-                onClick={() => {
-                  setShowInventoryModal(true); // Start with inventory verification
-                }}
-                className="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 text-sm font-medium"
-              >
-                Close Cash Drawer
-              </button>
+                <button
+                  onClick={async () => {
+                    // Check if inventory verification has already been completed for this session
+                    if (inventoryVerificationData) {
+                      console.log('⚠️ Inventory verification already completed for this session, proceeding to cash balance');
+                      setShowCashBalanceModal(true);
+                    } else {
+                      setShowInventoryModal(true); // Start with inventory verification
+                    }
+                  }}
+                  className="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 text-sm font-medium"
+                >
+                  {inventoryVerificationData ? 'Continue to Cash Balance' : 'Start Closing Process'}
+                </button>
               
               <button
                 onClick={loadStatus}

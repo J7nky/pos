@@ -6,9 +6,11 @@ import {
   DollarSign, 
   Download,
   Users,
-  Package
+  Package,
+  AlertTriangle
 } from 'lucide-react';
 import SalesOverviewCard from '../components/cards/SalesOverviewCard';
+import { MissedProductsReport } from '../components/MissedProductsReport';
 
 export default function Reports() {
   const raw = useOfflineData();
@@ -23,7 +25,7 @@ export default function Reports() {
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0]
   });
-  const [reportType, setReportType] = useState<'sales' | 'inventory' | 'customers' | 'profit'>('sales');
+  const [reportType, setReportType] = useState<'sales' | 'inventory' | 'customers' | 'profit' | 'missed-products'>('sales');
 
   const filteredSales = sales.filter(sale => {
     if (!sale.createdAt) return false;
@@ -98,6 +100,7 @@ export default function Reports() {
               <option value="inventory">Inventory Report</option>
               <option value="customers">Customer Report</option>
               <option value="profit">Profit Analysis</option>
+              <option value="missed-products">Missed Products Report</option>
             </select>
           </div>
           <div>
@@ -362,6 +365,10 @@ export default function Reports() {
             </div>
           </div>
         </div>
+      )}
+
+      {reportType === 'missed-products' && (
+        <MissedProductsReport storeId={raw.storeId} />
       )}
     </div>
   );

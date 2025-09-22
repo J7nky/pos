@@ -34,6 +34,7 @@ interface OfflineDataContextType {
   bills: any[]; // Bill management data
   billLineItems: any[]; // Bill line items data
   billAuditLogs: any[]; // Bill audit logs data
+  missedProducts: any[]; // Missed products data
 
 
   // Computed/legacy compatibility - exact match
@@ -202,6 +203,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [bills, setBills] = useState<any[]>([]);
   const [billLineItems, setBillLineItems] = useState<any[]>([]);
   const [billAuditLogs, setBillAuditLogs] = useState<any[]>([]);
+  const [missedProducts, setMissedProducts] = useState<any[]>([]);
 
   // Loading states - exact match
   const [loading, setLoading] = useState({
@@ -510,6 +512,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         billAuditLogsData,
         cashDrawerAccountsData,
         cashDrawerSessionsData,
+        missedProductsData,
       } = await loadAllStoreData(storeId);
 
       console.log(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
@@ -561,6 +564,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setBills(billsData);
       setBillLineItems(billLineItemsData);
       setBillAuditLogs(billAuditLogsData);
+      setMissedProducts(missedProductsData);
 
       // Transform inventory to match expected structure and attach batch info for grouping/export
       const batchById = (batchesData || []).reduce((acc: any, b: any) => {
@@ -871,6 +875,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       () => db.bill_audit_logs.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
       () => db.cash_drawer_accounts.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
       () => db.cash_drawer_sessions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
+      () => db.missed_products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
     ];
 
     const results = await batchIndexedDBOperations(operations);
@@ -890,6 +895,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       billAuditLogsData: results[8],
       cashDrawerAccountsData: results[9],
       cashDrawerSessionsData: results[10],
+      missedProductsData: results[11],
     };
   };
 
@@ -2944,6 +2950,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         bills: [],
         billLineItems: [],
         billAuditLogs: [],
+        missedProducts: [],
         stockLevels: [],
         setStockLevels: () => {},
         lowStockAlertsEnabled: false,
@@ -3039,6 +3046,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       bills,
       billLineItems,
       billAuditLogs,
+      missedProducts,
 
 
       // Computed/legacy compatibility - exact match

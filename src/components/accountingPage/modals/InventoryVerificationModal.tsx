@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle, AlertTriangle } from 'lucide-react';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
+import { missedProductsService, MissedProductData } from '../../../services/missedProductsService';
 
 interface InventoryVerificationModalProps {
   isOpen: boolean;
@@ -10,15 +11,7 @@ interface InventoryVerificationModalProps {
 }
 
 interface InventoryVerificationData {
-  verifiedItems: Array<{
-    itemId: string;
-    productName: string;
-    systemQuantity: number;
-    physicalQuantity: number;
-    unit: string;
-    isVerified: boolean;
-    notes?: string;
-  }>;
+  verifiedItems: MissedProductData[];
 }
 
 interface InventoryItem {

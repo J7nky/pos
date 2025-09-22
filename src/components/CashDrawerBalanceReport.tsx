@@ -371,7 +371,7 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-200">
                                 {sessionDetails.transactions.sales.map((sale: any, index: number) => (
-                                  <tr key={index} className="hover:bg-gray-50">
+                                  <tr key={`sale-${sale.id || `sale-${index}`}`} className="hover:bg-gray-50">
                                     <td className="px-3 py-2 text-sm text-gray-900">{sale.product_name || 'Unknown'}</td>
                                     <td className="px-3 py-2 text-sm text-gray-900">{sale.quantity}</td>
                                     <td className="px-3 py-2 text-sm text-gray-900">{formatCurrency(sale.unit_price)}</td>
@@ -399,7 +399,7 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-200">
                                 {sessionDetails.transactions.payments.map((payment: any, index: number) => (
-                                  <tr key={index} className="hover:bg-gray-50">
+                                  <tr key={`payment-${payment.id || `payment-${index}`}`} className="hover:bg-gray-50">
                                     <td className="px-3 py-2 text-sm text-gray-900">{payment.description}</td>
                                     <td className="px-3 py-2 text-sm text-gray-900 font-semibold">{formatCurrency(payment.amount)}</td>
                                     <td className="px-3 py-2 text-sm text-gray-500">{payment.reference || '-'}</td>
@@ -426,7 +426,7 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-200">
                                 {sessionDetails.transactions.expenses.map((expense: any, index: number) => (
-                                  <tr key={index} className="hover:bg-gray-50">
+                                  <tr key={`expense-${expense.id || `expense-${index}`}`} className="hover:bg-gray-50">
                                     <td className="px-3 py-2 text-sm text-gray-900">{expense.description}</td>
                                     <td className="px-3 py-2 text-sm text-gray-900 font-semibold">{formatCurrency(expense.amount)}</td>
                                     <td className="px-3 py-2 text-sm text-gray-500">{expense.category}</td>

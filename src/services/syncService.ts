@@ -52,7 +52,10 @@ const SYNC_TABLES = [
   'bill_audit_logs',    // depends on stores, bills
   
   // Cash drawer sessions (depends on stores, cash_drawer_accounts)
-  'cash_drawer_sessions'
+  'cash_drawer_sessions',
+  
+  // Missed products (depends on stores, cash_drawer_sessions, inventory_items)
+  'missed_products'
 ] as const;
 
 type SyncTable = typeof SYNC_TABLES[number];
@@ -70,7 +73,8 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'bills': ['customers'],
   'bill_line_items': ['bills', 'products', 'suppliers', 'inventory_items'],
   'bill_audit_logs': ['bills'],
-  'cash_drawer_sessions': ['cash_drawer_accounts']
+  'cash_drawer_sessions': ['cash_drawer_accounts'],
+  'missed_products': ['cash_drawer_sessions', 'inventory_items']
 };
 
 export interface SyncResult {
@@ -1927,6 +1931,10 @@ export class SyncService {
    * Force sync specific table
    */
   async syncTable(storeId: string, tableName: SyncTable): Promise<SyncResult> {
+    if (tableName === 'missed_products') {
+      console.log(`🔄 Starting sync for missed_products table`);
+    }
+    
     const result: SyncResult = {
       success: true,
       errors: [],
@@ -1937,6 +1945,12 @@ export class SyncService {
     try {
       // Upload unsynced records
       const unsyncedRecords = await db.getUnsyncedRecords(tableName);
+      if (tableName === 'missed_products') {
+        console.log(`🔍 Found ${unsyncedRecords.length} unsynced missed_products records`);
+        if (unsyncedRecords.length > 0) {
+          console.log('🔍 Unsynced missed_products:', unsyncedRecords);
+        }
+      }
       if (unsyncedRecords.length > 0) {
         // Clean records for upload
         const cleanedRecords = (unsyncedRecords as any[])
@@ -1946,6 +1960,10 @@ export class SyncService {
         console.log(`📤 Uploading ${cleanedRecords.length} ${tableName} records to Supabase`);
         if (tableName === 'bills' && cleanedRecords.length > 0) {
           console.log('🔍 Bills data fields:', cleanedRecords[0] ? Object.keys(cleanedRecords[0]) : 'No records');
+        }
+        if (tableName === 'missed_products' && cleanedRecords.length > 0) {
+          console.log('🔍 Missed Products data:', cleanedRecords);
+          console.log('🔍 Missed Products fields:', cleanedRecords[0] ? Object.keys(cleanedRecords[0]) : 'No records');
         }
 
         const { error } = await supabase
