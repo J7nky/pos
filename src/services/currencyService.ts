@@ -118,13 +118,7 @@ export class CurrencyService {
     // Additional validation for LBP (no decimals)
     if (currency === 'LBP' && amount % 1 !== 0) return false;
     
-    // Check database precision limits (max: 99,999,999.99)
-    const MAX_DB_AMOUNT = 99999999.99;
-    if (amount > MAX_DB_AMOUNT) {
-      console.warn(`Amount ${amount} exceeds database precision limit of ${MAX_DB_AMOUNT}`);
-      return false;
-    }
-    
+  
     return true;
   }
 
@@ -137,11 +131,8 @@ export class CurrencyService {
    * Returns the converted amount and whether it was converted
    */
   public safeConvertForDatabase(amount: number, currency: 'USD' | 'LBP'): { amount: number; currency: 'USD' | 'LBP'; wasConverted: boolean } {
-    const MAX_DB_AMOUNT = 99999999.99;
     
-    if (amount >= MAX_DB_AMOUNT) {
-      return { amount, currency, wasConverted: false };
-    }
+
     
     if (currency === 'USD') {
       // Convert USD to LBP

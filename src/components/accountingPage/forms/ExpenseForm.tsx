@@ -93,25 +93,17 @@ export const ExpenseForm: React.FC<ExpenseFormProps> = ({
         <input
           type="number"
           step="0.01"
-          max="99999999.99"
           value={expenseForm.amount}
           onChange={(e) => {
             const value = e.target.value;
             const numValue = parseFloat(value);
-            if (numValue > 99999999.99) {
-              showToast(
-                "Amount exceeds maximum allowed value (99,999,999.99)",
-                "error"
-              );
-              return;
-            }
+           
             setExpenseForm((prev: any) => ({ ...prev, amount: value }));
           }}
           className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
           required
           placeholder={`Enter amount in ${expenseForm.currency}`}
         />
-        <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
       </div>
 
       {/* Conversion */}

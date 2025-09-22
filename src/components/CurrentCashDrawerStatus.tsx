@@ -4,7 +4,7 @@ import { db } from '../lib/db';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 import { CashDrawerFlowTracker } from './CashDrawerFlowTracker';
-import { InventoryVerificationModal } from './InventoryVerificationModal';
+import { InventoryVerificationModal } from './accountingPage/modals/InventoryVerificationModal';
 
 interface CurrentCashDrawerStatusProps {
   storeId: string;

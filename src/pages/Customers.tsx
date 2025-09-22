@@ -75,10 +75,6 @@ export default function Customers() {
       return { isValid: false };
     }
 
-    if (numAmount > 99999999.99) {
-      showToast('Amount exceeds maximum allowed value (99,999,999.99)', 'error');
-      return { isValid: false };
-    }
 
     // Validate entity selection
     if (!entityId || entityId.trim() === '') {
@@ -812,22 +808,16 @@ export default function Customers() {
                   <input
                     type="number"
                     step="0.01"
-                    max="99999999.99"
                     value={paymentForm.amount}
                     onChange={(e) => {
                       const value = e.target.value;
-                      const numValue = parseFloat(value);
-                      if (numValue > 99999999.99) {
-                        showToast('Amount exceeds maximum allowed value (99,999,999.99)', 'error');
-                        return;
-                      }
+                   
                       setPaymentForm(prev => ({ ...prev, amount: value }));
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
                     required
                     placeholder="0.00"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
                 </div>
                 
                 <div>
@@ -915,22 +905,16 @@ export default function Customers() {
                   <input
                     type="number"
                     step="0.01"
-                    max="99999999.99"
                     value={paymentForm.amount}
                     onChange={(e) => {
                       const value = e.target.value;
-                      const numValue = parseFloat(value);
-                      if (numValue > 99999999.99) {
-                        showToast('Amount exceeds maximum allowed value (99,999,999.99)', 'error');
-                        return;
-                      }
+              
                       setPaymentForm(prev => ({ ...prev, amount: value }));
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
                     required
                     placeholder="0.00"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Maximum: 99,999,999.99</p>
                 </div>
                 
                 <div>

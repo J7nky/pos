@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle, AlertTriangle } from 'lucide-react';
-import { useOfflineData } from '../contexts/OfflineDataContext';
+import { useOfflineData } from '../../../contexts/OfflineDataContext';
 
 interface InventoryVerificationModalProps {
   isOpen: boolean;
