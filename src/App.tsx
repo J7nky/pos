@@ -3,6 +3,8 @@ import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthCo
 import { OfflineDataProvider } from './contexts/OfflineDataContext';
 import SupabaseLogin from './components/SupabaseLogin';
 import { I18nProvider, useI18n } from './i18n';
+import ErrorBoundary from './components/ErrorBoundary';
+import I18nErrorBoundary from './components/I18nErrorBoundary';
 import { Outlet, useLocation } from 'react-router-dom';
 
 function AppContent() {
@@ -32,12 +34,16 @@ function AppContent() {
 
 export default function App() {
   return (
-    <I18nProvider>
+    <ErrorBoundary>
       <SupabaseAuthProvider>
         <OfflineDataProvider>
-          <AppContent />
+          <I18nErrorBoundary>
+            <I18nProvider>
+              <AppContent />
+            </I18nProvider>
+          </I18nErrorBoundary>
         </OfflineDataProvider>
       </SupabaseAuthProvider>
-    </I18nProvider>
+    </ErrorBoundary>
   );
 }

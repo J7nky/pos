@@ -45,23 +45,8 @@ export default function Settings() {
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Handle language change with database update
-  const handleLanguageChange = async (newLanguage: string) => {
-    setLanguage(newLanguage);
-    if (userProfile?.store_id) {
-      try {
-        // Note: Language preference will be synced to store settings via background sync
-        setShowSaveMessage(true);
-        setSaveError(null);
-        setTimeout(() => setShowSaveMessage(false), 2000);
-      } catch (error) {
-        console.error('Failed to save language preference to database:', error);
-        setSaveError('Failed to save language preference to database');
-        setTimeout(() => setSaveError(null), 3000);
-        // Language change still works locally
-      }
-    }
-  };
+  // Language change is now handled by the I18nProvider through OfflineDataContext
+  // No need for custom handling here
 
   const handleThresholdSave = () => {
     const newThreshold = parseInt(tempThreshold);
@@ -420,7 +405,7 @@ export default function Settings() {
           <div className="flex items-center space-x-3">
             <select
               value={language}
-              onChange={(e) => handleLanguageChange(e.target.value)}
+              onChange={(e) => setLanguage(e.target.value)}
               className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="ar">{t('settings.language_ar')}</option>

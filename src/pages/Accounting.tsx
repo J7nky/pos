@@ -410,18 +410,18 @@ export default function Accounting() {
       const { erpFinancialService } = await import('../services/erpFinancialService');
 
       // Sync current entities to ERP service
-      localStorage.setItem('erp_customers', JSON.stringify(customers));
-      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
-      erpFinancialService.reloadData();
+      // localStorage.setItem('erp_customers', JSON.stringify(customers));
+      // localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
+      // erpFinancialService.reloadData();
 
-      const result = erpFinancialService.processEntityPayment(
-        receiveForm.entityType,
-        receiveForm.entityId,
-        parseFloat(receiveForm.amount),
-        receiveForm.currency as 'USD' | 'LBP',
-        `Payment from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
-        userProfile?.id || ''
-      );
+      // const result = erpFinancialService.processEntityPayment(
+      //   receiveForm.entityType,
+      //   receiveForm.entityId,
+      //   parseFloat(receiveForm.amount),
+      //   receiveForm.currency as 'USD' | 'LBP',
+      //   `Payment from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
+      //   userProfile?.id || ''
+      // );
 
       // Update entity balance in main application
       // Store amounts in their respective currency fields

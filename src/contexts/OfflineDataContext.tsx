@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { useLocalStorage } from '../hooks/useLocalStorage';
 import { Database } from '../types/database';
 import { BillLineItem, BillLineItemTransforms } from '../types';
 import { 
@@ -45,6 +44,7 @@ interface OfflineDataContextType {
   defaultCommissionRate: number;
   currency: 'USD' | 'LBP';
   exchangeRate: number;
+  language: 'en' | 'ar' | 'fr';
   cashDrawer: any;
   openCashDrawer: (amount: number, openedBy: string) => void;
   closeCashDrawer: (actualAmount: number, closedBy: string, notes?: string) => void;
@@ -128,6 +128,7 @@ interface OfflineDataContextType {
   updateDefaultCommissionRate: (rate: number) => Promise<void>;
   updateCurrency: (newCurrency: 'USD' | 'LBP') => Promise<void>;
   updateExchangeRate: (rate: number) => Promise<void>;
+  updateLanguage: (language: 'en' | 'ar' | 'fr') => Promise<void>;
 
   // Additional offline-specific features
   sync: (isAutomatic?: boolean) => Promise<SyncResult>;
@@ -236,29 +237,32 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return !!undoData;
   });
 
-  // Legacy compatibility states - exact match
-  const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useLocalStorage<boolean>('lowStockAlertsEnabled', true);
-  const [lowStockThreshold, setLowStockThreshold] = useLocalStorage<number>('lowStockThreshold', 10);
-  const [defaultCommissionRate, setDefaultCommissionRate] = useLocalStorage<number>('defaultCommissionRate', 10);
-  const [currency, setCurrency] = useLocalStorage<'USD' | 'LBP'>('currency', 'LBP');
-  const [exchangeRate, setExchangeRate] = useLocalStorage<number>('exchangeRate', 89500);
-  const [cashDrawer, setCashDrawer] = useState<any>(() => {
-    const stored = localStorage.getItem('erp_cash_drawer');
-    return stored ? JSON.parse(stored) : null;
+  // Settings states - loaded from IndexedDB stores table
+  const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useState<boolean>(true);
+  const [lowStockThreshold, setLowStockThreshold] = useState<number>(() => {
+    const stored = localStorage.getItem('lowStockThreshold');
+    return stored ? parseInt(stored, 10) : 10;
   });
+  const [defaultCommissionRate, setDefaultCommissionRate] = useState<number>(10);
+  const [currency, setCurrency] = useState<'USD' | 'LBP'>('LBP');
+  const [exchangeRate, setExchangeRate] = useState<number>(89500);
+  const [language, setLanguage] = useState<'en' | 'ar' | 'fr'>('ar');
+  const [cashDrawer, setCashDrawer] = useState<any>(null);
   const [stockLevels, setStockLevels] = useState<any[]>([]);
 
-  // Load store data and update currency
+  // Load store data and settings from IndexedDB
   const loadStoreData = async () => {
     if (!storeId) return;
-
+    
     try {
-      // First check if store data exists in IndexedDB
+      // Load store data from IndexedDB
       const existingStore = await db.stores.where('id').equals(storeId).first();
 
       if (existingStore) {
         // Use existing store data
         console.log('📦 Using cached store data:', existingStore);
+        
+        // Update settings from store data
         if (existingStore.preferred_currency) {
           setCurrency(existingStore.preferred_currency);
         }
@@ -271,6 +275,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         if (existingStore.exchange_rate !== undefined) {
           setExchangeRate(existingStore.exchange_rate);
         }
+        if (existingStore.preferred_language) {
+          setLanguage(existingStore.preferred_language);
+        }
+        
+        // Load cash drawer status from IndexedDB
+        await refreshCashDrawerStatus();
       } else {
         // Store not found locally - will be synced when connection is available
         console.log('📴 Store data not found locally - will sync when online');
@@ -278,9 +288,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         setCurrency('LBP');
         setDefaultCommissionRate(10);
         setExchangeRate(89500);
+        setLowStockAlertsEnabled(true);
       }
     } catch (error) {
       console.error('❌ Error loading store data:', error);
+      // Use default values on error
+      setCurrency('LBP');
+      setDefaultCommissionRate(10);
+      setExchangeRate(89500);
+      setLowStockAlertsEnabled(true);
     }
   };
 
@@ -390,6 +406,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       // Mark migration as complete - we now handle precision issues during sync
+      // This is system state, so localStorage is appropriate
       localStorage.setItem(migrationKey, new Date().toISOString());
       console.log('✅ Transaction migration completed - precision issues now handled during sync');
     } catch (error) {
@@ -2500,16 +2517,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         lastUpdated: new Date().toISOString()
       });
 
-      // Store in localStorage for persistence
-      localStorage.setItem('erp_cash_drawer', JSON.stringify({
-        id: result.sessionId,
-        accountId: account.id,
-        status: 'open',
-        currentBalance: amount,
-        currency: (account as any).currency,
-        lastUpdated: new Date().toISOString()
-      }));
-
       // Dispatch event to notify components
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
@@ -2567,14 +2574,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         currentBalance: 0,
         lastUpdated: new Date().toISOString()
       });
-
-      // Update localStorage
-      localStorage.setItem('erp_cash_drawer', JSON.stringify({
-        ...cashDrawer,
-        status: 'closed',
-        currentBalance: 0,
-        lastUpdated: new Date().toISOString()
-      }));
 
       // Store undo data
       pushUndo({
@@ -2635,19 +2634,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           lastUpdated: new Date().toISOString()
         });
 
-        // Update localStorage
-        localStorage.setItem('erp_cash_drawer', JSON.stringify({
-          id: status.sessionId,
-          accountId: status.accountId,
-          status: 'open',
-          currentBalance: status.currentBalance,
-          currency: currency,
-          lastUpdated: new Date().toISOString()
-        }));
       } else {
         // No active session
         setCashDrawer(null);
-        localStorage.removeItem('erp_cash_drawer');
       }
     } catch (error) {
       console.error('Error refreshing cash drawer status:', error);
@@ -2706,7 +2695,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateLowStockThreshold = (threshold: number) => {
+    // Low stock threshold is UI state only, not business data
+    // Keep in localStorage as it's not synced to server
     setLowStockThreshold(threshold);
+    localStorage.setItem('lowStockThreshold', threshold.toString());
   };
 
   const updateDefaultCommissionRate = async (rate: number) => {
@@ -2823,6 +2815,45 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.error('❌ Error updating exchange rate:', error);
       // Revert local state on error
       setExchangeRate(exchangeRate);
+    }
+  };
+
+  const updateLanguage = async (newLanguage: 'en' | 'ar' | 'fr') => {
+    if (!storeId) {
+      console.warn('No store ID available for language update');
+      return;
+    }
+
+    try {
+      // Update local state immediately
+      setLanguage(newLanguage);
+      
+      // Update IndexedDB
+      await db.stores
+        .where('id')
+        .equals(storeId)
+        .modify({ 
+          preferred_language: newLanguage,
+          _synced: false,
+          updated_at: new Date().toISOString()
+        });
+
+      console.log('✅ Language updated locally:', newLanguage);
+      
+      // Update unsynced count immediately
+      await updateUnsyncedCount();
+      
+      // Trigger immediate sync for settings changes
+      if (isOnline && !isSyncing) {
+        console.log('🔄 Triggering immediate sync for language change');
+        performSync(true);
+      } else {
+        debouncedSync();
+      }
+    } catch (error) {
+      console.error('❌ Error updating language:', error);
+      // Revert local state on error
+      setLanguage(language);
     }
   };
 
@@ -2958,6 +2989,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         defaultCommissionRate: 10,
         currency: 'LBP',
         exchangeRate: 89500,
+        language: 'ar',
         cashDrawer: null,
         openCashDrawer: async () => {},
         closeCashDrawer: async () => {},
@@ -3014,6 +3046,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateDefaultCommissionRate: async () => {},
         updateCurrency: async () => {},
         updateExchangeRate: async () => {},
+        updateLanguage: async () => {},
         sync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
         fullResync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
         debouncedSync: () => {},
@@ -3057,6 +3090,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       defaultCommissionRate,
       currency,
       exchangeRate,
+      language,
       cashDrawer,
       closeCashDrawer,
       getCashDrawerBalanceReport,
@@ -3112,6 +3146,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateDefaultCommissionRate,
       updateCurrency,
       updateExchangeRate,
+      updateLanguage,
 
       // Additional offline-specific features
       sync: performSync,

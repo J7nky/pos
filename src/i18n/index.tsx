@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useMemo, useState, ReactNode, useEffect } from 'react';
+import { createContext, useContext, useMemo, useState, ReactNode, useEffect } from 'react';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 
 type Translations = Record<string, any>;
 
@@ -27,20 +28,37 @@ function interpolate(template: string, vars?: Record<string, string | number>): 
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
+  const offlineData = useOfflineData();
+  
+  // Get language from OfflineDataContext (which loads from IndexedDB stores table)
   const [language, setLanguage] = useState<string>(() => {
-    const stored = localStorage.getItem('app_language');
-    return stored || 'ar';
+    // Default to Arabic if no store data is available yet
+    return 'ar';
   });
 
-  // Load language preference from user profile if available
+  // Update language when store data is loaded
   useEffect(() => {
-    // This will be called when the component mounts
-    // The actual user profile loading will be handled by the Settings component
-    // which will call setLanguage when the profile is loaded
-  }, []);
+    if (offlineData?.language) {
+      setLanguage(offlineData.language);
+    }
+  }, [offlineData?.language]);
+
+  // Handle language changes by updating the store
+  const handleLanguageChange = async (newLanguage: string) => {
+    setLanguage(newLanguage);
+    
+    // Update the store's preferred language in IndexedDB
+    if (offlineData?.updateLanguage) {
+      try {
+        await offlineData.updateLanguage(newLanguage as 'en' | 'ar' | 'fr');
+      } catch (error) {
+        console.error('Failed to update language preference:', error);
+        // Language change still works locally even if database update fails
+      }
+    }
+  };
 
   useEffect(() => {
-    localStorage.setItem('app_language', language);
     const dir = language === 'ar' ? 'rtl' : 'ltr';
     if (typeof document !== 'undefined') {
       document.documentElement.setAttribute('dir', dir);
@@ -50,7 +68,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<I18nContextType>(() => ({
     language,
-    setLanguage,
+    setLanguage: handleLanguageChange,
     t: (key: string, vars?: Record<string, string | number>) => {
       const dict = DICTIONARY[language] || {};
       let raw = getByPath(dict, key);
@@ -64,7 +82,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       const str = typeof raw === 'string' ? raw : key;
       return interpolate(str, vars);
     },
-  }), [language]);
+  }), [language, handleLanguageChange]);
 
   return (
     <I18nContext.Provider value={value}>
