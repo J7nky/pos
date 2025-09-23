@@ -410,9 +410,8 @@ export default function Accounting() {
       const { erpFinancialService } = await import('../services/erpFinancialService');
 
       // Sync current entities to ERP service
-      // localStorage.setItem('erp_customers', JSON.stringify(customers));
-      // localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
-      // erpFinancialService.reloadData();
+      // Data is now managed through IndexedDB directly
+      await erpFinancialService.reloadData(storeId);
 
       // const result = erpFinancialService.processEntityPayment(
       //   receiveForm.entityType,
@@ -585,9 +584,7 @@ export default function Accounting() {
 
       // Sync current entities to ERP service
       console.log('Syncing entities to ERP service:', payForm.entityType === 'customer' ? customers.length : suppliers.length, 'entities');
-      localStorage.setItem('erp_customers', JSON.stringify(customers));
-      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
-      erpFinancialService.reloadData();
+      await erpFinancialService.reloadData(storeId);
       console.log('Entity found for payment:', entity.name);
 
       const result = erpFinancialService.processEntityPayment(
@@ -742,9 +739,9 @@ export default function Accounting() {
       // Use the ERP Financial Service to process the expense
       const { erpFinancialService } = await import('../services/erpFinancialService');
 
-      // Sync current data to ERP service (for consistency)
-      localStorage.setItem('erp_customers', JSON.stringify(customers));
-      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
+          // // Sync current data to ERP service (for consistency)
+          // localStorage.setItem('erp_customers', JSON.stringify(customers));
+          // localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
       erpFinancialService.reloadData();
 
       const result = erpFinancialService.processExpense(

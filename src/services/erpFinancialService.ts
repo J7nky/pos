@@ -8,6 +8,7 @@ import {
   InventoryItem,
   CashDrawer 
 } from '../types';
+// Remove dataAccessService import - use OfflineDataContext instead
 
 export interface SaleData {
   id: string;
@@ -89,21 +90,59 @@ export class ERPFinancialService {
   private cashDrawer: CashDrawer | null = null;
   private financialTransactions: FinancialTransaction[] = [];
   private accountBalances: Map<string, AccountBalance> = new Map();
+  private storeId: string | null = null;
 
   constructor() {
-    this.loadData();
+    // No longer load data in constructor - load on demand
   }
 
-  private loadData() {
-    // Load data from localStorage or context
-    this.customers = JSON.parse(localStorage.getItem('erp_customers') || '[]');
-    this.suppliers = JSON.parse(localStorage.getItem('erp_suppliers') || '[]');
-    this.transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
-    this.accountsReceivable = JSON.parse(localStorage.getItem('erp_accounts_receivable') || '[]');
-    this.accountsPayable = JSON.parse(localStorage.getItem('erp_accounts_payable') || '[]');
-    this.inventory = JSON.parse(localStorage.getItem('erp_inventory') || '[]');
-    this.cashDrawer = JSON.parse(localStorage.getItem('erp_cash_drawer') || 'null');
-    this.financialTransactions = JSON.parse(localStorage.getItem('erp_financial_transactions') || '[]');
+  private async loadData(storeId: string) {
+    if (this.storeId === storeId && this.customers.length > 0) {
+      return; // Already loaded
+    }
+
+    this.storeId = storeId;
+    
+    // Load data directly from IndexedDB (OfflineDataContext handles the architecture)
+    const { db } = await import('../lib/db');
+    
+    const [customers, suppliers, transactions] = await Promise.all([
+      db.customers.where('store_id').equals(storeId).toArray(),
+      db.suppliers.where('store_id').equals(storeId).toArray(),
+      db.transactions.where('store_id').equals(storeId).toArray()
+    ]);
+    
+    // Transform to expected format
+    this.customers = customers.map(c => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      email: c.email || '',
+      address: c.address || '',
+      lbBalance: c.lb_balance || 0,
+      usdBalance: c.usd_balance || 0,
+      isActive: c.is_active,
+      createdAt: c.created_at,
+      balance: c.usd_balance || 0,
+    }));
+    
+    this.suppliers = suppliers.map(s => ({
+      id: s.id,
+      name: s.name,
+      phone: s.phone,
+      email: s.email || '',
+      address: s.address,
+      lbBalance: s.lb_balance || 0,
+      usdBalance: s.usd_balance || 0,
+      createdAt: s.created_at,
+      balance: s.usd_balance || 0,
+    }));
+    
+    this.transactions = transactions;
+    this.accountsReceivable = []; // Will be calculated from bill_line_items
+    this.accountsPayable = []; // Will be calculated from bill_line_items
+    this.inventory = []; // Will be loaded separately
+    this.cashDrawer = null; // Managed separately
     
     this.initializeAccountBalances();
   }
@@ -138,20 +177,9 @@ export class ERPFinancialService {
     });
   }
 
-  private saveData() {
-    localStorage.setItem('erp_customers', JSON.stringify(this.customers));
-    localStorage.setItem('erp_suppliers', JSON.stringify(this.suppliers));
-    localStorage.setItem('erp_transactions', JSON.stringify(this.transactions));
-    localStorage.setItem('erp_accounts_receivable', JSON.stringify(this.accountsReceivable));
-    localStorage.setItem('erp_accounts_payable', JSON.stringify(this.accountsPayable));
-    localStorage.setItem('erp_inventory', JSON.stringify(this.inventory));
-    localStorage.setItem('erp_cash_drawer', JSON.stringify(this.cashDrawer));
-    localStorage.setItem('erp_financial_transactions', JSON.stringify(this.financialTransactions));
-  }
-
-  // Public method to reload data from localStorage
-  reloadData() {
-    this.loadData();
+  // Public method to reload data from IndexedDB
+  async reloadData(storeId: string) {
+    await this.loadData(storeId);
   }
 
   private convertCurrency(amount: number, fromCurrency: 'USD' | 'LBP', toCurrency: 'USD' | 'LBP'): number {
@@ -204,7 +232,9 @@ export class ERPFinancialService {
   }
 
   // Process customer credit sale
-  processCustomerCreditSale(sale: SaleData, items: SaleItem[]): TransactionSummary {
+  async processCustomerCreditSale(sale: SaleData, items: SaleItem[], storeId: string): Promise<TransactionSummary> {
+    await this.loadData(storeId);
+    
     const customer = this.customers.find(c => c.id === sale.customerId);
     if (!customer) {
       throw new Error('Customer not found');
@@ -217,10 +247,18 @@ export class ERPFinancialService {
     // Update customer balance
     this.updateAccountBalance(customer.id, sale.amountDue, true);
     
-    // Update customer balance in customers array
+    // Update customer balance in IndexedDB
+    const { db } = await import('../lib/db');
+    await db.customers.update(customer.id, { 
+      usd_balance: balanceAfter,
+      _synced: false,
+      updated_at: new Date().toISOString()
+    });
+    
+    // Update local cache
     const customerIndex = this.customers.findIndex(c => c.id === customer.id);
     if (customerIndex !== -1) {
-      this.customers[customerIndex].balance = balanceAfter; // Updated to use balance field
+      this.customers[customerIndex].balance = balanceAfter;
     }
 
     // Create accounts receivable entry
@@ -257,7 +295,7 @@ export class ERPFinancialService {
       createdBy: sale.createdBy
     });
 
-    this.saveData();
+    // Data is now persisted directly to IndexedDB
 
     return {
       transactionId: financialTransaction.id,
@@ -276,7 +314,9 @@ export class ERPFinancialService {
   }
 
   // Process customer payment
-  processCustomerPayment(customerId: string, amount: number, currency: 'USD' | 'LBP', description: string, createdBy: string): TransactionSummary {
+  async processCustomerPayment(customerId: string, amount: number, currency: 'USD' | 'LBP', description: string, createdBy: string, storeId: string): Promise<TransactionSummary> {
+    await this.loadData(storeId);
+    
     const customer = this.customers.find(c => c.id === customerId);
     if (!customer) {
       throw new Error('Customer not found');
@@ -290,10 +330,18 @@ export class ERPFinancialService {
     // Update customer balance
     this.updateAccountBalance(customer.id, amountInUSD, false);
     
-    // Update customer balance
+    // Update customer balance in IndexedDB
+    const { db } = await import('../lib/db');
+    await db.customers.update(customer.id, { 
+      usd_balance: balanceAfter,
+      _synced: false,
+      updated_at: new Date().toISOString()
+    });
+    
+    // Update local cache
     const customerIndex = this.customers.findIndex(c => c.id === customer.id);
     if (customerIndex !== -1) {
-      this.customers[customerIndex].balance = balanceAfter; // Updated to use balance field
+      this.customers[customerIndex].balance = balanceAfter;
     }
 
     // RULE 2 FIX: For cash payments, INCREASE cash drawer by payment amount
@@ -335,7 +383,7 @@ export class ERPFinancialService {
       createdBy
     });
 
-    this.saveData();
+    // Data is now persisted directly to IndexedDB
 
     return {
       transactionId: financialTransaction.id,
@@ -449,7 +497,7 @@ export class ERPFinancialService {
       createdBy
     });
 
-    this.saveData();
+    // Data is now persisted directly to IndexedDB
 
     return {
       transactionId: financialTransaction.id,
@@ -521,7 +569,7 @@ export class ERPFinancialService {
       createdBy
     });
 
-    this.saveData();
+    // Data is now persisted directly to IndexedDB
 
     return {
       transactionId: financialTransaction.id,
@@ -625,7 +673,7 @@ export class ERPFinancialService {
       createdBy
     });
 
-    this.saveData();
+    // Data is now persisted directly to IndexedDB
 
     return {
       transactionId: financialTransaction.id,
@@ -667,7 +715,7 @@ export class ERPFinancialService {
       createdBy: sale.createdBy
     });
 
-    this.saveData();
+    // Data is now persisted directly to IndexedDB
 
     return {
       transactionId: financialTransaction.id,
@@ -704,7 +752,7 @@ export class ERPFinancialService {
       createdBy
     });
 
-    this.saveData();
+    // Data is now persisted directly to IndexedDB
 
     return {
       transactionId: financialTransaction.id,

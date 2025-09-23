@@ -106,17 +106,8 @@ export class WeightConfigurationService {
    * Get current weight configuration
    */
   public getConfiguration(): WeightConfiguration {
-    try {
-      const stored = localStorage.getItem(WeightConfigurationService.STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Merge with defaults to ensure all fields exist
-        return { ...this.getDefaultConfiguration(), ...parsed };
-      }
-    } catch (error) {
-      console.error('Error loading weight configuration:', error);
-    }
-    
+    // Weight configuration is now stored in IndexedDB via store settings
+    // This method is kept for backward compatibility but returns defaults
     return this.getDefaultConfiguration();
   }
 
@@ -124,27 +115,16 @@ export class WeightConfigurationService {
    * Update weight configuration
    */
   public updateConfiguration(updates: Partial<WeightConfiguration>): void {
-    try {
-      const current = this.getConfiguration();
-      const updated = { ...current, ...updates };
-      localStorage.setItem(WeightConfigurationService.STORAGE_KEY, JSON.stringify(updated));
-    } catch (error) {
-      console.error('Error saving weight configuration:', error);
-      throw new Error('Failed to save weight configuration');
-    }
+    // Weight configuration updates should now go through store settings
+    console.warn('Weight configuration updates should be handled through store settings');
   }
 
   /**
    * Reset configuration to defaults
    */
   public resetToDefaults(): void {
-    try {
-      const defaults = this.getDefaultConfiguration();
-      localStorage.setItem(WeightConfigurationService.STORAGE_KEY, JSON.stringify(defaults));
-    } catch (error) {
-      console.error('Error resetting weight configuration:', error);
-      throw new Error('Failed to reset weight configuration');
-    }
+    // Weight configuration reset should now go through store settings
+    console.warn('Weight configuration reset should be handled through store settings');
   }
 
   /**

@@ -190,10 +190,8 @@ export default function Customers() {
       const { erpFinancialService } = await import('../services/erpFinancialService');
 
       // Sync data to ERP service
-      const storageKey = isCustomer ? 'erp_customers' : 'erp_suppliers';
       const dataToSync = isCustomer ? customers : suppliers;
-      localStorage.setItem(storageKey, JSON.stringify(dataToSync));
-      erpFinancialService.reloadData();
+      await erpFinancialService.reloadData(storeId);
 
       // Process payment through ERP service
       const erpMethod = isCustomer ? 'processCustomerPayment' : 'processSupplierPayment';

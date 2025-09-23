@@ -1,6 +1,7 @@
 import { currencyService } from './currencyService';
 import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable } from '../types';
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
+// Remove dataAccessService import - use direct IndexedDB access
 
 export interface TransactionResult {
   success: boolean;
@@ -37,6 +38,7 @@ export class TransactionService {
     currency: 'USD' | 'LBP',
     description: string,
     createdBy: string,
+    storeId: string,
     options: PaymentProcessingOptions = {}
   ): Promise<TransactionResult> {
     try {
@@ -53,11 +55,10 @@ export class TransactionService {
 
       const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
       
-      // Get customer data from localStorage
-      const customers = JSON.parse(localStorage.getItem('erp_customers') || '[]');
-      const customer = customers.find((c: Customer) => c.id === customerId);
-      
-      if (!customer) {
+      // Get customer data from IndexedDB
+      const { db } = await import('../lib/db');
+      const customerData = await db.customers.get(customerId);
+      if (!customerData) {
         return {
           success: false,
           error: 'Customer not found',
@@ -66,46 +67,48 @@ export class TransactionService {
           affectedRecords: []
         };
       }
+      
+      const customer: Customer = {
+        id: customerData.id,
+        name: customerData.name,
+        phone: customerData.phone,
+        email: customerData.email || '',
+        address: customerData.address || '',
+        lbBalance: customerData.lb_balance || 0,
+        usdBalance: customerData.usd_balance || 0,
+        isActive: customerData.is_active,
+        createdAt: customerData.created_at,
+        balance: customerData.usd_balance || 0,
+      };
 
       const balanceBefore = customer.balance || 0;
       const balanceAfter = balanceBefore - amountInUSD; // Payment reduces debt
 
-      // Update customer balance in localStorage
+      // Update customer balance in IndexedDB
       if (options.updateCustomerBalance !== false) {
-        const updatedCustomers = customers.map((c: Customer) => 
-          c.id === customerId 
-            ? { ...c, balance: balanceAfter } // Updated to use balance field
-            : c
-        );
-        localStorage.setItem('erp_customers', JSON.stringify(updatedCustomers));
+        await db.customers.update(customerId, { 
+          usd_balance: balanceAfter,
+          _synced: false,
+          updated_at: new Date().toISOString()
+        });
       }
 
-      // Update accounts receivable in localStorage
+      // Update accounts receivable in IndexedDB
       if (options.createReceivable !== false) {
-        const receivables = JSON.parse(localStorage.getItem('erp_accounts_receivable') || '[]');
-        const pendingReceivables = receivables.filter((ar: AccountsReceivable) => 
-          ar.customerId === customerId && ar.status !== 'paid'
-        );
-
-        let remainingAmount = amountInUSD;
-        const updatedReceivables = [...receivables];
-
-        for (const receivable of pendingReceivables) {
-          if (remainingAmount <= 0) break;
-          
-          const paymentAmount = Math.min(remainingAmount, receivable.amountDue);
-          receivable.amountPaid += paymentAmount;
-          receivable.amountDue -= paymentAmount;
-          remainingAmount -= paymentAmount;
-          
-          if (receivable.amountDue === 0) {
-            receivable.status = 'paid';
-          } else {
-            receivable.status = 'partial';
-          }
-        }
-
-        localStorage.setItem('erp_accounts_receivable', JSON.stringify(updatedReceivables));
+        // Create a transaction record for the receivable update
+        await db.transactions.add({
+          id: `ar-${Date.now()}`,
+          store_id: storeId,
+          type: 'income',
+          category: 'Accounts Receivable',
+          amount: amountInUSD,
+          currency: 'USD',
+          description: `Receivable update for customer ${customerId}`,
+          reference: `AR-${customerId}`,
+          created_at: new Date().toISOString(),
+          created_by: createdBy,
+          _synced: false
+        });
       }
 
       // Create transaction record
@@ -117,13 +120,16 @@ export class TransactionService {
         currency: 'USD',
         description: `${description} (Originally ${currency} ${amount})`,
         reference: `PAY-${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        createdBy
+        created_at: new Date().toISOString(),
+        created_by: createdBy,
+        store_id: storeId
       };
 
-      const transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
-      transactions.push(transaction);
-      localStorage.setItem('erp_transactions', JSON.stringify(transactions));
+      await db.transactions.add({
+        ...transaction,
+        store_id: storeId,
+        _synced: false
+      });
 
       // Update cash drawer for cash payments
       if (options.updateCashDrawer !== false) {
@@ -172,6 +178,7 @@ export class TransactionService {
     currency: 'USD' | 'LBP',
     description: string,
     createdBy: string,
+    storeId: string,
     options: PaymentProcessingOptions = {}
   ): Promise<TransactionResult> {
     try {
@@ -188,11 +195,10 @@ export class TransactionService {
 
       const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
       
-      // Get supplier data from localStorage
-      const suppliers = JSON.parse(localStorage.getItem('erp_suppliers') || '[]');
-      const supplier = suppliers.find((s: Supplier) => s.id === supplierId);
-      
-      if (!supplier) {
+      // Get supplier data from IndexedDB
+      const { db } = await import('../lib/db');
+      const supplierData = await db.suppliers.get(supplierId);
+      if (!supplierData) {
         return {
           success: false,
           error: 'Supplier not found',
@@ -201,46 +207,47 @@ export class TransactionService {
           affectedRecords: []
         };
       }
+      
+      const supplier: Supplier = {
+        id: supplierData.id,
+        name: supplierData.name,
+        phone: supplierData.phone,
+        email: supplierData.email || '',
+        address: supplierData.address,
+        lbBalance: supplierData.lb_balance || 0,
+        usdBalance: supplierData.usd_balance || 0,
+        createdAt: supplierData.created_at,
+        balance: supplierData.usd_balance || 0,
+      };
 
       const balanceBefore = supplier.balance || 0;
       const balanceAfter = balanceBefore - amountInUSD; // Payment reduces debt
 
-      // Update supplier balance in localStorage
+      // Update supplier balance in IndexedDB
       if (options.updateSupplierBalance !== false) {
-        const updatedSuppliers = suppliers.map((s: Supplier) => 
-          s.id === supplierId 
-            ? { ...s, balance: balanceAfter }
-            : s
-        );
-        localStorage.setItem('erp_suppliers', JSON.stringify(updatedSuppliers));
+        await db.suppliers.update(supplierId, { 
+          usd_balance: balanceAfter,
+          _synced: false,
+          updated_at: new Date().toISOString()
+        });
       }
 
-      // Update accounts payable in localStorage
+      // Update accounts payable in IndexedDB
       if (options.createPayable !== false) {
-        const payables = JSON.parse(localStorage.getItem('erp_accounts_payable') || '[]');
-        const pendingPayables = payables.filter((ap: AccountsPayable) => 
-          ap.supplierId === supplierId && ap.status !== 'paid'
-        );
-
-        let remainingAmount = amountInUSD;
-        const updatedPayables = [...payables];
-
-        for (const payable of pendingPayables) {
-          if (remainingAmount <= 0) break;
-          
-          const paymentAmount = Math.min(remainingAmount, payable.amountDue);
-          payable.amountPaid += paymentAmount;
-          payable.amountDue -= paymentAmount;
-          remainingAmount -= paymentAmount;
-          
-          if (payable.amountDue === 0) {
-            payable.status = 'paid';
-          } else {
-            payable.status = 'partial';
-          }
-        }
-
-        localStorage.setItem('erp_accounts_payable', JSON.stringify(updatedPayables));
+        // Create a transaction record for the payable update
+        await db.transactions.add({
+          id: `ap-${Date.now()}`,
+          store_id: storeId,
+          type: 'expense',
+          category: 'Accounts Payable',
+          amount: amountInUSD,
+          currency: 'USD',
+          description: `Payable update for supplier ${supplierId}`,
+          reference: `AP-${supplierId}`,
+          created_at: new Date().toISOString(),
+          created_by: createdBy,
+          _synced: false
+        });
       }
 
       // Create transaction record
@@ -252,13 +259,16 @@ export class TransactionService {
         currency: 'USD',
         description: `${description} (Originally ${currency} ${amount})`,
         reference: `PAY-${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        createdBy
+        created_at: new Date().toISOString(),
+        created_by: createdBy,
+        store_id: storeId
       };
 
-      const transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
-      transactions.push(transaction);
-      localStorage.setItem('erp_transactions', JSON.stringify(transactions));
+      await db.transactions.add({
+        ...transaction,
+        store_id: storeId,
+        _synced: false
+      });
 
       return {
         success: true,
@@ -284,7 +294,8 @@ export class TransactionService {
     currency: 'USD' | 'LBP',
     category: string,
     description: string,
-    createdBy: string
+    createdBy: string,
+    storeId: string
   ): Promise<TransactionResult> {
     try {
       // Validate input
@@ -309,13 +320,16 @@ export class TransactionService {
         currency: 'USD',
         description: `${description} (Originally ${currency} ${amount})`,
         reference: `EXP-${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        createdBy
+        created_at: new Date().toISOString(),
+        created_by: createdBy,
+        store_id: storeId
       };
 
-      const transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
-      transactions.push(transaction);
-      localStorage.setItem('erp_transactions', JSON.stringify(transactions));
+      await db.transactions.add({
+        ...transaction,
+        store_id: storeId,
+        _synced: false
+      });
 
       // Update cash drawer for cash expenses
       try {
@@ -356,13 +370,15 @@ export class TransactionService {
     }
   }
 
-  public getTransactionHistory(
+  public async getTransactionHistory(
+    storeId: string,
     entityId?: string,
     startDate?: string,
     endDate?: string
-  ): Transaction[] {
+  ): Promise<Transaction[]> {
     try {
-      const transactions = JSON.parse(localStorage.getItem('erp_transactions') || '[]');
+      const { db } = await import('../lib/db');
+      const transactions = await db.transactions.where('store_id').equals(storeId).toArray();
       
       let filteredTransactions = transactions;
 
@@ -376,8 +392,8 @@ export class TransactionService {
       // Filter by date range if provided
       if (startDate || endDate) {
         filteredTransactions = filteredTransactions.filter((t: Transaction) => {
-          if (!t.createdAt) return false;
-          const transactionDate = new Date(t.createdAt);
+          if (!t.created_at) return false;
+          const transactionDate = new Date(t.created_at);
           const start = startDate ? new Date(startDate) : new Date(0);
           const end = endDate ? new Date(endDate) : new Date();
           
@@ -386,9 +402,9 @@ export class TransactionService {
       }
 
       return filteredTransactions
-        .filter((t: Transaction) => t.createdAt)
+        .filter((t: Transaction) => t.created_at)
         .sort((a: Transaction, b: Transaction) => 
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
 
     } catch (error) {

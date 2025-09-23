@@ -122,33 +122,15 @@ export class AuditLogService {
   }
 
   private loadLogsFromStorage(): void {
-    try {
-      const storedLogs = localStorage.getItem('erp_audit_logs');
-      this.logs = storedLogs ? JSON.parse(storedLogs) : [];
-      
-      const storedBalanceChanges = localStorage.getItem('erp_balance_changes');
-      this.balanceChanges = storedBalanceChanges ? JSON.parse(storedBalanceChanges) : [];
-      
-      // Rebuild correlation map
-      this.logs.forEach(log => {
-        if (log.metadata.correlationId && log.relatedTransactions) {
-          this.correlationMap.set(log.metadata.correlationId, log.relatedTransactions);
-        }
-      });
-    } catch (error) {
-      console.error('Error loading audit logs:', error);
-      this.logs = [];
-      this.balanceChanges = [];
-    }
+    // Audit logs are now stored in IndexedDB
+    // This method is kept for backward compatibility but does nothing
+    this.logs = [];
+    this.balanceChanges = [];
   }
 
   private saveLogsToStorage(): void {
-    try {
-      localStorage.setItem('erp_audit_logs', JSON.stringify(this.logs));
-      localStorage.setItem('erp_balance_changes', JSON.stringify(this.balanceChanges));
-    } catch (error) {
-      console.error('Error saving audit logs:', error);
-    }
+    // Audit logs are now stored in IndexedDB
+    // This method is kept for backward compatibility but does nothing
   }
 
   private generateId(): string {

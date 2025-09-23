@@ -30,37 +30,31 @@ export class CurrencyService {
     return CurrencyService.instance;
   }
 
-  private async loadExchangeRateFromStore(): Promise<void> {
+  private async loadExchangeRateFromStore(storeId: string): Promise<void> {
     try {
-      // Try to get the current store's exchange rate
-      const storeId = localStorage.getItem('currentStoreId');
-      if (storeId) {
-        const { db } = await import('../lib/db');
-        const store = await db.stores.get(storeId);
-        if (store && store.exchange_rate) {
-          this.exchangeRate = store.exchange_rate;
-          this.lastUpdate = store.updated_at;
-        }
+      const { db } = await import('../lib/db');
+      const store = await db.stores.get(storeId);
+      if (store && store.exchange_rate) {
+        this.exchangeRate = store.exchange_rate;
+        this.lastUpdate = store.updated_at;
       }
     } catch (error) {
       console.warn('Could not load exchange rate from store, using default:', error);
     }
   }
 
-  public async updateExchangeRate(rate: number): Promise<void> {
+  public async updateExchangeRate(storeId: string, rate: number): Promise<void> {
     try {
       this.exchangeRate = rate;
       this.lastUpdate = new Date().toISOString();
       
       // Update the store's exchange rate
-      const storeId = localStorage.getItem('currentStoreId');
-      if (storeId) {
-        const { db } = await import('../lib/db');
-        await db.stores.update(storeId, { 
-          exchange_rate: rate,
-          updated_at: this.lastUpdate
-        });
-      }
+      const { db } = await import('../lib/db');
+      await db.stores.update(storeId, { 
+        exchange_rate: rate,
+        updated_at: this.lastUpdate,
+        _synced: false
+      });
     } catch (error) {
       console.error('Failed to update exchange rate:', error);
       throw error;
@@ -163,8 +157,8 @@ export class CurrencyService {
   }
 
   // Method to refresh exchange rate from store
-  public async refreshExchangeRate(): Promise<void> {
-    await this.loadExchangeRateFromStore();
+  public async refreshExchangeRate(storeId: string): Promise<void> {
+    await this.loadExchangeRateFromStore(storeId);
   }
 }
 
