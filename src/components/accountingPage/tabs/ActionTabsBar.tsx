@@ -10,6 +10,8 @@ import {
   AlertCircle,
   Package,
   FileText,
+  Wallet,
+  FileText as Document,
 } from "lucide-react";
 
 type ActionTabsBarProps = {
@@ -37,8 +39,10 @@ const ActionTabsBar: React.FC<ActionTabsBarProps> = ({
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
     { id: "expenses", label: "Expenses", icon: Receipt },
     { id: "nonpriced", label: "Non Priced Items", icon: AlertCircle },
-    { id: "inventory-logs", label: "Inventory Logs", icon: Package },
+    { id: "bills-management", label: "Bills Management", icon: Document },
     { id: "received-bills", label: "Received Bills", icon: FileText },
+    { id: "cash-drawer", label: "Cash Drawer", icon: Wallet },
+    
   ];
 
   return (

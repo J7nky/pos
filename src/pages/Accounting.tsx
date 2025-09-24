@@ -38,6 +38,8 @@ import ReceivedBillDetailsModal from '../components/accountingPage/modals/Receiv
 import EditSaleModal from '../components/accountingPage/modals/EditSaleModal';
 import DeleteSaleModal from '../components/accountingPage/modals/DeleteSaleModal';
 import ActionTabsBar from '../components/accountingPage/tabs/ActionTabsBar';
+import { CashDrawerBalanceReport } from '../components/CashDrawerBalanceReport';
+import { CurrentCashDrawerStatus } from '../components/CurrentCashDrawerStatus';
 
 export default function Accounting() {
   let raw;
@@ -100,7 +102,7 @@ export default function Accounting() {
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('accounting_recent_suppliers', []);
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'customer-balances' | 'supplier-balances' | 'expenses' | 'journal' | 'nonpriced' | 'inventory-logs' | 'received-bills'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'customer-balances' | 'supplier-balances' | 'expenses' | 'journal' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer'>('dashboard');
   const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
   const [showForm, setShowForm] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -162,6 +164,8 @@ export default function Accounting() {
   const [showEditSaleModal, setShowEditSaleModal] = useState(false);
   const [showDeleteSaleModal, setShowDeleteSaleModal] = useState(false);
   const [saleToDelete, setSaleToDelete] = useState<any>(null);
+  const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus, getCashDrawerSessionDetails } = raw;
+  const storeId = userProfile?.store_id;
 
   // Form states
   const [receiveForm, setReceiveForm] = useState({
@@ -410,17 +414,18 @@ export default function Accounting() {
       const { erpFinancialService } = await import('../services/erpFinancialService');
 
       // Sync current entities to ERP service
-      // Data is now managed through IndexedDB directly
-      await erpFinancialService.reloadData(storeId);
+      localStorage.setItem('erp_customers', JSON.stringify(customers));
+      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
+      erpFinancialService.reloadData();
 
-      // const result = erpFinancialService.processEntityPayment(
-      //   receiveForm.entityType,
-      //   receiveForm.entityId,
-      //   parseFloat(receiveForm.amount),
-      //   receiveForm.currency as 'USD' | 'LBP',
-      //   `Payment from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
-      //   userProfile?.id || ''
-      // );
+      const result = erpFinancialService.processEntityPayment(
+        receiveForm.entityType,
+        receiveForm.entityId,
+        parseFloat(receiveForm.amount),
+        receiveForm.currency as 'USD' | 'LBP',
+        `Payment from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
+        userProfile?.id || ''
+      );
 
       // Update entity balance in main application
       // Store amounts in their respective currency fields
@@ -519,7 +524,7 @@ export default function Accounting() {
       // Add cash drawer restoration if transaction was created
       if (cashDrawerResult?.success && cashDrawerResult.transactionId) {
         const { db } = await import('../lib/db');
-        const account = await db.getCashDrawerAccount(userProfile?.store_id || '');
+        const account = await db.getCashDrawerAccount(userProfile?.store_id || 'default-store');
         if (account) {
           paymentUndoData.steps.push({
             op: 'update',
@@ -584,7 +589,9 @@ export default function Accounting() {
 
       // Sync current entities to ERP service
       console.log('Syncing entities to ERP service:', payForm.entityType === 'customer' ? customers.length : suppliers.length, 'entities');
-      await erpFinancialService.reloadData(storeId);
+      localStorage.setItem('erp_customers', JSON.stringify(customers));
+      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
+      erpFinancialService.reloadData();
       console.log('Entity found for payment:', entity.name);
 
       const result = erpFinancialService.processEntityPayment(
@@ -691,7 +698,7 @@ export default function Accounting() {
       // Add cash drawer restoration if transaction was created
       if (payCashDrawerResult?.success && payCashDrawerResult.transactionId) {
         const { db } = await import('../lib/db');
-        const account = await db.getCashDrawerAccount(userProfile?.store_id || '');
+        const account = await db.getCashDrawerAccount(userProfile?.store_id || 'default-store');
         if (account) {
           payUndoData.steps.push({
             op: 'update',
@@ -739,9 +746,9 @@ export default function Accounting() {
       // Use the ERP Financial Service to process the expense
       const { erpFinancialService } = await import('../services/erpFinancialService');
 
-          // // Sync current data to ERP service (for consistency)
-          // localStorage.setItem('erp_customers', JSON.stringify(customers));
-          // localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
+      // Sync current data to ERP service (for consistency)
+      localStorage.setItem('erp_customers', JSON.stringify(customers));
+      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
       erpFinancialService.reloadData();
 
       const result = erpFinancialService.processExpense(
@@ -2307,6 +2314,9 @@ export default function Accounting() {
             getPeriodData={getPeriodData}
             customers={customers}
             transactions={transactions}
+            inventory={inventory}
+            products={products}
+            suppliers={suppliers}
           />
         </div>
       )}
@@ -2359,8 +2369,28 @@ export default function Accounting() {
             />
         </div>
       )}
+         {/* Cash Drawer Tab */}
+         {activeTab === 'cash-drawer' && (
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Cash Drawer Management</h3>
+          <div className="space-y-6">
+            {/* Current Status */}
+            <CurrentCashDrawerStatus 
+              storeId={storeId || ''} 
+              getCurrentStatus={getCurrentCashDrawerStatus}
+            />
+            
+            {/* Balance Report */}
+            <CashDrawerBalanceReport
+              storeId={storeId || ''}
+              getBalanceReport={getCashDrawerBalanceReport}
+              getSessionDetails={getCashDrawerSessionDetails}
+            />
+          </div>
+        </div>
+      )}
 
-      {activeTab === 'inventory-logs' && (
+      {activeTab === 'bills-management' && (
         <InventoryLogs />
       )}
 

@@ -13,12 +13,10 @@ import {
   Eye, 
   Edit, 
   Trash2, 
-  Plus, 
   Calendar, 
   User, 
   DollarSign,
   Clock,
-  AlertTriangle,
   CheckCircle,
   X,
   Save,
@@ -26,21 +24,8 @@ import {
   RefreshCw,
   History,
   CreditCard,
-  Receipt,
-  Package,
-  TrendingUp,
-  TrendingDown,
-  Truck,
-  ShoppingCart,
   Wallet,
-  Building2,
-  ArrowUpRight,
-  ArrowDownRight,
-  PlusCircle,
-  MinusCircle,
   Activity,
-  BarChart3,
-  
 } from 'lucide-react';
 import { createId } from '../../../lib/db';
 
@@ -105,11 +90,6 @@ export default function InventoryLogs() {
 
   // Get data from offline context
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0}));
-  const suppliers = raw.suppliers.map(s => ({...s, createdAt: s.created_at}));
-  const inventory = raw.inventory;
-  const products = raw.products;
-  const transactions = raw.transactions;
-  const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus, getCashDrawerSessionDetails } = raw; // Add this line
 
   // Helper function to get customer name
   const getCustomerName = (customerId: string | null): string => {
@@ -119,15 +99,13 @@ export default function InventoryLogs() {
   };
 
   // State
-  const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' | 'cash-drawer'>('bills');
+  const [activeTab, setActiveTab] = useState<'bills' | 'cash-drawer'>('bills');
   const [bills, setBills] = useState<Bill[]>([]);
   const [selectedBill, setSelectedBill] = useState<BillDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [showBillDetails, setShowBillDetails] = useState(false);
   const [showEditBill, setShowEditBill] = useState(false);
   const [showAuditTrail, setShowAuditTrail] = useState(false);
-  const [showPaymentForm, setShowPaymentForm] = useState<'customer' | 'supplier' | null>(null);
-  const [showReceiveForm, setShowReceiveForm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
 
@@ -137,33 +115,11 @@ export default function InventoryLogs() {
   const [dateTo, setDateTo] = useState('');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
 
   // Edit form state
   const [editForm, setEditForm] = useState<Partial<Bill>>({});
 
-  // Payment form state
-  const [paymentForm, setPaymentForm] = useState({
-    entityId: '',
-    entityType: 'customer' as 'customer' | 'supplier',
-    amount: '',
-    currency: 'USD' as 'USD' | 'LBP',
-    description: '',
-    reference: ''
-  });
-
-  // Receive form state
-  const [receiveForm, setReceiveForm] = useState({
-    productId: '',
-    supplierId: '',
-    quantity: '',
-    unit: 'kg' as 'kg' | 'piece' | 'box' | 'bag',
-    weight: '',
-    price: '',
-    type: 'commission' as 'commission' | 'cash',
-    commissionRate: '10',
-    notes: ''
-  });
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -281,143 +237,6 @@ export default function InventoryLogs() {
     }
   };
 
-  // Payment handlers
-  const handlePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
-      showToast('Please enter a valid amount', 'error');
-      return;
-    }
-    
-    if (!paymentForm.entityId) {
-      showToast(`Please select a ${paymentForm.entityType}`, 'error');
-      return;
-    }
-    
-    try {
-      const amount = parseFloat(paymentForm.amount);
-      
-      if (paymentForm.entityType === 'customer') {
-        const customer = customers.find(c => c.id === paymentForm.entityId);
-        if (!customer) {
-          showToast('Customer not found', 'error');
-          return;
-        }
-        
-        // Update customer balance
-        const currentBalance = paymentForm.currency === 'LBP' ? customer.lb_balance : customer.usd_balance;
-        const newBalance = Math.max(0, currentBalance - amount);
-        
-        await raw.updateCustomer(paymentForm.entityId, {
-          [paymentForm.currency === 'LBP' ? 'lb_balance' : 'usd_balance']: newBalance
-        });
-        
-        // Add transaction
-        await raw.addTransaction({
-          id: createId(),
-          type: 'income',
-          category: 'Customer Payment',
-          customer_id: customer.id,
-          amount: amount,
-          currency: paymentForm.currency,
-          description: `Payment from ${customer.name}: ${paymentForm.description}`,
-          reference: paymentForm.reference,
-          created_by: userProfile?.id || ''
-        });
-        
-        showToast(`Payment received from ${customer.name}`, 'success');
-      } else {
-        const supplier = suppliers.find(s => s.id === paymentForm.entityId);
-        if (!supplier) {
-          showToast('Supplier not found', 'error');
-          return;
-        }
-        
-        // Update supplier balance
-        const currentBalance = paymentForm.currency === 'LBP' ? (supplier.lb_balance || 0) : (supplier.usd_balance || 0);
-        const newBalance = Math.max(0, currentBalance - amount);
-        
-        await raw.updateSupplier(paymentForm.entityId, {
-          [paymentForm.currency === 'LBP' ? 'lb_balance' : 'usd_balance']: newBalance
-        });
-        
-        // Add transaction
-        await raw.addTransaction({
-          id: createId(),
-          type: 'expense',
-          category: 'Supplier Payment',
-          supplier_id: supplier.id,
-          amount: amount,
-          currency: paymentForm.currency,
-          description: `Payment to ${supplier.name}: ${paymentForm.description}`,
-          reference: paymentForm.reference,
-          created_by: userProfile?.id || ''
-        });
-        
-        showToast(`Payment sent to ${supplier.name}`, 'success');
-      }
-      
-      setPaymentForm({
-        entityId: '',
-        entityType: 'customer',
-        amount: '',
-        currency: 'USD',
-        description: '',
-        reference: ''
-      });
-      setShowPaymentForm(null);
-      
-    } catch (error) {
-      console.error('Error processing payment:', error);
-      showToast('Failed to process payment', 'error');
-    }
-  };
-
-  // Receive products handler
-  const handleReceiveSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!receiveForm.productId || !receiveForm.supplierId || !receiveForm.quantity) {
-      showToast('Please fill in all required fields', 'error');
-      return;
-    }
-    
-    try {
-      await raw.addInventoryItem({
-        product_id: receiveForm.productId,
-        supplier_id: receiveForm.supplierId,
-        quantity: parseInt(receiveForm.quantity),
-        unit: receiveForm.unit,
-        weight: receiveForm.weight ? parseFloat(receiveForm.weight) : null,
-        price: receiveForm.price ? parseFloat(receiveForm.price) : null,
-        received_quantity: parseInt(receiveForm.quantity),
-        notes: receiveForm.notes || undefined
-      });
-      
-      const product = products.find(p => p.id === receiveForm.productId);
-      const supplier = suppliers.find(s => s.id === receiveForm.supplierId);
-      
-      showToast(`Received ${receiveForm.quantity} ${receiveForm.unit} of ${product?.name} from ${supplier?.name}`, 'success');
-      
-      setReceiveForm({
-        productId: '',
-        supplierId: '',
-        quantity: '',
-        unit: 'kg',
-        weight: '',
-        price: '',
-        type: 'commission',
-        commissionRate: '10',
-        notes: ''
-      });
-      setShowReceiveForm(false);
-      
-    } catch (error) {
-      console.error('Error receiving products:', error);
-      showToast('Failed to receive products', 'error');
-    }
-  };
 
   const exportBills = () => {
     const csvContent = [
@@ -466,10 +285,6 @@ export default function InventoryLogs() {
     paidBills: bills.filter(b => b.payment_status === 'paid').length,
     pendingAmount: bills.filter(b => b.payment_status !== 'paid').reduce((sum, bill) => sum + (bill.total_amount - bill.amount_paid), 0),
     todaysBills: bills.filter(b => new Date(b.bill_date).toDateString() === new Date().toDateString()).length,
-    recentInventory: inventory.slice(0, 5),
-    lowStockItems: raw.stockLevels.filter(item => item.currentStock < raw.lowStockThreshold),
-    customerDebt: customers.reduce((sum, c) => sum + (c.lb_balance + c.usd_balance), 0),
-    supplierDebt: suppliers.reduce((sum, s) => sum + ((s.lb_balance || 0) + (s.usd_balance || 0)), 0),
     syncedBills: bills.filter(b => b._synced).length,
     pendingSyncBills: bills.filter(b => !b._synced).length
   };
@@ -498,8 +313,8 @@ export default function InventoryLogs() {
         <div className="flex items-center">
           <Activity className="w-6 h-6 text-blue-600 mr-3" />
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">Financial Operations Hub</h2>
-            <p className="text-gray-600">Comprehensive management of bills, inventory, payments, and analytics</p>
+            <h2 className="text-2xl font-bold text-gray-900">Sold Bills</h2>
+            <p className="text-gray-600">Review and manage sold bills</p>
           </div>
         </div>
         
@@ -566,26 +381,7 @@ export default function InventoryLogs() {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
-        {[
-          { id: 'bills', label: 'Bills Management', icon: FileText },
-          { id: 'inventory', label: 'Inventory Logs', icon: Package },
-          { id: 'payments', label: 'Payment History', icon: DollarSign },
-          { id: 'cash-drawer', label: 'Cash Drawer', icon: Wallet },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`px-4 py-2 rounded-md transition-colors flex items-center ${
-              activeTab === tab.id ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            <tab.icon className="w-4 h-4 mr-2" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+     
 
       {/* Search and Filters */}
       {activeTab === 'bills' && (
@@ -801,339 +597,8 @@ export default function InventoryLogs() {
         </div>
       )}
 
-      {/* Inventory Logs Tab */}
-      {activeTab === 'inventory' && (
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Inventory Receives</h3>
-          <div className="space-y-4">
-            {analytics.recentInventory.map((item: any) => {
-              const product = products.find(p => p.id === item.product_id);
-              const supplier = suppliers.find(s => s.id === item.supplier_id);
-              return (
-                <div key={item.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                  <div className="flex items-center">
-                    <Package className="w-8 h-8 text-blue-500 mr-3" />
-                    <div>
-                      <div className="font-medium text-gray-900">{product?.name || 'Unknown Product'}</div>
-                      <div className="text-sm text-gray-600">
-                        {item.quantity} {item.unit} from {supplier?.name || 'Unknown Supplier'}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {new Date(item.received_at || item.receivedAt).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-medium text-gray-900">
-                      {item.price ? formatCurrency(item.price * item.quantity) : 'No price'}
-                    </div>
-                    <div className={`text-xs px-2 py-1 rounded-full ${
-                      item.type === 'commission' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
-                    }`}>
-                      {item.type}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
-      {/* Payment History Tab */}
-      {activeTab === 'payments' && (
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Transactions</h3>
-          <div className="space-y-4">
-            {transactions.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 10).map((transaction: any) => (
-              <div key={transaction.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                <div className="flex items-center">
-                  {transaction.type === 'income' ? (
-                    <ArrowDownRight className="w-6 h-6 text-green-500 mr-3" />
-                  ) : (
-                    <ArrowUpRight className="w-6 h-6 text-red-500 mr-3" />
-                  )}
-                  <div>
-                    <div className="font-medium text-gray-900">{transaction.category}</div>
-                    <div className="text-sm text-gray-600">{transaction.description}</div>
-                    <div className="text-xs text-gray-500">
-                      {new Date(transaction.created_at).toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right ">
-                  <div className={`text-lg font-medium ${
-                    transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {transaction.type === 'income' ? '+' : '-'}
-                    {transaction.amount} {transaction.currency}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Cash Drawer Tab */}
-      {activeTab === 'cash-drawer' && (
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Cash Drawer Management</h3>
-          <div className="space-y-6">
-            {/* Current Status */}
-            <CurrentCashDrawerStatus 
-              storeId={storeId || ''} 
-              getCurrentStatus={getCurrentCashDrawerStatus}
-            />
-            
-            {/* Balance Report */}
-            <CashDrawerBalanceReport
-              storeId={storeId || ''}
-              getBalanceReport={getCashDrawerBalanceReport}
-              getSessionDetails={getCashDrawerSessionDetails}
-            />
-          </div>
-        </div>
-      )}
-      {/* Payment Form Modal */}
-      {showPaymentForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">
-                {paymentForm.entityType === 'customer' ? 'Receive Payment' : 'Send Payment'}
-              </h2>
-            </div>
-            <form onSubmit={handlePaymentSubmit} className="p-6 space-y-6">
-              <div className={`p-4 rounded-lg border ${
-                paymentForm.entityType === 'customer' 
-                  ? 'bg-green-50 border-green-200' 
-                  : 'bg-red-50 border-red-200'
-              }`}>
-                <div className="flex items-center">
-                  {paymentForm.entityType === 'customer' ? (
-                    <ArrowDownRight className="w-5 h-5 text-green-600 mr-2" />
-                  ) : (
-                    <ArrowUpRight className="w-5 h-5 text-red-600 mr-2" />
-                  )}
-                  <span className={`font-medium ${
-                    paymentForm.entityType === 'customer' ? 'text-green-800' : 'text-red-800'
-                  }`}>
-                    {paymentForm.entityType === 'customer' 
-                      ? 'Record a payment received from a customer' 
-                      : 'Record a payment sent to a supplier'}
-                  </span>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="md:col-span-2">
-                  <SearchableSelect
-                    options={(paymentForm.entityType === 'customer' ? customers : suppliers)
-                      .filter((entity: any) => paymentForm.entityType === 'customer' ? entity.isActive : true)
-                      .map((entity: any) => ({
-                        id: entity.id,
-                        label: entity.name,
-                        value: entity.id,
-                        category: paymentForm.entityType === 'customer' ? 'Customer' : 'Supplier'
-                      }))}
-                    value={paymentForm.entityId}
-                    onChange={(value) => setPaymentForm(prev => ({ ...prev, entityId: value as string }))}
-                    placeholder={`Select ${paymentForm.entityType === 'customer' ? 'Customer' : 'Supplier'} *`}
-                    searchPlaceholder={`Search ${paymentForm.entityType}s...`}
-                    className="w-full"
-                  />
-                </div>
-                
-                <div>
-                  <MoneyInput
-                    label="Amount *"
-                    value={paymentForm.amount}
-                    onChange={(value) => setPaymentForm(prev => ({ ...prev, amount: value }))}
-                    placeholder="0.00"
-                    step="0.01"
-                    min="0"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency *</label>
-                  <select
-                    value={paymentForm.currency}
-                    onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="USD">USD ($)</option>
-                    <option value="LBP">LBP (ل.ل)</option>
-                  </select>
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                <input
-                  type="text"
-                  value={paymentForm.description}
-                  onChange={(e) => setPaymentForm(prev => ({ ...prev, description: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Payment description..."
-                />
-              </div>
-              
-              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={() => setShowPaymentForm(null)}
-                  className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className={`px-6 py-2 text-white rounded-lg transition-colors font-medium ${
-                    paymentForm.entityType === 'customer'
-                      ? 'bg-green-600 hover:bg-green-700'
-                      : 'bg-red-600 hover:bg-red-700'
-                  }`}
-                >
-                  {paymentForm.entityType === 'customer' ? 'Receive Payment' : 'Send Payment'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Receive Products Form Modal */}
-      {showReceiveForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">Receive Products</h2>
-            </div>
-            <form onSubmit={handleReceiveSubmit} className="p-6 space-y-6">
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className="flex items-center">
-                  <Truck className="w-5 h-5 text-blue-600 mr-2" />
-                  <span className="text-blue-800 font-medium">Add new inventory from supplier</span>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <SearchableSelect
-                    options={products.map(product => ({
-                      id: product.id,
-                      label: product.name,
-                      value: product.id,
-                      category: product.category
-                    }))}
-                    value={receiveForm.productId}
-                    onChange={(value) => setReceiveForm(prev => ({ ...prev, productId: value as string }))}
-                    placeholder="Select Product *"
-                    searchPlaceholder="Search products..."
-                    categories={['Fruits', 'Vegetables', 'Herbs']}
-                    className="w-full"
-                  />
-                </div>
-                
-                <div>
-                  <SearchableSelect
-                    options={suppliers.map(supplier => ({
-                      id: supplier.id,
-                      label: supplier.name,
-                      value: supplier.id,
-                      category: 'Supplier'
-                    }))}
-                    value={receiveForm.supplierId}
-                    onChange={(value) => setReceiveForm(prev => ({ ...prev, supplierId: value as string }))}
-                    placeholder="Select Supplier *"
-                    searchPlaceholder="Search suppliers..."
-                    className="w-full"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={receiveForm.quantity}
-                    onChange={(e) => setReceiveForm(prev => ({ ...prev, quantity: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Unit</label>
-                  <select
-                    value={receiveForm.unit}
-                    onChange={(e) => setReceiveForm(prev => ({ ...prev, unit: e.target.value as any }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="kg">Kilogram (kg)</option>
-                    <option value="piece">Piece</option>
-                    <option value="box">Box</option>
-                    <option value="bag">Bag</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <MoneyInput
-                    label="Price per unit"
-                    value={receiveForm.price}
-                    onChange={(value) => setReceiveForm(prev => ({ ...prev, price: value }))}
-                    placeholder="0.00"
-                    step="0.01"
-                    min="0"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
-                  <select
-                    value={receiveForm.type}
-                    onChange={(e) => setReceiveForm(prev => ({ ...prev, type: e.target.value as any }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="commission">Commission</option>
-                    <option value="cash">Cash Purchase</option>
-                  </select>
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
-                <textarea
-                  value={receiveForm.notes}
-                  onChange={(e) => setReceiveForm(prev => ({ ...prev, notes: e.target.value }))}
-                  rows={3}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Additional notes..."
-                />
-              </div>
-              
-              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={() => setShowReceiveForm(false)}
-                  className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-                >
-                  Receive Products
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+   
 
       {/* Bill Details Modal */}
       {showBillDetails && selectedBill && (
