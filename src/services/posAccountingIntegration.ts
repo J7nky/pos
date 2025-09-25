@@ -1,5 +1,6 @@
 import { erpFinancialService } from './erpFinancialService';
-import { SaleItem, Customer, Supplier } from '../types';
+import { BillLineItem, Customer, Supplier } from '../types';
+import { userProfile } from '../auth/authContext';
 
 export interface POSSaleData {
   customer_id?: string;
@@ -64,9 +65,9 @@ export class POSAccountingIntegration {
       const saleId = `pos-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
       // Convert POS data to ERP format - create sale items directly
-      const saleItems: SaleItem[] = items.map(item => ({
+      const billLineItems: BillLineItem[] = items.map(item => ({
         id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        inventory_item_id: '', // Will be populated by ERP service
+        inventoryItemId: '', // Will be populated by ERP service
         productId: item.product_id,
         supplierId: item.supplier_id,
         quantity: item.quantity,
@@ -127,7 +128,7 @@ export class POSAccountingIntegration {
 
         customerName = customer.name;
         transactionSummary = erpFinancialService.processCustomerCreditSale(tempSale, saleItems);
-
+const storeId = userProfile?.store_id || 'default-store';
         // If there was a partial payment, also process the payment
         if (saleData.amount_paid > 0) {
           await erpFinancialService.processCustomerPayment(
@@ -135,7 +136,8 @@ export class POSAccountingIntegration {
             saleData.amount_paid,
             'USD',
             `Partial payment for sale ${saleId}`,
-            saleData.created_by
+            saleData.created_by,
+            storeId
           );
         }
       } else {
@@ -185,14 +187,16 @@ export class POSAccountingIntegration {
     error?: string;
   }> {
     try {
-      erpFinancialService.reloadData();
-      
+      const storeId = userProfile?.store_id || 'default-store';
+
+      erpFinancialService.reloadData(storeId);
       const result = erpFinancialService.processCustomerPayment(
         customerId,
         amount,
         currency,
         description,
-        createdBy
+        createdBy,
+        storeId
       );
 
       return {

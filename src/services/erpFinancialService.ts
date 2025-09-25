@@ -104,6 +104,7 @@ export class ERPFinancialService {
 
     // Validate storeId to prevent Dexie errors
     if (!storeId || storeId.trim() === '') {
+      console.log("1231231231", storeId);
       throw new Error('Invalid storeId provided. StoreId cannot be empty or null.');
     }
 
@@ -185,6 +186,7 @@ export class ERPFinancialService {
 
   // Public method to reload data from IndexedDB
   async reloadData(storeId: string) {
+    console.log(storeId,123123125);
     await this.loadData(storeId);
   }
 
@@ -321,6 +323,7 @@ export class ERPFinancialService {
 
   // Process customer payment
   async processCustomerPayment(customerId: string, amount: number, currency: 'USD' | 'LBP', description: string, createdBy: string, storeId: string): Promise<TransactionSummary> {
+    console.log(storeId,413213);
     await this.loadData(storeId);
     
     const customer = this.customers.find(c => c.id === customerId);

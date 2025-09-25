@@ -189,6 +189,7 @@ export default function Customers() {
       // Use the ERP Financial Service to process the payment
       const { erpFinancialService } = await import('../services/erpFinancialService');
       const storeId = userProfile?.store_id || 'default-store';
+      console.log('storeId 123', storeId);
       // Sync data to ERP service
       const dataToSync = isCustomer ? customers : suppliers;
       await erpFinancialService.reloadData(storeId);
@@ -202,7 +203,8 @@ export default function Customers() {
         safeAmount.amount,
         currency,
         `${isCustomer ? 'Payment from' : 'Payment to'} ${entity.name}${description ? ': ' + description : ''}`,
-        userProfile?.id || ''
+        userProfile?.id || '',
+        storeId
       );
       // Update entity balance
       await updateEntityBalance(entity, entityId, Number(amount), currency, isCustomer);
