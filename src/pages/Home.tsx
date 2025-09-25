@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
@@ -50,34 +50,44 @@ export default function Home() {
   const [showFastActions, setShowFastActions] = useState(true);
   const { t } = useI18n();
   const inventory = Array.isArray(raw.inventory) ? raw.inventory : [];
-  const recentReceivesCount = inventory
-    .sort((a, b) => new Date(b.received_at || b.receivedAt).getTime() - new Date(a.received_at || a.receivedAt).getTime())
-    .slice(0, 10).length;
-
-  const today = new Date().toISOString().split('T')[0];
-  const todaySales = sales.filter(sale => 
-    sale.createdAt && sale.createdAt.split('T')[0] 
+  const recentReceivesCount = useMemo(() => 
+    inventory
+      .sort((a, b) => new Date(b.received_at || b.receivedAt).getTime() - new Date(a.received_at || a.receivedAt).getTime())
+      .slice(0, 10).length,
+    [inventory]
   );
-  const todayExpenses = transactions.filter(t => 
-    t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today
-  )
+
+  // Memoize expensive calculations
+  const today = useMemo(() => new Date().toISOString().split('T')[0], []);
+  
+  const todaySales = useMemo(() => 
+    sales.filter(sale => 
+      sale.createdAt && sale.createdAt.split('T')[0] === today
+    ), [sales, today]
+  );
+  
+  const todayExpenses = useMemo(() => 
+    transactions.filter(t => 
+      t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today
+    ), [transactions, today]
+  );
 
   // Helper function to get local cash drawer session from context
-  const getLocalCurrentSession = () => {
+  const getLocalCurrentSession = useCallback(() => {
     return cashDrawer; // Already available in context
-  };
+  }, [cashDrawer]);
 
   // Helper function to calculate cash drawer balance from local transactions
-  const calculateLocalCashDrawerBalance = (currentSession: any): number => {
+  const calculateLocalCashDrawerBalance = useCallback((currentSession: any): number => {
     if (!currentSession) {
       return 0;
     }
     let totalBalance = currentSession.opening_amount || currentSession.currentBalance || 0;
     return totalBalance;
-  };
+  }, []);
 
   // Helper function to get cash drawer transaction history from local data
-  const getLocalCashDrawerHistory = (limit: number = 50): any[] => {
+  const getLocalCashDrawerHistory = useCallback((limit: number = 50): any[] => {
     const cashDrawerTransactions = transactions
       .filter(trans =>
         trans.store_id === raw.storeId &&
@@ -86,9 +96,9 @@ export default function Home() {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, limit);
     return cashDrawerTransactions;
-  };
+  }, [transactions, raw.storeId]);
 
-  const loadCashDrawerStatus = async () => {
+  const loadCashDrawerStatus = useCallback(async () => {
     if (!raw.storeId) return;
     setIsLoadingCashDrawer(true);
     try {
@@ -110,22 +120,22 @@ export default function Home() {
     } finally {
       setIsLoadingCashDrawer(false);
     }
-  };
+  }, [raw.storeId, raw.currency, getLocalCurrentSession, calculateLocalCashDrawerBalance, getLocalCashDrawerHistory]);
 
   // Helper function to normalize cash drawer balance to store's preferred currency
-  const getNormalizedCashDrawerBalance = (balance: number): number => {
+  const getNormalizedCashDrawerBalance = useCallback((balance: number): number => {
     // For now, return balance as-is since we're using local currency
     // In the future, we can implement proper currency conversion if needed
     return balance;
-  };
+  }, []);
 
   // Helper function to format currency based on store's preferred currency
-  const formatCurrencyForStore = (amount: number): string => {
+  const formatCurrencyForStore = useCallback((amount: number): string => {
     if (storePreferredCurrency === 'LBP') {
       return `${amount.toLocaleString()} ل.ل`;
     }
     return `$${amount.toLocaleString()}`;
-  };
+  }, [storePreferredCurrency]);
 
   useEffect(() => {
     loadCashDrawerStatus();
@@ -225,7 +235,7 @@ export default function Home() {
       color: 'bg-amber-500',
       hoverColor: 'hover:bg-amber-600',
       action: () => {navigate('/accounting')},
-      stats: `${formatCurrencyForStore(todayExpenses)} today (${storePreferredCurrency})`
+      stats: `${formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + expense.amount, 0))} today (${storePreferredCurrency})`
     },
     {
       id: 'today-sales',
@@ -259,7 +269,7 @@ export default function Home() {
     },
     {
       title: `Today's Expense (${storePreferredCurrency})`, 
-      value: formatCurrencyForStore(todayExpenses),
+      value: formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + expense.amount, 0)),
       icon: Receipt,
       color: 'bg-red-500',
       change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today).length} transactions`
@@ -326,7 +336,7 @@ export default function Home() {
             key={index}
             stat={stat}
             index={index}
-            cashDrawerStatus={cashDrawerStatus}
+            cashDrawerStatus={cashDrawerStatus || undefined}
             handleOpenDrawer={handleOpenDrawer}
           />
         ))}

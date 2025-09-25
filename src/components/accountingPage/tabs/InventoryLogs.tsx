@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useCurrency } from '../../../hooks/useCurrency';
@@ -13,12 +13,9 @@ import {
   Eye, 
   Edit, 
   Trash2, 
-  Plus, 
-  Calendar, 
   User, 
   DollarSign,
   Clock,
-  AlertTriangle,
   CheckCircle,
   X,
   Save,
@@ -26,20 +23,12 @@ import {
   RefreshCw,
   History,
   CreditCard,
-  Receipt,
   Package,
-  TrendingUp,
-  TrendingDown,
   Truck,
-  ShoppingCart,
   Wallet,
-  Building2,
   ArrowUpRight,
   ArrowDownRight,
-  PlusCircle,
-  MinusCircle,
   Activity,
-  BarChart3,
   
 } from 'lucide-react';
 import { createId } from '../../../lib/db';
@@ -111,12 +100,12 @@ export default function InventoryLogs() {
   const transactions = raw.transactions;
   const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus, getCashDrawerSessionDetails } = raw; // Add this line
 
-  // Helper function to get customer name
-  const getCustomerName = (customerId: string | null): string => {
+  // Helper function to get customer name - memoized for performance
+  const getCustomerName = useCallback((customerId: string | null): string => {
     if (!customerId) return 'Walk-in Customer';
     const customer = customers.find(c => c.id === customerId);
     return customer?.name || 'Walk-in Customer';
-  };
+  }, [customers]);
 
   // State
   const [activeTab, setActiveTab] = useState<'bills' | 'inventory' | 'payments' | 'cash-drawer'>('bills');
@@ -385,6 +374,7 @@ export default function InventoryLogs() {
     
     try {
       await raw.addInventoryItem({
+        id: createId(),
         product_id: receiveForm.productId,
         supplier_id: receiveForm.supplierId,
         quantity: parseInt(receiveForm.quantity),
@@ -392,7 +382,6 @@ export default function InventoryLogs() {
         weight: receiveForm.weight ? parseFloat(receiveForm.weight) : null,
         price: receiveForm.price ? parseFloat(receiveForm.price) : null,
         received_quantity: parseInt(receiveForm.quantity),
-        notes: receiveForm.notes || undefined
       });
       
       const product = products.find(p => p.id === receiveForm.productId);
@@ -459,20 +448,23 @@ export default function InventoryLogs() {
     }
   };
 
-  // Calculate analytics
-  const analytics = {
-    totalBills: bills.length,
-    totalRevenue: bills.reduce((sum, bill) => sum + bill.total_amount, 0),
-    paidBills: bills.filter(b => b.payment_status === 'paid').length,
-    pendingAmount: bills.filter(b => b.payment_status !== 'paid').reduce((sum, bill) => sum + (bill.total_amount - bill.amount_paid), 0),
-    todaysBills: bills.filter(b => new Date(b.bill_date).toDateString() === new Date().toDateString()).length,
-    recentInventory: inventory.slice(0, 5),
-    lowStockItems: raw.stockLevels.filter(item => item.currentStock < raw.lowStockThreshold),
-    customerDebt: customers.reduce((sum, c) => sum + (c.lb_balance + c.usd_balance), 0),
-    supplierDebt: suppliers.reduce((sum, s) => sum + ((s.lb_balance || 0) + (s.usd_balance || 0)), 0),
-    syncedBills: bills.filter(b => b._synced).length,
-    pendingSyncBills: bills.filter(b => !b._synced).length
-  };
+  // Memoize expensive analytics calculations
+  const analytics = useMemo(() => {
+    const today = new Date().toDateString();
+    return {
+      totalBills: bills.length,
+      totalRevenue: bills.reduce((sum, bill) => sum + bill.total_amount, 0),
+      paidBills: bills.filter(b => b.payment_status === 'paid').length,
+      pendingAmount: bills.filter(b => b.payment_status !== 'paid').reduce((sum, bill) => sum + (bill.total_amount - bill.amount_paid), 0),
+      todaysBills: bills.filter(b => new Date(b.bill_date).toDateString() === today).length,
+      recentInventory: inventory.slice(0, 5),
+      lowStockItems: raw.stockLevels.filter(item => item.currentStock < raw.lowStockThreshold),
+      customerDebt: customers.reduce((sum, c) => sum + (c.lb_balance + c.usd_balance), 0),
+      supplierDebt: suppliers.reduce((sum, s) => sum + ((s.lb_balance || 0) + (s.usd_balance || 0)), 0),
+      syncedBills: bills.filter(b => b._synced).length,
+      pendingSyncBills: bills.filter(b => !b._synced).length
+    };
+  }, [bills, inventory, raw.stockLevels, raw.lowStockThreshold, customers, suppliers]);
 
   if (loading) {
     return (

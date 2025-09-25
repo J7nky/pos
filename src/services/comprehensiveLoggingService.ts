@@ -1,6 +1,5 @@
 import { auditLogService } from './auditLogService';
 import { enhancedTransactionService } from './enhancedTransactionService';
-import { chartOfAccountsService } from './chartOfAccountsService';
 import { dataSyncService } from './dataSyncService';
 import { 
   Customer, 

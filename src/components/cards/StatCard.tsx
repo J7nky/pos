@@ -1,4 +1,4 @@
-import React from "react";
+import React, { memo } from "react";
 
 type Stat = {
   title: string;
@@ -17,7 +17,7 @@ interface StatCardProps {
   handleOpenDrawer?: () => void;
 }
 
-const StatCard: React.FC<StatCardProps> = ({
+const StatCard: React.FC<StatCardProps> = memo(({
   stat,
   index,
   cashDrawerStatus,
@@ -54,6 +54,8 @@ const StatCard: React.FC<StatCardProps> = ({
       )}
     </div>
   );
-};
+});
+
+StatCard.displayName = 'StatCard';
 
 export default StatCard;

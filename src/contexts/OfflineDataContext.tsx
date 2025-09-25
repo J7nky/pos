@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, useMemo } from 'react';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
@@ -3081,7 +3081,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       billAuditLogs,
       missedProducts,
 
-
       // Computed/legacy compatibility - exact match
       stockLevels,
       setStockLevels,
@@ -3166,7 +3165,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       createCashDrawerUndoData,
 
       openCashDrawer,
-
     }}>
       {children}
     </OfflineDataContext.Provider>

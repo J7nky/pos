@@ -15,7 +15,9 @@ function cleanArrayForSupabase(items: any[]): any[] {
 
 type Tables = Database['public']['Tables'];
 
-// Optimized SupabaseService - essential operations only (auth, store, bills, sync helpers)
+// SupabaseService - Following offline-first architecture pattern
+// Handles: Authentication, Store Management, and Sync Helpers ONLY
+// CRUD operations should go through: IndexedDB → syncService → Supabase
 export class SupabaseService {
   // Authentication & User Management
   static async getUserProfile(userId: string) {
@@ -169,99 +171,7 @@ export class SupabaseService {
     }
   }
 
-  // Bills (minimal server-side ops)
-  static async getBills(storeId: string, filters?: {
-    searchTerm?: string;
-    dateFrom?: string;
-    dateTo?: string;
-    paymentStatus?: string;
-    customerId?: string;
-    status?: string;
-    limit?: number;
-    offset?: number;
-  }) {
-    try {
-      let query = supabase
-        .from('bills')
-        .select('*')
-        .eq('store_id', storeId);
 
-      if (filters?.searchTerm) {
-        query = query.or(`bill_number.ilike.%${filters.searchTerm}%,id.ilike.%${filters.searchTerm}%,notes.ilike.%${filters.searchTerm}%`);
-      }
-      if (filters?.dateFrom) query = query.gte('bill_date', filters.dateFrom);
-      if (filters?.dateTo) query = query.lte('bill_date', filters.dateTo);
-      if (filters?.paymentStatus) query = query.eq('payment_status', filters.paymentStatus as any);
-      if (filters?.customerId) query = query.eq('customer_id', filters.customerId as any);
-      if (filters?.status) query = query.eq('status', filters.status as any);
-
-      query = query.order('bill_date', { ascending: false });
-      if (filters?.limit) query = query.limit(filters.limit);
-      if (filters?.offset) query = query.range(filters.offset, (filters.offset || 0) + (filters.limit || 50) - 1);
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  // static async createBill(billData: any, lineItems: any[]) {
-  //   try {
-  //     const cleanBillData = cleanDataForSupabase(billData) as Tables['bills']['Insert'];
-  //     const cleanLineItems = cleanArrayForSupabase(lineItems) as Tables['bill_line_items']['Insert'][];
-  //     const { data: bill, error: billError } = await supabase
-  //       .rpc('create_bill_with_line_items', {
-  //         bill_data: cleanBillData,
-  //         line_items_data: cleanLineItems
-  //       } as any);
-  //     if (billError) throw billError;
-  //     return bill;
-  //   } catch (error) {
-  //     throw error;
-  //   }
-  // }
-
-  static async updateBill(billId: string, updates: any) {
-    try {
-      const cleanUpdates = cleanDataForSupabase(updates) as Tables['bills']['Update'];
-      const { data, error } = await (supabase
-        .from('bills') as any)
-        .update(cleanUpdates)
-        .eq('id', billId)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
-
-  static async deleteBill(billId: string, softDelete: boolean = true) {
-    try {
-      if (softDelete) {
-        const { error } = await (supabase
-          .from('bills') as any)
-          .update({
-            status: 'cancelled',
-            updated_at: new Date().toISOString()
-          } as Tables['bills']['Update'])
-          .eq('id', billId);
-        if (error) throw error;
-      } else {
-        const { error } = await (supabase
-          .from('bills') as any)
-          .delete()
-          .eq('id', billId);
-        if (error) throw error;
-      }
-      return true;
-    } catch (error) {
-      handleSupabaseError(error);
-    }
-  }
 
   // Real-time subscriptions
   static subscribeToTable(table: string, callback: (payload: any) => void, storeId?: string) {

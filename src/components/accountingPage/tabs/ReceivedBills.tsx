@@ -137,6 +137,7 @@ export default function ReceivedBills({
     }
   };
 
+  // Memoize the expensive getReceivedBills calculation
   const getReceivedBills = useMemo(() => {
     const bills: any[] = [];
     try {

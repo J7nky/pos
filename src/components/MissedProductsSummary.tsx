@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { Package, AlertTriangle, Eye, RefreshCw } from 'lucide-react';
 import { missedProductsService, MissedProductWithDetails } from '../services/missedProductsService';
 import { MissedProductsDetailsModal } from './MissedProductsDetailsModal';
@@ -9,7 +9,7 @@ interface MissedProductsSummaryProps {
   storeId: string;
 }
 
-export const MissedProductsSummary: React.FC<MissedProductsSummaryProps> = ({
+export const MissedProductsSummary: React.FC<MissedProductsSummaryProps> = memo(({
   sessionId,
   storeId
 }) => {
@@ -18,11 +18,7 @@ export const MissedProductsSummary: React.FC<MissedProductsSummaryProps> = ({
   const [loading, setLoading] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
-  useEffect(() => {
-    loadMissedProducts();
-  }, [sessionId, contextMissedProducts]);
-
-  const loadMissedProducts = async () => {
+  const loadMissedProducts = useCallback(async () => {
     setLoading(true);
     try {
       // Use context data for better performance
@@ -38,10 +34,26 @@ export const MissedProductsSummary: React.FC<MissedProductsSummaryProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId, contextMissedProducts, inventory, products]);
 
-  const totalVariance = missedProducts.reduce((sum, mp) => sum + Math.abs(mp.variance), 0);
-  const averageVariance = missedProducts.length > 0 ? totalVariance / missedProducts.length : 0;
+  useEffect(() => {
+    loadMissedProducts();
+  }, [loadMissedProducts]);
+
+  // Memoize expensive calculations
+  const { totalVariance, averageVariance } = useMemo(() => {
+    const total = missedProducts.reduce((sum, mp) => sum + Math.abs(mp.variance), 0);
+    const average = missedProducts.length > 0 ? total / missedProducts.length : 0;
+    return { totalVariance: total, averageVariance: average };
+  }, [missedProducts]);
+
+  // Memoize sorted products for display
+  const topDiscrepancies = useMemo(() => 
+    missedProducts
+      .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance))
+      .slice(0, 3),
+    [missedProducts]
+  );
 
   if (loading) {
     return (
@@ -94,21 +106,18 @@ export const MissedProductsSummary: React.FC<MissedProductsSummaryProps> = ({
         
         {/* Quick summary of most significant discrepancies */}
         <div className="mt-3 space-y-1">
-          {missedProducts
-            .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance))
-            .slice(0, 3)
-            .map((item, index) => (
-              <div key={item.id} className="flex items-center justify-between text-xs">
-                <span className="text-gray-700 truncate max-w-xs">
-                  {item.product_name}
-                </span>
-                <span className={`font-medium ${
-                  item.variance > 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {item.variance > 0 ? '+' : ''}{item.variance.toFixed(2)} {item.unit}
-                </span>
-              </div>
-            ))}
+          {topDiscrepancies.map((item, index) => (
+            <div key={item.id} className="flex items-center justify-between text-xs">
+              <span className="text-gray-700 truncate max-w-xs">
+                {item.product_name}
+              </span>
+              <span className={`font-medium ${
+                item.variance > 0 ? 'text-green-600' : 'text-red-600'
+              }`}>
+                {item.variance > 0 ? '+' : ''}{item.variance.toFixed(2)} {item.unit}
+              </span>
+            </div>
+          ))}
           {missedProducts.length > 3 && (
             <div className="text-xs text-gray-500">
               +{missedProducts.length - 3} more discrepancies
@@ -126,4 +135,6 @@ export const MissedProductsSummary: React.FC<MissedProductsSummaryProps> = ({
       />
     </>
   );
-};
+});
+
+MissedProductsSummary.displayName = 'MissedProductsSummary';

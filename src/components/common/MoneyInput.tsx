@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 
 interface MoneyInputProps {
   value: string | number;
@@ -78,7 +78,7 @@ export default function MoneyInput({
     };
   }, [stringValue, hasUsedRecommendation, hasUsedAutoComplete]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
     
     // Check if user is deleting digits (value is getting shorter)
@@ -99,9 +99,9 @@ export default function MoneyInput({
       setHasUsedRecommendation(false);
       setHasUsedAutoComplete(false); // Reset auto-complete flag when clearing
     }
-  };
+  }, [onChange, previousValue]);
 
-  const handleRecommendationClick = () => {
+  const handleRecommendationClick = useCallback(() => {
     onChange(recommendedValue);
     setShowRecommendation(false);
     setHasUsedRecommendation(true);
@@ -112,9 +112,9 @@ export default function MoneyInput({
         inputRef.current.focus();
       }
     }, 0);
-  };
+  }, [onChange, recommendedValue]);
 
-  const handleInputFocus = () => {
+  const handleInputFocus = useCallback(() => {
     // Auto-complete with the suggested value if provided, field is empty, and auto-complete hasn't been used yet
     if (autoCompleteValue && (!stringValue || stringValue.trim() === '') && !hasUsedAutoComplete) {
       const autoCompleteString = typeof autoCompleteValue === 'number' 
@@ -125,14 +125,14 @@ export default function MoneyInput({
       setHasUsedAutoComplete(true); // Mark that auto-complete has been used
     }
     // Do not show recommendation on focus alone; only while actively typing
-  };
+  }, [autoCompleteValue, stringValue, hasUsedAutoComplete, onChange]);
 
-  const handleInputBlur = () => {
+  const handleInputBlur = useCallback(() => {
     // Hide recommendation after a short delay to allow clicking on it
     setTimeout(() => {
       setShowRecommendation(false);
     }, 150);
-  };
+  }, []);
 
   return (
     <div className="relative">
