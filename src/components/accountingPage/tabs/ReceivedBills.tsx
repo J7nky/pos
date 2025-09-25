@@ -68,7 +68,7 @@ export default function ReceivedBills({
   const [showReceivedBillDetails, setShowReceivedBillDetails] = useState(false);
   const [showReceivedBillSalesLogs, setShowReceivedBillSalesLogs] = useState(false);
   const [showBatchEdit, setShowBatchEdit] = useState(false);
-  const [batchEditForm, setBatchEditForm] = useState<{ 
+  const [batchEditForm, setBatchEditForm] = useState<{
     supplier_id?: string;
     type?: string;
     porterage_fee?: string;
@@ -90,7 +90,7 @@ export default function ReceivedBills({
   const initializeBatchEdit = (group: any) => {
     const first = group.items[0];
     const batchId = group.batchId || first?.batch_id;
-    
+
     if (!batchId || batchId === null) {
       return;
     }
@@ -124,11 +124,11 @@ export default function ReceivedBills({
           notes: data.batch?.status || null
         });
       }
-      
+
       if (editingBatchId && onApplyBatchCommission && data.batch?.commission_rate) {
         await onApplyBatchCommission(editingBatchId, parseFloat(data.batch.commission_rate));
       }
-      
+
       setShowBatchEdit(false);
       setEditingBatchId(null);
       showToast('Batch updated successfully', 'success');
@@ -472,7 +472,7 @@ export default function ReceivedBills({
   const exportReceivedBills = () => {
     try {
       const headers = [
-        'Date', 'Product', 'Supplier', 'Type', 'Original Qty', 'Remaining Qty', 
+        'Date', 'Product', 'Supplier', 'Type', 'Original Qty', 'Remaining Qty',
         'Sold Qty', 'Progress %', 'Revenue', 'Cost', 'Profit', 'Status', 'Unit Price'
       ];
       const csvContent = [
@@ -532,7 +532,7 @@ export default function ReceivedBills({
 
 
 
- 
+
   return (
     <div>
       <div className="flex justify-between items-center">
@@ -561,7 +561,7 @@ export default function ReceivedBills({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Total Bills</p>
-             
+
               <p className="text-2xl font-bold text-gray-900">{groupedReceivedBills.length}</p>
             </div>
             <div className="p-2 bg-blue-100 rounded-full">
@@ -691,12 +691,7 @@ export default function ReceivedBills({
                     {receivedBillsSort === 'progress' && (receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />)}
                   </button>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button onClick={() => handleReceivedBillsSort('revenue')} className="flex items-center space-x-1 hover:text-gray-700">
-                    <span>Revenue</span>
-                    {receivedBillsSort === 'revenue' && (receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />)}
-                  </button>
-                </th>
+
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
@@ -704,7 +699,7 @@ export default function ReceivedBills({
             <tbody className="bg-white divide-y divide-gray-200">
               {paginatedGroups.map((group: any) => (
                 <React.Fragment key={`group-${group.groupId}`}>
-                  <tr 
+                  <tr
                     className="hover:bg-gray-50 cursor-pointer"
                     onClick={() => group.isBatch && toggleGroup(group.groupId)}
                   >
@@ -752,9 +747,7 @@ export default function ReceivedBills({
                         <span className="text-sm text-gray-900">{group.progress.toFixed(1)}%</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{formatCurrency(group.totalRevenue || 0)}</div>
-                    </td>
+                  
                     <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(group.status)}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
@@ -1155,8 +1148,8 @@ export default function ReceivedBills({
               />
             </div>
             <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-              <button 
-                onClick={() => setShowWeightComparison(false)} 
+              <button
+                onClick={() => setShowWeightComparison(false)}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
               >
                 Close
@@ -1167,17 +1160,17 @@ export default function ReceivedBills({
       )}
 
       {/* Removed parent-level Close Bill modal. The Sales Logs modal now manages its own confirmation modal. */}
-      
+
     </div>
   );
 }
 
-function ReceivedBillSalesLogsModal({ 
-  selectedReceivedBill, 
-  setShowReceivedBillSalesLogs, 
+function ReceivedBillSalesLogsModal({
+  selectedReceivedBill,
+  setShowReceivedBillSalesLogs,
   inventory,
-  sales, 
-  customers, 
+  sales,
+  customers,
   formatCurrency,
   onEditSale,
   onDeleteSale,
@@ -1237,7 +1230,7 @@ function ReceivedBillSalesLogsModal({
       }
       // Calculate total revenue from sales
       const totalRevenue = selectedReceivedBill.totalRevenue || 0;
-      
+
       // Calculate fees based on bill type
       let commissionAmount = 0;
       let porterageAmount = 0;
@@ -1248,11 +1241,11 @@ function ReceivedBillSalesLogsModal({
         // For commission items, calculate commission percentage
         const commissionRate = selectedReceivedBill.commissionRate || 0;
         commissionAmount = (totalRevenue * commissionRate) / 100;
-        
+
         // Porterage and transfer fees are fixed amounts
         porterageAmount = selectedReceivedBill.porterage || selectedReceivedBill.batchPorterage || 0;
         transferAmount = selectedReceivedBill.transferFee || selectedReceivedBill.batchTransferFee || 0;
-        
+
         // Supplier gets the remaining amount after deducting all fees
         supplierAmount = totalRevenue - commissionAmount - porterageAmount - transferAmount;
       } else {
@@ -1277,15 +1270,15 @@ function ReceivedBillSalesLogsModal({
   };
   const hasInvalidSalesLines = useMemo(() => {
     return processedSalesData.some((item: any) => {
-      const invalidQuantity =  selectedReceivedBill.originalQuantity > selectedReceivedBill.totalSoldQuantity;
+      const invalidQuantity = selectedReceivedBill.originalQuantity > selectedReceivedBill.totalSoldQuantity;
       const invalidPrice = !item.unitPrice || item.unitPrice <= 0;
       return invalidQuantity || invalidPrice;
-      
+
     });
   }, [processedSalesData]);
 
   const exportSelectedBill = () => {
-    
+
     try {
       const isBatch = !!selectedReceivedBill.batchId;
       const billHeaders = isBatch
@@ -1447,7 +1440,7 @@ function ReceivedBillSalesLogsModal({
                         <div className="text-sm text-gray-900">{new Date(item.saleDate).toLocaleDateString()}</div>
                         <div className="text-xs text-gray-500">{new Date(item.saleDate).toLocaleTimeString()}</div>
                       </td>
-                    
+
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{item.customerName}</div>
                       </td>
@@ -1494,13 +1487,13 @@ function ReceivedBillSalesLogsModal({
         <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center flex-shrink-0">
           <div className="text-sm text-gray-500">Showing {processedSalesData.length} sale record{processedSalesData.length !== 1 ? 's' : ''}</div>
           <div className="flex items-center gap-2">
-          <button
+            <button
               onClick={exportSelectedBill}
               disabled={!selectedReceivedBill.isClosed}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title={!selectedReceivedBill.isClosed ? 'Export is only available after closing the bill' : 'Export this received bill'}
             >
-              {'Export Bill' }
+              {'Export Bill'}
             </button>
             <button
               onClick={closeBill}
@@ -1510,7 +1503,7 @@ function ReceivedBillSalesLogsModal({
             >
               {'Close Bill'}
             </button>
-            
+
             <button onClick={() => setShowReceivedBillSalesLogs(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">Close</button>
           </div>
         </div>
@@ -1578,7 +1571,7 @@ function ReceivedBillSalesLogsModal({
                 </div>
               </div>
 
-       
+
             </div>
             <div className="px-6 py-4 border-t flex justify-end gap-3">
               <button

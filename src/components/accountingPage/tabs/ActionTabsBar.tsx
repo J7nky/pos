@@ -37,7 +37,7 @@ const ActionTabsBar: React.FC<ActionTabsBarProps> = ({
 }) => {
   const tabs = [
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { id: "expenses", label: "Expenses", icon: Receipt },
+    { id: "expenses", label: "Payments", icon: Receipt },
     { id: "nonpriced", label: "Non Priced Items", icon: AlertCircle },
     { id: "bills-management", label: "Bills Management", icon: Document },
     { id: "received-bills", label: "Received Bills", icon: FileText },

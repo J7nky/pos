@@ -1,6 +1,7 @@
 import { LocalSaleItem, Bill, BillLineItem } from '../lib/db';
 import { Customer, Supplier, Transaction, BillLineItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
+import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 
 export interface AccountStatement {
   entityId: string;
@@ -105,7 +106,7 @@ export class AccountStatementService {
     const prePayments = allTransactions.filter(t =>
       t.customer_id === customerId &&
       t.type === 'income' &&
-      t.category === 'Customer Payment' &&
+      t.category === PAYMENT_CATEGORIES.CUSTOMER_PAYMENT &&
       new Date(t.created_at) < startDate
     );
     const paymentsSumUSD = prePayments
@@ -357,7 +358,7 @@ export class AccountStatementService {
     // Pre-period supplier payments
     const prePayments = allTransactions.filter(t =>
       t.type === 'expense' &&
-      t.category === 'Supplier Payment' &&
+      t.category === PAYMENT_CATEGORIES.SUPPLIER_PAYMENT &&
       t.supplier_id === supplierId &&
       !!t.created_at && new Date(t.created_at) < startDate
     );

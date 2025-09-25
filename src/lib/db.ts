@@ -583,7 +583,7 @@ class POSDatabase extends Dexie {
       const cashPayments = await this.transactions
         .filter(trans => 
           trans.type === 'income' && 
-          trans.category === 'cash_payment' &&
+          trans.category === 'Cash Payment' &&
           new Date(trans.created_at) >= sessionStartTime &&
           new Date(trans.created_at) <= sessionEndTime
         )
@@ -693,7 +693,7 @@ class POSDatabase extends Dexie {
       const cashPayments = await this.transactions
         .filter(trans => 
           trans.type === 'income' && 
-          trans.category === 'cash_payment' &&
+          trans.category === 'Cash Payment' &&
           trans.created_by === sessionId
         )
         .toArray();

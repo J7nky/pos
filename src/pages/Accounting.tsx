@@ -4,33 +4,21 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { 
-  Receipt,
   TrendingUp,
-  FileText,
   AlertCircle,
   CheckCircle,
   Clock,
-  Download,
-  RefreshCw,
-  Filter,
-  BarChart3,
   Activity,
   Target,
-  ArrowUpRight,
-  ArrowDownRight,
-  TrendingDown as TrendingDownIcon,
-  CreditCard as CreditCardIcon,
-  Package,
-  Calculator as CalculatorIcon,
 } from 'lucide-react';
 import Toast from '../components/common/Toast';
 import { CurrencyService } from '../services/currencyService';
 import ReceivedBills from '../components/accountingPage/tabs/ReceivedBills';
-import InventoryLogs from '../components/accountingPage/tabs/InventoryLogs';
+import InventoryLogs from '../components/accountingPage/tabs/SoldBills';
 import { createId } from '../lib/db';
 import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 import DashboardOverview from '../components/accountingPage/tabs/DashboardOverview';
-import ExpenseManagement from '../components/accountingPage/tabs/ExpenseManagement';
+import ExpenseManagement from '../components/accountingPage/tabs/PaymentsManagement';
 import NonPricedItems from '../components/accountingPage/tabs/NonPricedItems';
 import EditNonPricedModal from '../components/accountingPage/modals/EditNonPricedModal';
 import { PaymentsModal } from '../components/accountingPage/modals/PaymentsModal';

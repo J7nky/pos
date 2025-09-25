@@ -8,6 +8,7 @@ import {
   InventoryItem,
   CashDrawer 
 } from '../types';
+import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 // Remove dataAccessService import - use OfflineDataContext instead
 
 export interface SaleData {
@@ -392,7 +393,7 @@ export class ERPFinancialService {
 
     return {
       transactionId: financialTransaction.id,
-      transactionType: 'Customer Payment',
+      transactionType: PAYMENT_CATEGORIES.CUSTOMER_PAYMENT,
       entityInvolved: customer.name,
       amount: amountInUSD,
       currency: 'USD',
@@ -578,7 +579,7 @@ export class ERPFinancialService {
 
     return {
       transactionId: financialTransaction.id,
-      transactionType: 'Supplier Payment',
+      transactionType: PAYMENT_CATEGORIES.SUPPLIER_PAYMENT,
       entityInvolved: supplier.name,
       amount: amountInUSD,
       currency: 'USD',
@@ -682,7 +683,7 @@ export class ERPFinancialService {
 
     return {
       transactionId: financialTransaction.id,
-      transactionType: entityType === 'customer' ? 'Customer Payment' : 'Supplier Payment',
+      transactionType: entityType === 'customer' ? PAYMENT_CATEGORIES.CUSTOMER_PAYMENT : PAYMENT_CATEGORIES.SUPPLIER_PAYMENT,
       entityInvolved: entity.name,
       amount: amountInUSD,
       currency: 'USD',

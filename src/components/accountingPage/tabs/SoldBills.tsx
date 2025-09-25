@@ -1,11 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useCurrency } from '../../../hooks/useCurrency';
-import SearchableSelect from '../../common/SearchableSelect';
-import MoneyInput from '../../common/MoneyInput';
-import { CashDrawerBalanceReport } from '../../CashDrawerBalanceReport';
-import { CurrentCashDrawerStatus } from '../../CurrentCashDrawerStatus';
+
 import { 
   FileText, 
   Search, 
@@ -13,7 +10,6 @@ import {
   Eye, 
   Edit, 
   Trash2, 
-  Calendar, 
   User, 
   DollarSign,
   Clock,
@@ -24,15 +20,9 @@ import {
   RefreshCw,
   History,
   CreditCard,
-  Package,
-  Truck,
-  Wallet,
-  ArrowUpRight,
-  ArrowDownRight,
   Activity,
 
 } from 'lucide-react';
-import { createId } from '../../../lib/db';
 
 interface Bill {
   id: string;
@@ -104,7 +94,6 @@ export default function InventoryLogs() {
   }, [customers]);
 
   // State
-  const [activeTab, setActiveTab] = useState<'bills' | 'cash-drawer'>('bills');
   const [bills, setBills] = useState<Bill[]>([]);
   const [selectedBill, setSelectedBill] = useState<BillDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -519,7 +508,7 @@ export default function InventoryLogs() {
      
 
       {/* Search and Filters */}
-      {activeTab === 'bills' && (
+      { (
         <div className="bg-white rounded-lg shadow-sm p-4">
           <div className="flex items-center space-x-4 mb-4">
             <div className="flex-1 relative">
@@ -586,7 +575,7 @@ export default function InventoryLogs() {
       )}
 
       {/* Bills Management Tab */}
-      {activeTab === 'bills' && (
+      { (
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">

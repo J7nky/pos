@@ -1,6 +1,8 @@
 import { currencyService } from './currencyService';
 import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable } from '../types';
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
+import { paymentService, PaymentFilter, PaymentTransaction } from './paymentService';
+import { PAYMENT_CATEGORIES, PAYMENT_TYPES } from '../constants/paymentCategories';
 // Remove dataAccessService import - use direct IndexedDB access
 
 export interface TransactionResult {
@@ -114,8 +116,8 @@ export class TransactionService {
       // Create transaction record
       const transaction: Transaction = {
         id: Date.now().toString(),
-        type: 'income',
-        category: 'Customer Payment',
+        type: PAYMENT_TYPES.INCOME,
+        category: PAYMENT_CATEGORIES.CUSTOMER_PAYMENT,
         amount: amountInUSD,
         currency: 'USD',
         description: `${description} (Originally ${currency} ${amount})`,
@@ -253,8 +255,8 @@ export class TransactionService {
       // Create transaction record
       const transaction: Transaction = {
         id: Date.now().toString(),
-        type: 'expense',
-        category: 'Supplier Payment',
+        type: PAYMENT_TYPES.EXPENSE,
+        category: PAYMENT_CATEGORIES.SUPPLIER_PAYMENT,
         amount: amountInUSD,
         currency: 'USD',
         description: `${description} (Originally ${currency} ${amount})`,
@@ -411,6 +413,156 @@ export class TransactionService {
       console.error('Error getting transaction history:', error);
       return [];
     }
+  }
+
+  /**
+   * Get payment transactions with enhanced filtering
+   */
+  public async getPaymentTransactions(
+    storeId: string,
+    filter: PaymentFilter = {}
+  ): Promise<PaymentTransaction[]> {
+    try {
+      const { db } = await import('../lib/db');
+      const transactions = await db.transactions.where('store_id').equals(storeId).toArray();
+      
+      return paymentService.filterPaymentTransactions(transactions, {
+        ...filter,
+        storeId
+      });
+    } catch (error) {
+      console.error('Error getting payment transactions:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get customer payment transactions
+   */
+  public async getCustomerPayments(
+    storeId: string,
+    customerId?: string,
+    startDate?: string,
+    endDate?: string
+  ): Promise<PaymentTransaction[]> {
+    return this.getPaymentTransactions(storeId, {
+      entityType: 'customer',
+      entityId: customerId,
+      startDate,
+      endDate
+    });
+  }
+
+  /**
+   * Get supplier payment transactions
+   */
+  public async getSupplierPayments(
+    storeId: string,
+    supplierId?: string,
+    startDate?: string,
+    endDate?: string
+  ): Promise<PaymentTransaction[]> {
+    return this.getPaymentTransactions(storeId, {
+      entityType: 'supplier',
+      entityId: supplierId,
+      startDate,
+      endDate
+    });
+  }
+
+  /**
+   * Get today's payment transactions
+   */
+  public async getTodaysPayments(
+    storeId: string,
+    today: string,
+    entityType?: 'customer' | 'supplier',
+    entityId?: string
+  ): Promise<PaymentTransaction[]> {
+    const { db } = await import('../lib/db');
+    const transactions = await db.transactions.where('store_id').equals(storeId).toArray();
+    
+    return paymentService.getTodaysPayments(transactions, today, {
+      entityType,
+      entityId,
+      storeId
+    });
+  }
+
+  /**
+   * Get payment summary for a date range
+   */
+  public async getPaymentSummary(
+    storeId: string,
+    startDate: string,
+    endDate: string,
+    currency: 'USD' | 'LBP' = 'USD'
+  ): Promise<{
+    dailyPayments: Record<string, any>;
+    totalSummary: any;
+  }> {
+    const { db } = await import('../lib/db');
+    const transactions = await db.transactions.where('store_id').equals(storeId).toArray();
+    
+    return paymentService.getPaymentStatistics(transactions, startDate, endDate, currency);
+  }
+
+  /**
+   * Validate payment transaction before processing
+   */
+  public validatePayment(
+    customerId?: string,
+    supplierId?: string,
+    amount?: number,
+    currency?: 'USD' | 'LBP',
+    description?: string
+  ): { isValid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    if (!customerId && !supplierId) {
+      errors.push('Either customer or supplier must be specified');
+    }
+
+    if (customerId && supplierId) {
+      errors.push('Cannot specify both customer and supplier');
+    }
+
+    if (!amount || amount <= 0) {
+      errors.push('Valid amount is required');
+    }
+
+    if (!currency) {
+      errors.push('Currency is required');
+    }
+
+    if (!description || description.trim().length === 0) {
+      errors.push('Description is required');
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+
+  /**
+   * Get payment transactions grouped by entity
+   */
+  public async getPaymentsByEntity(
+    storeId: string,
+    entityType?: 'customer' | 'supplier',
+    startDate?: string,
+    endDate?: string
+  ): Promise<Record<string, PaymentTransaction[]>> {
+    const { db } = await import('../lib/db');
+    const transactions = await db.transactions.where('store_id').equals(storeId).toArray();
+    
+    return paymentService.getPaymentsByEntity(transactions, {
+      entityType,
+      startDate,
+      endDate,
+      storeId
+    });
   }
 }
 
