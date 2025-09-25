@@ -4,7 +4,7 @@ import {
   Transaction, 
   AccountsReceivable, 
   AccountsPayable, 
-  SaleItem, 
+  BillLineItem, 
   InventoryItem,
   CashDrawer 
 } from '../types';
@@ -99,6 +99,11 @@ export class ERPFinancialService {
   private async loadData(storeId: string) {
     if (this.storeId === storeId && this.customers.length > 0) {
       return; // Already loaded
+    }
+
+    // Validate storeId to prevent Dexie errors
+    if (!storeId || storeId.trim() === '') {
+      throw new Error('Invalid storeId provided. StoreId cannot be empty or null.');
     }
 
     this.storeId = storeId;
@@ -232,7 +237,7 @@ export class ERPFinancialService {
   }
 
   // Process customer credit sale
-  async processCustomerCreditSale(sale: SaleData, items: SaleItem[], storeId: string): Promise<TransactionSummary> {
+  async processCustomerCreditSale(sale: SaleData, items: BillLineItem[], storeId: string): Promise<TransactionSummary> {
     await this.loadData(storeId);
     
     const customer = this.customers.find(c => c.id === sale.customerId);
@@ -323,7 +328,7 @@ export class ERPFinancialService {
     }
 
     const amountInUSD = this.convertCurrency(amount, currency, 'USD');
-    const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
+    const balanceBefore = customer.usd_balance || 0; // Updated to use balance field with null safety
     // RULE 5 FIX: When receiving payment FROM customer, DECREASE their balance (reduce their debt to us)
     const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
 
@@ -692,7 +697,7 @@ export class ERPFinancialService {
   }
 
   // Process cash sale
-  processCashSale(sale: SaleData, items: SaleItem[]): TransactionSummary {
+  processCashSale(sale: SaleData, items: BillLineItem[]): TransactionSummary {
     // RULE 2 FIX: For cash sales, INCREASE cash drawer by sale amount
     this.updateCashDrawer(sale.amountPaid, true);
 

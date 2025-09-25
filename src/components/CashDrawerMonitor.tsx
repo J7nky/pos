@@ -143,7 +143,7 @@ export default function CashDrawerMonitor() {
        <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
           
-            <h2 className="text-lg font-semibold text-gray-900">{t('home.recentSales')}</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{t('home.recentActions')}</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setRange('today')}

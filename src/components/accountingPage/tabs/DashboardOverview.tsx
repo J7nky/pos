@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
   RefreshCw,
   Wallet,
@@ -7,6 +7,15 @@ import {
   TrendingUp,
   Users,
   ArrowDownRight,
+  Filter,
+  Search,
+  X,
+  Calendar,
+  DollarSign,
+  ChevronDown,
+  RotateCcw,
+  SortAsc,
+  SortDesc,
 } from "lucide-react";
 
 type Currency = "USD" | "LBP";
@@ -21,9 +30,37 @@ type Transaction = {
   createdAt: string;
 };
 
+type FilterState = {
+  searchTerm: string;
+  type: string;
+  currency: string;
+  dateRange: {
+    start: string;
+    end: string;
+  };
+  amountRange: {
+    min: string;
+    max: string;
+  };
+  sortBy: 'date' | 'amount' | 'category';
+  sortOrder: 'asc' | 'desc';
+};
+
 type Customer = {
   lb_balance?: number;
   usd_balance?: number;
+};
+
+
+type Product = {
+  id: string;
+  name: string;
+  category: string;
+};
+
+type Supplier = {
+  id: string;
+  name: string;
 };
 
 type StatCardProps = {
@@ -34,7 +71,7 @@ type StatCardProps = {
   children?: React.ReactNode;
 };
 
-const StatCard: React.FC<StatCardProps> = ({
+const StatCard: React.FC<StatCardProps> = React.memo(({
   title,
   value,
   icon,
@@ -42,100 +79,251 @@ const StatCard: React.FC<StatCardProps> = ({
   children,
 }) => (
   <div
-    className={`bg-white rounded-xl shadow-sm p-6 border-l-4 ${borderColor}`}
+    className={`bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200 p-6 border-l-4 ${borderColor}`}
   >
     <div className="flex items-center justify-between">
-      <div>
-        <p className="text-sm text-gray-600 font-medium">{title}</p>
-        <p className="text-2xl font-bold text-gray-900">{value}</p>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-600 font-medium truncate">{title}</p>
+        <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
         {children}
       </div>
-      <div className="p-3 bg-gray-100 rounded-full">{icon}</div>
+      <div className="p-3 bg-gray-50 rounded-full ml-4 flex-shrink-0">{icon}</div>
     </div>
   </div>
-);
+));
 
-type RecentActivityProps = {
-  transactions: Transaction[];
-  formatCurrencyWithSymbol: (amount: number, currency: Currency) => string;
+StatCard.displayName = 'StatCard';
+
+// Enhanced Filter Component
+type FilterPanelProps = {
+  filters: FilterState;
+  onFiltersChange: (filters: FilterState) => void;
+  onReset: () => void;
+  isVisible: boolean;
+  onToggle: () => void;
 };
 
-const RecentActivity: React.FC<RecentActivityProps> = ({
-  transactions,
-  formatCurrencyWithSymbol,
+const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
+  filters,
+  onFiltersChange,
+  onReset,
+  isVisible,
+  onToggle,
 }) => {
-  const recentTransactions = transactions
-    .filter(
-      (t) =>
-        new Date(t.createdAt) >=
-        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    )
-    .sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )
-    .slice(0, 5);
+  const [isExpanded, setIsExpanded] = useState(true);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus search input when filters open
+  useEffect(() => {
+    if (isVisible && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [isVisible]);
+
+  const updateFilter = useCallback((key: keyof FilterState, value: any) => {
+    onFiltersChange({ ...filters, [key]: value });
+  }, [filters, onFiltersChange]);
+
+  const updateNestedFilter = useCallback((parentKey: keyof FilterState, childKey: string, value: any) => {
+    onFiltersChange({
+      ...filters,
+      [parentKey]: {
+        ...(filters[parentKey] as any),
+        [childKey]: value
+      }
+    });
+  }, [filters, onFiltersChange]);
+
+  const hasActiveFilters = useMemo(() => {
+    return filters.searchTerm || 
+           filters.type || 
+           filters.currency || 
+           filters.dateRange.start || 
+           filters.dateRange.end ||
+           filters.amountRange.min ||
+           filters.amountRange.max;
+  }, [filters]);
+
+  const handleReset = useCallback(() => {
+    onReset();
+    setIsExpanded(false);
+  }, [onReset]);
+
+  if (!isVisible) return null;
 
   return (
-    <div className="bg-white rounded-xl shadow-sm p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
-        <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">
-          View All
-        </button>
+    <div className="mb-6 bg-gray-50 rounded-lg p-4 border border-gray-200">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center space-x-2">
+          <Filter className="w-4 h-4 text-gray-600" />
+          <h4 className="text-sm font-medium text-gray-900">Filters</h4>
+          {hasActiveFilters && (
+            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+              Active
+            </span>
+          )}
+        </div>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center text-sm text-gray-600 hover:text-gray-900 transition-colors"
+          >
+            {isExpanded ? 'Less' : 'More'}
+            <ChevronDown className={`w-4 h-4 ml-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+          </button>
+          {hasActiveFilters && (
+            <button
+              onClick={handleReset}
+              className="flex items-center text-sm text-red-600 hover:text-red-700 transition-colors"
+            >
+              <RotateCcw className="w-4 h-4 mr-1" />
+              Reset
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-4">
-        {recentTransactions.map((transaction) => (
-          <div
-            key={transaction.id}
-            className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
-          >
-            <div className="flex items-center">
-              <div
-                className={`p-2 rounded-full mr-3 ${
-                  transaction.type === "income" ? "bg-green-100" : "bg-red-100"
-                }`}
-              >
-                {transaction.type === "income" ? (
-                  <ArrowDownRight className="w-4 h-4 text-green-600" />
-                ) : (
-                  <ArrowUpRight className="w-4 h-4 text-red-600" />
-                )}
-              </div>
-              <div>
-                <div className="text-sm font-medium text-gray-900">
-                  {transaction.category}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {transaction.description}
-                </div>
+      {/* Basic Filters */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Search */}
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            placeholder="Search transactions..."
+            value={filters.searchTerm}
+            onChange={(e) => updateFilter('searchTerm', e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          />
+          {filters.searchTerm && (
+            <button
+              onClick={() => updateFilter('searchTerm', '')}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Type Filter */}
+        <select
+          value={filters.type}
+          onChange={(e) => updateFilter('type', e.target.value)}
+          className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+        >
+          <option value="">All Types</option>
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+        </select>
+
+        {/* Currency Filter */}
+        <select
+          value={filters.currency}
+          onChange={(e) => updateFilter('currency', e.target.value)}
+          className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+        >
+          <option value="">All Currencies</option>
+          <option value="USD">USD</option>
+          <option value="LBP">LBP</option>
+        </select>
+      </div>
+
+      {/* Advanced Filters */}
+      {isExpanded && (
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Date Range */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Start Date</label>
+              <div className="relative">
+                <Calendar className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input
+                  type="date"
+                  value={filters.dateRange.start}
+                  onChange={(e) => updateNestedFilter('dateRange', 'start', e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
               </div>
             </div>
-            <div className="text-right">
-              <div
-                className={`text-sm font-semibold ${
-                  transaction.type === "income"
-                    ? "text-green-600"
-                    : "text-red-600"
-                }`}
-              >
-                {transaction.type === "income" ? "+" : "-"}
-                {formatCurrencyWithSymbol(
-                  transaction.amount,
-                  transaction.currency || "USD"
-                )}
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">End Date</label>
+              <div className="relative">
+                <Calendar className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input
+                  type="date"
+                  value={filters.dateRange.end}
+                  onChange={(e) => updateNestedFilter('dateRange', 'end', e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
               </div>
-              <div className="text-xs text-gray-500">
-                {new Date(transaction.createdAt).toLocaleDateString()}
+            </div>
+
+            {/* Amount Range */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Min Amount</label>
+              <div className="relative">
+                <DollarSign className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input
+                  type="number"
+                  placeholder="0"
+                  value={filters.amountRange.min}
+                  onChange={(e) => updateNestedFilter('amountRange', 'min', e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Max Amount</label>
+              <div className="relative">
+                <DollarSign className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input
+                  type="number"
+                  placeholder="∞"
+                  value={filters.amountRange.max}
+                  onChange={(e) => updateNestedFilter('amountRange', 'max', e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
               </div>
             </div>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-};
+
+          {/* Sort Options */}
+          <div className="mt-4 flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <label className="text-xs font-medium text-gray-700">Sort by:</label>
+              <select
+                value={filters.sortBy}
+                onChange={(e) => updateFilter('sortBy', e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="date">Date</option>
+                <option value="amount">Amount</option>
+                <option value="category">Category</option>
+              </select>
+            </div>
+            <button
+              onClick={() => updateFilter('sortOrder', filters.sortOrder === 'asc' ? 'desc' : 'asc')}
+              className="flex items-center space-x-1 px-2 py-1 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+            >
+              {filters.sortOrder === 'asc' ? (
+                <SortAsc className="w-4 h-4" />
+              ) : (
+                <SortDesc className="w-4 h-4" />
+              )}
+              <span className="text-sm capitalize">{filters.sortOrder}</span>
+            </button>
+          </div>
+        </div>
+      )}
+  </div>
+);
+});
+
+FilterPanel.displayName = 'FilterPanel';
+
 
 type DashboardOverviewProps = {
   cashDrawerBalance: number | null;
@@ -151,6 +339,8 @@ type DashboardOverviewProps = {
   };
   customers: Customer[];
   transactions: Transaction[];
+  products: Product[];
+  suppliers: Supplier[];
 };
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
@@ -162,7 +352,23 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   getPeriodData,
   customers,
   transactions,
+  products,
+  suppliers,
 }) => {
+  // Enhanced filter state
+  const [showFilters, setShowFilters] = useState(true);
+  const [filters, setFilters] = useState<FilterState>({
+    searchTerm: '',
+    type: '',
+    currency: '',
+    dateRange: { start: '', end: '' },
+    amountRange: { min: '', max: '' },
+    sortBy: 'date',
+    sortOrder: 'desc',
+  });
+
+  // Memoized customer debt calculations
+  const customerDebtData = useMemo(() => {
   const totalLBPDebt = customers
     .filter((c) => (c.lb_balance || 0) > 0)
     .reduce((sum, c) => sum + (c.lb_balance || 0), 0);
@@ -174,6 +380,103 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const customersWithDebt = customers.filter(
     (c) => (c.lb_balance || 0) > 0 || (c.usd_balance || 0) > 0
   ).length;
+
+    return { totalLBPDebt, totalUSDDebt, customersWithDebt };
+  }, [customers]);
+
+  // Enhanced filtered transactions with advanced filtering
+  const filteredTransactions = useMemo(() => {
+    let filtered = transactions.filter((transaction) => {
+      // Search filter
+      const matchesSearch = !filters.searchTerm || 
+        transaction.category.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
+        transaction.description.toLowerCase().includes(filters.searchTerm.toLowerCase());
+      
+      // Type filter
+      const matchesType = !filters.type || transaction.type === filters.type;
+      
+      // Currency filter
+      const matchesCurrency = !filters.currency || transaction.currency === filters.currency;
+      
+      // Date range filter
+      const transactionDate = new Date(transaction.createdAt);
+      const matchesDateRange = (!filters.dateRange.start || transactionDate >= new Date(filters.dateRange.start)) &&
+                              (!filters.dateRange.end || transactionDate <= new Date(filters.dateRange.end));
+      
+      // Amount range filter
+      const matchesAmountRange = (!filters.amountRange.min || transaction.amount >= parseFloat(filters.amountRange.min)) &&
+                                (!filters.amountRange.max || transaction.amount <= parseFloat(filters.amountRange.max));
+      
+      return matchesSearch && matchesType && matchesCurrency && matchesDateRange && matchesAmountRange;
+    });
+
+    // Sort transactions
+    filtered.sort((a, b) => {
+      let comparison = 0;
+      
+      switch (filters.sortBy) {
+        case 'date':
+          comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          break;
+        case 'amount':
+          comparison = a.amount - b.amount;
+          break;
+        case 'category':
+          comparison = a.category.localeCompare(b.category);
+          break;
+        default:
+          comparison = 0;
+      }
+      
+      return filters.sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+    return filtered.slice(0, 10);
+  }, [transactions, filters]);
+
+  // Memoized callback functions
+  const handleRefreshCashDrawer = useCallback(async () => {
+    await refreshCashDrawerBalance();
+  }, [refreshCashDrawerBalance]);
+
+  const toggleFilters = useCallback(() => {
+    setShowFilters(prev => !prev);
+  }, []);
+
+  const handleFiltersChange = useCallback((newFilters: FilterState) => {
+    setFilters(newFilters);
+  }, []);
+
+  const handleResetFilters = useCallback(() => {
+    setFilters({
+      searchTerm: '',
+      type: '',
+      currency: '',
+      dateRange: { start: '', end: '' },
+      amountRange: { min: '', max: '' },
+      sortBy: 'date',
+      sortOrder: 'desc',
+    });
+  }, []);
+
+  // Filter summary for display
+  const filterSummary = useMemo(() => {
+    const activeFilters = [];
+    if (filters.searchTerm) activeFilters.push(`Search: "${filters.searchTerm}"`);
+    if (filters.type) activeFilters.push(`Type: ${filters.type}`);
+    if (filters.currency) activeFilters.push(`Currency: ${filters.currency}`);
+    if (filters.dateRange.start || filters.dateRange.end) {
+      const start = filters.dateRange.start || 'Any';
+      const end = filters.dateRange.end || 'Any';
+      activeFilters.push(`Date: ${start} to ${end}`);
+    }
+    if (filters.amountRange.min || filters.amountRange.max) {
+      const min = filters.amountRange.min || '0';
+      const max = filters.amountRange.max || '∞';
+      activeFilters.push(`Amount: ${min} - ${max}`);
+    }
+    return activeFilters;
+  }, [filters]);
 
   return (
     <div>
@@ -191,10 +494,8 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         >
           <div className="flex items-center mt-2 text-xs text-gray-500">
             <button
-              onClick={async () => {
-                await refreshCashDrawerBalance();
-              }}
-              className="inline-flex items-center px-2 py-1 bg-gray-100 rounded hover:bg-gray-200"
+              onClick={handleRefreshCashDrawer}
+              className="inline-flex items-center px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 transition-colors duration-200"
             >
               <RefreshCw className="w-3 h-3 mr-1" /> Refresh
             </button>
@@ -257,19 +558,24 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         <StatCard
           title="Total Customer Debt"
           value={
-            <>
-              LBP: {formatCurrency(totalLBPDebt)}
-              <br />
-              USD: {formatCurrency(totalUSDDebt)}
-            </>
+            <div className="space-y-1">
+              <div className="flex items-center">
+                <span className="text-xs text-gray-500 mr-2">LBP:</span>
+                <span className="text-lg font-semibold">{formatCurrency(customerDebtData.totalLBPDebt)}</span>
+              </div>
+              <div className="flex items-center">
+                <span className="text-xs text-gray-500 mr-2">USD:</span>
+                <span className="text-lg font-semibold">{formatCurrency(customerDebtData.totalUSDDebt)}</span>
+              </div>
+            </div>
           }
-          borderColor="border-green-500"
-          icon={<Wallet className="w-6 h-6 text-green-600" />}
+          borderColor="border-orange-500"
+          icon={<Users className="w-6 h-6 text-orange-600" />}
         >
           <div className="flex items-center mt-2">
             <Users className="w-4 h-4 text-blue-500 mr-1" />
             <span className="text-sm font-medium text-blue-600">
-              {customersWithDebt}
+              {customerDebtData.customersWithDebt}
             </span>
             <span className="text-xs text-gray-500 ml-1">
               customers with debt
@@ -278,12 +584,141 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         </StatCard>
       </div>
 
-      {/* Recent Activity */}
-      <div className="mt-6">
-        <RecentActivity
-          transactions={transactions}
-          formatCurrencyWithSymbol={formatCurrencyWithSymbol}
-        />
+      {/* Recent Transactions and Inventory */}
+      <div className="">
+        {/* Recent Transactions */}
+        <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center space-x-3">
+              <h3 className="text-lg font-semibold text-gray-900">Recent Transactions</h3>
+              {filterSummary.length > 0 && (
+                <div className="flex items-center space-x-1">
+                  <span className="text-xs text-gray-500">({filterSummary.length} filters)</span>
+                  <div className="flex flex-wrap gap-1">
+                    {filterSummary.slice(0, 2).map((filter, index) => (
+                      <span
+                        key={index}
+                        className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                      >
+                        {filter}
+                      </span>
+                    ))}
+                    {filterSummary.length > 2 && (
+                      <span className="text-xs text-gray-500">+{filterSummary.length - 2} more</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={toggleFilters}
+              className={`p-2 rounded-lg transition-colors duration-200 ${
+                showFilters ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              <Filter className="w-4 h-4" />
+            </button>
+          </div>
+
+          <FilterPanel
+            filters={filters}
+            onFiltersChange={handleFiltersChange}
+            onReset={handleResetFilters}
+            isVisible={showFilters}
+            onToggle={toggleFilters}
+          />
+
+          {/* Results Summary */}
+          <div className="mb-4 flex items-center justify-between text-sm text-gray-600">
+            <span>
+              Showing {filteredTransactions.length} of {transactions.length} transactions
+            </span>
+            {filterSummary.length > 0 && (
+              <span className="text-blue-600">
+                Filtered by {filterSummary.length} criteria
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {filteredTransactions.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+                  <Search className="w-8 h-8 text-gray-400" />
+                </div>
+                <h4 className="text-lg font-medium text-gray-900 mb-2">No transactions found</h4>
+                <p className="text-sm">
+                  {filterSummary.length > 0 
+                    ? "Try adjusting your filters to see more results"
+                    : "No transactions available at the moment"
+                  }
+                </p>
+                {filterSummary.length > 0 && (
+                  <button
+                    onClick={handleResetFilters}
+                    className="mt-3 text-sm text-blue-600 hover:text-blue-700 transition-colors"
+                  >
+                    Clear all filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              filteredTransactions.map((transaction) => (
+                <div
+                  key={transaction.id}
+                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200 border border-transparent hover:border-gray-200"
+                >
+                  <div className="flex items-center flex-1 min-w-0">
+                    <div
+                      className={`p-2 rounded-full mr-3 flex-shrink-0 ${
+                        transaction.type === "income" ? "bg-green-100" : "bg-red-100"
+                      }`}
+                    >
+                      {transaction.type === "income" ? (
+                        <ArrowDownRight className="w-4 h-4 text-green-600" />
+                      ) : (
+                        <ArrowUpRight className="w-4 h-4 text-red-600" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">
+                        {transaction.category}
+                      </div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {transaction.description}
+                      </div>
+                      <div className="flex items-center space-x-2 mt-1">
+                        <span className="text-xs text-gray-400">
+                          {new Date(transaction.createdAt).toLocaleDateString()}
+                        </span>
+                        <span className="text-xs text-gray-400">•</span>
+                        <span className="text-xs text-gray-400">
+                          {transaction.currency}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0 ml-4">
+                    <div
+                      className={`text-sm font-semibold ${
+                        transaction.type === "income"
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
+                    >
+                      {transaction.type === "income" ? "+" : "-"}
+                      {formatCurrencyWithSymbol(
+                        transaction.amount,
+                        transaction.currency || "USD"
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
       </div>
     </div>
   );

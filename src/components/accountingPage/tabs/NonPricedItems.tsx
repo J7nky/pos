@@ -95,7 +95,7 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
       <div className="flex justify-between items-center">
         <div className="flex items-center">
           <h2 className="text-xl font-semibold text-gray-900">
-            Non Priced Items
+            Non Priced 
           </h2>
           {filteredNonPricedItems.length > 0 && (
             <span className="ml-3 bg-red-500 text-white text-sm rounded-full px-3 py-1">

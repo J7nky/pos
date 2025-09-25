@@ -145,8 +145,8 @@ const ar = {
     alertsDisabled: 'التنبيهات معطلة',
     lowStockAlert: 'تنبيه انخفاض المخزون',
     allWellStocked: 'جميع المنتجات مخزونها جيد!',
-    recentSales: 'المبيعات الأخيرة',
-    noRecentSales: 'لا توجد مبيعات حديثة'
+    recentActions: 'الإجراءات الأخيرة',
+    noRecentSales: 'لا توجد إجراءات حديثة'
   },
   inventory: {
     header: 'إدارة المخزون',

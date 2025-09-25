@@ -167,10 +167,10 @@ export default function Customers() {
       // For supplier payments, check cash drawer balance BEFORE processing
       if (!isCustomer) {
         const safeAmount = getSafeAmount(amount, currency);
-        const currentBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile?.store_id || '');
+        const currentBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile?.store_id || 'default-store');
         
         // Convert payment amount to store currency for comparison
-        const storeCurrency = await cashDrawerUpdateService.getStorePreferredCurrency(userProfile?.store_id || '', getStore);
+        const storeCurrency = await cashDrawerUpdateService.getStorePreferredCurrency(userProfile?.store_id || 'default-store', getStore);
         const normalizedPaymentAmount = cashDrawerUpdateService.normalizeAmountToStoreCurrency(
           safeAmount.amount,
           currency,
@@ -188,7 +188,7 @@ export default function Customers() {
 
       // Use the ERP Financial Service to process the payment
       const { erpFinancialService } = await import('../services/erpFinancialService');
-
+      const storeId = userProfile?.store_id || 'default-store';
       // Sync data to ERP service
       const dataToSync = isCustomer ? customers : suppliers;
       await erpFinancialService.reloadData(storeId);

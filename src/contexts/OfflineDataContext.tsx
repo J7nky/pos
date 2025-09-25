@@ -3,13 +3,13 @@ import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
 import { BillLineItem, BillLineItemTransforms } from '../types';
-import { 
-  db, 
-  Product, 
-  Supplier, 
-  Customer, 
-  InventoryItem, 
-  Transaction, 
+import {
+  db,
+  Product,
+  Supplier,
+  Customer,
+  InventoryItem,
+  Transaction,
   createBaseEntity,
   createId,
 } from '../lib/db';
@@ -91,9 +91,9 @@ interface OfflineDataContextType {
     porterage_fee?: number | null;
     transfer_fee?: number | null;
     received_at?: string;
-    commission_rate?:number,
-    type:string,
-    plastic_fee?:number|null;
+    commission_rate?: number,
+    type: string,
+    plastic_fee?: number | null;
     items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
   }) => Promise<{ batchId: string; financialResult?: any }>;
   addSale: (items: any[]) => Promise<void>;
@@ -253,7 +253,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // Load store data and settings from IndexedDB
   const loadStoreData = async () => {
     if (!storeId) return;
-    
+
     try {
       // Load store data from IndexedDB
       const existingStore = await db.stores.where('id').equals(storeId).first();
@@ -261,7 +261,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (existingStore) {
         // Use existing store data
         console.log('📦 Using cached store data:', existingStore);
-        
+
         // Update settings from store data
         if (existingStore.preferred_currency) {
           setCurrency(existingStore.preferred_currency);
@@ -278,7 +278,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         if (existingStore.preferred_language) {
           setLanguage(existingStore.preferred_language);
         }
-        
+
         // Load cash drawer status from IndexedDB
         await refreshCashDrawerStatus();
       } else {
@@ -473,7 +473,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         if (autoSyncTimeout) {
           clearTimeout(autoSyncTimeout);
         }
-        
+
         // Debounce auto-sync calls
         autoSyncTimeout = setTimeout(() => {
           console.log('👀 Auto-syncing on focus/visibility change...');
@@ -572,7 +572,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               line_total: item.line_total,
               line_order: item.line_order,
               updated_at: item.updated_at,
-            } 
+            }
           );
         })
       );
@@ -665,7 +665,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               console.log(`🔍 Validating unsynced item ${item.id}:`);
 
               const validationErrors = [];
-              
+
               // Check quantity constraint
               if (item.quantity < 0) {
                 console.log(`  ❌ Quantity validation failed: ${item.quantity} < 0`);
@@ -704,22 +704,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               } else {
                 console.log(`  ℹ️ No batch_id provided (optional)`);
               }
-              
+
               // Auto-fix common issues
               if (validationErrors.length > 0) {
                 console.log(`🔧 Attempting to auto-fix item ${item.id}...`);
                 try {
                   const fixes = [];
-                  
+
                   // Fix negative quantity
                   if (item.quantity < 0) {
-                    await db.inventory_items.update(item.id, { 
+                    await db.inventory_items.update(item.id, {
                       quantity: 0,
-                      _synced: false 
+                      _synced: false
                     });
                     fixes.push('Fixed negative quantity (set to 0)');
                   }
-                  
+
                   // Fix missing product (use first available product)
                   if (!product) {
                     const validProduct = await db.products
@@ -728,14 +728,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                       .filter(p => !p._deleted)
                       .first();
                     if (validProduct) {
-                      await db.inventory_items.update(item.id, { 
+                      await db.inventory_items.update(item.id, {
                         product_id: validProduct.id,
-                        _synced: false 
+                        _synced: false
                       });
                       fixes.push(`Updated product_id to: ${validProduct.name}`);
                     }
                   }
-                  
+
                   // Fix missing supplier (use first available supplier)
                   if (!supplier) {
                     const validSupplier = await db.suppliers
@@ -744,23 +744,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                       .filter(s => !s._deleted)
                       .first();
                     if (validSupplier) {
-                      await db.inventory_items.update(item.id, { 
+                      await db.inventory_items.update(item.id, {
                         supplier_id: validSupplier.id,
-                        _synced: false 
+                        _synced: false
                       });
                       fixes.push(`Updated supplier_id to: ${validSupplier.name}`);
                     }
                   }
-                  
+
                   // Fix invalid batch reference
                   if (item.batch_id && !await db.inventory_bills.get(item.batch_id)) {
-                    await db.inventory_items.update(item.id, { 
+                    await db.inventory_items.update(item.id, {
                       batch_id: null,
-                      _synced: false 
+                      _synced: false
                     });
                     fixes.push('Removed invalid batch_id reference');
                   }
-                  
+
                   if (fixes.length > 0) {
                     console.log(`✅ Auto-fixes applied: ${fixes.join(', ')}`);
                   } else {
@@ -879,7 +879,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // Optimized data loading with batching
   const loadAllStoreData = async (storeId: string) => {
     const startTime = Date.now();
-    
+
     const operations = [
       () => getProductsByStore(storeId),
       () => getSuppliersByStore(storeId),
@@ -897,9 +897,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const results = await batchIndexedDBOperations(operations);
     const loadTime = Date.now() - startTime;
-    
+
     console.log(`⚡ IndexedDB batch load completed in ${loadTime}ms`);
-    
+
     return {
       productsData: results[0],
       suppliersData: results[1],
@@ -1014,11 +1014,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       return result;
     } catch (error) {
       console.error(`${isAutomatic ? 'Auto-sync' : 'Manual sync'} error:`, error);
-      return { 
-        success: false, 
-        errors: [error instanceof Error ? error.message : 'Unknown sync error'], 
-        synced: { uploaded: 0, downloaded: 0 }, 
-        conflicts: 0 
+      return {
+        success: false,
+        errors: [error instanceof Error ? error.message : 'Unknown sync error'],
+        synced: { uploaded: 0, downloaded: 0 },
+        conflicts: 0
       };
     } finally {
       setIsSyncing(false);
@@ -1095,7 +1095,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Store original inventory states for undo
     const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
-    
+
     // Use transaction to ensure atomicity for all operations including inventory, cash drawer, and customer balance
     await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.customers, db.transactions], async () => {
       // Add bill and line items
@@ -1104,35 +1104,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         await db.bill_line_items.bulkAdd(mappedLineItems);
       }
 
-      // Update customer balance if needed
-      if (customerBalanceUpdate) {
-        const customer = await db.customers.get(customerBalanceUpdate.customerId);
-        if (customer) {
-          const newBalance = customerBalanceUpdate.originalBalance + customerBalanceUpdate.amountDue;
-          await db.customers.update(customerBalanceUpdate.customerId, {
-            lb_balance: newBalance,
-            _synced: false
-          });
-
-          // Record the transaction for financial tracking
-          const transaction = {
-            id: createId(),
-            store_id: storeId,
-            created_at: now,
-            updated_at: now,
-            _synced: false,
-            type: 'income' , // Credit sale creates accounts receivable (income)
-            amount: customerBalanceUpdate.amountDue,
-            currency: 'LBP',
-            description: `Credit sale - Bill ${bill.bill_number}`,
-            reference: bill.bill_number,
-            customer_id: customerBalanceUpdate.customerId,
-            supplier_id:null,
-            category:"sale",
-            created_by: currentUserId,
-            status: 'active' as const
-          };
-          await db.transactions.add(transaction as any);
+      // Deduct inventory quantities for all line items (regardless of payment method)
       for (const item of mappedLineItems) {
         if (item.inventory_item_id) {
           // Use the specific inventory item ID if provided
@@ -1143,18 +1115,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               id: item.inventory_item_id,
               originalQuantity: inventoryItem.quantity
             });
-            
+
             const newQuantity = inventoryItem.quantity - item.quantity;
 
             if (newQuantity <= 0) {
               // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(item.inventory_item_id, { 
+              await db.inventory_items.update(item.inventory_item_id, {
                 quantity: 0,
                 _synced: false
               });
             } else {
               // Update with new quantity
-              await db.inventory_items.update(item.inventory_item_id, { 
+              await db.inventory_items.update(item.inventory_item_id, {
                 quantity: newQuantity,
                 _synced: false
               });
@@ -1183,13 +1155,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
             if (newQuantity <= 0) {
               // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(inv.id, { 
+              await db.inventory_items.update(inv.id, {
                 quantity: 0,
                 _synced: false
               });
             } else {
               // Update with new quantity
-              await db.inventory_items.update(inv.id, { 
+              await db.inventory_items.update(inv.id, {
                 quantity: newQuantity,
                 _synced: false
               });
@@ -1198,10 +1170,39 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           }
         }
       }
-    }
-  }
-}
-);
+
+      // Update customer balance if needed
+      if (customerBalanceUpdate) {
+        const customer = await db.customers.get(customerBalanceUpdate.customerId);
+        if (customer) {
+          const newBalance = customerBalanceUpdate.originalBalance + customerBalanceUpdate.amountDue;
+          await db.customers.update(customerBalanceUpdate.customerId, {
+            lb_balance: newBalance,
+            _synced: false
+          });
+
+          // Record the transaction for financial tracking
+          const transaction = {
+            id: createId(),
+            store_id: storeId,
+            created_at: now,
+            updated_at: now,
+            _synced: false,
+            type: 'income', // Credit sale creates accounts receivable (income)
+            amount: customerBalanceUpdate.amountDue,
+            currency: 'LBP',
+            description: `Credit sale - Bill ${bill.bill_number}`,
+            reference: bill.bill_number,
+            customer_id: customerBalanceUpdate.customerId,
+            supplier_id: null,
+            category: "sale",
+            created_by: currentUserId,
+            status: 'active' as const
+          };
+          await db.transactions.add(transaction as any);
+        }
+      }
+    });
 
     // Process cash drawer transaction for cash sales using the general utility
     const cashSaleItems = mappedLineItems.filter(item => item.payment_method === 'cash');
@@ -1234,8 +1235,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             description: `Cash sale - Bill ${bill.bill_number}`,
             reference: bill.bill_number,
             customer_id: cashSaleItems[0]?.customer_id || null,
-            supplier_id:null,
-            category:"sale",
+            supplier_id: null,
+            category: "sale",
             created_by: currentUserId,
           };
           await db.transactions.add(cashTransaction as any);
@@ -1269,11 +1270,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Delete all line items
         ...mappedLineItems.map(item => ({ op: 'delete', table: 'bill_line_items', id: item.id })),
         // Restore inventory quantities
-        ...inventoryStates.map(state => ({ 
-          op: 'update', 
-          table: 'inventory_items', 
-          id: state.id, 
-          changes: { quantity: state.originalQuantity, _synced: false } 
+        ...inventoryStates.map(state => ({
+          op: 'update',
+          table: 'inventory_items',
+          id: state.id,
+          changes: { quantity: state.originalQuantity, _synced: false }
         })),
         // Restore customer balance if applicable
         ...(customerBalanceUpdate ? [{
@@ -1298,7 +1299,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
 
     // Create comprehensive undo data including cash drawer if applicable
-    const undoData = cashDrawerResult 
+    const undoData = cashDrawerResult
       ? createCashDrawerUndoData(cashDrawerResult.transactionId, cashDrawerResult.previousBalance, cashDrawerResult.accountId, baseUndoData)
       : { type: 'complete_checkout', ...baseUndoData };
 
@@ -1637,8 +1638,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const item: InventoryItem = {
       id: createId(),
-      product_id: itemData.product_id??'',
-      supplier_id: itemData.supplier_id??'',
+      product_id: itemData.product_id ?? '',
+      supplier_id: itemData.supplier_id ?? '',
       quantity: itemData.quantity ?? 0,
       unit: itemData.unit ?? '',
       received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
@@ -1698,7 +1699,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addInventoryBatch: OfflineDataContextType['addInventoryBatch'] = async ({
     supplier_id,
     created_by,
-    status = 'Created', 
+    status = 'Created',
     porterage_fee = null,
     transfer_fee = null,
     received_at,
@@ -1771,14 +1772,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // to maintain foreign key constraints.
     await db.transaction('rw', [db.inventory_bills, db.inventory_items], async () => {
       await db.inventory_bills.add(batchRecord);
-      console.log(batchRecord,'batchrecord')
+      console.log(batchRecord, 'batchrecord')
       const now = new Date().toISOString();
 
       const mappedItems = items.map((it) => ({
-        id:createId(),
-        product_id:it.product_id??'',
-        quantity:it.quantity??0,
-        unit:it.unit??'',
+        id: createId(),
+        product_id: it.product_id ?? '',
+        quantity: it.quantity ?? 0,
+        unit: it.unit ?? '',
         store_id: storeId,
         created_at: now,
         _synced: false,
@@ -1786,7 +1787,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         weight: it.weight ?? null,
         price: it.price ?? null,
         selling_price: it.selling_price ?? null,
-        received_quantity: it.received_quantity ??0,  
+        received_quantity: it.received_quantity ?? 0,
         batch_id: batchId as string | null
       }));
 
@@ -1934,13 +1935,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
             if (newQuantity <= 0) {
               // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(item.inventory_item_id, { 
+              await db.inventory_items.update(item.inventory_item_id, {
                 quantity: 0,
                 _synced: false
               });
             } else {
               // Update with new quantity
-              await db.inventory_items.update(item.inventory_item_id, { 
+              await db.inventory_items.update(item.inventory_item_id, {
                 quantity: newQuantity,
                 _synced: false
               });
@@ -1963,13 +1964,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
             if (newQuantity <= 0) {
               // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(inv.id, { 
+              await db.inventory_items.update(inv.id, {
                 quantity: 0,
                 _synced: false
               });
             } else {
               // Update with new quantity
-              await db.inventory_items.update(inv.id, { 
+              await db.inventory_items.update(inv.id, {
                 quantity: newQuantity,
                 _synced: false
               });
@@ -2087,7 +2088,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       } else if (quantityDifference < 0) {
         // Quantity decreased - restore inventory
         await restoreInventoryQuantity(originalSale.product_id, originalSale.supplier_id, Math.abs(quantityDifference));
-      } 
+      }
     }
 
     // Update related bills if price-related fields changed
@@ -2172,12 +2173,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Ensure commission_rate is properly typed as number | null
     const processedUpdates = {
       ...updates,
-      commission_rate: updates.commission_rate !== undefined 
+      commission_rate: updates.commission_rate !== undefined
         ? (typeof updates.commission_rate === 'string' ? parseFloat(updates.commission_rate) || null : updates.commission_rate)
         : undefined,
       _synced: false
     };
-    
+
     await db.inventory_bills.update(id, processedUpdates);
     await refreshData();
     await updateUnsyncedCount();
@@ -2227,11 +2228,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       return result;
     } catch (error) {
       console.error('Full resync error:', error);
-      return { 
-        success: false, 
-        errors: [error instanceof Error ? error.message : 'Unknown resync error'], 
-        synced: { uploaded: 0, downloaded: 0 }, 
-        conflicts: 0 
+      return {
+        success: false,
+        errors: [error instanceof Error ? error.message : 'Unknown resync error'],
+        synced: { uploaded: 0, downloaded: 0 },
+        conflicts: 0
       };
     } finally {
       setIsSyncing(false);
@@ -2286,7 +2287,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-      
+
       const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
         ...transactionData,
         storeId,
@@ -2389,47 +2390,35 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (!undoData) return false;
 
       const action = JSON.parse(undoData);
-      console.log('🔄 Attempting undo for action:', action);
 
       // Check if any affected records are synced
       // Exception: cash_drawer_accounts can be synced and still allow undo (only balance changes)
       for (const item of action.affected || []) {
-        console.log(`🔍 Checking record: ${item.table} with ID: ${item.id}`);
         const record = await (db as any)[item.table].get(item.id);
         if (!record) {
-          console.log(`❌ Cannot undo: record ${item.id} in ${item.table} is missing`);
           localStorage.removeItem('last_undo_action');
           setCanUndo(false);
           return false;
         }
-        console.log(`✅ Record found: ${item.table} with ID: ${item.id}`);
-
-        // // Allow undo for cash_drawer_accounts even if synced (only balance changes)
-        // if (record._synced && item.table !== 'cash_drawer_accounts') {
-        //   console.log(`❌ Cannot undo: record ${item.id} in ${item.table} is synced`);
-        //   localStorage.removeItem('last_undo_action');
-        //   setCanUndo(false);
-        //   return false;
-        // }
+        // Allow undo for cash_drawer_accounts even if synced (only balance changes)
+        if (record._synced && item.table !== 'cash_drawer_accounts') {
+          localStorage.removeItem('last_undo_action');
+          setCanUndo(false);
+          return false;
+        }
       }
 
       // Execute undo steps
       await db.transaction('rw', [...db.tables, db.pending_syncs], async () => {
-        console.log('12312312', action.steps);
         for (const step of action.steps || []) {
-          console.log('🔄 Executing undo step:', step);
-
           if (step.op === 'delete' && step.id) {
-            console.log(`🗑️ Deleting record ${step.id} from ${step.table}`);
             await (db as any)[step.table].delete(step.id);
             // Remove from pending syncs if it exists
             await db.pending_syncs.where('table_name').equals(step.table)
               .filter(item => item.record_id === step.id).delete();
           } else if (step.op === 'restore' && step.record) {
-            console.log(`📥 Restoring record to ${step.table}:`, step.record);
             await (db as any)[step.table].add(step.record);
           } else if (step.op === 'update' && step.id && step.changes) {
-            console.log(`✏️ Updating record ${step.id} in ${step.table} with:`, step.changes);
             await (db as any)[step.table].update(step.id, step.changes);
             // Remove from pending syncs if it exists
             await db.pending_syncs.where('table_name').equals(step.table)
@@ -2449,6 +2438,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setCanUndo(false);
       await refreshData();
       await updateUnsyncedCount();
+      
+      // Trigger cash drawer update event if the undo affected cash drawer
+      const hasCashDrawerChanges = action.affected?.some((item: any) => 
+        item.table === 'cash_drawer_accounts' || 
+        action.steps?.some((step: any) => step.table === 'cash_drawer_accounts')
+      );
+      
+      if (hasCashDrawerChanges && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
+          detail: { storeId, event: 'undo_completed' }
+        }));
+        // Also dispatch a general undo-completed event for broader listening
+        window.dispatchEvent(new CustomEvent('undo-completed', { 
+          detail: { storeId, event: 'undo_completed', affectedTables: action.affected?.map((a: any) => a.table) || [] }
+        }));
+      }
+      
       return true;
     } catch (error) {
       console.error('❌ Undo failed:', error);
@@ -2519,7 +2525,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Dispatch event to notify components
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
+        window.dispatchEvent(new CustomEvent('cash-drawer-updated', {
           detail: { storeId, event: 'opened' }
         }));
       }
@@ -2583,15 +2589,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           { table: 'cash_drawer_accounts', id: account.id }
         ],
         steps: [
-          { op: 'update', table: 'cash_drawer_sessions', id: cashDrawer.id, changes: {
-            status: 'open',
-            closed_at: null,
-            closed_by: null,
-            expected_amount: null,
-            actual_amount: null,
-            variance: null,
-            _synced: false
-          }},
+          {
+            op: 'update', table: 'cash_drawer_sessions', id: cashDrawer.id, changes: {
+              status: 'open',
+              closed_at: null,
+              closed_by: null,
+              expected_amount: null,
+              actual_amount: null,
+              variance: null,
+              _synced: false
+            }
+          },
           { op: 'update', table: 'cash_drawer_accounts', id: account.id, changes: { current_balance: previousBalance, _synced: false } }
         ]
       });
@@ -2664,22 +2672,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Update local state immediately
       setLowStockAlertsEnabled(enabled);
-      
+
       // Update IndexedDB
       await db.stores
         .where('id')
         .equals(storeId)
-        .modify({ 
+        .modify({
           low_stock_alert: enabled,
           _synced: false,
           updated_at: new Date().toISOString()
         });
 
       console.log('✅ Low stock alert updated locally:', enabled);
-      
+
       // Update unsynced count immediately
       await updateUnsyncedCount();
-      
+
       // Trigger immediate sync for settings changes
       if (isOnline && !isSyncing) {
         console.log('🔄 Triggering immediate sync for low stock alert change');
@@ -2710,22 +2718,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Update local state immediately
       setDefaultCommissionRate(rate);
-      
+
       // Update IndexedDB
       await db.stores
         .where('id')
         .equals(storeId)
-        .modify({ 
+        .modify({
           preferred_commission_rate: rate,
           _synced: false,
           updated_at: new Date().toISOString()
         });
 
       console.log('✅ Commission rate updated locally:', rate);
-      
+
       // Update unsynced count immediately
       // await updateUnsyncedCount();
-      
+
       // Trigger immediate sync for settings changes
       if (isOnline && !isSyncing) {
         console.log('🔄 Triggering immediate sync for commission rate change');
@@ -2749,22 +2757,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Update local state immediately
       setCurrency(newCurrency);
-      
+
       // Update IndexedDB
       await db.stores
         .where('id')
         .equals(storeId)
-        .modify({ 
+        .modify({
           preferred_currency: newCurrency,
           _synced: false,
           updated_at: new Date().toISOString()
         });
 
       console.log('✅ Currency updated locally:', newCurrency);
-      
+
       // Update unsynced count immediately
       await updateUnsyncedCount();
-      
+
       // Trigger immediate sync for settings changes
       if (isOnline && !isSyncing) {
         console.log('🔄 Triggering immediate sync for currency change');
@@ -2788,22 +2796,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Update local state immediately
       setExchangeRate(rate);
-      
+
       // Update IndexedDB
       await db.stores
         .where('id')
         .equals(storeId)
-        .modify({ 
+        .modify({
           exchange_rate: rate,
           _synced: false,
           updated_at: new Date().toISOString()
         });
 
       console.log('✅ Exchange rate updated locally:', rate);
-      
+
       // Update unsynced count immediately
       await updateUnsyncedCount();
-      
+
       // Trigger immediate sync for settings changes
       if (isOnline && !isSyncing) {
         console.log('🔄 Triggering immediate sync for exchange rate change');
@@ -2827,22 +2835,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Update local state immediately
       setLanguage(newLanguage);
-      
+
       // Update IndexedDB
       await db.stores
         .where('id')
         .equals(storeId)
-        .modify({ 
+        .modify({
           preferred_language: newLanguage,
           _synced: false,
           updated_at: new Date().toISOString()
         });
 
       console.log('✅ Language updated locally:', newLanguage);
-      
+
       // Update unsynced count immediately
       await updateUnsyncedCount();
-      
+
       // Trigger immediate sync for settings changes
       if (isOnline && !isSyncing) {
         console.log('🔄 Triggering immediate sync for language change');
@@ -2879,13 +2887,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
         if (newQuantity <= 0) {
           // Keep inventory item with quantity = 0 for received bills review instead of deleting
-          await db.inventory_items.update(inv.id, { 
+          await db.inventory_items.update(inv.id, {
             quantity: 0,
             _synced: false
           });
         } else {
           // Update with new quantity
-          await db.inventory_items.update(inv.id, { 
+          await db.inventory_items.update(inv.id, {
             quantity: newQuantity,
             _synced: false
           });
@@ -2923,7 +2931,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const mostRecent = existingInventory[existingInventory.length - 1];
         const newQuantity = mostRecent.quantity + quantity;
 
-        await db.inventory_items.update(mostRecent.id, { 
+        await db.inventory_items.update(mostRecent.id, {
           quantity: newQuantity,
           _synced: false
         });
@@ -2983,7 +2991,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         billAuditLogs: [],
         missedProducts: [],
         stockLevels: [],
-        setStockLevels: () => {},
+        setStockLevels: () => { },
         lowStockAlertsEnabled: false,
         lowStockThreshold: 10,
         defaultCommissionRate: 10,
@@ -2991,13 +2999,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         exchangeRate: 89500,
         language: 'ar',
         cashDrawer: null,
-        openCashDrawer: async () => {},
-        closeCashDrawer: async () => {},
+        openCashDrawer: async () => { },
+        closeCashDrawer: async () => { },
         getCashDrawerBalanceReport: async () => [],
         getCurrentCashDrawerStatus: async () => null,
         getCashDrawerSessionDetails: async () => null,
         getRecommendedOpeningAmount: async () => ({ amount: 0, source: 'default' as const }),
-        refreshCashDrawerStatus: async () => {},
+        refreshCashDrawerStatus: async () => { },
         isOnline: false,
         loading: {
           sync: false,
@@ -3011,51 +3019,51 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           bills: false
         },
         // Empty CRUD operations
-        addProduct: async () => {},
-        addSupplier: async () => {},
-        addCustomer: async () => {},
-        updateCustomer: async () => {},
-        updateSupplier: async () => {},
-        updateProduct: async () => {},
-        deleteProduct: async () => {},
-        addInventoryItem: async () => {},
-        updateInventoryItem: async () => {},
-        deleteInventoryItem: async () => {},
+        addProduct: async () => { },
+        addSupplier: async () => { },
+        addCustomer: async () => { },
+        updateCustomer: async () => { },
+        updateSupplier: async () => { },
+        updateProduct: async () => { },
+        deleteProduct: async () => { },
+        addInventoryItem: async () => { },
+        updateInventoryItem: async () => { },
+        deleteInventoryItem: async () => { },
         addInventoryBatch: async () => ({ batchId: '', financialResult: null }),
-        addSale: async () => {},
-        updateSale: async () => {},
-        deleteSale: async () => {},
-        updateBillsForSaleItem: async () => {},
-        addTransaction: async () => {},
-        addExpenseCategory: async () => {},
-        updateInventoryBatch: async () => {},
-        applyCommissionRateToBatch: async () => {},
+        addSale: async () => { },
+        updateSale: async () => { },
+        deleteSale: async () => { },
+        updateBillsForSaleItem: async () => { },
+        addTransaction: async () => { },
+        addExpenseCategory: async () => { },
+        updateInventoryBatch: async () => { },
+        applyCommissionRateToBatch: async () => { },
         createBill: async () => '',
-        updateBill: async () => {},
-        deleteBill: async () => {},
+        updateBill: async () => { },
+        deleteBill: async () => { },
         getBills: async () => [],
         getBillDetails: async () => null,
-        createBillAuditLog: async () => {},
+        createBillAuditLog: async () => { },
         getStore: async () => null,
-        deductInventoryQuantity: async () => {},
-        restoreInventoryQuantity: async () => {},
-        refreshData: async () => {},
+        deductInventoryQuantity: async () => { },
+        restoreInventoryQuantity: async () => { },
+        refreshData: async () => { },
         getStockLevels: () => [],
-        toggleLowStockAlerts: async () => {},
-        updateLowStockThreshold: () => {},
-        updateDefaultCommissionRate: async () => {},
-        updateCurrency: async () => {},
-        updateExchangeRate: async () => {},
-        updateLanguage: async () => {},
+        toggleLowStockAlerts: async () => { },
+        updateLowStockThreshold: () => { },
+        updateDefaultCommissionRate: async () => { },
+        updateCurrency: async () => { },
+        updateExchangeRate: async () => { },
+        updateLanguage: async () => { },
         sync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
         fullResync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
-        debouncedSync: () => {},
+        debouncedSync: () => { },
         getSyncStatus: () => ({ isOnline: false, lastSync: null, unsyncedCount: 0, isSyncing: false, isAutoSyncing: false }),
         validateAndCleanData: async () => ({ cleaned: 0, report: {} }),
         canUndo: false,
         undoLastAction: async () => false,
-        pushUndo: () => {},
-        testUndo: () => {},
+        pushUndo: () => { },
+        testUndo: () => { },
         processCashDrawerTransaction: async () => ({ success: false }),
         createCashDrawerUndoData: () => ({})
       }}>

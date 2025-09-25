@@ -146,13 +146,25 @@ export default function Home() {
       if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
       loadCashDrawerStatus();
     };
+    
+    // Handle undo completion events
+    const handleUndoCompleted = (e: any) => {
+      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
+      // Small delay to ensure database updates are complete
+      setTimeout(() => {
+        loadCashDrawerStatus();
+      }, 100);
+    };
+    
     window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+    window.addEventListener('undo-completed', handleUndoCompleted as any);
 
     // Refresh every 30 seconds as a fallback
     const interval = setInterval(loadCashDrawerStatus, 30000);
     return () => {
       clearInterval(interval);
       window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+      window.removeEventListener('undo-completed', handleUndoCompleted as any);
     };
   }, [raw.storeId]);
 
@@ -170,6 +182,17 @@ export default function Home() {
     if (!raw.storeId) return;
     loadCashDrawerStatus();
   }, [raw.storeId, transactions.length]);
+
+  // Additional effect to refresh cash drawer when transactions array changes (including undo operations)
+  useEffect(() => {
+    if (!raw.storeId) return;
+    // Debounce the refresh to avoid excessive calls
+    const timeoutId = setTimeout(() => {
+      loadCashDrawerStatus();
+    }, 200);
+    
+    return () => clearTimeout(timeoutId);
+  }, [raw.storeId, transactions]);
 
   const lowStockItems = lowStockAlertsEnabled 
     ? stockLevels.filter(item => item.currentStock < lowStockThreshold)

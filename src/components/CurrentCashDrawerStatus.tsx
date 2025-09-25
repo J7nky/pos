@@ -455,16 +455,6 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
         )}
       </div>
 
-      {/* Cash Flow Tracker - Show when there's an active session */}
-      {status.status === 'active' && status.sessionId && (
-        <div className="mt-6">
-          <CashDrawerFlowTracker 
-            sessionId={status.sessionId} 
-            storeId={storeId} 
-          />
-        </div>
-      )}
-
       {/* Inventory Verification Modal */}
       <InventoryVerificationModal
         isOpen={showInventoryModal}
