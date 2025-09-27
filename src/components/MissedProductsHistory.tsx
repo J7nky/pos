@@ -10,10 +10,13 @@ import {
   Download,
   Filter
 } from 'lucide-react';
-import { missedProductsService, MissedProductsReport as MissedProductsReportType } from '../services/missedProductsService';
+import { missedProductsService } from '../services/missedProductsService';
 import { useOfflineData } from '../contexts/OfflineDataContext';
+//call the missedproducts 
+// history service to get the missed products history
 
-interface MissedProductsReportProps {
+
+interface MissedProductsHistoryProps {
   storeId: string;
   className?: string;
 }
@@ -23,12 +26,12 @@ interface DateRange {
   endDate: string;
 }
 
-export const MissedProductsReport: React.FC<MissedProductsReportProps> = ({
+export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
   storeId,
   className = ''
 }) => {
   const { missedProducts: contextMissedProducts, inventory, products } = useOfflineData();
-  const [report, setReport] = useState<MissedProductsReportType | null>(null);
+  const [history, setHistory] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>({
@@ -43,17 +46,12 @@ export const MissedProductsReport: React.FC<MissedProductsReportProps> = ({
     
     try {
       // Use context data for better performance
-      const reportData = await missedProductsService.getMissedProductsReport(
+      const reportData = await missedProductsService.getProductMissedHistory(
         storeId,
-        dateRange.startDate,
-        dateRange.endDate,
-        {
-          missedProducts: contextMissedProducts,
-          inventoryItems: inventory,
-          products: products
-        }
+        30
       );
-      setReport(reportData);
+      console.log(reportData,21321);
+      setHistory(reportData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load report');
     } finally {
@@ -83,31 +81,23 @@ export const MissedProductsReport: React.FC<MissedProductsReportProps> = ({
   };
 
   const handleExport = () => {
-    if (!report) return;
+    if (!history) return;
+    
+    const totalDiscrepancies = history.reduce((sum, day) => sum + day.discrepancy_count, 0);
+    const totalVariance = history.reduce((sum, day) => sum + day.total_variance, 0);
     
     const csvContent = [
       ['Date Range', `${dateRange.startDate} to ${dateRange.endDate}`],
-      ['Total Discrepancies', (report.totalDiscrepancies || 0).toString()],
-      ['Total Variance', (report.totalVariance || 0).toString()],
-      ['Average Variance', (report.averageVariance || 0).toFixed(2)],
+      ['Total Discrepancies', totalDiscrepancies.toString()],
+      ['Total Variance', totalVariance.toString()],
       [''],
-      ['Most Missed Products'],
-      ['Product Name', 'Discrepancy Count', 'Total Variance'],
-      ...report.mostMissedProducts.map(item => [
-        item.product_name || 'Unknown',
-        (item.discrepancy_count || 0).toString(),
-        (item.total_variance || 0).toString()
-      ]),
-      [''],
-      ['Sessions with Discrepancies'],
-      ['Session ID', 'Opened At', 'Closed At', 'Opened By', 'Discrepancy Count', 'Total Variance'],
-      ...report.sessions.map(session => [
-        session.session_id,
-        session.opened_at,
-        session.closed_at || 'N/A',
-        session.opened_by,
-        (session.discrepancy_count || 0).toString(),
-        (session.total_variance || 0).toString()
+      ['Daily Missed Products'],
+      ['Date', 'Discrepancy Count', 'Total Variance', 'Sessions'],
+      ...history.map(day => [
+        day.date,
+        day.discrepancy_count.toString(),
+        day.total_variance.toString(),
+        day.sessions.length.toString()
       ])
     ].map(row => row.join(',')).join('\n');
 
@@ -145,7 +135,7 @@ export const MissedProductsReport: React.FC<MissedProductsReportProps> = ({
     );
   }
 
-  if (!report) {
+  if (!history) {
     return null;
   }
 
@@ -216,13 +206,13 @@ export const MissedProductsReport: React.FC<MissedProductsReportProps> = ({
 
       {/* Summary Cards */}
       <div className="px-6 py-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <div className="flex items-center">
               <AlertTriangle className="w-8 h-8 text-red-600 mr-3" />
               <div>
                 <p className="text-sm font-medium text-red-800">Total Discrepancies</p>
-                <p className="text-2xl font-bold text-red-900">{report.totalDiscrepancies || 0}</p>
+                <p className="text-2xl font-bold text-red-900">{history.reduce((sum, day) => sum + day.discrepancy_count, 0)}</p>
               </div>
             </div>
           </div>
@@ -232,80 +222,24 @@ export const MissedProductsReport: React.FC<MissedProductsReportProps> = ({
               <TrendingDown className="w-8 h-8 text-orange-600 mr-3" />
               <div>
                 <p className="text-sm font-medium text-orange-800">Total Variance</p>
-                <p className="text-2xl font-bold text-orange-900">{(report.totalVariance || 0).toFixed(2)}</p>
+                <p className="text-2xl font-bold text-orange-900">{history.reduce((sum, day) => sum + day.total_variance, 0).toFixed(2)}</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center">
-              <BarChart3 className="w-8 h-8 text-blue-600 mr-3" />
-              <div>
-                <p className="text-sm font-medium text-blue-800">Average Variance</p>
-                <p className="text-2xl font-bold text-blue-900">{(report.averageVariance || 0).toFixed(2)}</p>
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* Most Missed Products */}
-        {report.mostMissedProducts.length > 0 && (
-          <div className="mb-6">
-            <h4 className="text-lg font-semibold text-gray-900 mb-4">Most Missed Products</h4>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Product
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Discrepancy Count
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Total Variance
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {report.mostMissedProducts.map((item, index) => (
-                    <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                        {item.product_name || 'Unknown Product'}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-900">
-                        {item.discrepancy_count || 0}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-900">
-                        {(item.total_variance || 0).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
 
-        {/* Sessions with Discrepancies */}
-        {report.sessions.length > 0 && (
+        {/* Daily Discrepancies */}
+        {history.length > 0 && (
           <div>
-            <h4 className="text-lg font-semibold text-gray-900 mb-4">Sessions with Discrepancies</h4>
+            <h4 className="text-lg font-semibold text-gray-900 mb-4">Daily Discrepancies</h4>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Session
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Opened At
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Closed At
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Opened By
+                      Date
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Discrepancies
@@ -313,31 +247,29 @@ export const MissedProductsReport: React.FC<MissedProductsReportProps> = ({
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Total Variance
                     </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Sessions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {report.sessions.map((session, index) => (
-                    <tr key={session.session_id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="px-4 py-3 text-sm font-mono text-gray-900">
-                        {session.session_id.substring(0, 8)}...
+                  {history.map((day, index) => (
+                    <tr key={day.date} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        {new Date(day.date).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric'
+                        })}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        {formatDate(session.opened_at)}
+                        {day.discrepancy_count}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        {session.closed_at ? formatDate(session.closed_at) : 'N/A'}
+                        {day.total_variance.toFixed(2)}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        <div className="flex items-center">
-                          <User className="w-4 h-4 text-gray-400 mr-1" />
-                          {session.opened_by}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-900">
-                        {session.discrepancy_count || 0}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-900">
-                        {(session.total_variance || 0).toFixed(2)}
+                        {day.sessions.length}
                       </td>
                     </tr>
                   ))}
@@ -348,7 +280,7 @@ export const MissedProductsReport: React.FC<MissedProductsReportProps> = ({
         )}
 
         {/* No Data Message */}
-        {report.totalDiscrepancies === 0 && (
+        {history.length === 0 && (
           <div className="text-center py-8">
             <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No Discrepancies Found</h3>
