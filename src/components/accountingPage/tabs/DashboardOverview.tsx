@@ -83,8 +83,8 @@ const StatCard: React.FC<StatCardProps> = React.memo(({
   >
     <div className="flex items-center justify-between">
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-600 font-medium truncate">{title}</p>
-        <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+        <div className="text-sm text-gray-600 font-medium truncate">{title}</div>
+        <div className="text-2xl font-bold text-gray-900 mt-1">{value}</div>
         {children}
       </div>
       <div className="p-3 bg-gray-50 rounded-full ml-4 flex-shrink-0">{icon}</div>
