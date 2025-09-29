@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   AlertTriangle, 
   TrendingDown, 
   Package, 
-  Calendar, 
-  User, 
-  BarChart3,
   RefreshCw,
   Download,
-  Filter
+  Filter,
+  ArrowRight,
+  Trash2
 } from 'lucide-react';
 import { missedProductsService } from '../services/missedProductsService';
-import { useOfflineData } from '../contexts/OfflineDataContext';
+import Toast from './common/Toast';
 //call the missedproducts 
 // history service to get the missed products history
 
@@ -30,7 +30,8 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
   storeId,
   className = ''
 }) => {
-  const { missedProducts: contextMissedProducts, inventory, products } = useOfflineData();
+  const navigate = useNavigate();
+  // const { missedProducts, inventory, products } = useOfflineData();
   const [history, setHistory] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +40,55 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
     endDate: new Date().toISOString().split('T')[0]
   });
   const [showFilters, setShowFilters] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
+    message: '',
+    type: 'success',
+    visible: false
+  });
+
+  // Action handlers
+  const handleNavigateToInventory = (inventoryItemId: string) => {
+    // Navigate to accounting page and highlight the related received bill item
+    console.log('Navigate to received bills for inventory item:', inventoryItemId);
+    
+    // Navigate to accounting page
+    navigate('/accounting');
+    
+    // Store the inventory item ID in sessionStorage for highlighting in received bills
+    // The accounting page can check for this and highlight the specific item in received bills tab
+    sessionStorage.setItem('highlightReceivedBillItem', inventoryItemId);
+    sessionStorage.setItem('activeAccountingTab', 'received-bills');
+    
+    // Show a toast notification
+    setToast({
+      message: 'Navigating to received bills...', 
+      type: 'success',
+      visible: true
+    });
+    
+    // Auto-hide toast after 2 seconds
+    setTimeout(() => {
+      setToast(prev => ({ ...prev, visible: false }));
+    }, 2000);
+  };
+
+
+  const handleDeleteItem = async (itemId: string) => {
+    if (window.confirm('Are you sure you want to delete this missed product record?')) {
+      try {
+        const success = await missedProductsService.deleteMissedProduct(itemId);
+        if (success) {
+          // Refresh the data after successful deletion
+          await loadReport();
+        } else {
+          setError('Failed to delete item');
+        }
+      } catch (error) {
+        console.error('Error deleting item:', error);
+        setError('Failed to delete item');
+      }
+    }
+  };
 
   const loadReport = async () => {
     setLoading(true);
@@ -46,14 +96,15 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
     
     try {
       // Use context data for better performance
-      const reportData = await missedProductsService.getProductMissedHistory(
+      const reportData = await missedProductsService.getAllMissedProducts(
         storeId,
-        30
+        dateRange.startDate,
+        dateRange.endDate
       );
-      console.log(reportData,21321);
+      console.log('Missed products history data:', reportData);
       setHistory(reportData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load report');
+      setError(err instanceof Error ? err.message : 'Failed to load history');
     } finally {
       setLoading(false);
     }
@@ -63,22 +114,6 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
     loadReport();
   }, [storeId, dateRange]);
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
 
   const handleExport = () => {
     if (!history) return;
@@ -105,7 +140,7 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `missed-products-report-${dateRange.startDate}-to-${dateRange.endDate}.csv`;
+    a.download = `missed-products-history-${dateRange.startDate}-to-${dateRange.endDate}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -118,7 +153,7 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
       <div className={`bg-white rounded-lg shadow-sm border border-gray-200 p-6 ${className}`}>
         <div className="flex items-center justify-center py-8">
           <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-          <span className="text-gray-600">Loading missed products report...</span>
+          <span className="text-gray-600">Loading missed products history...</span>
         </div>
       </div>
     );
@@ -146,7 +181,7 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center">
             <Package className="w-5 h-5 text-blue-600 mr-2" />
-            <h3 className="text-lg font-semibold text-gray-900">Missed Products Report</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Missed Products History</h3>
           </div>
           <div className="flex items-center space-x-2">
             <button
@@ -242,34 +277,65 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
                       Date
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Discrepancies
+                      Product Name  
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Total Variance
+                      Variance
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Sessions
+                      Employee Name
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Note
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {history.map((day, index) => (
-                    <tr key={day.date} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  {history.map((item, index) => (
+                    <tr key={`${item.date}-${index}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        {new Date(day.date).toLocaleDateString('en-US', {
+                        {new Date(item.date).toLocaleDateString('en-US', {
                           year: 'numeric',
-                          month: 'short',
+                          month: 'numeric',
                           day: 'numeric'
                         })}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        {day.discrepancy_count}
+                        {item.productName}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        {day.total_variance.toFixed(2)}
+                        {item.varianceNumber}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        {day.sessions.length}
+                        {item.employeeId}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        {item.note || '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        <div className="flex items-center justify-center space-x-2">
+                          {/* Navigation Arrow Button */}
+                          <button
+                            onClick={() => handleNavigateToInventory(item.inventoryId || item.id)}
+                            className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors duration-200"
+                            title="View in Received Bills"
+                          >
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                        
+                          
+                          {/* Delete Button */}
+                          <button
+                            onClick={() => handleDeleteItem(item.id)}
+                            className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-md transition-colors duration-200"
+                            title="Delete Item"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -290,6 +356,14 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
           </div>
         )}
       </div>
+      
+      {/* Toast Notification */}
+      <Toast
+        message={toast.message}
+        type={toast.type}
+        visible={toast.visible}
+        onClose={() => setToast(prev => ({ ...prev, visible: false }))}
+      />
     </div>
   );
 };

@@ -11,8 +11,6 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import EnhancedProductCard from '../components/EnhancedProductCard';
 
 import { 
-  Plus, 
-  Minus, 
   Search, 
   ShoppingCart, 
   CreditCard, 
@@ -21,11 +19,13 @@ import {
   Trash2,
   X,
   PlusCircle,
-  Package
+  Printer
 } from 'lucide-react';
 import { Customer, BillLineItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
+import { thermalPrinter, ReceiptData } from '../services/thermalPrinterService';
+import PrinterTest from '../components/PrinterTest';
 
 
 interface BillTab {
@@ -51,9 +51,7 @@ export default function POS() {
   const products = (raw.products || []).map(p => ({...p, createdAt: p.created_at})) as Array<any>;
   const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
-  const stockLevels = (raw.stockLevels || []) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
-  const addSale = raw.addSale;
   const addCustomer = raw.addCustomer;
 
   const { userProfile } = useSupabaseAuth();
@@ -80,6 +78,7 @@ export default function POS() {
   // Add customer validation state
   const [customerError, setCustomerError] = useState<string | null>(null);
   const [customerFormError, setCustomerFormError] = useState<string | null>(null);
+  const [showPrinterTest, setShowPrinterTest] = useState(false);
   const showToast = (type: 'success' | 'error', message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
@@ -189,20 +188,7 @@ export default function POS() {
   const activeTab = activeTabs.find(tab => tab.id === activeTabId);
   if (!activeTab) return null;
 
-  // Get all inventory items for a product-supplier combination
-  const getInventoryItems = (productId: string, supplierId: string) => {
-    return inventory.filter(item => 
-      item.product_id === productId && 
-      item.supplier_id === supplierId && 
-      item.quantity > 0
-    );
-  };
 
-  // Get total available stock for a product-supplier combination
-  const getSupplierStock = (productId: string, supplierId: string) => {
-    const items = getInventoryItems(productId, supplierId);
-    return items.reduce((total, item) => total + item.quantity, 0);
-  };
 
   // Get total available stock for a product across all suppliers (subtract reservations across all tabs)
   const getProductStock = (productId: string) => {
@@ -391,6 +377,54 @@ export default function POS() {
   const isWalkInCustomer = activeTab.selectedCustomer === 'Walk-in Customer'; // Empty string represents Walk-in Customer
   const hasZeroPricedItem = activeTab.cart.some(i => (i.unitPrice ?? 0) === 0);
 
+  // Print receipt function
+  const printReceipt = async (tab: BillTab, billData: any) => {
+    try {
+      // Get customer information
+      const customer = tab.selectedCustomer ? 
+        customers.find(c => c.id === tab.selectedCustomer) : null;
+
+      // Prepare receipt data
+      const receiptData: ReceiptData = {
+        billNumber: billData.bill_number,
+        billDate: billData.bill_date,
+        customerName: customer?.name || (tab.selectedCustomer ? 'Unknown Customer' : 'Walk-in Customer'),
+        customerPhone: customer?.phone,
+        items: tab.cart.map(item => {
+          const product = products.find(p => p.id === item.productId);
+          const supplier = suppliers.find(s => s.id === item.supplierId);
+          return {
+            name: product?.name || 'Unknown Product',
+            quantity: item.quantity,
+            unitPrice: item.unitPrice || 0,
+            total: item.lineTotal || 0,
+            weight: item.weight,
+            supplier: supplier?.name
+          };
+        }),
+        subtotal: total,
+        total: total,
+        amountPaid: parseFloat(tab.amountReceived) || 0,
+        change: change,
+        paymentMethod: tab.paymentMethod,
+        notes: tab.notes,
+        storeName: 'Your Store Name', // This should come from store settings
+        storeAddress: 'Your Store Address', // This should come from store settings
+        storePhone: 'Your Store Phone', // This should come from store settings
+        cashierName: userProfile?.name || 'Cashier'
+      };
+
+      // Print the receipt
+      const success = await thermalPrinter.printReceipt(receiptData);
+      if (!success) {
+        throw new Error('Failed to print receipt');
+      }
+    } catch (error) {
+      console.error('Print receipt error:', error);
+      throw error;
+    }
+  };
+
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
   const handleCheckout = async () => {handleCheckout
     if (activeTab.cart.length === 0) return;
@@ -526,7 +560,7 @@ export default function POS() {
       }
 
       // Use offline-first bill creation from OfflineDataContext
-      const createdBillId = await raw.createBill(billData, lineItemsData, customerBalanceUpdate || undefined);
+      await raw.createBill(billData, lineItemsData, customerBalanceUpdate || undefined);
 
       // The sale is now handled entirely through the bill creation above
       // No need for separate sale_items creation since bill_line_items now contains all sale data
@@ -536,6 +570,15 @@ export default function POS() {
 
       // Trigger immediate sync after sale completion for critical data
       raw.debouncedSync?.();
+
+      // Print receipt after successful sale
+      try {
+        await printReceipt(activeTab, billData);
+      } catch (printError) {
+        console.error('Failed to print receipt:', printError);
+        // Don't fail the sale if printing fails, just log the error
+        showToast('error', 'Sale completed but receipt printing failed');
+      }
 
       if (activeTabs.length > 1) {
         closeTab(activeTabId);
@@ -652,6 +695,14 @@ export default function POS() {
           >
             <PlusCircle className="w-4 h-4 mr-1" />
             {t('pos.newBill')}
+          </button>
+          <button
+            onClick={() => setShowPrinterTest(true)}
+            className="flex items-center px-3 py-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+            title="Test Printer"
+          >
+            <Printer className="w-4 h-4 mr-1" />
+            Test Printer
           </button>
         </div>
       </div>
@@ -1010,6 +1061,12 @@ export default function POS() {
           )}
         </div>
       </div>
+
+      {/* Printer Test Modal */}
+      <PrinterTest
+        isOpen={showPrinterTest}
+        onClose={() => setShowPrinterTest(false)}
+      />
     </div>
   );
 }
@@ -1018,7 +1075,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
   const { formatCurrency } = useCurrency();
   const [showSalePrice, setShowSalePrice] = useState<{ [key: string]: boolean }>({});
 
-  const handleLongPress = (e: React.MouseEvent, inventoryItemId: string, sellingPrice: number | null) => {
+  const handleLongPress = (_e: React.MouseEvent | React.TouchEvent, inventoryItemId: string, sellingPrice?: number) => {
     if (sellingPrice && sellingPrice > 0) {
       const timer = setTimeout(() => {
         setShowSalePrice(prev => ({
@@ -1036,7 +1093,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
     }
   };
 
-  const handleTouchStart = (e: React.TouchEvent, inventoryItemId: string, sellingPrice: number | null) => {
+  const handleTouchStart = (_e: React.TouchEvent, inventoryItemId: string, sellingPrice?: number) => {
     if (sellingPrice && sellingPrice > 0) {
       const timer = setTimeout(() => {
         setShowSalePrice(prev => ({
@@ -1101,8 +1158,6 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
   );
 };
 const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, products }: any) => {
-  const total = activeTab.cart.reduce((sum: number, item: any) => sum + (item.lineTotal ?? 0), 0);
-  
   return (
     <div className="bg-white rounded-lg shadow-sm relative">
     {/* Enhanced Cart Header */}

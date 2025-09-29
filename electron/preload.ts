@@ -1,5 +1,11 @@
-import { contextBridge } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  // you can expose safe APIs here
+  // Thermal Printer API
+  printer: {
+    initialize: () => ipcRenderer.invoke('printer:initialize'),
+    print: (text: string) => ipcRenderer.invoke('printer:print', text),
+    openDrawer: () => ipcRenderer.invoke('printer:openDrawer'),
+    test: () => ipcRenderer.invoke('printer:test'),
+  },
 });

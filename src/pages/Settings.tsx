@@ -15,7 +15,9 @@ import {
   Smartphone,
   Calculator,
   DollarSign,
+  Printer,
 } from 'lucide-react';
+import PrinterSettings from '../components/PrinterSettings';
 
 export default function Settings() {
   const { userProfile } = useSupabaseAuth();
@@ -44,6 +46,7 @@ export default function Settings() {
   const [tempExchangeRate, setTempExchangeRate] = useState(exchangeRate?.toString() || '89500');
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showPrinterSettings, setShowPrinterSettings] = useState(false);
 
   // Language change is now handled by the I18nProvider through OfflineDataContext
   // No need for custom handling here
@@ -396,6 +399,26 @@ export default function Settings() {
           </div>
         </div>
 
+        {/* Printer Settings */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center">
+              <Printer className="w-6 h-6 text-gray-600 mr-3" />
+              <h2 className="text-xl font-semibold text-gray-900">Thermal Printer</h2>
+            </div>
+            <button
+              onClick={() => setShowPrinterSettings(true)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center"
+            >
+              <Printer className="w-4 h-4 mr-2" />
+              Configure Printer
+            </button>
+          </div>
+          <div className="text-sm text-gray-600">
+            Configure your thermal printer for receipt printing. Receipts will be automatically printed after each sale.
+          </div>
+        </div>
+
         {/* Language */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center mb-4">
@@ -415,6 +438,12 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {/* Printer Settings Modal */}
+      <PrinterSettings
+        isOpen={showPrinterSettings}
+        onClose={() => setShowPrinterSettings(false)}
+      />
     </div>
   );
 }

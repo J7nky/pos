@@ -32,6 +32,7 @@ export interface MissedProduct extends BaseEntity {
   physical_quantity: number;
   variance: number;
   notes?: string;
+  product_name: string;
 }
 export interface CashDrawerSession extends BaseEntity {
   account_id: string;
@@ -920,8 +921,9 @@ class POSDatabase extends Dexie {
 
   async validateDataIntegrity(storeId: string): Promise<{
     orphanedInventory: any[];
-    orphanedSaleItems: any[];
+    orphanedBillLineItems: any[];
     orphanedTransactions: any[];
+    orphanedMissedProducts: any[];
   }> {
     console.log('🔍 Validating data integrity...');
     
@@ -932,10 +934,12 @@ class POSDatabase extends Dexie {
     const inventory = await this.inventory_items.where('store_id').equals(storeId).toArray();
     const billLineItems = await this.bill_line_items.toArray();
     const transactions = await this.transactions.where('store_id').equals(storeId).toArray();
+    const missedProducts = await this.missed_products.where('store_id').equals(storeId).toArray();
     
     const productIds = new Set(products.map(p => p.id));
     const supplierIds = new Set(suppliers.map(s => s.id));
     const customerIds = new Set(customers.map(c => c.id));
+    const inventoryItemIds = new Set(inventory.map(item => item.id));
     
     // Find orphaned records
     const orphanedInventory = inventory.filter(item => 
@@ -951,16 +955,22 @@ class POSDatabase extends Dexie {
       false
     );
     
+    const orphanedMissedProducts = missedProducts.filter(missedProduct => 
+      !inventoryItemIds.has(missedProduct.inventory_item_id)
+    );
+    
     console.log('📊 Data integrity report:', {
       orphanedInventory: orphanedInventory.length,
       orphanedBillLineItems: orphanedBillLineItems.length,
-      orphanedTransactions: orphanedTransactions.length
+      orphanedTransactions: orphanedTransactions.length,
+      orphanedMissedProducts: orphanedMissedProducts.length
     });
     
     return {
       orphanedInventory,
       orphanedBillLineItems,
-      orphanedTransactions
+      orphanedTransactions,
+      orphanedMissedProducts
     };
   }
 
@@ -980,6 +990,13 @@ class POSDatabase extends Dexie {
       await this.bill_line_items.bulkDelete(integrity.orphanedBillLineItems.map(item => item.id));
       cleaned += integrity.orphanedBillLineItems.length;
       console.log(`🗑️ Removed ${integrity.orphanedBillLineItems.length} orphaned bill line items`);
+    }
+    
+    // Clean up orphaned missed products
+    if (integrity.orphanedMissedProducts.length > 0) {
+      await this.missed_products.bulkDelete(integrity.orphanedMissedProducts.map(item => item.id));
+      cleaned += integrity.orphanedMissedProducts.length;
+      console.log(`🗑️ Removed ${integrity.orphanedMissedProducts.length} orphaned missed products`);
     }
     
     return cleaned;

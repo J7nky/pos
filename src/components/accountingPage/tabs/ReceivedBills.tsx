@@ -34,6 +34,8 @@ type ReceivedBillsProps = {
   recentSuppliers: string[];
   setRecentSuppliers: (suppliers: string[]) => void;
   addSupplier?: (supplier: any) => Promise<void>;
+  flashingItemId?: string | null;
+  autoExpandGroupId?: string | null;
 };
 
 export default function ReceivedBills({
@@ -53,7 +55,9 @@ export default function ReceivedBills({
   defaultCommissionRate,
   recentSuppliers,
   setRecentSuppliers,
-  addSupplier
+  addSupplier,
+  flashingItemId,
+  autoExpandGroupId
 }: ReceivedBillsProps) {
   const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
   // const [receivedBills, setReceivedBills] = useState<Bill[]>([]);
@@ -85,6 +89,38 @@ export default function ReceivedBills({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [closedBillIds, setClosedBillIds] = useState<Set<string>>(new Set());
   const [showWeightComparison, setShowWeightComparison] = useState(false);
+
+  // Auto-expand group when navigating from missed products
+  React.useEffect(() => {
+    if (autoExpandGroupId) {
+      setExpandedGroups(prev => new Set([...prev, autoExpandGroupId]));
+    }
+  }, [autoExpandGroupId]);
+
+  // Auto-scroll to flashing item
+  React.useEffect(() => {
+    if (flashingItemId) {
+      // Small delay to ensure the item is rendered
+      const timer = setTimeout(() => {
+        const flashingElement = document.getElementById(`flashing-item-${flashingItemId}`);
+        if (flashingElement) {
+          flashingElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+            inline: 'nearest'
+          });
+          
+          // Add a subtle bounce effect
+          flashingElement.style.transform = 'scale(1.02)';
+          setTimeout(() => {
+            flashingElement.style.transform = 'scale(1)';
+          }, 200);
+        }
+      }, 100);
+
+      return () => clearTimeout(timer);
+    }
+  }, [flashingItemId]);
 
   // Initialize batch edit form with current batch data
   const initializeBatchEdit = (group: any) => {
@@ -863,9 +899,20 @@ export default function ReceivedBills({
                                 </tr>
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-200">
-                                {group.items.map((bill: any) => (
-                                  <tr key={bill.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{bill.productName}</td>
+                                {group.items.map((bill: any) => {
+                                  const shouldFlash = flashingItemId === bill.id;
+                                  return (
+                                    <tr 
+                                      key={bill.id} 
+                                      id={shouldFlash ? `flashing-item-${bill.id}` : undefined}
+                                      className={`hover:${shouldFlash ? 'bg-blue-500' : 'bg-gray-50'} transition-all duration-500 ${
+                                        shouldFlash ? ' border-2 border-blue-400 shadow-xl animate-pulse' : ''
+                                      }`}
+                                      style={shouldFlash ? { transform: 'scale(1)' } : {}}
+                                    >
+                                    <td className={`px-6 py-3 whitespace-nowrap text-sm font-medium ${
+                                      shouldFlash ? 'text-blue-900 font-bold' : 'text-gray-900'
+                                    }`}>{bill.productName}</td>
                                     <td className="px-6 py-3 whitespace-nowrap">
                                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bill.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
                                         {bill.type}
@@ -914,7 +961,8 @@ export default function ReceivedBills({
                                       </div>
                                     </td>
                                   </tr>
-                                ))}
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>

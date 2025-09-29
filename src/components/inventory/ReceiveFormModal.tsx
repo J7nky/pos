@@ -644,7 +644,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                       const selectedId = value as string;
                                       setBulkItems(prev => ({
                                         ...prev,
-                                        [productId]: { ...item, product_id: selectedId, unit: 'kg' }
+                                        [productId]: { ...prev[productId], product_id: selectedId, unit: 'kg' }
                                       }));
                                     }}
                                     placeholder="Select Product *"
@@ -675,7 +675,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 value={item.quantity}
                                 onChange={(e) => setBulkItems(prev => ({
                                   ...prev,
-                                  [productId]: { ...item, quantity: e.target.value }
+                                  [productId]: { ...prev[productId], quantity: e.target.value }
                                 }))}
                                 className={`w-20 border ${errors[`quantity_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                                 min="1"
@@ -691,7 +691,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 value={item.unit}
                                 onChange={(e) => setBulkItems(prev => ({
                                   ...prev,
-                                  [productId]: { ...item, unit: e.target.value as any }
+                                  [productId]: { ...prev[productId], unit: e.target.value as any }
                                 }))}
                                 className="w-24 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                               >
@@ -712,7 +712,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 value={item.weight || ''}
                                 onChange={(e) => setBulkItems(prev => ({
                                   ...prev,
-                                  [productId]: { ...item, weight: e.target.value }
+                                  [productId]: { ...prev[productId], weight: e.target.value }
                                 }))}
                                 className="w-20 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                                 placeholder="kg"
@@ -725,7 +725,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                   value={item.price || ''}
                                   onChange={(e) => setBulkItems(prev => ({
                                     ...prev,
-                                    [productId]: { ...item, price: e.target.value }
+                                    [productId]: { ...prev[productId], price: e.target.value }
                                   }))}
                                   className={`w-24 border ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                                   min="0"
@@ -743,7 +743,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 value={item.selling_price || ''}
                                 onChange={(e) => setBulkItems(prev => ({
                                   ...prev,
-                                  [productId]: { ...item, selling_price: e.target.value }
+                                  [productId]: { ...prev[productId], selling_price: e.target.value }
                                 }))}
                                 className={`w-24 border ${errors[`selling_price_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                                 min="0"

@@ -99,6 +99,8 @@ export default function Accounting() {
   const [showAddCategoryForm, setShowAddCategoryForm] = useState(false);
   const [dashboardPeriod, setDashboardPeriod] = useState<'today' | 'week' | 'month' | 'quarter' | 'year'>('today');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [flashingItemId, setFlashingItemId] = useState<string | null>(null);
+  const [autoExpandGroupId, setAutoExpandGroupId] = useState<string | null>(null);
 
   // Add loading state to prevent rendering before data is ready
   const [isDataReady, setIsDataReady] = useState(false);
@@ -109,6 +111,51 @@ export default function Accounting() {
       setIsDataReady(true);
     }
   }, [raw, transactions, customers, suppliers, products]);
+
+  // Handle navigation from missed products history
+  useEffect(() => {
+    const highlightItemId = sessionStorage.getItem('highlightReceivedBillItem');
+    const targetTab = sessionStorage.getItem('activeAccountingTab');
+    
+    if (highlightItemId && targetTab === 'received-bills') {
+      // Switch to received bills tab
+      setActiveTab('received-bills');
+      
+      // Set the item to flash immediately
+      setFlashingItemId(highlightItemId);
+      
+      // Clear the sessionStorage immediately to prevent re-triggering
+      sessionStorage.removeItem('highlightReceivedBillItem');
+      sessionStorage.removeItem('activeAccountingTab');
+    }
+  }, []); // Run only once on mount
+
+  // Handle auto-expand when data is ready
+  useEffect(() => {
+    if (isDataReady && inventory.length > 0 && flashingItemId) {
+      const targetItem = inventory.find(item => item.id === flashingItemId);
+      if (targetItem) {
+        // Find the batch/group ID for this item
+        const batchId = targetItem.batch_id;
+        if (batchId) {
+          setAutoExpandGroupId(batchId);
+        }
+      }
+    }
+  }, [isDataReady, inventory, flashingItemId]);
+
+  // Stop flashing after 3 seconds
+  useEffect(() => {
+    if (flashingItemId) {
+      const timer = setTimeout(() => {
+        setFlashingItemId(null);
+        setAutoExpandGroupId(null);
+        console.log('Stopping flash and expand effects');
+      }, 1700);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [flashingItemId]);
 
   // Fetch cash drawer balance
   useEffect(() => {
@@ -2401,6 +2448,8 @@ export default function Accounting() {
           recentSuppliers={recentSuppliers}
           setRecentSuppliers={setRecentSuppliers}
           addSupplier={addSupplier}
+          flashingItemId={flashingItemId}
+          autoExpandGroupId={autoExpandGroupId}
         />
       )}
 

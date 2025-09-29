@@ -647,12 +647,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                   <Search className="w-8 h-8 text-gray-400" />
                 </div>
                 <h4 className="text-lg font-medium text-gray-900 mb-2">No transactions found</h4>
-                <p className="text-sm">
+                <div className="text-sm">
                   {filterSummary.length > 0 
                     ? "Try adjusting your filters to see more results"
                     : "No transactions available at the moment"
                   }
-                </p>
+                </div>
                 {filterSummary.length > 0 && (
                   <button
                     onClick={handleResetFilters}

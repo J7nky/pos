@@ -10,7 +10,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import SalesOverviewCard from '../components/cards/SalesOverviewCard';
-import { MissedProductsReport } from '../components/MissedProductsReport';
+import { MissedProductsHistory } from '../components/MissedProductsHistory';
 
 export default function Reports() {
   const raw = useOfflineData();
@@ -368,7 +368,7 @@ export default function Reports() {
       )}
 
       {reportType === 'missed-products' && (
-        <MissedProductsReport storeId={raw.storeId} />
+        <MissedProductsHistory storeId={raw.storeId} />
       )}
     </div>
   );

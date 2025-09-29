@@ -1,3 +1,4 @@
+
 import { db } from '../lib/db';
 import { createId } from '../lib/db';
 
@@ -110,6 +111,7 @@ export class MissedProductsService {
           physical_quantity: item.physicalQuantity,
           variance: item.physicalQuantity - item.systemQuantity,
           notes: item.notes || undefined,
+          product_name: item.productName, // Add product_name field
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           _synced: false
@@ -481,8 +483,106 @@ export class MissedProductsService {
   }
 
   /**
+   * Get all missed products with details (Date, Product Name, Variance Number, Employee Name, note, inventory ID)
+   * 
+   * @param storeId - The store ID to get missed products for
+   * @param startDate - Optional start date filter (YYYY-MM-DD format)
+   * @param endDate - Optional end date filter (YYYY-MM-DD format)
+   * @returns Array of missed products with the specified fields
+   * 
+   * @example
+   * // Get all missed products for a store
+   * const missedProducts = await missedProductsService.getAllMissedProducts('store-123');
+   * 
+   * // Get missed products for a specific date range
+   * const missedProducts = await missedProductsService.getAllMissedProducts(
+   *   'store-123', 
+   *   '2024-01-01', 
+   *   '2024-01-31'
+   * );
+   */
+  public async getAllMissedProducts(
+    storeId: string,
+    startDate?: string,
+    endDate?: string
+  ): Promise<Array<{
+    date: string;
+    productName: string;
+    varianceNumber: number;
+    employeeId: string;
+    note?: string;
+    inventoryId: string;
+  }>> {
+    try {
+      // Get all missed products for the store
+      let missedProducts = await db.missed_products
+        .where('store_id')
+        .equals(storeId)
+        .toArray();
+
+      if (missedProducts.length === 0) {
+        return [];
+      }
+
+      // Get session IDs to fetch session details
+      const sessionIds = [...new Set(missedProducts.map(mp => mp.session_id))];
+      const sessions = await db.cash_drawer_sessions
+        .where('id')
+        .anyOf(sessionIds)
+        .toArray();
+
+      // Filter by date range if provided
+      if (startDate || endDate) {
+        const filteredSessions = sessions.filter(session => {
+          const sessionDate = new Date(session.opened_at);
+          const start = startDate ? new Date(startDate) : new Date(0);
+          const end = endDate ? new Date(endDate) : new Date();
+          return sessionDate >= start && sessionDate <= end;
+        });
+
+        const filteredSessionIds = filteredSessions.map(s => s.id);
+        missedProducts = missedProducts.filter(mp => 
+          filteredSessionIds.includes(mp.session_id)
+        );
+      }
+
+      // Map missed products to the required format
+      return missedProducts.map(mp => {
+        const session = sessions.find(s => s.id === mp.session_id);
+        
+        return {
+          date: session ? new Date(session.opened_at).toISOString().split('T')[0] : 'Unknown Date',
+          productName: mp.product_name || 'Unknown Product',
+          varianceNumber: mp.variance,
+          employeeId: session?.opened_by || 'Unknown Employee',
+          note: mp.notes,
+          inventoryId: mp.inventory_item_id
+        };
+      }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    } catch (error) {
+      console.error('Error getting all missed products:', error);
+      return [];
+    }
+  }
+
+  /**
    * Delete missed products for a session (useful for cleanup)
    */
+  public async deleteMissedProduct(itemId: string): Promise<boolean> {
+    try {
+      await db.missed_products
+        .where('id')
+        .equals(itemId)
+        .delete();
+
+      return true;
+
+    } catch (error) {
+      console.error('Error deleting missed products:', error);
+      return false;
+    }
+  }
   public async deleteSessionMissedProducts(sessionId: string): Promise<boolean> {
     try {
       await db.missed_products

@@ -413,525 +413,727 @@ export class SyncService {
 
   /**
    * Upload local unsynced changes to Supabase
+   * Optimized version with better separation of concerns and parallel processing
    */
   private async uploadLocalChanges(storeId: string, tableDependencies: { [key: string]: string[] }) {
     const result = { uploaded: 0, errors: [] as string[] };
+    const startTime = Date.now();
+    
+    // Pre-load validation cache once for all tables
+    await this.refreshValidationCache(storeId);
+    
+    // Process tables in parallel where possible, respecting dependencies
+    const tableResults = await this.processTablesInParallel(storeId, tableDependencies);
+    
+    // Aggregate results
+    for (const tableResult of tableResults) {
+      result.uploaded += tableResult.uploaded;
+      result.errors.push(...tableResult.errors);
+    }
+    
+    const duration = Date.now() - startTime;
+    console.log(`📊 Sync upload completed in ${duration}ms: ${result.uploaded} records uploaded, ${result.errors.length} errors`);
+    return result;
+  }
 
-    for (const tableName of SYNC_TABLES) {
-      try {
-        console.log(`📤 Processing table: ${tableName} (${SYNC_TABLES.indexOf(tableName) + 1}/${SYNC_TABLES.length})`);
-        
-        // Validate dependencies before processing
-        const dependenciesMet = await this.validateDependencies(tableName, storeId);
-        if (!dependenciesMet) {
-          console.log(`⏳ Skipping ${tableName} - dependencies not met`);
-          continue;
+  /**
+   * Process tables in parallel while respecting dependencies
+   */
+  private async processTablesInParallel(storeId: string, tableDependencies: { [key: string]: string[] }) {
+    const results = [];
+    const dependencyGroups = this.groupTablesByDependencies();
+    
+    // Process each dependency group sequentially, but tables within groups in parallel
+    for (const group of dependencyGroups) {
+      const groupPromises = group.map(tableName => 
+        this.processTable(storeId, tableName, tableDependencies)
+      );
+      
+      const groupResults = await Promise.allSettled(groupPromises);
+      
+      for (const [index, promiseResult] of groupResults.entries()) {
+        if (promiseResult.status === 'fulfilled') {
+          results.push(promiseResult.value);
+        } else {
+          results.push({
+            uploaded: 0,
+            errors: [`Table ${group[index]} processing failed: ${promiseResult.reason}`]
+          });
         }
-        
-                 // Get unsynced records for this table
-         const table = (db as any)[tableName];
-         const activeRecords = await table.filter((record: any) => !record._synced && !record._deleted).toArray();
-         const deletedRecords = await table.filter((record: any) => record._deleted && !record._synced).toArray();
-
-         if (activeRecords.length === 0 && deletedRecords.length === 0) {
-           console.log(`  ⏭️  No unsynced records for ${tableName}`);
-           continue;
-         }
-         
-         console.log(`  📊 Found ${activeRecords.length} active and ${deletedRecords.length} deleted unsynced records for ${tableName}`);
-
-        // Filter out deleted records for separate handling
-        let activeRecordsFiltered = activeRecords.filter((r: any) => !r._deleted);
-        const deletedRecordsFiltered = deletedRecords.filter((r: any) => r._deleted);
-
-         // Additional validation for inventory_items
-         if (tableName === 'inventory_items') {
-           const validRecords = [];
-           const invalidRecords = [];
-           
-           // Use cached validation data to avoid repeated queries
-           await this.refreshValidationCache(storeId);
-           const validProductIds = this.validationCache.products;
-           const validSupplierIds = this.validationCache.suppliers;
-           const validUserIds = this.validationCache.users;
-           const validBatchIds = this.validationCache.batches;
-           
-           // Get local batch IDs for validation
-           const localBatches = await db.inventory_bills
-             .where('store_id')
-             .equals(storeId)
-             .filter(batch => !batch._deleted)
-             .toArray();
-           const localBatchIds = new Set(localBatches.map(batch => batch.id));
-        
-           for (const record of activeRecordsFiltered) {
-             // Check quantity constraint
-             if (record.quantity < 0) {
-               // Allow quantity = 0 to preserve historical inventory entries
-               invalidRecords.push({ record, reason: 'quantity < 0' });
-               continue;
-             }
-             
-             // Check batch_id constraint - first check local, then server
-             if (record.batch_id) {
-               if (!localBatchIds.has(record.batch_id) && !validBatchIds.has(record.batch_id)) {
-                 invalidRecords.push({ record, reason: `invalid batch_id: ${record.batch_id} (not found locally or on server)` });
-                 continue;
-               } else {
-                 console.log(`✅ Batch ID ${record.batch_id} validated successfully (found ${localBatchIds.has(record.batch_id) ? 'locally' : 'on server'})`);
-               }
-             }
-             
-             // Check foreign key constraints
-             if (!validProductIds.has(record.product_id)) {
-               invalidRecords.push({ record, reason: `invalid product_id: ${record.product_id}` });
-               continue;
-             }
-             
-             if (!validSupplierIds.has(record.supplier_id)) {
-               invalidRecords.push({ record, reason: `invalid supplier_id: ${record.supplier_id}` });
-               continue;
-             }
-        
-             
-             validRecords.push(record);
-           }
-           
-           // Delete invalid inventory items locally and remove from sync queue
-           for (const invalid of invalidRecords) {
-             console.warn(`🚫 Removing invalid inventory item: ${invalid.reason}`, invalid.record);
-             await db.inventory_items.delete(invalid.record.id);
-           }
-           
-           activeRecordsFiltered = validRecords;
-           
-           if (invalidRecords.length > 0) {
-             console.log(`🧹 Cleaned ${invalidRecords.length} invalid inventory items (quantity/FK violations)`);
-           }
-         }
-
-         // Additional validation for cash drawer tables
-         if (tableName === 'cash_drawer_accounts' || tableName === 'cash_drawer_sessions') {
-           const validRecords = [];
-           const invalidRecords = [];
-           
-           for (const record of activeRecordsFiltered) {
-             // Validate cash drawer account records
-             if (tableName === 'cash_drawer_accounts') {
-               // Check required fields
-               if (!record.store_id || !record.account_code || !record.name) {
-                 invalidRecords.push({ record, reason: 'missing required fields (store_id, account_code, name)' });
-                 continue;
-               }
-               
-               // Validate currency
-               if (record.currency && !['USD', 'LBP'].includes(record.currency)) {
-                 invalidRecords.push({ record, reason: `invalid currency: ${record.currency}` });
-                 continue;
-               }
-               
-               // Validate balance is numeric
-               if (record.current_balance !== undefined && isNaN(Number(record.current_balance))) {
-                 invalidRecords.push({ record, reason: `invalid current_balance: ${record.current_balance}` });
-                 continue;
-               }
-             }
-             
-             // Validate cash drawer session records
-             if (tableName === 'cash_drawer_sessions') {
-               // Check required fields
-               if (!record.store_id || !record.account_id || !record.opened_by || !record.opened_at) {
-                 invalidRecords.push({ record, reason: 'missing required fields (store_id, account_id, opened_by, opened_at)' });
-                 continue;
-               }
-               
-               // Validate status
-               if (record.status && !['open', 'closed'].includes(record.status)) {
-                 invalidRecords.push({ record, reason: `invalid status: ${record.status}` });
-                 continue;
-               }
-               
-               // Validate amounts are numeric
-               if (record.opening_amount !== undefined && isNaN(Number(record.opening_amount))) {
-                 invalidRecords.push({ record, reason: `invalid opening_amount: ${record.opening_amount}` });
-                 continue;
-               }
-               
-               if (record.expected_amount !== undefined && isNaN(Number(record.expected_amount))) {
-                 invalidRecords.push({ record, reason: `invalid expected_amount: ${record.expected_amount}` });
-                 continue;
-               }
-               
-               if (record.actual_amount !== undefined && isNaN(Number(record.actual_amount))) {
-                 invalidRecords.push({ record, reason: `invalid actual_amount: ${record.actual_amount}` });
-                 continue;
-               }
-               
-               if (record.variance !== undefined && isNaN(Number(record.variance))) {
-                 invalidRecords.push({ record, reason: `invalid variance: ${record.variance}` });
-                 continue;
-               }
-             }
-             
-             validRecords.push(record);
-           }
-           
-           // Remove invalid cash drawer records from sync queue
-           for (const invalid of invalidRecords) {
-             console.warn(`🚫 Removing invalid ${tableName} record: ${invalid.reason}`, invalid.record);
-             await db.markAsSynced(tableName, invalid.record.id);
-           }
-           
-           activeRecordsFiltered = validRecords;
-           
-           if (invalidRecords.length > 0) {
-             console.log(`🧹 Cleaned ${invalidRecords.length} invalid ${tableName} records`);
-           }
-         }
-
-         // Additional validation for bills
-         if (tableName === 'bills') {
-           const validRecords = [];
-           const invalidRecords = [];
-           
-           // Use cached validation data to avoid repeated queries
-           await this.refreshValidationCache(storeId);
-           const validCustomerIds = new Set();
-           const validUserIds = this.validationCache.users;
-           
-           // Get valid customer IDs
-           try {
-             const { data: customers } = await supabase
-               .from('customers')
-               .select('id')
-               .eq('store_id', storeId);
-             customers?.forEach(c => validCustomerIds.add(c.id));
-           } catch (error) {
-             console.warn('Failed to get customer IDs for validation:', error);
-           }
-           
-           for (const record of activeRecordsFiltered) {
-             // Check required fields
-             if (!record.bill_number || !record.total_amount || !record.payment_method) {
-               invalidRecords.push({ record, reason: 'missing required fields' });
-               continue;
-             }
-             
-             // Check foreign key constraints
-             if (record.customer_id && !validCustomerIds.has(record.customer_id)) {
-               invalidRecords.push({ record, reason: `invalid customer_id: ${record.customer_id}` });
-               continue;
-             }
-             
-             if (!validUserIds.has(record.created_by)) {
-               invalidRecords.push({ record, reason: `invalid created_by: ${record.created_by}` });
-               continue;
-             }
-             
-             // CRITICAL: Ensure bills don't contain line item fields
-             const lineItemFields = ['inventory_item_id', 'product_id', 'supplier_id', 'quantity', 'unit_price', 'line_total', 'weight', 'line_order'];
-             const foundLineItemFields = lineItemFields.filter(field => record[field] !== undefined);
-             
-             if (foundLineItemFields.length > 0) {
-               console.warn(`🚫 Bill ${record.id} contains line item fields: ${foundLineItemFields.join(', ')}`);
-               console.warn(`🚫 Bill data before cleaning:`, Object.keys(record));
-               
-               // Remove line item fields that shouldn't be in bills
-               foundLineItemFields.forEach(field => {
-                 console.warn(`🚫 Removing field '${field}' with value:`, record[field]);
-                 delete record[field];
-               });
-               
-               console.warn(`🚫 Bill data after cleaning:`, Object.keys(record));
-             }
-             
-             validRecords.push(record);
-           }
-           
-           // Remove invalid bills from sync queue
-           for (const invalid of invalidRecords) {
-             console.warn(`🚫 Removing invalid bill from sync: ${invalid.reason}`, invalid.record);
-             await db.markAsSynced(tableName, invalid.record.id);
-           }
-           
-           activeRecordsFiltered = validRecords;
-           
-           if (invalidRecords.length > 0) {
-             console.log(`🧹 Cleaned ${invalidRecords.length} invalid bills (validation violations)`);
-           }
-         }
-
-         // Additional validation for bill_line_items
-         if (tableName === 'bill_line_items') {
-           const validRecords = [];
-           const invalidRecords = [];
-           
-           // Use cached validation data to avoid repeated queries
-           await this.refreshValidationCache(storeId);
-           const validProductIds = this.validationCache.products;
-           const validSupplierIds = this.validationCache.suppliers;
-           
-           // CRITICAL: Check if referenced bills exist in Supabase before uploading bill_line_items
-           const billIds = [...new Set(activeRecordsFiltered.map(record => record.bill_id))];
-           let validBillIds: Set<string>;
-           
-           try {
-             const { data: billsData, error: billsError } = await supabase
-               .from('bills')
-               .select('id')
-               .in('id', billIds);
-             
-             if (billsError) {
-               console.warn('Failed to validate bill IDs:', billsError);
-               // If we can't validate bills, skip this table for now
-               console.log(`⏳ Skipping bill_line_items sync - cannot validate bill dependencies`);
-               continue;
-             }
-             
-             validBillIds = new Set(billsData?.map(b => b.id) || []);
-           } catch (error) {
-             console.warn('Failed to validate bill IDs:', error);
-             // If we can't validate bills, skip this table for now
-             console.log(`⏳ Skipping bill_line_items sync - cannot validate bill dependencies`);
-             continue;
-           }
-           
-           for (const record of activeRecordsFiltered) {
-             // Check required fields
-             if (!record.bill_id || !record.product_id || !record.supplier_id || !record.quantity) {
-               invalidRecords.push({ record, reason: 'missing required fields' });
-               continue;
-             }
-             
-             // Check if referenced bill exists in Supabase
-             if (!validBillIds.has(record.bill_id)) {
-               invalidRecords.push({ record, reason: `referenced bill_id ${record.bill_id} does not exist in Supabase` });
-               continue;
-             }
-             
-             // Check foreign key constraints
-             if (!validProductIds.has(record.product_id)) {
-               invalidRecords.push({ record, reason: `invalid product_id: ${record.product_id}` });
-               continue;
-             }
-             
-             if (!validSupplierIds.has(record.supplier_id)) {
-               invalidRecords.push({ record, reason: `invalid supplier_id: ${record.supplier_id}` });
-               continue;
-             }
-             
-             validRecords.push(record);
-           }
-           
-           // Remove invalid bill line items from sync queue
-           for (const invalid of invalidRecords) {
-             // If the record was skipped due to missing bill dependency, mark it for retry
-             if (invalid.reason.includes('does not exist in Supabase')) {
-               console.log(`⏳ Bill line item ${invalid.record.id} will retry - parent bill not yet synced: ${invalid.record.bill_id}`);
-               // Don't mark as synced - let it be retried in the next sync cycle
-             } else {
-               console.warn(`🚫 Removing invalid bill line item from sync: ${invalid.reason}`, invalid.record);
-               // Mark as synced only for truly invalid records
-               await db.markAsSynced(tableName, invalid.record.id);
-             }
-           }
-           
-           activeRecordsFiltered = validRecords;
-           
-           if (invalidRecords.length > 0) {
-             console.log(`🧹 Cleaned ${invalidRecords.length} invalid bill line items (validation violations)`);
-             
-             // Log summary of skipped records
-             const skippedForDependency = invalidRecords.filter(r => r.reason.includes('does not exist in Supabase'));
-             const skippedForValidation = invalidRecords.filter(r => !r.reason.includes('does not exist in Supabase'));
-             
-             if (skippedForDependency.length > 0) {
-               console.log(`⏳ ${skippedForDependency.length} bill line items skipped due to missing bill dependencies (will retry next sync)`);
-             }
-             if (skippedForValidation.length > 0) {
-               console.log(`❌ ${skippedForValidation.length} bill line items skipped due to validation errors (marked as synced)`);
-             }
-           }
-         }
-
-         // Additional validation for bill_audit_logs
-         if (tableName === 'bill_audit_logs') {
-           const validRecords = [];
-           const invalidRecords = [];
-           
-           // Use cached validation data to avoid repeated queries
-           await this.refreshValidationCache(storeId);
-           const validUserIds = this.validationCache.users;
-           
-           // CRITICAL: Check if referenced bills exist in Supabase before uploading bill_audit_logs
-           const billIds = [...new Set(activeRecordsFiltered.map(record => record.bill_id))];
-           let validBillIds: Set<string>;
-           
-           try {
-             const { data: billsData, error: billsError } = await supabase
-               .from('bills')
-               .select('id')
-               .in('id', billIds);
-             
-             if (billsError) {
-               console.warn('Failed to validate bill IDs:', billsError);
-               // If we can't validate bills, skip this table for now
-               console.log(`⏳ Skipping bill_audit_logs sync - cannot validate bill dependencies`);
-               continue;
-             }
-             
-             validBillIds = new Set(billsData?.map(b => b.id) || []);
-           } catch (error) {
-             console.warn('Failed to validate bill IDs:', error);
-             // If we can't validate bills, skip this table for now
-             console.log(`⏳ Skipping bill_audit_logs sync - cannot validate bill dependencies`);
-             continue;
-           }
-           
-           for (const record of activeRecordsFiltered) {
-             // Check required fields
-             if (!record.bill_id || !record.action || !record.changed_by) {
-               invalidRecords.push({ record, reason: 'missing required fields' });
-               continue;
-             }
-             
-             // Check if referenced bill exists in Supabase
-             if (!validBillIds.has(record.bill_id)) {
-               invalidRecords.push({ record, reason: `referenced bill_id ${record.bill_id} does not exist in Supabase` });
-               continue;
-             }
-             
-             // Check foreign key constraints
-             if (!validUserIds.has(record.changed_by)) {
-               invalidRecords.push({ record, reason: `invalid changed_by: ${record.changed_by}` });
-               continue;
-             }
-             
-             validRecords.push(record);
-           }
-           
-           // Remove invalid bill audit logs from sync queue
-           for (const invalid of invalidRecords) {
-             // If the record was skipped due to missing bill dependency, mark it for retry
-             if (invalid.reason.includes('does not exist in Supabase')) {
-               console.log(`⏳ Bill audit log ${invalid.record.id} will retry - parent bill not yet synced: ${invalid.record.bill_id}`);
-               // Don't mark as synced - let it be retried in the next sync cycle
-             } else {
-               console.warn(`🚫 Removing invalid bill audit log from sync: ${invalid.reason}`, invalid.record);
-               // Mark as synced only for truly invalid records
-               await db.markAsSynced(tableName, invalid.record.id);
-             }
-           }
-           
-           activeRecordsFiltered = validRecords;
-           
-           if (invalidRecords.length > 0) {
-             console.log(`🧹 Cleaned ${invalidRecords.length} invalid bill audit logs (validation violations)`);
-             
-             // Log summary of skipped records
-             const skippedForDependency = invalidRecords.filter(r => r.reason.includes('does not exist in Supabase'));
-             const skippedForValidation = invalidRecords.filter(r => !r.reason.includes('does not exist in Supabase'));
-             
-             if (skippedForDependency.length > 0) {
-               console.log(`⏳ ${skippedForDependency.length} bill audit logs skipped due to missing bill dependencies (will retry next sync)`);
-             }
-             if (skippedForValidation.length > 0) {
-               console.log(`❌ ${skippedForValidation.length} bill audit logs skipped due to validation errors (marked as synced)`);
-             }
-           }
-         }
-
-         // Upload active records in batches
-         for (let i = 0; i < activeRecordsFiltered.length; i += SYNC_CONFIG.batchSize) {
-           const batch = activeRecordsFiltered.slice(i, i + SYNC_CONFIG.batchSize);
-          
-          // Debug: Log the first record to see what fields it has before cleaning
-          if (tableName === 'bills' && batch.length > 0) {
-            console.log(`🔍 Before cleaning - First bill record fields:`, Object.keys(batch[0]));
-            console.log(`🔍 Before cleaning - First bill record has _synced:`, batch[0].hasOwnProperty('_synced'));
-          }
-          
-          // Clean the batch data before upload
-          const cleanedBatch = batch.map((record: any) => this.cleanRecordForUpload(record, tableName));
-          
-          // Debug: Log the first cleaned record to see what fields it has after cleaning
-          if (tableName === 'bills' && cleanedBatch.length > 0) {
-            console.log(`🧹 After cleaning - First bill record fields:`, Object.keys(cleanedBatch[0]));
-            console.log(`🧹 After cleaning - First bill record has _synced:`, cleanedBatch[0].hasOwnProperty('_synced'));
-          }
-
-          const { error, data } = await supabase
-            .from(tableName as any)
-            .upsert(cleanedBatch, { onConflict: 'id' });
-
-          if (error) {
-            console.error(`❌ Upload failed for ${tableName}:`, error);
-            console.error('📋 Failed batch data:', cleanedBatch); 
-            console.error('🔍 First record fields:', Object.keys(cleanedBatch[0] || {}));
-            result.errors.push(`Upload failed for ${tableName}: ${error.message}`);
-            
-            // For 409 conflicts, try individual uploads to identify problematic records
-            if (error.code === '23503' || error.message.includes('foreign key') || error.message.includes('violates')) {
-              console.log(`🔍 Attempting individual uploads to identify problem records...`);
-              for (const record of cleanedBatch) {
-                try {
-                  const { error: individualError } = await supabase
-                    .from(tableName as any)
-                    .upsert([record], { onConflict: 'id' });
-                  
-                  if (individualError) {
-                    console.error(`❌ Individual record failed:`, record, individualError);
-                    // Mark this record as problematic
-                    await db.addPendingSync(tableName, record.id, 'update', record);
-                  } else {
-                    // Mark successful individual record as synced
-                    await db.markAsSynced(tableName, record.id);
-                  }
-                } catch (e) {
-                  console.error(`❌ Critical error with record:`, record, e);
-                }
-              }
-            }
-          } else {
-            // Mark records as synced
-            for (const record of batch as any[]) {
-              await db.markAsSynced(tableName, record.id);
-            }
-            result.uploaded += batch.length;
-          }
-        }
-
-        // Mark table as processed in this cycle to satisfy dependencies
-        await db.updateSyncMetadata(tableName, new Date().toISOString());
-
-                 // Handle deleted records
-         for (const record of deletedRecordsFiltered as any[]) {
-          try {
-            const { error } = await supabase
-              .from(tableName as any)
-              .delete()
-              .eq('id', record.id);
-
-            if (error) {
-              result.errors.push(`Delete failed for ${tableName}/${record.id}: ${error.message}`);
-            } else {
-              // Actually delete from local DB
-              const table = (db as any)[tableName];
-              await table.delete(record.id);
-              result.uploaded++;
-            }
-          } catch (error) {
-            result.errors.push(`Delete error for ${tableName}/${record.id}: ${error}`);
-          }
-        }
-
-      } catch (error) {
-        result.errors.push(`Table ${tableName} upload error: ${error}`);
       }
     }
+    
+    return results;
+  }
 
-    console.log(`📊 Sync upload summary: ${result.uploaded} records uploaded, ${result.errors}`);
+  /**
+   * Group tables by dependency levels for parallel processing
+   */
+  private groupTablesByDependencies(): string[][] {
+    const groups: string[][] = [];
+    const processed = new Set<string>();
+    
+    while (processed.size < SYNC_TABLES.length) {
+      const currentGroup: string[] = [];
+      
+      for (const tableName of SYNC_TABLES) {
+        if (processed.has(tableName)) continue;
+        
+        const dependencies = SYNC_DEPENDENCIES[tableName] || [];
+        const allDependenciesProcessed = dependencies.every(dep => processed.has(dep));
+        
+        if (allDependenciesProcessed) {
+          currentGroup.push(tableName);
+        }
+      }
+      
+      if (currentGroup.length === 0) {
+        // Fallback: add remaining tables to avoid infinite loop
+        const remaining = SYNC_TABLES.filter(t => !processed.has(t));
+        currentGroup.push(...remaining);
+      }
+      
+      currentGroup.forEach(table => processed.add(table));
+      groups.push(currentGroup);
+    }
+    
+    return groups;
+  }
+
+  /**
+   * Process a single table with optimized validation and upload
+   */
+  private async processTable(storeId: string, tableName: string, tableDependencies: { [key: string]: string[] }) {
+    const result = { uploaded: 0, errors: [] as string[] };
+    
+    try {
+      console.log(`📤 Processing table: ${tableName}`);
+      
+      // Validate dependencies
+      const dependenciesMet = await this.validateDependencies(tableName, storeId);
+      if (!dependenciesMet) {
+        console.log(`⏳ Skipping ${tableName} - dependencies not met`);
+        return result;
+      }
+      
+      // Get unsynced records efficiently
+      const { activeRecords, deletedRecords } = await this.getUnsyncedRecords(tableName);
+      
+      if (activeRecords.length === 0 && deletedRecords.length === 0) {
+        console.log(`  ⏭️  No unsynced records for ${tableName}`);
+        return result;
+      }
+      
+      console.log(`  📊 Found ${activeRecords.length} active and ${deletedRecords.length} deleted unsynced records for ${tableName}`);
+
+      // Validate and filter records
+      const { validActiveRecords, validDeletedRecords } = await this.validateAndFilterRecords(
+        tableName, 
+        activeRecords, 
+        deletedRecords, 
+        storeId
+      );
+
+      // Upload valid records in optimized batches
+      const uploadResult = await this.uploadRecordsInBatches(tableName, validActiveRecords);
+      result.uploaded += uploadResult.uploaded;
+      result.errors.push(...uploadResult.errors);
+
+      // Handle deleted records
+      const deleteResult = await this.handleDeletedRecords(tableName, validDeletedRecords);
+      result.uploaded += deleteResult.uploaded;
+      result.errors.push(...deleteResult.errors);
+
+      // Mark table as processed
+      await db.updateSyncMetadata(tableName, new Date().toISOString());
+
+    } catch (error) {
+      result.errors.push(`Table ${tableName} processing error: ${error}`);
+    }
+
     return result;
+  }
+
+  /**
+   * Get unsynced records efficiently with a single query
+   */
+  private async getUnsyncedRecords(tableName: string) {
+    const table = (db as any)[tableName];
+    
+    // Single query to get both active and deleted records
+    const allUnsynced = await table.filter((record: any) => !record._synced).toArray();
+    
+    const activeRecords = allUnsynced.filter((r: any) => !r._deleted);
+    const deletedRecords = allUnsynced.filter((r: any) => r._deleted);
+    
+    return { activeRecords, deletedRecords };
+  }
+
+  /**
+   * Validate and filter records based on table-specific rules
+   */
+  private async validateAndFilterRecords(
+    tableName: string, 
+    activeRecords: any[], 
+    deletedRecords: any[], 
+    storeId: string
+  ) {
+    // Use table-specific validation strategy
+    const validator = this.getTableValidator(tableName);
+    const validationResult = await validator.validate(activeRecords, deletedRecords, storeId);
+    
+    return validationResult;
+  }
+
+  /**
+   * Get table-specific validator
+   */
+  private getTableValidator(tableName: string) {
+    const validators = {
+      'inventory_items': new InventoryItemsValidator(this.validationCache),
+      'cash_drawer_accounts': new CashDrawerValidator(),
+      'cash_drawer_sessions': new CashDrawerValidator(),
+      'bills': new BillsValidator(this.validationCache),
+      'bill_line_items': new BillLineItemsValidator(this.validationCache),
+      'bill_audit_logs': new BillAuditLogsValidator(this.validationCache),
+    };
+    
+    return validators[tableName] || new DefaultValidator();
+  }
+
+  /**
+   * Upload records in optimized batches with retry logic
+   */
+  private async uploadRecordsInBatches(tableName: string, records: any[]) {
+    const result = { uploaded: 0, errors: [] as string[] };
+    
+    if (records.length === 0) return result;
+    
+    // Process in parallel batches for better performance
+    const batchPromises = [];
+    
+    for (let i = 0; i < records.length; i += SYNC_CONFIG.batchSize) {
+      const batch = records.slice(i, i + SYNC_CONFIG.batchSize);
+      batchPromises.push(this.uploadBatch(tableName, batch));
+    }
+    
+    const batchResults = await Promise.allSettled(batchPromises);
+    
+    for (const batchResult of batchResults) {
+      if (batchResult.status === 'fulfilled') {
+        result.uploaded += batchResult.value.uploaded;
+        result.errors.push(...batchResult.value.errors);
+      } else {
+        result.errors.push(`Batch upload failed: ${batchResult.reason}`);
+      }
+    }
+    
+    return result;
+  }
+
+  /**
+   * Upload a single batch with error handling and retry logic
+   */
+  private async uploadBatch(tableName: string, batch: any[]) {
+    const result = { uploaded: 0, errors: [] as string[] };
+    
+    try {
+      // Clean records before upload
+      const cleanedBatch = batch.map(record => this.cleanRecordForUpload(record, tableName));
+      
+      const { error, data } = await supabase
+        .from(tableName as any)
+        .upsert(cleanedBatch, { onConflict: 'id' });
+
+      if (error) {
+        // Handle specific error types
+        if (error.code === '23503' || error.message.includes('foreign key')) {
+          // Try individual uploads for foreign key errors
+          return await this.uploadIndividually(tableName, cleanedBatch);
+        }
+        
+        result.errors.push(`Batch upload failed: ${error.message}`);
+        return result;
+      }
+      
+      // Mark records as synced
+      await Promise.all(
+        batch.map(record => db.markAsSynced(tableName, record.id))
+      );
+      
+      result.uploaded = batch.length;
+      
+    } catch (error) {
+      result.errors.push(`Batch upload error: ${error}`);
+    }
+    
+    return result;
+  }
+
+  /**
+   * Upload records individually when batch upload fails
+   */
+  private async uploadIndividually(tableName: string, records: any[]) {
+    const result = { uploaded: 0, errors: [] as string[] };
+    
+    for (const record of records) {
+      try {
+        const { error } = await supabase
+          .from(tableName as any)
+          .upsert([record], { onConflict: 'id' });
+        
+        if (error) {
+          result.errors.push(`Individual upload failed for ${record.id}: ${error.message}`);
+          // Add to pending sync for retry
+          await db.addPendingSync(tableName, record.id, 'update', record);
+        } else {
+          await db.markAsSynced(tableName, record.id);
+          result.uploaded++;
+        }
+      } catch (error) {
+        result.errors.push(`Individual upload error for ${record.id}: ${error}`);
+      }
+    }
+    
+    return result;
+  }
+
+  /**
+   * Handle deleted records efficiently
+   */
+  private async handleDeletedRecords(tableName: string, deletedRecords: any[]) {
+    const result = { uploaded: 0, errors: [] as string[] };
+    
+    if (deletedRecords.length === 0) return result;
+    
+    // Process deletions in parallel
+    const deletePromises = deletedRecords.map(record => this.deleteRecord(tableName, record));
+    const deleteResults = await Promise.allSettled(deletePromises);
+    
+    for (const deleteResult of deleteResults) {
+      if (deleteResult.status === 'fulfilled') {
+        if (deleteResult.value.success) {
+          result.uploaded++;
+        } else {
+          result.errors.push(deleteResult.value.error);
+        }
+      } else {
+        result.errors.push(`Delete operation failed: ${deleteResult.reason}`);
+      }
+    }
+    
+    return result;
+  }
+
+  /**
+   * Delete a single record from both remote and local
+   */
+  private async deleteRecord(tableName: string, record: any) {
+    try {
+      const { error } = await supabase
+        .from(tableName as any)
+        .delete()
+        .eq('id', record.id);
+
+      if (error) {
+        return { success: false, error: `Delete failed for ${tableName}/${record.id}: ${error.message}` };
+      }
+      
+      // Delete from local DB
+      const table = (db as any)[tableName];
+      await table.delete(record.id);
+      
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: `Delete error for ${tableName}/${record.id}: ${error}` };
+    }
+  }
+}
+
+/**
+ * Validation Strategy Pattern Implementation
+ */
+
+abstract class TableValidator {
+  abstract validate(activeRecords: any[], deletedRecords: any[], storeId: string): Promise<{
+    validActiveRecords: any[];
+    validDeletedRecords: any[];
+  }>;
+}
+
+class DefaultValidator extends TableValidator {
+  async validate(activeRecords: any[], deletedRecords: any[], storeId: string) {
+    return {
+      validActiveRecords: activeRecords,
+      validDeletedRecords: deletedRecords
+    };
+  }
+}
+
+class InventoryItemsValidator extends TableValidator {
+  constructor(private validationCache: any) {
+    super();
+  }
+
+  async validate(activeRecords: any[], deletedRecords: any[], storeId: string) {
+    const validRecords = [];
+    const invalidRecords = [];
+    
+    // Use cached validation data
+    const validProductIds = this.validationCache.products;
+    const validSupplierIds = this.validationCache.suppliers;
+    const validUserIds = this.validationCache.users;
+    const validBatchIds = this.validationCache.batches;
+    
+    // Get local batch IDs for validation
+    const localBatches = await db.inventory_bills
+      .where('store_id')
+      .equals(storeId)
+      .filter(batch => !batch._deleted)
+      .toArray();
+    const localBatchIds = new Set(localBatches.map(batch => batch.id));
+  
+    for (const record of activeRecords) {
+      // Check quantity constraint
+      if (record.quantity < 0) {
+        invalidRecords.push({ record, reason: 'quantity < 0' });
+        continue;
+      }
+      
+      // Check batch_id constraint
+      if (record.batch_id) {
+        if (!localBatchIds.has(record.batch_id) && !validBatchIds.has(record.batch_id)) {
+          invalidRecords.push({ record, reason: `invalid batch_id: ${record.batch_id}` });
+          continue;
+        }
+      }
+      
+      // Check foreign key constraints
+      if (!validProductIds.has(record.product_id)) {
+        invalidRecords.push({ record, reason: `invalid product_id: ${record.product_id}` });
+        continue;
+      }
+      
+      if (!validSupplierIds.has(record.supplier_id)) {
+        invalidRecords.push({ record, reason: `invalid supplier_id: ${record.supplier_id}` });
+        continue;
+      }
+      
+      validRecords.push(record);
+    }
+    
+    // Remove invalid records
+    for (const invalid of invalidRecords) {
+      console.warn(`🚫 Removing invalid inventory item: ${invalid.reason}`, invalid.record);
+      await db.inventory_items.delete(invalid.record.id);
+    }
+    
+    if (invalidRecords.length > 0) {
+      console.log(`🧹 Cleaned ${invalidRecords.length} invalid inventory items`);
+    }
+    
+    return {
+      validActiveRecords: validRecords,
+      validDeletedRecords: deletedRecords
+    };
+  }
+}
+
+class CashDrawerValidator extends TableValidator {
+  async validate(activeRecords: any[], deletedRecords: any[], storeId: string) {
+    const validRecords = [];
+    const invalidRecords = [];
+    
+    for (const record of activeRecords) {
+      // Basic validation logic for cash drawer records
+      if (!record.store_id) {
+        invalidRecords.push({ record, reason: 'missing store_id' });
+        continue;
+      }
+      
+      validRecords.push(record);
+    }
+    
+    // Remove invalid records
+    for (const invalid of invalidRecords) {
+      console.warn(`🚫 Removing invalid cash drawer record: ${invalid.reason}`, invalid.record);
+      await db.markAsSynced('cash_drawer_accounts', invalid.record.id);
+    }
+    
+    return {
+      validActiveRecords: validRecords,
+      validDeletedRecords: deletedRecords
+    };
+  }
+}
+
+class BillsValidator extends TableValidator {
+  constructor(private validationCache: any) {
+    super();
+  }
+
+  async validate(activeRecords: any[], deletedRecords: any[], storeId: string) {
+    const validRecords = [];
+    const invalidRecords = [];
+    
+    const validCustomerIds = new Set();
+    const validUserIds = this.validationCache.users;
+    
+    // Get valid customer IDs
+    try {
+      const { data: customers } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('store_id', storeId);
+      customers?.forEach(c => validCustomerIds.add(c.id));
+    } catch (error) {
+      console.warn('Failed to get customer IDs for validation:', error);
+    }
+    
+    for (const record of activeRecords) {
+      // Check required fields
+      if (!record.bill_number || !record.total_amount || !record.payment_method) {
+        invalidRecords.push({ record, reason: 'missing required fields' });
+        continue;
+      }
+      
+      // Check foreign key constraints
+      if (record.customer_id && !validCustomerIds.has(record.customer_id)) {
+        invalidRecords.push({ record, reason: `invalid customer_id: ${record.customer_id}` });
+        continue;
+      }
+      
+      if (!validUserIds.has(record.created_by)) {
+        invalidRecords.push({ record, reason: `invalid created_by: ${record.created_by}` });
+        continue;
+      }
+      
+      // Remove line item fields that shouldn't be in bills
+      const lineItemFields = ['inventory_item_id', 'product_id', 'supplier_id', 'quantity', 'unit_price', 'line_total', 'weight', 'line_order'];
+      lineItemFields.forEach(field => {
+        if (record[field] !== undefined) {
+          delete record[field];
+        }
+      });
+      
+      validRecords.push(record);
+    }
+    
+    // Remove invalid records
+    for (const invalid of invalidRecords) {
+      console.warn(`🚫 Removing invalid bill: ${invalid.reason}`, invalid.record);
+      await db.markAsSynced('bills', invalid.record.id);
+    }
+    
+    return {
+      validActiveRecords: validRecords,
+      validDeletedRecords: deletedRecords
+    };
+  }
+}
+
+class BillLineItemsValidator extends TableValidator {
+  constructor(private validationCache: any) {
+    super();
+  }
+
+  async validate(activeRecords: any[], deletedRecords: any[], storeId: string) {
+    const validRecords = [];
+    const invalidRecords = [];
+    
+    const validProductIds = this.validationCache.products;
+    const validSupplierIds = this.validationCache.suppliers;
+    
+    // Check if referenced bills exist in Supabase
+    const billIds = [...new Set(activeRecords.map(record => record.bill_id))];
+    let validBillIds: Set<string>;
+    
+    try {
+      const { data: billsData, error: billsError } = await supabase
+        .from('bills')
+        .select('id')
+        .in('id', billIds);
+      
+      if (billsError) {
+        console.warn('Failed to validate bill IDs:', billsError);
+        return { validActiveRecords: [], validDeletedRecords: deletedRecords };
+      }
+      
+      validBillIds = new Set(billsData?.map(b => b.id) || []);
+    } catch (error) {
+      console.warn('Failed to validate bill IDs:', error);
+      return { validActiveRecords: [], validDeletedRecords: deletedRecords };
+    }
+    
+    for (const record of activeRecords) {
+      // Check required fields
+      if (!record.bill_id || !record.product_id || !record.supplier_id || !record.quantity) {
+        invalidRecords.push({ record, reason: 'missing required fields' });
+        continue;
+      }
+      
+      // Check if referenced bill exists
+      if (!validBillIds.has(record.bill_id)) {
+        // Don't mark as synced - let it retry
+        continue;
+      }
+      
+      // Check foreign key constraints
+      if (!validProductIds.has(record.product_id)) {
+        invalidRecords.push({ record, reason: `invalid product_id: ${record.product_id}` });
+        continue;
+      }
+      
+      if (!validSupplierIds.has(record.supplier_id)) {
+        invalidRecords.push({ record, reason: `invalid supplier_id: ${record.supplier_id}` });
+        continue;
+      }
+      
+      validRecords.push(record);
+    }
+    
+    // Remove invalid records
+    for (const invalid of invalidRecords) {
+      console.warn(`🚫 Removing invalid bill line item: ${invalid.reason}`, invalid.record);
+      await db.markAsSynced('bill_line_items', invalid.record.id);
+    }
+    
+    return {
+      validActiveRecords: validRecords,
+      validDeletedRecords: deletedRecords
+    };
+  }
+}
+
+class BillAuditLogsValidator extends TableValidator {
+  constructor(private validationCache: any) {
+    super();
+  }
+
+  async validate(activeRecords: any[], deletedRecords: any[], storeId: string) {
+    const validRecords = [];
+    const invalidRecords = [];
+    
+    const validUserIds = this.validationCache.users;
+    
+    // Check if referenced bills exist in Supabase
+    const billIds = [...new Set(activeRecords.map(record => record.bill_id))];
+    let validBillIds: Set<string>;
+    
+    try {
+      const { data: billsData, error: billsError } = await supabase
+        .from('bills')
+        .select('id')
+        .in('id', billIds);
+      
+      if (billsError) {
+        console.warn('Failed to validate bill IDs:', billsError);
+        return { validActiveRecords: [], validDeletedRecords: deletedRecords };
+      }
+      
+      validBillIds = new Set(billsData?.map(b => b.id) || []);
+    } catch (error) {
+      console.warn('Failed to validate bill IDs:', error);
+      return { validActiveRecords: [], validDeletedRecords: deletedRecords };
+    }
+    
+    for (const record of activeRecords) {
+      // Check required fields
+      if (!record.bill_id || !record.action || !record.changed_by) {
+        invalidRecords.push({ record, reason: 'missing required fields' });
+        continue;
+      }
+      
+      // Check if referenced bill exists
+      if (!validBillIds.has(record.bill_id)) {
+        // Don't mark as synced - let it retry
+        continue;
+      }
+      
+      // Check foreign key constraints
+      if (!validUserIds.has(record.changed_by)) {
+        invalidRecords.push({ record, reason: `invalid changed_by: ${record.changed_by}` });
+        continue;
+      }
+      
+      validRecords.push(record);
+    }
+    
+    // Remove invalid records
+    for (const invalid of invalidRecords) {
+      console.warn(`🚫 Removing invalid bill audit log: ${invalid.reason}`, invalid.record);
+      await db.markAsSynced('bill_audit_logs', invalid.record.id);
+    }
+    
+    return {
+      validActiveRecords: validRecords,
+      validDeletedRecords: deletedRecords
+    };
+  }
+
+  /**
+   * Full resync - clear local data and download everything from Supabase
+   */
+  async fullResync(storeId: string): Promise<SyncResult> {
+    console.log('🔄 Starting full resync for store:', storeId);
+    
+    try {
+      // Clear all local data
+      await this.clearLocalData(storeId);
+      
+      // Download all data from Supabase
+      const result = await this.downloadAllData(storeId);
+      
+      console.log('✅ Full resync completed:', result);
+      return result;
+    } catch (error) {
+      console.error('❌ Full resync failed:', error);
+      return {
+        success: false,
+        errors: [error instanceof Error ? error.message : 'Unknown resync error'],
+        synced: { uploaded: 0, downloaded: 0 },
+        conflicts: 0
+      };
+    }
+  }
+
+  /**
+   * Clear all local data for a store
+   */
+  private async clearLocalData(storeId: string) {
+    await db.transaction('rw', db.tables, async () => {
+      for (const tableName of SYNC_TABLES) {
+        await (db as any)[tableName].where('store_id').equals(storeId).delete();
+      }
+      await db.sync_metadata.clear();
+      await db.pending_syncs.clear();
+    });
+  }
+
+  /**
+   * Download all data from Supabase
+   */
+  private async downloadAllData(storeId: string): Promise<SyncResult> {
+    const result = { uploaded: 0, downloaded: 0, errors: [] as string[] };
+    
+    for (const tableName of SYNC_TABLES) {
+      try {
+        const tableResult = await this.fetchTableData(tableName, storeId);
+        result.downloaded += tableResult.recordsWithSync.length;
+        if (tableResult.error) {
+          result.errors.push(tableResult.error);
+        }
+      } catch (error) {
+        result.errors.push(`Failed to download ${tableName}: ${error}`);
+      }
+    }
+    
+    return {
+      success: result.errors.length === 0,
+      errors: result.errors,
+      synced: { uploaded: 0, downloaded: result.downloaded },
+      conflicts: 0
+    };
   }
 
   /**
@@ -2017,6 +2219,53 @@ export class SyncService {
     return result;
   }
 
+  async fetchTableData(tableName: string, storeId: string) {
+    try {
+      let query = supabase.from(tableName as any).select('*');
+  
+      // Special case: stores table
+      query = tableName === 'stores'
+        ? query.eq('id', storeId)
+        : query.eq('store_id', storeId);
+  
+      // Apply sync limit
+      query = query.limit(SYNC_CONFIG.maxRecordsPerSync);
+  
+      const startTime = Date.now();
+      const { data: remoteRecords, error } = await query;
+      const responseTime = Date.now() - startTime;
+  
+      if (error) {
+        console.error(`❌ Full resync failed for ${tableName}:`, error);
+        return { tableName, recordsWithSync: [], error };
+      }
+  
+      if (remoteRecords && remoteRecords.length > 0) {
+        console.log(`📊 Full resync: ${remoteRecords.length} records for ${tableName} (${responseTime}ms)`);
+  
+        const syncTimestamp = new Date().toISOString();
+        const recordsWithSync = remoteRecords.map((record) => ({
+          ...record,
+          _synced: true,
+          _lastSyncedAt: syncTimestamp,
+        }));
+  
+        return { tableName, recordsWithSync, error: null };
+      }
+  
+      console.log(`📊 Full resync: no records found for ${tableName}`);
+      return { tableName, recordsWithSync: [], error: null };
+  
+    } catch (err) {
+      console.error(`❌ Unexpected error fetching ${tableName}:`, err);
+      return {
+        tableName,
+        recordsWithSync: [],
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
+    }
+  }
+  
   /**
    * Clear all local data and re-sync from server
    */
@@ -2027,9 +2276,9 @@ export class SyncService {
       synced: { uploaded: 0, downloaded: 0 },
       conflicts: 0
     };
-
+  
     try {
-      // Clear all local data
+      // Clear all local data in one transaction
       await db.transaction('rw', db.tables, async () => {
         for (const tableName of SYNC_TABLES) {
           await (db as any)[tableName].clear();
@@ -2037,58 +2286,39 @@ export class SyncService {
         await db.sync_metadata.clear();
         await db.pending_syncs.clear();
       });
-
-      // Download all data from server - OPTIMIZED
-      for (const tableName of SYNC_TABLES) {
-        console.log(`📥 Full resync: downloading ${tableName}...`);
-        
-        let query = supabase.from(tableName as any).select('*');
-        
-        // Stores table doesn't have store_id, so we filter by the specific store ID
-        if (tableName === 'stores') {
-          query = query.eq('id', storeId);
-        } else {
-          query = query.eq('store_id', storeId);
+  
+      // Download in parallel
+      const syncTimestamp = new Date().toISOString();
+      const downloadTasks = SYNC_TABLES.map(tableName => this.fetchTableData(tableName, storeId));
+      const results = await Promise.allSettled(downloadTasks);
+  
+      // Write in a single transaction
+      await db.transaction('rw', db.tables, async () => {
+        for (const res of results) {
+          if (res.status === 'fulfilled') {
+            const { tableName, recordsWithSync, error } = res.value;
+            if (error) {
+              result.errors.push(`Download failed for ${tableName}: ${error.message}`);
+              continue;
+            }
+            if (recordsWithSync.length > 0) {
+              await (db as any)[tableName].bulkPut(recordsWithSync);
+              await db.updateSyncMetadata(tableName, syncTimestamp);
+              result.synced.downloaded += recordsWithSync.length;
+            }
+          } else {
+            result.errors.push(`Unexpected error: ${res.reason}`);
+          }
         }
-        
-        // Add limits to prevent large data transfers
-        query = query.limit(SYNC_CONFIG.maxRecordsPerSync);
-        
-        const startTime = Date.now();
-        const { data: remoteRecords, error } = await query;
-        const responseTime = Date.now() - startTime;
-        
-        // Query monitoring removed - using IndexedDB only approach
-
-        if (error) {
-          console.error(`❌ Full resync failed for ${tableName}:`, error);
-          result.errors.push(`Download failed for ${tableName}: ${error.message}`);
-        } else if (remoteRecords && remoteRecords.length > 0) {
-          console.log(`📊 Full resync: found ${remoteRecords.length} records for ${tableName}`);
-          
-          const recordsWithSync = remoteRecords.map(record => ({
-            ...record,
-            _synced: true,
-            _lastSyncedAt: new Date().toISOString()
-          }));
-          
-          await (db as any)[tableName].bulkPut(recordsWithSync);
-          result.synced.downloaded += remoteRecords.length;
-          
-          // Update sync metadata
-          await db.updateSyncMetadata(tableName, new Date().toISOString());
-        } else {
-          console.log(`📊 Full resync: no records found for ${tableName}`);
-        }
-      }
-
+      });
+  
       result.success = result.errors.length === 0;
-
-    } catch (error) {
+  
+    } catch (err) {
       result.success = false;
-      result.errors.push(error instanceof Error ? error.message : 'Full resync failed');
+      result.errors.push(err instanceof Error ? err.message : 'Full resync failed');
     }
-
+  
     return result;
   }
 }
