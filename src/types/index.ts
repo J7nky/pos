@@ -88,46 +88,50 @@ export interface inventory_bills { id: string;
   type:string
   }
 
-// BillLineItem interface - maps directly to bill_line_items table
+// BillLineItem interface - maps directly to bill_line_items table (snake_case for db compatibility)
 export interface BillLineItem {
   // Core identifiers
   id: string;
-  storeId: string;
-  billId: string;
-  inventoryItemId: string;
-  productId: string;
-  supplierId: string;
-  customerId?: string;
+  store_id: string;
+  bill_id: string;
+  inventory_item_id: string | null;
+  product_id: string;
+  supplier_id: string;
+  customer_id: string | null;
+  
+  // Product/Supplier names (denormalized for performance)
+  product_name: string;
+  supplier_name: string;
   
   // Quantity and pricing
   quantity: number;
-  weight?: number;
-  unitPrice: number;
-  lineTotal: number; // Maps to line_total in database
-  receivedValue: number; // Amount actually received
+  weight: number | null;
+  unit_price: number;
+  line_total: number;
+  received_value: number;
   
   // Transaction details
-  paymentMethod: 'cash' | 'card' | 'credit';
-  notes?: string;
+  payment_method: 'cash' | 'card' | 'credit';
+  notes: string | null;
+  line_order: number;
   
   // Metadata
-  createdAt: string;
-  createdBy: string;
-  
-  // Local state (for cart items, optional fields)
-  inventoryType?: 'commission' | 'cash';
+  created_at: string;
+  updated_at: string;
+  created_by: string;
   
   // Sync state (for offline functionality)
-  synced?: boolean;
-  deleted?: boolean;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
 }
 
 // Cart item - partial BillLineItem for items being added to cart
-export interface CartItem extends Omit<BillLineItem, 'id' | 'createdAt' | 'createdBy' | 'receivedValue'> {
+export interface CartItem extends Omit<BillLineItem, 'id' | 'created_at' | 'created_by' | 'received_value'> {
   id?: string; // Optional for new cart items
-  receivedValue?: number; // Optional until checkout
-  createdAt?: string;
-  createdBy?: string;
+  received_value?: number; // Optional until checkout
+  created_at?: string;
+  created_by?: string;
 }
 
 // Database transformation types for Supabase integration
@@ -167,62 +171,67 @@ export const BillLineItemTransforms = {
   // Convert from database row to frontend BillLineItem
   fromDbRow: (dbRow: BillLineItemDbRow): BillLineItem => ({
     id: dbRow.id,
-    storeId: dbRow.store_id,
-    billId: dbRow.bill_id,
-    inventoryItemId: dbRow.inventory_item_id || '',
-    productId: dbRow.product_id,
-    supplierId: dbRow.supplier_id,
-    customerId: dbRow.customer_id || undefined,
+    store_id: dbRow.store_id,
+    bill_id: dbRow.bill_id,
+    inventory_item_id: dbRow.inventory_item_id,
+    product_id: dbRow.product_id,
+    supplier_id: dbRow.supplier_id,
+    customer_id: dbRow.customer_id,
+    product_name: dbRow.product_name,
+    supplier_name: dbRow.supplier_name,
     quantity: dbRow.quantity,
-    weight: dbRow.weight || undefined,
-    unitPrice: dbRow.unit_price,
-    lineTotal: dbRow.line_total,
-    receivedValue: dbRow.received_value,
-    paymentMethod: dbRow.payment_method,
-    notes: dbRow.notes || undefined,
-    createdAt: dbRow.created_at,
-    createdBy: dbRow.created_by,
-    synced: true,
-    deleted: false,
+    weight: dbRow.weight,
+    unit_price: dbRow.unit_price,
+    line_total: dbRow.line_total,
+    received_value: dbRow.received_value,
+    payment_method: dbRow.payment_method,
+    notes: dbRow.notes,
+    line_order: dbRow.line_order,
+    created_at: dbRow.created_at,
+    updated_at: dbRow.updated_at,
+    created_by: dbRow.created_by,
+    _synced: true,
+    _lastSyncedAt: undefined,
+    _deleted: false,
   }),
 
   // Convert from frontend BillLineItem to database insert
   toDbInsert: (billLineItem: BillLineItem): BillLineItemDbInsert => ({
     id: billLineItem.id,
-    store_id: billLineItem.storeId,
-    bill_id: billLineItem.billId,
-    product_id: billLineItem.productId,
-    product_name: '', // Will be populated from product lookup
-    supplier_id: billLineItem.supplierId,
-    supplier_name: '', // Will be populated from supplier lookup
-    inventory_item_id: billLineItem.inventoryItemId || null,
+    store_id: billLineItem.store_id,
+    bill_id: billLineItem.bill_id,
+    product_id: billLineItem.product_id,
+    product_name: billLineItem.product_name,
+    supplier_id: billLineItem.supplier_id,
+    supplier_name: billLineItem.supplier_name,
+    inventory_item_id: billLineItem.inventory_item_id,
     quantity: billLineItem.quantity,
-    unit_price: billLineItem.unitPrice,
-    line_total: billLineItem.lineTotal,
-    weight: billLineItem.weight || null,
-    notes: billLineItem.notes || null,
-    line_order: 1, // Default order
-    payment_method: billLineItem.paymentMethod,
-    customer_id: billLineItem.customerId || null,
-    created_by: billLineItem.createdBy,
-    received_value: billLineItem.receivedValue,
+    unit_price: billLineItem.unit_price,
+    line_total: billLineItem.line_total,
+    weight: billLineItem.weight,
+    notes: billLineItem.notes,
+    line_order: billLineItem.line_order,
+    payment_method: billLineItem.payment_method,
+    customer_id: billLineItem.customer_id,
+    created_by: billLineItem.created_by,
+    received_value: billLineItem.received_value,
   }),
 
   // Convert from frontend BillLineItem to database update
   toDbUpdate: (updates: Partial<BillLineItem>): BillLineItemDbUpdate => {
     const dbUpdate: BillLineItemDbUpdate = {};
     
-    if (updates.inventoryItemId !== undefined) dbUpdate.inventory_item_id = updates.inventoryItemId || null;
-    if (updates.productId !== undefined) dbUpdate.product_id = updates.productId;
-    if (updates.supplierId !== undefined) dbUpdate.supplier_id = updates.supplierId;
-    if (updates.customerId !== undefined) dbUpdate.customer_id = updates.customerId || null;
+    if (updates.inventory_item_id !== undefined) dbUpdate.inventory_item_id = updates.inventory_item_id;
+    if (updates.product_id !== undefined) dbUpdate.product_id = updates.product_id;
+    if (updates.supplier_id !== undefined) dbUpdate.supplier_id = updates.supplier_id;
+    if (updates.customer_id !== undefined) dbUpdate.customer_id = updates.customer_id;
     if (updates.quantity !== undefined) dbUpdate.quantity = updates.quantity;
-    if (updates.weight !== undefined) dbUpdate.weight = updates.weight || null;
-    if (updates.unitPrice !== undefined) dbUpdate.unit_price = updates.unitPrice;
-    if (updates.lineTotal !== undefined) dbUpdate.line_total = updates.lineTotal;
-    if (updates.receivedValue !== undefined) dbUpdate.received_value = updates.receivedValue;
-    if (updates.paymentMethod !== undefined) dbUpdate.payment_method = updates.paymentMethod;
-    if (updates.notes !== undefined) dbUpdate.notes = updates.notes || null;
+    if (updates.weight !== undefined) dbUpdate.weight = updates.weight;
+    if (updates.unit_price !== undefined) dbUpdate.unit_price = updates.unit_price;
+    if (updates.line_total !== undefined) dbUpdate.line_total = updates.line_total;
+    if (updates.received_value !== undefined) dbUpdate.received_value = updates.received_value;
+    if (updates.payment_method !== undefined) dbUpdate.payment_method = updates.payment_method;
+    if (updates.notes !== undefined) dbUpdate.notes = updates.notes;
     
     return dbUpdate;
   },
@@ -231,13 +240,13 @@ export const BillLineItemTransforms = {
   fromCartItem: (cartItem: CartItem, id: string, billId: string, createdAt: string, createdBy: string): BillLineItem => ({
     ...cartItem,
     id,
-    billId,
-    createdAt,
-    createdBy,
-    lineTotal: cartItem.lineTotal || (cartItem.quantity * cartItem.unitPrice),
-    receivedValue: cartItem.receivedValue || cartItem.lineTotal || (cartItem.quantity * cartItem.unitPrice),
-    synced: false,
-    deleted: false,
+    bill_id: billId,
+    created_at: createdAt,
+    created_by: createdBy,
+    line_total: cartItem.line_total || (cartItem.quantity * cartItem.unit_price),
+    received_value: cartItem.received_value || cartItem.line_total || (cartItem.quantity * cartItem.unit_price),
+    _synced: false,
+    _deleted: false,
   }),
 };
 
@@ -372,4 +381,111 @@ export interface StatementProductDetail {
   commissionRate?: number;
   commissionAmount?: number;
   notes?: string;
+}
+
+// Additional interfaces for db.ts (Dexie-specific) - matches database schema exactly
+export interface Store {
+  id: string;
+  store_id: string;
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  preferred_currency: 'USD' | 'LBP';
+  preferred_language: 'en' | 'ar' | 'fr';
+  preferred_commission_rate: number;
+  exchange_rate: number;
+  low_stock_alert: boolean;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
+export interface CashDrawerAccount {
+  id: string;
+  store_id: string;
+  account_code: string;
+  name: string;
+  currency: string;
+  is_active: boolean;
+  current_balance: number | null;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
+export interface CashDrawerSession {
+  id: string;
+  store_id: string;
+  account_id: string;
+  opened_by: string;
+  opened_at: string;
+  closed_at?: string;
+  closed_by?: string;
+  opening_amount: number;
+  expected_amount?: number;
+  actual_amount?: number;
+  variance?: number;
+  status: 'open' | 'closed';
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
+export interface MissedProduct {
+  id: string;
+  store_id: string;
+  session_id: string;
+  inventory_item_id: string;
+  system_quantity: number;
+  physical_quantity: number;
+  variance: number;
+  notes?: string;
+  product_name: string;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
+export interface BillAuditLog {
+  id: string;
+  store_id: string;
+  bill_id: string;
+  action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
+  field_changed: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  change_reason: string | null;
+  changed_by: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
+export interface SyncMetadata {
+  id: string;
+  table_name: string;
+  last_synced_at: string;
+}
+
+export interface PendingSync {
+  id: string;
+  table_name: string;
+  record_id: string;
+  operation: 'create' | 'update' | 'delete';
+  created_at: string;
+  retry_count: number;
 }

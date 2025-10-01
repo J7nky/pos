@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, User, AlertTriangle, CheckCircle, Wallet, X } from 'lucide-react';
-import { db } from '../lib/db';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
-import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
-import { CashDrawerFlowTracker } from './CashDrawerFlowTracker';
 import { InventoryVerificationModal } from './accountingPage/modals/InventoryVerificationModal';
 import { MissedProductsSummary } from './MissedProductsSummary';
 import { missedProductsService } from '../services/missedProductsService';
@@ -147,7 +144,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
   const [error, setError] = useState<string | null>(null);
   const [inventoryVerificationData, setInventoryVerificationData] = useState<any>(null);
   const { userProfile } = useSupabaseAuth();
-  const { sync } = useOfflineData();
+  const { closeCashDrawer: contextCloseCashDrawer } = useOfflineData();
 
   useEffect(() => {
     loadStatus();
@@ -175,70 +172,40 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
       // Get current user ID from auth context
       const currentUserId = userProfile?.id || 'unknown-user';
       
-      // Close the cash drawer session using the service
-      const result = await cashDrawerUpdateService.closeCashDrawer(
-        status.sessionId,
+      // Process inventory verification data if available
+      if (inventoryVerificationData) {
+        console.log('📊 Processing inventory verification data for session:', status.sessionId);
+        try {
+          const missedProductsResult = await missedProductsService.recordMissedProducts(
+            status.sessionId, 
+            storeId,
+            inventoryVerificationData
+          );
+          
+          if (missedProductsResult.success) {
+            console.log(`📊 Recorded ${missedProductsResult.recordedCount} missed products for session ${status.sessionId}`);
+          } else {
+            console.error('Failed to record missed products:', missedProductsResult.error);
+          }
+        } catch (error) {
+          console.error('Error recording missed products:', error);
+        }
+      }
+      
+      // Use the context method to close cash drawer (follows offline-first architecture)
+      await contextCloseCashDrawer(
         actualAmount,
         currentUserId,
         'Cash drawer closed by user'
       );
       
-      if (result.success) {
-        // After closing, ensure the account balance is set to the actual value
-        const account = await db.getCashDrawerAccount(storeId);
-        if (account && account.current_balance !== actualAmount) {
-          await db.cash_drawer_accounts.update(account.id, {
-            current_balance: actualAmount,
-            _synced: false
-          });
-        }
-        
-        // Process inventory verification data if available
-        if (inventoryVerificationData) {
-          console.log('📊 Processing inventory verification data for session:', status.sessionId);
-          try {
-            const missedProductsResult = await missedProductsService.recordMissedProducts(
-              status.sessionId, 
-              storeId,
-              inventoryVerificationData
-            );
-            
-            if (missedProductsResult.success) {
-              console.log(`📊 Recorded ${missedProductsResult.recordedCount} missed products for session ${status.sessionId}`);
-            } else {
-              console.error('Failed to record missed products:', missedProductsResult.error);
-            }
-          } catch (error) {
-            console.error('Error recording missed products:', error);
-          }
-        }
-        
-        // Refresh the status
-        await loadStatus();
-        
-        // Trigger sync to upload missed products and cash drawer data to cloud
-        try {
-          console.log('🔄 Triggering sync after cash drawer closing...');
-          await sync(false); // Manual sync
-          console.log('✅ Sync completed after cash drawer closing');
-        } catch (syncError) {
-          console.error('❌ Sync failed after cash drawer closing:', syncError);
-          // Don't fail the cash drawer closing if sync fails
-        }
-        
-        // Clear the verification data since it's been processed
-        setInventoryVerificationData(null);
-        
-        // Show success message with variance information
-        console.log('Cash drawer closed successfully', {
-          expectedAmount: result.expectedAmount,
-          actualAmount: result.actualAmount,
-          variance: result.variance
-        });
-      } else {
-        console.error('Failed to close cash drawer:', result.error);
-        setError(result.error || 'Failed to close cash drawer.');
-      }
+      // Refresh the status
+      await loadStatus();
+      
+      // Clear the verification data since it's been processed
+      setInventoryVerificationData(null);
+      
+      console.log('Cash drawer closed successfully');
       
     } catch (error) {
       console.error('Error closing cash drawer:', error);

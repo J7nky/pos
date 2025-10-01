@@ -1,19 +1,15 @@
-import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
 import { BillLineItem, BillLineItemTransforms } from '../types';
 import {
   db,
-  Product,
-  Supplier,
-  Customer,
   InventoryItem,
   Transaction,
-  createBaseEntity,
   createId,
 } from '../lib/db';
-import { syncService, SyncResult } from '../services/syncService.optimized';
+import { syncService, SyncResult } from '../services/syncService';
 import { crudHelperService } from '../services/crudHelperService';
 // Removed SupabaseService import - using offline-first approach only
 
@@ -183,12 +179,17 @@ interface OfflineDataContextType {
 
 const OfflineDataContext = createContext<OfflineDataContextType | undefined>(undefined);
 
+// Debug mode - set to false in production to reduce console noise
+const DEBUG = false;
+const debug = (...args: any[]) => DEBUG && console.log(...args);
+
 export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const { userProfile } = useSupabaseAuth();
   const { isOnline, justCameOnline } = useNetworkStatus();
   const storeId = userProfile?.store_id;
+  const hasLoggedNoProfile = useRef(false);
 
-  console.log('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline, 'justCameOnline:', justCameOnline);
+  debug('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline, 'justCameOnline:', justCameOnline);
 
   // Data states - offline-first structure
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
@@ -263,7 +264,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       if (existingStore) {
         // Use existing store data
-        console.log('📦 Using cached store data:', existingStore);
+        debug('📦 Using cached store data:', existingStore);
 
         // Update settings from store data
         if (existingStore.preferred_currency) {
@@ -277,6 +278,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
         if (existingStore.exchange_rate !== undefined) {
           setExchangeRate(existingStore.exchange_rate);
+          
+          // Initialize CurrencyService with store's exchange rate
+          const { CurrencyService } = await import('../services/currencyService');
+          await CurrencyService.getInstance().refreshExchangeRate(storeId);
         }
         if (existingStore.preferred_language) {
           setLanguage(existingStore.preferred_language);
@@ -286,7 +291,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         await refreshCashDrawerStatus();
       } else {
         // Store not found locally - will be synced when connection is available
-        console.log('📴 Store data not found locally - will sync when online');
+        debug('📴 Store data not found locally - will sync when online');
         // Use default values for now
         setCurrency('LBP');
         setDefaultCommissionRate(10);
@@ -314,18 +319,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setTimeout(() => checkUndoValidity(), 1000);
     }
   }, [storeId]);
-  useEffect(() => {
-    crudHelperService.setCallbacks({
-      onRefreshData: refreshData,
-      onUpdateUnsyncedCount: updateUnsyncedCount,
-      onDebouncedSync: debouncedSync,
-      onResetAutoSyncTimer: resetAutoSyncTimer
-    });
-  }, [refreshData, updateUnsyncedCount, debouncedSync, resetAutoSyncTimer]);
   const initializeData = async () => {
     if (!storeId) return;
 
-    console.log('🔄 Initializing data for store:', storeId);
+    debug('🔄 Initializing data for store:', storeId);
 
     try {
       // Clean up any invalid/orphaned data first
@@ -335,7 +332,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       ]);
 
       if (invalidCleaned > 0 || orphanedCleaned > 0) {
-        console.log(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
+        debug(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
       }
 
       // Clean up duplicate cash drawer accounts
@@ -343,13 +340,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
         const cleanupResult = await cashDrawerUpdateService.cleanupDuplicateAccounts(storeId);
         if (cleanupResult.success && cleanupResult.duplicatesRemoved > 0) {
-          console.log(`🧹 Cleaned up ${cleanupResult.duplicatesRemoved} duplicate cash drawer accounts`);
+          debug(`🧹 Cleaned up ${cleanupResult.duplicatesRemoved} duplicate cash drawer accounts`);
         }
       } catch (cleanupError) {
         console.warn('Failed to cleanup duplicate cash drawer accounts:', cleanupError);
       }
 
-      console.log('📊 Loading local data...');
+      debug('📊 Loading local data...');
       // Load local data first
       await refreshDataAndUpdateCount();
 
@@ -360,20 +357,20 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
       ]);
 
-      console.log(`📈 Local data counts: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
+      debug(`📈 Local data counts: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
 
       const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
 
       // If local database is empty and we're online, sync from cloud
       if (isLocalDatabaseEmpty && isOnline) {
-        console.log('📥 Local database is empty, syncing from cloud...');
+        debug('📥 Local database is empty, syncing from cloud...');
         setLoading(prev => ({ ...prev, sync: true }));
 
         try {
           const syncResult = await syncService.fullResync(storeId);
 
           if (syncResult.success) {
-            console.log(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
+            debug(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
             await refreshDataAndUpdateCount();
           } else {
             console.error('❌ Initial sync failed:', syncResult.errors);
@@ -384,13 +381,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           setLoading(prev => ({ ...prev, sync: false }));
         }
       } else if (isLocalDatabaseEmpty && !isOnline) {
-        console.log('📴 Local database is empty but offline - will sync when connection is restored');
+        debug('📴 Local database is empty but offline - will sync when connection is restored');
       } else if (!isLocalDatabaseEmpty) {
-        console.log(`📊 Local database loaded: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
+        debug(`📊 Local database loaded: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
 
         // If we have local data and we're online, perform a regular sync to get updates
         if (isOnline && unsyncedCount === 0) {
-          console.log('🔄 Performing background sync to check for updates...');
+          debug('🔄 Performing background sync to check for updates...');
           performSync(true); // Auto sync without blocking UI
         }
       }
@@ -418,7 +415,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Mark migration as complete - we now handle precision issues during sync
       // This is system state, so localStorage is appropriate
       localStorage.setItem(migrationKey, new Date().toISOString());
-      console.log('✅ Transaction migration completed - precision issues now handled during sync');
+      debug('✅ Transaction migration completed - precision issues now handled during sync');
     } catch (error) {
       console.error('❌ Transaction migration failed:', error);
     }
@@ -434,7 +431,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const handleConnectionRestored = async () => {
     if (!storeId) return;
 
-    console.log('🌐 Connection restored - checking what to sync...');
+    debug('🌐 Connection restored - checking what to sync...');
 
     try {
       // Check if local database is empty
@@ -447,14 +444,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
 
       if (isLocalDatabaseEmpty) {
-        console.log('📥 Connection restored with empty database - performing full sync...');
+        debug('📥 Connection restored with empty database - performing full sync...');
         setLoading(prev => ({ ...prev, sync: true }));
 
         try {
           const syncResult = await syncService.fullResync(storeId);
 
           if (syncResult.success) {
-            console.log(`✅ Full sync after connection restore completed: downloaded ${syncResult.synced.downloaded} records`);
+            debug(`✅ Full sync after connection restore completed: downloaded ${syncResult.synced.downloaded} records`);
             await refreshDataAndUpdateCount();
           } else {
             console.error('❌ Full sync after connection restore failed:', syncResult.errors);
@@ -463,7 +460,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           setLoading(prev => ({ ...prev, sync: false }));
         }
       } else {
-        console.log('🔄 Connection restored with local data - performing regular sync...');
+        debug('🔄 Connection restored with local data - performing regular sync...');
         performSync(true); // Regular sync for updates and uploads
       }
     } catch (error) {
@@ -486,7 +483,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
         // Debounce auto-sync calls
         autoSyncTimeout = setTimeout(() => {
-          console.log('👀 Auto-syncing on focus/visibility change...');
+          debug('👀 Auto-syncing on focus/visibility change...');
           performSync(true);
         }, 1000); // 1 second debounce
       }
@@ -523,7 +520,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const refreshData = async () => {
     if (!storeId) return;
 
-    console.log('🔄 Refreshing data for store:', storeId);
+    debug('🔄 Refreshing data for store:', storeId);
 
     try {
       // Load all data from IndexedDB using optimized batch loading
@@ -542,7 +539,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         missedProductsData,
       } = await crudHelperService.loadAllStoreData(storeId);
 
-      console.log(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
+      debug(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
 
       // Transform data for offline-first structure
       setProducts(productsData as Tables['products']['Row'][]);
@@ -614,201 +611,38 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Refresh cash drawer status
       await refreshCashDrawerStatus();
 
-      console.log('✅ Data refresh completed successfully');
+      debug('✅ Data refresh completed successfully');
 
     } catch (error) {
       console.error('❌ Error loading data from Dexie:', error);
     }
   };
 
+  // Simplified using crudHelperService
   const updateUnsyncedCount = async () => {
     try {
-      const tableNames = [
-        'stores', 'products', 'suppliers', 'customers', 'cash_drawer_accounts',
-        'inventory_bills', 'inventory_items', 'transactions', 'bills',
-        'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions'
-      ];
-
-      const counts = await Promise.all([
-        db.stores.filter(item => !item._synced).count(),
-        db.products.filter(item => !item._synced).count(),
-        db.suppliers.filter(item => !item._synced).count(),
-        db.customers.filter(item => !item._synced).count(),
-        db.cash_drawer_accounts.filter(item => !item._synced).count(),
-        db.inventory_bills.filter(item => !item._synced).count(),
-        db.inventory_items.filter(item => !item._synced).count(),
-        db.transactions.filter(item => !item._synced).count(),
-        db.bills.filter(item => !item._synced).count(),
-        db.bill_line_items.filter(item => !item._synced).count(),
-        db.bill_audit_logs.filter(item => !item._synced).count(),
-        db.cash_drawer_sessions.filter(item => !item._synced).count(),
-      ]);
-
-      // Debug: Log which tables have unsynced records
-      const unsyncedByTable = tableNames.map((name, index) => ({ table: name, count: counts[index] }))
-        .filter(item => item.count > 0);
-
-      if (unsyncedByTable.length > 0) {
-        console.log('🔍 Unsynced records by table:', unsyncedByTable);
-
-        // Debug specific unsynced records for inventory_items
-        if (unsyncedByTable.some(item => item.table === 'inventory_items')) {
-          db.inventory_items.filter(item => !item._synced).toArray().then(async (unsyncedItems) => {
-            console.log('🔍 Unsynced inventory_items details:', unsyncedItems);
-            unsyncedItems.forEach((item, index) => {
-              console.log(`  Item ${index + 1}:`, {
-                id: item.id,
-                product_id: item.product_id,
-                supplier_id: item.supplier_id,
-                batch_id: item.batch_id,
-                quantity: item.quantity,
-                weight: item.weight,
-                price: item.price,
-                _synced: item._synced,
-                _deleted: item._deleted,
-                created_at: item.created_at
-              });
-            });
-
-            // Check validation constraints for each unsynced item
-            for (const item of unsyncedItems) {
-              console.log(`🔍 Validating unsynced item ${item.id}:`);
-
-              const validationErrors = [];
-
-              // Check quantity constraint
-              if (item.quantity < 0) {
-                console.log(`  ❌ Quantity validation failed: ${item.quantity} < 0`);
-                validationErrors.push('Negative quantity');
-              } else {
-                console.log(`  ✅ Quantity validation passed: ${item.quantity}`);
-              }
-
-              // Check if product_id exists
-              const product = await db.products.get(item.product_id);
-              if (!product) {
-                console.log(`  ❌ Product validation failed: product_id ${item.product_id} not found`);
-                validationErrors.push('Missing product');
-              } else {
-                console.log(`  ✅ Product validation passed: ${product.name}`);
-              }
-
-              // Check if supplier_id exists
-              const supplier = await db.suppliers.get(item.supplier_id);
-              if (!supplier) {
-                console.log(`  ❌ Supplier validation failed: supplier_id ${item.supplier_id} not found`);
-                validationErrors.push('Missing supplier');
-              } else {
-                console.log(`  ✅ Supplier validation passed: ${supplier.name}`);
-              }
-
-              // Check if batch_id exists (if provided)
-              if (item.batch_id) {
-                const batch = await db.inventory_bills.get(item.batch_id);
-                if (!batch) {
-                  console.log(`  ❌ Batch validation failed: batch_id ${item.batch_id} not found`);
-                  validationErrors.push('Invalid batch reference');
-                } else {
-                  console.log(`  ✅ Batch validation passed: ${batch.id}`);
-                }
-              } else {
-                console.log(`  ℹ️ No batch_id provided (optional)`);
-              }
-
-              // Auto-fix common issues
-              if (validationErrors.length > 0) {
-                console.log(`🔧 Attempting to auto-fix item ${item.id}...`);
-                try {
-                  const fixes = [];
-
-                  // Fix negative quantity
-                  if (item.quantity < 0) {
-                    await db.inventory_items.update(item.id, {
-                      quantity: 0,
-                      _synced: false
-                    });
-                    fixes.push('Fixed negative quantity (set to 0)');
-                  }
-
-                  // Fix missing product (use first available product)
-                  if (!product) {
-                    const validProduct = await db.products
-                      .where('store_id')
-                      .equals(item.store_id)
-                      .filter(p => !p._deleted)
-                      .first();
-                    if (validProduct) {
-                      await db.inventory_items.update(item.id, {
-                        product_id: validProduct.id,
-                        _synced: false
-                      });
-                      fixes.push(`Updated product_id to: ${validProduct.name}`);
-                    }
-                  }
-
-                  // Fix missing supplier (use first available supplier)
-                  if (!supplier) {
-                    const validSupplier = await db.suppliers
-                      .where('store_id')
-                      .equals(item.store_id)
-                      .filter(s => !s._deleted)
-                      .first();
-                    if (validSupplier) {
-                      await db.inventory_items.update(item.id, {
-                        supplier_id: validSupplier.id,
-                        _synced: false
-                      });
-                      fixes.push(`Updated supplier_id to: ${validSupplier.name}`);
-                    }
-                  }
-
-                  // Fix invalid batch reference
-                  if (item.batch_id && !await db.inventory_bills.get(item.batch_id)) {
-                    await db.inventory_items.update(item.id, {
-                      batch_id: null,
-                      _synced: false
-                    });
-                    fixes.push('Removed invalid batch_id reference');
-                  }
-
-                  if (fixes.length > 0) {
-                    console.log(`✅ Auto-fixes applied: ${fixes.join(', ')}`);
-                  } else {
-                    console.log(`⚠️ No auto-fixes available for item ${item.id}`);
-                  }
-                } catch (fixError) {
-                  console.error(`❌ Auto-fix failed for item ${item.id}:`, fixError);
-                }
-              }
-            }
-          });
-        }
+      const { total, byTable } = await crudHelperService.getUnsyncedCount();
+      
+      // Log unsynced records by table (only non-zero counts)
+      const unsyncedTables = Object.entries(byTable)
+        .filter(([_, count]) => count > 0)
+        .map(([table, count]) => ({ table, count }));
+      
+      if (unsyncedTables.length > 0) {
+        debug('🔍 Unsynced records by table:', unsyncedTables);
       }
-
-      setUnsyncedCount(counts.reduce((sum, count) => sum + count, 0));
+      
+      setUnsyncedCount(total);
     } catch (error) {
       console.error('Error counting unsynced records:', error);
     }
   };
 
-  // Helper function to get current unsynced count
+  // Simplified helper function using crudHelperService
   const getCurrentUnsyncedCount = async (): Promise<number> => {
     try {
-      const counts = await Promise.all([
-        db.stores.filter(item => !item._synced).count(),
-        db.products.filter(item => !item._synced).count(),
-        db.suppliers.filter(item => !item._synced).count(),
-        db.customers.filter(item => !item._synced).count(),
-        db.cash_drawer_accounts.filter(item => !item._synced).count(),
-        db.inventory_bills.filter(item => !item._synced).count(),
-        db.inventory_items.filter(item => !item._synced).count(),
-        db.transactions.filter(item => !item._synced).count(),
-        db.bills.filter(item => !item._synced).count(),
-        db.bill_line_items.filter(item => !item._synced).count(),
-        db.bill_audit_logs.filter(item => !item._synced).count(),
-        db.cash_drawer_sessions.filter(item => !item._synced).count(),
-      ]);
-      return counts.reduce((sum, count) => sum + count, 0);
+      const { total } = await crudHelperService.getUnsyncedCount();
+      return total;
     } catch (error) {
       console.error('Error counting unsynced records:', error);
       return 0;
@@ -821,139 +655,34 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await updateUnsyncedCount();
   };
 
-  // Optimized IndexedDB query helpers for better performance
-
-  const getProductsByStore = async (storeId: string) => {
-    return await db.products
-      .where('store_id')
-      .equals(storeId)
-      .filter(item => !item._deleted)
-      .toArray();
-  };
-
-  const getSuppliersByStore = async (storeId: string) => {
-    return await db.suppliers
-      .where('store_id')
-      .equals(storeId)
-      .filter(item => !item._deleted)
-      .toArray();
-  };
-
-  const getCustomersByStore = async (storeId: string) => {
-    return await db.customers
-      .where('store_id')
-      .equals(storeId)
-      .filter(item => !item._deleted)
-      .toArray();
-  };
-
-  const getInventoryItemsByStore = async (storeId: string) => {
-    return await db.inventory_items
-      .where('store_id')
-      .equals(storeId)
-      .filter(item => !item._deleted)
-      .toArray();
-  };
-
-  const getBillsByStore = async (storeId: string) => {
-    return await db.bills
-      .where('store_id')
-      .equals(storeId)
-      .filter(item => !item._deleted)
-      .toArray();
-  };
-
-  const getBillLineItemsByStore = async (storeId: string) => {
-    return await db.bill_line_items
-      .where('store_id')
-      .equals(storeId)
-      .filter(item => !item._deleted)
-      .toArray();
-  };
-
-  const getTransactionsByStore = async (storeId: string) => {
-    return await db.transactions
-      .where('store_id')
-      .equals(storeId)
-      .filter(item => !item._deleted)
-      .toArray();
-  };
-
-  // Performance optimization: Batch IndexedDB operations
-  const batchIndexedDBOperations = async (operations: (() => Promise<any>)[]) => {
-    return await db.transaction('r', db.tables, async () => {
-      return await Promise.all(operations.map(op => op()));
-    });
-  };
-
-  // Optimized data loading with batching
-  const loadAllStoreData = async (storeId: string) => {
-    const startTime = Date.now();
-
-    const operations = [
-      () => getProductsByStore(storeId),
-      () => getSuppliersByStore(storeId),
-      () => getCustomersByStore(storeId),
-      () => getInventoryItemsByStore(storeId),
-      () => getTransactionsByStore(storeId),
-      () => db.inventory_bills.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-      () => getBillsByStore(storeId),
-      () => getBillLineItemsByStore(storeId),
-      () => db.bill_audit_logs.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-      () => db.cash_drawer_accounts.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-      () => db.cash_drawer_sessions.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-      () => db.missed_products.where('store_id').equals(storeId).filter(item => !item._deleted).toArray(),
-    ];
-
-    const results = await batchIndexedDBOperations(operations);
-    const loadTime = Date.now() - startTime;
-
-    console.log(`⚡ IndexedDB batch load completed in ${loadTime}ms`);
-
-    return {
-      productsData: results[0],
-      suppliersData: results[1],
-      customersData: results[2],
-      inventoryData: results[3],
-      transactionsData: results[4],
-      batchesData: results[5],
-      billsData: results[6],
-      billLineItemsData: results[7],
-      billAuditLogsData: results[8],
-      cashDrawerAccountsData: results[9],
-      cashDrawerSessionsData: results[10],
-      missedProductsData: results[11],
-    };
-  };
-
   // Reset auto-sync timer on every data change
   const resetAutoSyncTimer = useCallback(() => {
     // Clear existing timer
     if (autoSyncTimerRef.current) {
-      console.log('🔄 Resetting auto-sync timer (clearing existing timer)');
+      debug('🔄 Resetting auto-sync timer (clearing existing timer)');
       clearTimeout(autoSyncTimerRef.current);
       autoSyncTimerRef.current = null;
     }
 
     // Always set new timer if online (we'll check unsyncedCount when timer fires)
     if (isOnline && storeId && !isSyncing) {
-      console.log('⏰ Setting new 8-second auto-sync timer');
+      debug('⏰ Setting new 8-second auto-sync timer');
       autoSyncTimerRef.current = setTimeout(async () => {
-        console.log('⏰ Auto-sync timer fired, checking for unsynced data...');
+        debug('⏰ Auto-sync timer fired, checking for unsynced data...');
 
         // Get fresh unsynced count
         const currentUnsyncedCount = await getCurrentUnsyncedCount();
-        console.log(`📊 Current unsynced count: ${currentUnsyncedCount}`);
+        debug(`📊 Current unsynced count: ${currentUnsyncedCount}`);
 
         if (!syncService.isCurrentlyRunning() && currentUnsyncedCount > 0) {
-          console.log('⏰ Auto-sync triggered after 30-second delay');
+          debug('⏰ Auto-sync triggered after 30-second delay');
           performSync(true);
         } else {
-          console.log('⏰ No unsynced data or sync already running, skipping auto-sync');
+          debug('⏰ No unsynced data or sync already running, skipping auto-sync');
         }
       }, 30000); // 30 seconds - same as undo window
     } else {
-      console.log('⏰ Not setting auto-sync timer - offline, no store, or syncing');
+      debug('⏰ Not setting auto-sync timer - offline, no store, or syncing');
     }
   }, [isOnline, storeId, isSyncing]);
 
@@ -968,6 +697,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [resetAutoSyncTimer]);
+
+  // Setup crudHelperService callbacks (runs once after all functions are defined)
+  useEffect(() => {
+    crudHelperService.setCallbacks({
+      onRefreshData: refreshData,
+      onUpdateUnsyncedCount: updateUnsyncedCount,
+      onDebouncedSync: debouncedSync,
+      onResetAutoSyncTimer: resetAutoSyncTimer
+    });
+  }, []); // Empty dependency array - only set up callbacks once
 
   const updateStockLevels = () => {
     const levels = products.map(product => {
@@ -1049,7 +788,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Set new timeout for 1 second
     const timeout = setTimeout(() => {
       if (isOnline && !isSyncing && unsyncedCount > 0) {
-        console.log('🔄 Debounced auto-sync triggered');
+        debug('🔄 Debounced auto-sync triggered');
         performSync(true); // Mark as automatic sync
       }
       setDebouncedSyncTimeout(null);
@@ -1101,7 +840,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }));
 
     // Log the final bill data for debugging
-    console.log('📋 Final line items data before storage:', mappedLineItems, 'items');
+    debug('📋 Final line items data before storage:', mappedLineItems, 'items');
 
     // Store original inventory states for undo
     const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
@@ -1216,7 +955,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Process cash drawer transaction for cash sales using the general utility
     const cashSaleItems = mappedLineItems.filter(item => item.payment_method === 'cash');
-    console.log('💰 Cash sale items:', cashSaleItems);
+    debug('💰 Cash sale items:', cashSaleItems);
     let cashDrawerResult = null;
     if (cashSaleItems.length > 0) {
       try {
@@ -1252,7 +991,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           await db.transactions.add(cashTransaction as any);
         });
 
-        console.log(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
+        debug(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
       } catch (error) {
         console.error('❌ Error updating cash drawer for sales:', error);
       }
@@ -1567,31 +1306,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addInventoryItem = async (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
-    const item: InventoryItem = {
-      id: createId(),
+    // Prepare item with defaults - crudHelperService will add base entity fields (id, store_id, created_at, _synced)
+    const preparedData = {
+      ...(itemData.id && { id: itemData.id }), // Only include id if provided
       product_id: itemData.product_id ?? '',
       supplier_id: itemData.supplier_id ?? '',
       quantity: itemData.quantity ?? 0,
       unit: itemData.unit ?? '',
       received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
-      store_id: storeId,
-      created_at: new Date().toISOString(),
-      _synced: false,
       weight: itemData.weight ?? null,
       price: itemData.price ?? null,
       selling_price: (itemData as any).selling_price ?? null,
       batch_id: itemData.batch_id ?? null
-    };
+    } as Omit<Tables['inventory_items']['Insert'], 'store_id'>;
 
-    await db.inventory_items.add(item);
-    await refreshData();
-    await updateUnsyncedCount();
-
-    // Reset auto-sync timer to ensure full undo window
-    resetAutoSyncTimer();
-
-    // Use debounced sync to batch rapid changes
-    debouncedSync();
+    // Use crudHelperService - it will handle all callbacks automatically
+    await crudHelperService.addEntity('inventory_items', storeId, preparedData);
   };
 
   const updateInventoryItem = async (id: string, updates: Tables['inventory_items']['Update']): Promise<void> => {
@@ -1649,7 +1379,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         };
 
         financialResult = await inventoryPurchaseService.processInventoryPurchase(purchaseData);
-        console.log('Financial transaction processed:', financialResult);
+        debug('Financial transaction processed:', financialResult);
       } catch (error) {
         console.error('Error processing financial transaction:', error);
         throw new Error(`Failed to process financial transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1678,7 +1408,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // to maintain foreign key constraints.
     await db.transaction('rw', [db.inventory_bills, db.inventory_items], async () => {
       await db.inventory_bills.add(batchRecord);
-      console.log(batchRecord, 'batchrecord')
+      debug(batchRecord, 'batchrecord')
       const now = new Date().toISOString();
 
       const mappedItems = items.map((it) => ({
@@ -1941,7 +1671,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }, getStore);
 
         if (cashDrawerResult.success) {
-          console.log(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
+          debug(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
         } else {
           console.error('❌ Failed to update cash drawer:', cashDrawerResult.error);
         }
@@ -2152,15 +1882,27 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const report = await db.validateDataIntegrity(storeId);
-      const cleaned = await db.cleanupOrphanedRecords(storeId);
+      // Clean up orphaned records and invalid inventory items
+      const [orphanedCleaned, invalidCleaned] = await Promise.all([
+        db.cleanupOrphanedRecords(storeId),
+        db.cleanupInvalidInventoryItems()
+      ]);
+      
+      const cleaned = orphanedCleaned + invalidCleaned;
 
       if (cleaned > 0) {
         await refreshData();
         await updateUnsyncedCount();
       }
 
-      return { cleaned, report };
+      return {
+        cleaned,
+        report: {
+          orphanedRecords: orphanedCleaned,
+          invalidInventory: invalidCleaned,
+          message: `Cleaned ${cleaned} records (${orphanedCleaned} orphaned, ${invalidCleaned} invalid)`
+        }
+      };
     } catch (error) {
       console.error('Data validation/cleanup failed:', error);
       throw error;
@@ -2879,7 +2621,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // Don't render context if userProfile is not available
   // Instead of blocking here, let the App component handle authentication
   if (!userProfile) {
-    console.log('❌ No userProfile available, rendering empty context');
+    // Only log once to avoid console spam during initial auth load
+    if (!hasLoggedNoProfile.current) {
+      debug('⏳ Waiting for userProfile to load...');
+      hasLoggedNoProfile.current = true;
+    }
     return (
       <OfflineDataContext.Provider value={{
         // Minimal context with empty data

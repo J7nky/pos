@@ -10,10 +10,9 @@ import {
   ArrowRight,
   Trash2
 } from 'lucide-react';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { missedProductsService } from '../services/missedProductsService';
 import Toast from './common/Toast';
-//call the missedproducts 
-// history service to get the missed products history
 
 
 interface MissedProductsHistoryProps {
@@ -31,7 +30,7 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
   className = ''
 }) => {
   const navigate = useNavigate();
-  // const { missedProducts, inventory, products } = useOfflineData();
+  const { missedProducts, inventory, products, refreshData } = useOfflineData();
   const [history, setHistory] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +77,8 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
       try {
         const success = await missedProductsService.deleteMissedProduct(itemId);
         if (success) {
-          // Refresh the data after successful deletion
+          // Refresh context data and then reload report
+          await refreshData();
           await loadReport();
         } else {
           setError('Failed to delete item');
@@ -95,11 +95,12 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
     setError(null);
     
     try {
-      // Use context data for better performance
+      // Use context data for better performance (follows offline-first architecture)
       const reportData = await missedProductsService.getAllMissedProducts(
         storeId,
         dateRange.startDate,
-        dateRange.endDate
+        dateRange.endDate,
+      
       );
       console.log('Missed products history data:', reportData);
       setHistory(reportData);
@@ -112,7 +113,7 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
 
   useEffect(() => {
     loadReport();
-  }, [storeId, dateRange]);
+  }, [storeId, dateRange, missedProducts, inventory, products]);
 
 
   const handleExport = () => {
@@ -146,7 +147,6 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
   };
-//   const user=
 
   if (loading) {
     return (

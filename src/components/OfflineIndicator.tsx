@@ -10,15 +10,19 @@ export function OfflineIndicator() {
     visible: false
   });
 
-  // Debug logging
+  // Debug logging (disabled in production)
   useEffect(() => {
-    console.log('🔍 OfflineIndicator: isOnline =', isOnline, 'justCameOnline =', justCameOnline);
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔍 OfflineIndicator: isOnline =', isOnline, 'justCameOnline =', justCameOnline);
+    }
   }, [isOnline, justCameOnline]);
 
   // Show toast when going offline
   useEffect(() => {
     if (!isOnline && !justCameOnline) {
-      console.log('🔍 Showing offline toast');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔍 Showing offline toast');
+      }
       setToast({
         message: '🚫🌐 Offline mode',
         type: 'error',
@@ -30,7 +34,9 @@ export function OfflineIndicator() {
   // Show toast when coming back online and hide offline toast
   useEffect(() => {
     if (justCameOnline) {
-      console.log('🔍 Showing online toast');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔍 Showing online toast');
+      }
       // Hide any existing offline toast immediately
       setToast(prev => ({ ...prev, visible: false }));
       

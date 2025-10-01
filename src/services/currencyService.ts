@@ -18,9 +18,10 @@ export class CurrencyService {
   private static instance: CurrencyService;
   private exchangeRate: number = 89500; // Default USD to LBP rate
   private lastUpdate: string = '';
+  private isInitialized: boolean = false;
 
   private constructor() {
-    this.loadExchangeRateFromStore();
+    // Don't load on construction - wait for storeId to be provided
   }
 
   public static getInstance(): CurrencyService {
@@ -31,12 +32,17 @@ export class CurrencyService {
   }
 
   private async loadExchangeRateFromStore(storeId: string): Promise<void> {
+    if (!storeId) {
+      return; // Silently return if no storeId provided
+    }
+    
     try {
       const { db } = await import('../lib/db');
       const store = await db.stores.get(storeId);
       if (store && store.exchange_rate) {
         this.exchangeRate = store.exchange_rate;
         this.lastUpdate = store.updated_at;
+        this.isInitialized = true;
       }
     } catch (error) {
       console.warn('Could not load exchange rate from store, using default:', error);

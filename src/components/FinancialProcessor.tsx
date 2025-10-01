@@ -3,7 +3,6 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import MoneyInput from './common/MoneyInput';
-import { erpFinancialService, TransactionSummary, AccountBalance } from '../services/erpFinancialService';
 import { 
   DollarSign, 
   User, 
@@ -34,14 +33,22 @@ interface TransactionForm {
 }
 
 export default function FinancialProcessor() {
-  const raw = useOfflineData();
+  const { 
+    customers: rawCustomers, 
+    suppliers: rawSuppliers, 
+    sales, 
+    inventory, 
+    transactions,
+    processCashDrawerTransaction,
+    addTransaction,
+    refreshData,
+    getCurrentCashDrawerStatus
+  } = useOfflineData();
   const { userProfile } = useSupabaseAuth();
   const { currency, formatCurrency, formatCurrencyWithSymbol, getConvertedAmount } = useCurrency();
   
-  const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
-  const suppliers = raw.suppliers.map(s => ({...s,  createdAt: s.created_at, type: s.type || 'commission'})) as Array<any>;
-  const sales = raw.sales;
-  const inventory = raw.inventory;
+  const customers = rawCustomers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
+  const suppliers = rawSuppliers.map(s => ({...s,  createdAt: s.created_at, type: s.type || 'commission'})) as Array<any>;
   
   const [activeTab, setActiveTab] = useState<'process' | 'accounts' | 'reports'>('process');
   const [showForm, setShowForm] = useState<string | null>(null);
@@ -55,8 +62,8 @@ export default function FinancialProcessor() {
     commissionRate: '10'
   });
   
-  const [lastTransaction, setLastTransaction] = useState<TransactionSummary | null>(null);
-  const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([]);
+  const [lastTransaction, setLastTransaction] = useState<any | null>(null);
+  const [accountBalances, setAccountBalances] = useState<any[]>([]);
   const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
   const [cashDrawerStatus, setCashDrawerStatus] = useState<any>(null);
   
@@ -75,9 +82,35 @@ export default function FinancialProcessor() {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setAccountBalances(erpFinancialService.getAllAccountBalances());
-    setCashDrawerStatus(erpFinancialService.getCashDrawerStatus());
+  const loadData = async () => {
+    // Calculate account balances from context data
+    const customerBalances = customers.map(customer => ({
+      entityId: customer.id,
+      entityName: customer.name,
+      entityType: 'customer',
+      currentBalance: customer.lb_balance || 0,
+      currency: 'LBP',
+      lastTransactionDate: customer.createdAt || new Date().toISOString()
+    }));
+
+    const supplierBalances = suppliers.map(supplier => ({
+      entityId: supplier.id,
+      entityName: supplier.name,
+      entityType: 'supplier',
+      currentBalance: supplier.lb_balance || 0,
+      currency: 'LBP',
+      lastTransactionDate: supplier.createdAt || new Date().toISOString()
+    }));
+
+    setAccountBalances([...customerBalances, ...supplierBalances]);
+    
+    // Get cash drawer status from context
+    try {
+      const status = await getCurrentCashDrawerStatus();
+      setCashDrawerStatus(status);
+    } catch (error) {
+      console.error('Error loading cash drawer status:', error);
+    }
   };
 
   const handleTransactionSubmit = async (e: React.FormEvent) => {
@@ -89,46 +122,68 @@ export default function FinancialProcessor() {
     }
 
     try {
-      let result: TransactionSummary;
+      const storeId = userProfile?.store_id || 'default-store';
+      const amount = parseFloat(transactionForm.amount);
+      
+      // Create transaction record using context method
+      const transactionData = {
+        type: transactionForm.type === 'customer_payment' ? 'income' : 'expense',
+        category: transactionForm.type,
+        amount: amount,
+        currency: transactionForm.currency,
+        description: transactionForm.description,
+        reference: transactionForm.reference || `${transactionForm.type.toUpperCase()}-${Date.now()}`,
+        customer_id: transactionForm.type === 'customer_payment' ? transactionForm.entityId : null,
+        supplier_id: transactionForm.type === 'supplier_payment' ? transactionForm.entityId : null,
+        created_by: userProfile.id
+      };
 
-      switch (transactionForm.type) {
-        case 'customer_payment':
-          result = erpFinancialService.processCustomerPayment(
-            transactionForm.entityId,
-            parseFloat(transactionForm.amount),
-            transactionForm.currency,
-            transactionForm.description,
-            userProfile.id
-          );
-          break;
+      // Add transaction using context method
+      await addTransaction(transactionData);
 
-        case 'supplier_payment':
-          result = erpFinancialService.processSupplierPayment(
-            transactionForm.entityId,
-            parseFloat(transactionForm.amount),
-            transactionForm.currency,
-            transactionForm.description,
-            userProfile.id
-          );
-          break;
+      // Process cash drawer transaction if it's a cash transaction
+      if (transactionForm.type === 'customer_payment' || transactionForm.type === 'expense') {
+        const cashDrawerResult = await processCashDrawerTransaction({
+          type: transactionForm.type === 'customer_payment' ? 'payment' : 'expense',
+          amount: amount,
+          currency: transactionForm.currency,
+          description: transactionForm.description,
+          reference: transactionData.reference,
+          customerId: transactionForm.type === 'customer_payment' ? transactionForm.entityId : undefined,
+          storeId: storeId,
+          createdBy: userProfile.id
+        });
 
-        case 'expense':
-          result = erpFinancialService.processExpense(
-            parseFloat(transactionForm.amount),
-            transactionForm.currency,
-            'General Expense',
-            transactionForm.description,
-            userProfile.id
-          );
-          break;
-
-        default:
-          showToast('Transaction type not implemented yet', 'error');
-          return;
+        setLastTransaction({
+          transactionType: transactionForm.type,
+          entityInvolved: transactionForm.type === 'customer_payment' 
+            ? customers.find(c => c.id === transactionForm.entityId)?.name || 'Unknown'
+            : transactionForm.type === 'supplier_payment'
+            ? suppliers.find(s => s.id === transactionForm.entityId)?.name || 'Unknown'
+            : 'Expense',
+          amount: amount,
+          currency: transactionForm.currency,
+          balanceBefore: cashDrawerResult.previousBalance || 0,
+          balanceAfter: cashDrawerResult.newBalance || 0,
+          cashDrawerImpact: cashDrawerResult.newBalance - (cashDrawerResult.previousBalance || 0),
+          notes: transactionForm.description
+        });
+      } else {
+        setLastTransaction({
+          transactionType: transactionForm.type,
+          entityInvolved: suppliers.find(s => s.id === transactionForm.entityId)?.name || 'Unknown',
+          amount: amount,
+          currency: transactionForm.currency,
+          balanceBefore: 0,
+          balanceAfter: 0,
+          cashDrawerImpact: 0,
+          notes: transactionForm.description
+        });
       }
 
-      setLastTransaction(result);
-      loadData();
+      // Refresh data and context
+      await refreshData();
+      await loadData();
       showToast('Transaction processed successfully!', 'success');
       setShowForm(null);
       resetForm();
@@ -162,7 +217,7 @@ export default function FinancialProcessor() {
         return suppliers.filter(s => s.isActive).map(s => ({
           id: s.id,
           name: s.name,
-          balance: erpFinancialService.getAccountBalance(s.id)?.currentBalance || 0
+          balance: s.lb_balance || 0
         }));
       default:
         return [];
@@ -170,24 +225,29 @@ export default function FinancialProcessor() {
   };
 
   const exportTransactionReport = () => {
-    const report = erpFinancialService.generateTransactionReport();
+    // Generate report from context data
+    const totalTransactions = transactions.length;
+    const totalIncome = transactions
+      .filter(t => t.type === 'income')
+      .reduce((sum, t) => sum + (t.amount || 0), 0);
+    const totalExpenses = transactions
+      .filter(t => t.type === 'expense')
+      .reduce((sum, t) => sum + (t.amount || 0), 0);
+    const netCashFlow = totalIncome - totalExpenses;
     
     const csvContent = [
       ['Transaction Report', ''].join(','),
       ['Generated', new Date().toLocaleString()].join(','),
       ['', ''].join(','),
       ['Summary', ''].join(','),
-      ['Total Transactions', report.summary.totalTransactions].join(','),
-      ['Total Income', report.summary.totalIncome.toFixed(2)].join(','),
-      ['Total Expenses', report.summary.totalExpenses.toFixed(2)].join(','),
-      ['Net Cash Flow', report.summary.netCashFlow.toFixed(2)].join(','),
-      ['Customer Payments', report.summary.customerPayments.toFixed(2)].join(','),
-      ['Supplier Payments', report.summary.supplierPayments.toFixed(2)].join(','),
-      ['Cash Sales', report.summary.cashSales.toFixed(2)].join(','),
+      ['Total Transactions', totalTransactions].join(','),
+      ['Total Income', totalIncome.toFixed(2)].join(','),
+      ['Total Expenses', totalExpenses.toFixed(2)].join(','),
+      ['Net Cash Flow', netCashFlow.toFixed(2)].join(','),
       ['', ''].join(','),
       ['Account Balances', ''].join(','),
       ['Entity', 'Type', 'Balance', 'Currency', 'Last Transaction'].join(','),
-      ...report.accountBalances.map(ab => [
+      ...accountBalances.map(ab => [
         ab.entityName,
         ab.entityType,
         ab.currentBalance.toFixed(2),
@@ -197,14 +257,15 @@ export default function FinancialProcessor() {
       ['', ''].join(','),
       ['Recent Transactions', ''].join(','),
       ['ID', 'Type', 'Entity', 'Amount', 'Currency', 'Status', 'Timestamp'].join(','),
-      ...report.transactions.slice(-50).map(t => [
+      ...transactions.slice(-50).map(t => [
         t.id,
         t.type,
-        t.entityName,
+        t.customer_id ? customers.find(c => c.id === t.customer_id)?.name || 'Unknown' : 
+        t.supplier_id ? suppliers.find(s => s.id === t.supplier_id)?.name || 'Unknown' : 'System',
         t.amount.toFixed(2),
         t.currency,
         'completed',
-        new Date(t.timestamp).toLocaleString()
+        new Date(t.created_at).toLocaleString()
       ].join(','))
     ].join('\n');
 
@@ -480,25 +541,33 @@ export default function FinancialProcessor() {
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Financial Summary</h2>
             {(() => {
-              const report = erpFinancialService.generateTransactionReport();
+              const totalTransactions = transactions.length;
+              const totalIncome = transactions
+                .filter(t => t.type === 'income')
+                .reduce((sum, t) => sum + (t.amount || 0), 0);
+              const totalExpenses = transactions
+                .filter(t => t.type === 'expense')
+                .reduce((sum, t) => sum + (t.amount || 0), 0);
+              const netCashFlow = totalIncome - totalExpenses;
+              
               return (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <p className="text-sm text-blue-600">Total Transactions</p>
-                    <p className="text-2xl font-bold text-blue-900">{report.summary.totalTransactions}</p>
+                    <p className="text-2xl font-bold text-blue-900">{totalTransactions}</p>
                   </div>
                   <div className="bg-green-50 p-4 rounded-lg">
                     <p className="text-sm text-green-600">Total Income</p>
-                    <p className="text-2xl font-bold text-green-900">{formatCurrency(report.summary.totalIncome)}</p>
+                    <p className="text-2xl font-bold text-green-900">{formatCurrency(totalIncome)}</p>
                   </div>
                   <div className="bg-red-50 p-4 rounded-lg">
                     <p className="text-sm text-red-600">Total Expenses</p>
-                    <p className="text-2xl font-bold text-red-900">{formatCurrency(report.summary.totalExpenses)}</p>
+                    <p className="text-2xl font-bold text-red-900">{formatCurrency(totalExpenses)}</p>
                   </div>
                   <div className="bg-purple-50 p-4 rounded-lg">
                     <p className="text-sm text-purple-600">Net Cash Flow</p>
-                    <p className={`text-2xl font-bold ${report.summary.netCashFlow >= 0 ? 'text-green-900' : 'text-red-900'}`}>
-                      {formatCurrency(report.summary.netCashFlow)}
+                    <p className={`text-2xl font-bold ${netCashFlow >= 0 ? 'text-green-900' : 'text-red-900'}`}>
+                      {formatCurrency(netCashFlow)}
                     </p>
                   </div>
                 </div>

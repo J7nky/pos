@@ -445,25 +445,7 @@ export default function Accounting() {
     }
 
     try {
-      // Use the ERP Financial Service to process the payment
-      const { erpFinancialService } = await import('../services/erpFinancialService');
-
-      // Sync current entities to ERP service
-      localStorage.setItem('erp_customers', JSON.stringify(customers));
-      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
-      erpFinancialService.reloadData();
-
-      const result = erpFinancialService.processEntityPayment(
-        receiveForm.entityType,
-        receiveForm.entityId,
-        parseFloat(receiveForm.amount),
-        receiveForm.currency as 'USD' | 'LBP',
-        `Payment from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
-        userProfile?.id || ''
-      );
-
-      // Update entity balance in main application
-      // Store amounts in their respective currency fields
+      // Update entity balance using context method
       const paymentAmount = parseFloat(receiveForm.amount);
 
       if (receiveForm.entityType === 'customer') {
@@ -472,11 +454,11 @@ export default function Accounting() {
 
         if (receiveForm.currency === 'LBP') {
           await raw.updateCustomer(receiveForm.entityId, { 
-            lb_balance: currentLbBalance + paymentAmount 
+            lb_balance: currentLbBalance - paymentAmount  // Decrease customer balance (reduce debt)
           });
         } else {
           await raw.updateCustomer(receiveForm.entityId, { 
-            usd_balance: currentUsdBalance + paymentAmount 
+            usd_balance: currentUsdBalance - paymentAmount  // Decrease customer balance (reduce debt)
           });
         }
       } else {
@@ -485,94 +467,53 @@ export default function Accounting() {
 
         if (receiveForm.currency === 'LBP') {
           await raw.updateSupplier(receiveForm.entityId, { 
-            lb_balance: currentLbBalance + paymentAmount 
+            lb_balance: currentLbBalance + paymentAmount  // Increase supplier balance (we owe them)
           });
         } else {
           await raw.updateSupplier(receiveForm.entityId, { 
-            usd_balance: currentUsdBalance + paymentAmount 
+            usd_balance: currentUsdBalance + paymentAmount  // Increase supplier balance (we owe them)
           });
         }
       }
 
-      // Safely convert amount for database storage
-      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
-        parseFloat(receiveForm.amount), 
-        receiveForm.currency as 'USD' | 'LBP'
+      // Use context method to process cash drawer transaction
+      const cashDrawerResult = await raw.processCashDrawerTransaction({
+        type: 'payment',
+        amount: paymentAmount,
+        currency: receiveForm.currency as 'USD' | 'LBP',
+        description: `Payment received from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
+        reference: receiveForm.reference || `PAY-${Date.now()}`,
+        customerId: receiveForm.entityType === 'customer' ? receiveForm.entityId : undefined,
+        supplierId: receiveForm.entityType === 'supplier' ? receiveForm.entityId : undefined,
+        storeId: userProfile?.store_id || '',
+        createdBy: userProfile?.id || ''
+      });
+
+      // Use the transaction ID from cash drawer result
+      const finalTransactionId = cashDrawerResult?.transactionId || createId();
+
+      // Store undo data for received payment using context helper
+      const paymentUndoData = raw.createCashDrawerUndoData(
+        cashDrawerResult?.transactionId,
+        cashDrawerResult?.previousBalance,
+        cashDrawerResult?.accountId,
+        {
+          affected: [
+            { table: receiveForm.entityType === 'customer' ? 'customers' : 'suppliers', id: receiveForm.entityId }
+          ],
+          steps: [
+            // Restore entity balance to original value before payment
+            {
+              op: 'update',
+              table: receiveForm.entityType === 'customer' ? 'customers' : 'suppliers',
+              id: receiveForm.entityId,
+              changes: receiveForm.currency === 'LBP'
+                ? { lb_balance: entity.lb_balance || 0, _synced: false }
+                : { usd_balance: entity.usd_balance || 0, _synced: false }
+            }
+          ]
+        }
       );
-
-      // Generate transaction ID for consistency
-      const transactionId = createId();
-
-      // Update cash drawer (increase for received payment) - this will create the transaction record
-      let cashDrawerResult: any = null;
-      if (!userProfile?.store_id) {
-        console.warn('Missing store_id: cannot update cash drawer');
-      } else {
-        console.log('Updating cash drawer for transaction:', 'payment');
-
-        cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: 'payment',
-          amount: safeAmount.amount,
-          currency: safeAmount.currency,
-          description: `Payment received from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${receiveForm.amount} ${receiveForm.currency})` : ''}`,
-          reference: receiveForm.reference || `PAY-${Date.now()}`,
-          storeId: userProfile.store_id,
-          createdBy: userProfile?.id || '',
-          customerId: receiveForm.entityType === 'customer' ? receiveForm.entityId : undefined,
-          supplierId: receiveForm.entityType === 'supplier' ? receiveForm.entityId : undefined
-        }, getStore);
-      }
-
-      // Use the transaction ID from cash drawer service if available, otherwise create one
-      const finalTransactionId = cashDrawerResult?.transactionId || transactionId;
-
-      // Store undo data for received payment
-      // Calculate original balance before payment was made
-      const originalLbBalance = (entity.lb_balance || 0) + paymentAmount;
-      const originalUsdBalance = (entity.usd_balance || 0) + paymentAmount;
-      
-      const paymentUndoData = {
-        type: 'accounting_receive_payment',
-        affected: [
-          { table: receiveForm.entityType === 'customer' ? 'customers' : 'suppliers', id: receiveForm.entityId },
-          { table: 'transactions', id: finalTransactionId }
-        ],
-        steps: [
-          // Restore entity balance to original value before payment
-          {
-            op: 'update',
-            table: receiveForm.entityType === 'customer' ? 'customers' : 'suppliers',
-            id: receiveForm.entityId,
-            changes: receiveForm.currency === 'LBP'
-              ? { lb_balance: originalLbBalance, _synced: false }
-              : { usd_balance: originalUsdBalance, _synced: false }
-          },
-          // Delete transaction
-          {
-            op: 'delete',
-            table: 'transactions',
-            id: finalTransactionId
-          }
-        ]
-      };
-
-      // Add cash drawer restoration if transaction was created
-      if (cashDrawerResult?.success && cashDrawerResult.transactionId) {
-        const { db } = await import('../lib/db');
-        const account = await db.getCashDrawerAccount(userProfile?.store_id || 'default-store');
-        if (account) {
-          paymentUndoData.steps.push({
-            op: 'update',
-            table: 'cash_drawer_accounts',
-            id: account.id,
-            changes: {
-              current_balance: (account.current_balance || 0) - safeAmount.amount,
-              _synced: false
-            } as any
-          });
-          paymentUndoData.affected.push({ table: 'cash_drawer_accounts', id: account.id });
-        }
-      }
 
       raw.pushUndo(paymentUndoData);
 
@@ -619,26 +560,7 @@ export default function Accounting() {
     }
 
     try {
-      // Use the ERP Financial Service to process the payment
-      const { erpFinancialService } = await import('../services/erpFinancialService');
-
-      // Sync current entities to ERP service
-      console.log('Syncing entities to ERP service:', payForm.entityType === 'customer' ? customers.length : suppliers.length, 'entities');
-      localStorage.setItem('erp_customers', JSON.stringify(customers));
-      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
-      erpFinancialService.reloadData();
-      console.log('Entity found for payment:', entity.name);
-
-      const result = erpFinancialService.processEntityPayment(
-        payForm.entityType,
-        payForm.entityId,
-        parseFloat(payForm.amount),
-        payForm.currency as 'USD' | 'LBP',
-        `Payment to ${entity.name}${payForm.description ? ': ' + payForm.description : ''}`,
-        userProfile?.id || ''
-      );
-
-      // Update entity balance (reduce debt)
+      // Update entity balance using context method (reduce debt)
       const paymentAmount = parseFloat(payForm.amount);
 
       if (payForm.entityType === 'customer') {
@@ -648,11 +570,11 @@ export default function Accounting() {
 
         if (payForm.currency === 'LBP') {
           await raw.updateCustomer(payForm.entityId, { 
-            lb_balance: currentLbBalance - paymentAmount 
+            lb_balance: currentLbBalance + paymentAmount  // Increase customer balance (we owe them back)
           });
         } else {
           await raw.updateCustomer(payForm.entityId, { 
-            usd_balance: currentUsdBalance - paymentAmount 
+            usd_balance: currentUsdBalance + paymentAmount  // Increase customer balance (we owe them back)
           });
         }
       } else {
@@ -661,92 +583,53 @@ export default function Accounting() {
 
         if (payForm.currency === 'LBP') {
           await raw.updateSupplier(payForm.entityId, { 
-            lb_balance: currentLbBalance - paymentAmount 
+            lb_balance: currentLbBalance - paymentAmount  // Decrease supplier balance (reduce what we owe)
           });
         } else {
           await raw.updateSupplier(payForm.entityId, { 
-            usd_balance: currentUsdBalance - paymentAmount 
+            usd_balance: currentUsdBalance - paymentAmount  // Decrease supplier balance (reduce what we owe)
           });
         }
       }
 
-      // Safely convert amount for database storage
-      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
-        parseFloat(payForm.amount), 
-        payForm.currency as 'USD' | 'LBP'
+      // Use context method to process cash drawer transaction
+      const payCashDrawerResult = await raw.processCashDrawerTransaction({
+        type: 'expense',
+        amount: paymentAmount,
+        currency: payForm.currency as 'USD' | 'LBP',
+        description: `Payment sent to ${entity.name}${payForm.description ? ': ' + payForm.description : ''}`,
+        reference: payForm.reference || `PAY-${Date.now()}`,
+        customerId: payForm.entityType === 'customer' ? payForm.entityId : undefined,
+        supplierId: payForm.entityType === 'supplier' ? payForm.entityId : undefined,
+        storeId: userProfile?.store_id || '',
+        createdBy: userProfile?.id || ''
+      });
+
+      // Use the transaction ID from cash drawer result
+      const finalPayTransactionId = payCashDrawerResult?.transactionId || createId();
+
+      // Store undo data for sent payment using context helper
+      const payUndoData = raw.createCashDrawerUndoData(
+        payCashDrawerResult?.transactionId,
+        payCashDrawerResult?.previousBalance,
+        payCashDrawerResult?.accountId,
+        {
+          affected: [
+            { table: payForm.entityType === 'customer' ? 'customers' : 'suppliers', id: payForm.entityId }
+          ],
+          steps: [
+            // Restore entity balance to original value before payment
+            {
+              op: 'update',
+              table: payForm.entityType === 'customer' ? 'customers' : 'suppliers',
+              id: payForm.entityId,
+              changes: payForm.currency === 'LBP'
+                ? { lb_balance: entity.lb_balance || 0, _synced: false }
+                : { usd_balance: entity.usd_balance || 0, _synced: false }
+            }
+          ]
+        }
       );
-
-      // Generate transaction ID for consistency
-      const payTransactionId = createId();
-
-      // Update cash drawer (decrease for sent payment) - this will create the transaction record
-      let payCashDrawerResult: any = null;
-      if (!userProfile?.store_id) {
-        console.warn('Missing store_id: cannot update cash drawer');
-      } else {
-        payCashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: 'expense',
-          amount: safeAmount.amount,
-          currency: safeAmount.currency,
-          description: `Payment sent to ${entity.name}${payForm.description ? ': ' + payForm.description : ''}${safeAmount.wasConverted ? ` (Originally ${payForm.amount} ${payForm.currency})` : ''}`,
-          reference: payForm.reference || `PAY-${Date.now()}`,
-          storeId: userProfile.store_id,
-          createdBy: userProfile?.id || '',
-          customerId: payForm.entityType === 'customer' ? payForm.entityId : undefined,
-          supplierId: payForm.entityType === 'supplier' ? payForm.entityId : undefined
-        }, getStore);
-      }
-
-      // Use the transaction ID from cash drawer service if available, otherwise create one
-      const finalPayTransactionId = payCashDrawerResult?.transactionId || payTransactionId;
-
-      // Store undo data for sent payment
-      // Calculate original balance before payment was made
-      const originalLbBalance = (entity.lb_balance || 0) + paymentAmount;
-      const originalUsdBalance = (entity.usd_balance || 0) + paymentAmount;
-      
-      const payUndoData = {
-        type: 'accounting_pay_payment',
-        affected: [
-          { table: payForm.entityType === 'customer' ? 'customers' : 'suppliers', id: payForm.entityId },
-          { table: 'transactions', id: finalPayTransactionId }
-        ],
-        steps: [
-          // Restore entity balance to original value before payment
-          {
-            op: 'update',
-            table: payForm.entityType === 'customer' ? 'customers' : 'suppliers',
-            id: payForm.entityId,
-            changes: payForm.currency === 'LBP'
-              ? { lb_balance: originalLbBalance, _synced: false }
-              : { usd_balance: originalUsdBalance, _synced: false }
-          },
-          // Delete transaction
-          {
-            op: 'delete',
-            table: 'transactions',
-            id: finalPayTransactionId
-          }
-        ]
-      };
-
-      // Add cash drawer restoration if transaction was created
-      if (payCashDrawerResult?.success && payCashDrawerResult.transactionId) {
-        const { db } = await import('../lib/db');
-        const account = await db.getCashDrawerAccount(userProfile?.store_id || 'default-store');
-        if (account) {
-          payUndoData.steps.push({
-            op: 'update',
-            table: 'cash_drawer_accounts',
-            id: account.id,
-            changes: {
-              current_balance: (account.current_balance || 0) + safeAmount.amount,
-              _synced: false
-            } as any
-          });
-          payUndoData.affected.push({ table: 'cash_drawer_accounts', id: account.id });
-        }
-      }
 
       raw.pushUndo(payUndoData);
 
@@ -778,45 +661,20 @@ export default function Accounting() {
     if (!category) return;
 
     try {
-      // Use the ERP Financial Service to process the expense
-      const { erpFinancialService } = await import('../services/erpFinancialService');
+      // Use context method to process cash drawer transaction
+      const expenseResult = await raw.processCashDrawerTransaction({
+        type: 'expense',
+        amount: parseFloat(expenseForm.amount),
+        currency: expenseForm.currency as 'USD' | 'LBP',
+        description: `Expense: ${category.name} - ${expenseForm.description}`,
+        reference: expenseForm.reference || `EXP-${Date.now()}`,
+        storeId: userProfile?.store_id || '',
+        createdBy: userProfile?.id || ''
+      });
 
-      // Sync current data to ERP service (for consistency)
-      localStorage.setItem('erp_customers', JSON.stringify(customers));
-      localStorage.setItem('erp_suppliers', JSON.stringify(suppliers));
-      erpFinancialService.reloadData();
-
-      const result = erpFinancialService.processExpense(
-        parseFloat(expenseForm.amount),
-        expenseForm.currency as 'USD' | 'LBP',
-        category.name,
-        expenseForm.description,
-        userProfile?.id || ''
-      );
-
-      // Safely convert amount for database storage
-      const safeAmount = CurrencyService.getInstance().safeConvertForDatabase(
-        parseFloat(expenseForm.amount), 
-        expenseForm.currency as 'USD' | 'LBP'
-      );
-
-      // Update cash drawer (decrease for expense) - this will create the transaction record
-      if (!userProfile?.store_id) {
-        console.warn('Missing store_id: cannot update cash drawer');
-      } else {
-        const updateResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: 'expense',
-          amount: safeAmount.amount,
-          currency: safeAmount.currency,
-          description: `Expense: ${category.name} - ${expenseForm.description}${safeAmount.wasConverted ? ` (Originally ${expenseForm.amount} ${expenseForm.currency})` : ''}`,
-          reference: expenseForm.reference || `EXP-${Date.now()}`,
-          storeId: userProfile.store_id,
-          createdBy: userProfile?.id || ''
-        }, getStore);
-        if (!updateResult.success && updateResult.error?.includes('No cash drawer account exists')) {
-          showToast('A cash drawer account has not been created yet. Please create it to track cash expenses.', 'error');
-          return;
-        }
+      if (!expenseResult.success) {
+        showToast(expenseResult.error || 'Failed to record expense', 'error');
+        return;
       }
 
       await refreshCashDrawerBalance();
@@ -824,7 +682,7 @@ export default function Accounting() {
       // Refresh data to show new transaction in Recent Activity
       await raw.refreshData();
 
-      showToast(`Expense recorded! Cash drawer updated: ${result.balanceBefore.toFixed(2)} → ${result.balanceAfter.toFixed(2)}`, 'success');
+      showToast(`Expense recorded! ${formatCurrencyWithSymbol(parseFloat(expenseForm.amount), expenseForm.currency)} for ${category.name}`, 'success');
     } catch (err) {
       console.log(err);
       showToast('Failed to record expense.', 'error');

@@ -1,4 +1,5 @@
-import { erpFinancialService } from './erpFinancialService';
+// Note: erpFinancialService has been removed - this service is deprecated
+// All financial operations should now use OfflineDataContext methods
 import { BillLineItem, Customer, Supplier } from '../types';
 import { userProfile } from '../auth/authContext';
 
@@ -60,7 +61,7 @@ export class POSAccountingIntegration {
   }> {
     try {
       // Reload data to ensure we have the latest information
-      erpFinancialService.reloadData();
+      // erpFinancialService.reloadData(); // Deprecated - use OfflineDataContext instead
 
       const saleId = `pos-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
@@ -105,7 +106,7 @@ export class POSAccountingIntegration {
       // Determine transaction type and process accordingly
       if (saleData.payment_method === 'cash' || (saleData.payment_method === 'partial' && saleData.amount_due === 0)) {
         // Cash sale
-        transactionSummary = erpFinancialService.processCashSale(tempSale, saleItems);
+        // transactionSummary = erpFinancialService.processCashSale(tempSale, saleItems); // Deprecated
         
         if (saleData.customer_id) {
           const customers = JSON.parse(localStorage.getItem('erp_customers') || '[]');
@@ -127,18 +128,18 @@ export class POSAccountingIntegration {
         }
 
         customerName = customer.name;
-        transactionSummary = erpFinancialService.processCustomerCreditSale(tempSale, saleItems);
+        // transactionSummary = erpFinancialService.processCustomerCreditSale(tempSale, saleItems); // Deprecated
 const storeId = userProfile?.store_id || 'default-store';
         // If there was a partial payment, also process the payment
         if (saleData.amount_paid > 0) {
-          await erpFinancialService.processCustomerPayment(
-            saleData.customer_id,
-            saleData.amount_paid,
-            'USD',
-            `Partial payment for sale ${saleId}`,
-            saleData.created_by,
-            storeId
-          );
+          // await erpFinancialService.processCustomerPayment( // Deprecated
+          //   saleData.customer_id,
+          //   saleData.amount_paid,
+          //   'USD',
+          //   `Partial payment for sale ${saleId}`,
+          //   saleData.created_by,
+          //   storeId
+          // );
         }
       } else {
         throw new Error('Invalid payment method or sale configuration');
@@ -189,20 +190,20 @@ const storeId = userProfile?.store_id || 'default-store';
     try {
       const storeId = userProfile?.store_id || 'default-store';
 
-      erpFinancialService.reloadData(storeId);
-      const result = erpFinancialService.processCustomerPayment(
-        customerId,
-        amount,
-        currency,
-        description,
-        createdBy,
-        storeId
-      );
+      // erpFinancialService.reloadData(storeId); // Deprecated
+      // const result = erpFinancialService.processCustomerPayment( // Deprecated
+      //   customerId,
+      //   amount,
+      //   currency,
+      //   description,
+      //   createdBy,
+      //   storeId
+      // );
 
       return {
-        success: true,
-        transactionId: result.transactionId,
-        journalEntryId: result.transactionId
+        success: false, // Deprecated service
+        transactionId: 'deprecated',
+        journalEntryId: 'deprecated'
       };
 
     } catch (error) {
@@ -234,16 +235,17 @@ const storeId = userProfile?.store_id || 'default-store';
       const customer = customers.find((c: Customer) => c.id === customerId);
       if (!customer) return null;
 
-      const recentTransactions = erpFinancialService
-        .getTransactionHistory(customerId)
-        .slice(0, 5) // Last 5 transactions
-        .map(t => ({
-          id: t.id,
-          type: t.type,
-          amount: t.amount,
-          timestamp: t.timestamp,
-          description: t.description
-        }));
+      // const recentTransactions = erpFinancialService // Deprecated
+      //   .getTransactionHistory(customerId)
+      //   .slice(0, 5) // Last 5 transactions
+      //   .map(t => ({
+      //     id: t.id,
+      //     type: t.type,
+      //     amount: t.amount,
+      //     timestamp: t.timestamp,
+      //     description: t.description
+      //   }));
+      const recentTransactions = []; // Deprecated service
 
       // Calculate credit status
       const balance = customer.balance || 0;
@@ -360,7 +362,8 @@ const storeId = userProfile?.store_id || 'default-store';
     }>;
   } {
     try {
-      const cashDrawer = erpFinancialService.getCashDrawerStatus();
+      // const cashDrawer = erpFinancialService.getCashDrawerStatus(); // Deprecated
+      const cashDrawer = null; // Deprecated service
 
       // Get today's transactions from localStorage
       const today = new Date().toISOString().split('T')[0];

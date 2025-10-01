@@ -53,6 +53,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    setLoading(true); // Keep loading state while fetching profile
+    
     try {
       // Try to get profile from Supabase first
       const profile = await SupabaseService.getUserProfile(user.id);

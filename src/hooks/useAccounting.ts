@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { currencyService } from '../services/currencyService';
-import { transactionService } from '../services/transactionService';
 import { dataSyncService } from '../services/dataSyncService';
 import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable } from '../types';
 
@@ -52,11 +51,6 @@ export interface AccountingState {
 }
 
 export interface AccountingActions {
-  // Payment processing
-  processCustomerPayment: (customerId: string, amount: number, currency: 'USD' | 'LBP', description: string) => Promise<boolean>;
-  processSupplierPayment: (supplierId: string, amount: number, currency: 'USD' | 'LBP', description: string) => Promise<boolean>;
-  processExpense: (amount: number, currency: 'USD' | 'LBP', category: string, description: string) => Promise<boolean>;
-  
   // Data management
   refreshData: () => Promise<void>;
   syncData: () => Promise<void>;
@@ -318,98 +312,6 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
   }, [filteredPayables.length, payablesPage]);
 
   // Actions
-  const processCustomerPayment = useCallback(async (
-    customerId: string, 
-    amount: number, 
-    currency: 'USD' | 'LBP', 
-    description: string
-  ): Promise<boolean> => {
-    if (!userProfile?.id) return false;
-    
-    setIsProcessing(true);
-    try {
-      const result = await transactionService.processCustomerPayment(
-        customerId,
-        amount,
-        currency,
-        description,
-        userProfile.id
-      );
-      
-      if (result.success) {
-        await refreshData();
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Payment processing failed:', error);
-      return false;
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [userProfile?.id]);
-
-  const processSupplierPayment = useCallback(async (
-    supplierId: string, 
-    amount: number, 
-    currency: 'USD' | 'LBP', 
-    description: string
-  ): Promise<boolean> => {
-    if (!userProfile?.id) return false;
-    
-    setIsProcessing(true);
-    try {
-      const result = await transactionService.processSupplierPayment(
-        supplierId,
-        amount,
-        currency,
-        description,
-        userProfile.id
-      );
-      
-      if (result.success) {
-        await refreshData();
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Payment processing failed:', error);
-      return false;
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [userProfile?.id]);
-
-  const processExpense = useCallback(async (
-    amount: number, 
-    currency: 'USD' | 'LBP', 
-    category: string, 
-    description: string
-  ): Promise<boolean> => {
-    if (!userProfile?.id) return false;
-    
-    setIsProcessing(true);
-    try {
-      const result = await transactionService.processExpense(
-        amount,
-        currency,
-        category,
-        description,
-        userProfile.id
-      );
-      
-      if (result.success) {
-        await refreshData();
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Expense processing failed:', error);
-      return false;
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [userProfile?.id]);
 
   const refreshData = useCallback(async () => {
     setIsLoading(true);
@@ -461,9 +363,6 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
   };
 
   const actions: AccountingActions = {
-    processCustomerPayment,
-    processSupplierPayment,
-    processExpense,
     refreshData,
     syncData,
     setReceivablesPage,

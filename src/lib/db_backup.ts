@@ -44,18 +44,122 @@ interface BaseEntity {
 // LocalSaleItem interface moved to /types/index.ts
 
 // Bill management interface for comprehensive bill operations
-// Bill interface moved to /types/index.ts
+export interface Bill extends BaseEntity {
+  store_id: string;
+  bill_number: string;
+  customer_id: string | null;
+  subtotal: number;
+  total_amount: number;
+  payment_method: 'cash' | 'card' | 'credit';
+  payment_status: 'paid' | 'partial' | 'pending';
+  amount_paid: number;
+  amount_due: number;
+  bill_date: string;
+  notes: string | null;
+  status: 'active' | 'cancelled' | 'refunded';
+  created_by: string;
+  last_modified_by: string | null;
+  last_modified_at: string | null;
+}
 
 // Bill line items for detailed bill management
-// BillLineItem interface moved to /types/index.ts
+export interface BillLineItem extends BaseEntity {
+  bill_id: string;
+  product_id: string;
+  product_name: string;
+  supplier_id: string;
+  supplier_name: string;
+  inventory_item_id: string | null;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  weight: number | null;
+  notes: string | null;
+  line_order: number;
+  payment_method: 'cash' | 'card' | 'credit';
+  customer_id: string | null;
+  created_by: string;
+  received_value: number;
+}
 
 // Bill audit trail for tracking all changes
-// BillAuditLog interface moved to /types/index.ts
-// Transaction interface moved to /types/index.ts
+export interface BillAuditLog extends BaseEntity {
+  bill_id: string;
+  action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
+  field_changed: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  change_reason: string | null;
+  changed_by: string;
+  ip_address: string | null;
+}
+export interface Transaction extends Omit<BaseEntity, 'updated_at'> {
+  type: 'income' | 'expense';
+  category: string;
+  amount: number;
+  currency: 'USD' | 'LBP';
+  description: string;
+  reference: string | null;
+  store_id: string;
+  created_by: string;
+  supplier_id: string | null;
+  customer_id: string | null;
+}
 
-// All remaining interfaces moved to centralized type files:
-// - /types/database.ts (Supabase-generated types)  
-// - /types/index.ts (business logic types)
+export interface ExpenseCategory extends BaseEntity {
+  name: string;
+  description: string | null;
+  is_active: boolean;
+}
+
+// Sync metadata interface
+export interface SyncMetadata {
+  id: string;
+  table_name: string;
+  last_synced_at: string;
+  sync_token?: string;
+}
+
+// Pending sync operation
+export interface PendingSync {
+  id: string;
+  table_name: string;
+  record_id: string;
+  operation: 'create' | 'update' | 'delete';
+  payload: any;
+  created_at: string;
+  retry_count: number;
+  last_error?: string;
+}
+
+export interface JournalEntry extends BaseEntity {
+  date: string;
+  reference: string;
+  description: string;
+  entries: Array<{
+    account: string;
+    debit: number;
+    credit: number;
+  }>;
+  total_debit: number;
+  total_credit: number;
+  created_by: string;
+}
+export interface inventory_bills extends BaseEntity {
+  id: string;
+  plastic_fee?:string;
+  supplier_id: string;
+  porterage_fee?: number | null;
+  transfer_fee?: number | null;
+  commission_rate?:number | null;
+  received_at: string;
+  store_id: string;
+  created_by: string;
+  status?: string;
+  created_at:string;
+  notes?:string;
+  type?:string
+}
 
 
 

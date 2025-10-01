@@ -1,9 +1,13 @@
-import { erpFinancialService } from '../services/erpFinancialService';
+// Note: This example file is deprecated as erpFinancialService has been removed
+// All financial operations should now use OfflineDataContext methods
 
 /**
- * Example usage of the ERP Financial Service
- * This demonstrates how to process various types of transactions
- * and shows the structured output format
+ * DEPRECATED: Example usage of the ERP Financial Service
+ * This file is no longer functional as erpFinancialService has been removed.
+ * All financial operations should now use OfflineDataContext methods:
+ * - useOfflineData().addTransaction()
+ * - useOfflineData().processCashDrawerTransaction()
+ * - useOfflineData().transactions for data access
  */
 
 // Example 1: Customer Credit Sale
@@ -38,7 +42,7 @@ export const exampleCustomerCreditSale = () => {
     createdBy: 'user-001'
   };
 
-  const result = erpFinancialService.processCustomerCreditSale(sale, sale.items);
+  // const result = erpFinancialService.processCustomerCreditSale(sale, sale.items); // Deprecated
   
   console.log('Transaction Summary:');
   console.log(`- Transaction ID: ${result.transactionId}`);
@@ -59,8 +63,9 @@ export const exampleCustomerCreditSale = () => {
 // Example 2: Customer Payment
 export const exampleCustomerPayment = () => {
   console.log('\n=== EXAMPLE 2: CUSTOMER PAYMENT ===');
-  
+  const storeId = userProfile?.store_id || 'default-store';
   const result = erpFinancialService.processCustomerPayment(
+
     'customer-001',
     10.00,
     'USD',
