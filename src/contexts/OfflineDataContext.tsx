@@ -156,6 +156,8 @@ interface OfflineDataContextType {
       reference: string;
       customerId?: string;
       supplierId?: string;
+      storeId: string;
+      createdBy: string;
     }
   ) => Promise<{
     success: boolean;
@@ -163,6 +165,7 @@ interface OfflineDataContextType {
     previousBalance?: number;
     newBalance?: number;
     accountId?: string;
+    error?: string;
   }>;
 
   // Helper function to create cash drawer undo data
@@ -175,6 +178,26 @@ interface OfflineDataContextType {
       steps: Array<{ op: string; table: string; id: string; changes?: any }>;
     }
   ) => any;
+  
+  // Utility functions
+  createId: () => string;
+  getCurrentCashDrawerBalance: (storeId: string) => Promise<number>;
+  refreshCashDrawerBalance: (storeId: string) => Promise<number>;
+  
+  // Unified payment processing
+  processPayment: (params: {
+    entityType: 'customer' | 'supplier';
+    entityId: string;
+    amount: string;
+    currency: 'USD' | 'LBP';
+    description: string;
+    reference: string;
+    storeId: string;
+    createdBy: string;
+  }) => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
 }
 
 const OfflineDataContext = createContext<OfflineDataContextType | undefined>(undefined);
@@ -2013,6 +2036,151 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return undoData;
   };
 
+  // Utility function to create unique IDs
+  const createIdFunction = (): string => {
+    return createId();
+  };
+
+  // Get current cash drawer balance for a store
+  const getCurrentCashDrawerBalance = async (storeId: string): Promise<number> => {
+    try {
+      const currentAccount = await db.cash_drawer_accounts
+        .where('store_id')
+        .equals(storeId)
+        .and(account => account.is_active)
+        .first();
+
+      return currentAccount?.balance || 0;
+    } catch (error) {
+      console.error('Error getting cash drawer balance:', error);
+      return 0;
+    }
+  };
+
+  // Refresh cash drawer balance (same as getCurrentCashDrawerBalance for now)
+  const refreshCashDrawerBalance = async (storeId: string): Promise<number> => {
+    return getCurrentCashDrawerBalance(storeId);
+  };
+
+  // Unified payment processing function
+  const processPayment = async (params: {
+    entityType: 'customer' | 'supplier';
+    entityId: string;
+    amount: string;
+    currency: 'USD' | 'LBP';
+    description: string;
+    reference: string;
+    storeId: string;
+    createdBy: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { entityType, entityId, amount, currency, description, reference, storeId, createdBy } = params;
+      
+      // Validate amount
+      const numAmount = parseFloat(amount);
+      if (isNaN(numAmount) || numAmount <= 0) {
+        return { success: false, error: 'Please enter a valid positive amount' };
+      }
+
+      // Find entity
+      const entity = entityType === 'customer' 
+        ? customers.find(c => c.id === entityId)
+        : suppliers.find(s => s.id === entityId);
+
+      if (!entity) {
+        return { success: false, error: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} not found` };
+      }
+
+      const isCustomer = entityType === 'customer';
+
+      // For supplier payments, check cash drawer balance
+      if (!isCustomer) {
+        const currentBalance = await getCurrentCashDrawerBalance(storeId);
+        if (numAmount > currentBalance) {
+          return { 
+            success: false, 
+            error: `Insufficient cash drawer balance. Payment amount: ${currency} ${numAmount.toLocaleString()}, Available balance: ${currentBalance.toLocaleString()}` 
+          };
+        }
+      }
+
+      // Update entity balance
+      const currentLbBalance = entity.lb_balance || 0;
+      const currentUsdBalance = entity.usd_balance || 0;
+
+      if (currency === 'LBP') {
+        const updateData = { lb_balance: Math.max(0, currentLbBalance - numAmount) };
+        if (isCustomer) {
+          await updateCustomer(entityId, updateData);
+        } else {
+          await updateSupplier(entityId, updateData);
+        }
+      } else {
+        const updateData = { usd_balance: Math.max(0, currentUsdBalance - numAmount) };
+        if (isCustomer) {
+          await updateCustomer(entityId, updateData);
+        } else {
+          await updateSupplier(entityId, updateData);
+        }
+      }
+
+      // Process cash drawer transaction
+      const cashDrawerType = isCustomer ? 'payment' : 'expense';
+      const cashDrawerResult = await processCashDrawerTransaction({
+        type: cashDrawerType,
+        amount: numAmount,
+        currency,
+        description: `${isCustomer ? 'Payment from' : 'Payment to'} ${entity.name}${description ? ': ' + description : ''}`,
+        reference: reference || `PAY-${Date.now()}`,
+        customerId: isCustomer ? entityId : undefined,
+        supplierId: isCustomer ? undefined : entityId,
+        storeId,
+        createdBy
+      });
+
+      if (!cashDrawerResult.success) {
+        return { success: false, error: cashDrawerResult.error || 'Failed to process cash drawer transaction' };
+      }
+
+      // Create undo data
+      const baseUndoData = {
+        affected: [
+          { table: isCustomer ? 'customers' : 'suppliers', id: entityId }
+        ],
+        steps: [
+          {
+            op: 'update',
+            table: isCustomer ? 'customers' : 'suppliers',
+            id: entityId,
+            changes: currency === 'LBP'
+              ? { lb_balance: currentLbBalance, _synced: false }
+              : { usd_balance: currentUsdBalance, _synced: false }
+          }
+        ]
+      };
+
+      const undoData = createCashDrawerUndoData(
+        cashDrawerResult.transactionId,
+        cashDrawerResult.previousBalance,
+        cashDrawerResult.accountId,
+        baseUndoData
+      );
+
+      pushUndo(undoData);
+
+      // Refresh data
+      await refreshData();
+
+      return { success: true };
+    } catch (error) {
+      console.error('Payment processing error:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error occurred' 
+      };
+    }
+  };
+
   // Undo functionality - simple single-level undo
   const pushUndo = (undoData: any) => {
     const undoWithTimestamp = {
@@ -2717,7 +2885,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         pushUndo: () => { },
         testUndo: () => { },
         processCashDrawerTransaction: async () => ({ success: false }),
-        createCashDrawerUndoData: () => ({})
+        createCashDrawerUndoData: () => ({}),
+        createId: () => crypto.randomUUID(),
+        getCurrentCashDrawerBalance: async () => 0,
+        refreshCashDrawerBalance: async () => 0,
+        processPayment: async () => ({ success: false, error: 'No store ID available' })
       }}>
         {children}
       </OfflineDataContext.Provider>
@@ -2823,6 +2995,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Cash drawer transaction utility
       processCashDrawerTransaction,
       createCashDrawerUndoData,
+
+      // Utility functions
+      createId: createIdFunction,
+      getCurrentCashDrawerBalance,
+      refreshCashDrawerBalance,
+      processPayment,
 
       openCashDrawer,
     }}>

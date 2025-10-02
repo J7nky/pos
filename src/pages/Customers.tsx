@@ -6,9 +6,7 @@ import { Customer, Supplier } from '../types';
 import Toast from '../components/common/Toast';
 import SearchableSelect from '../components/common/SearchableSelect';
 import SupplierFormModal from '../components/common/SupplierFormModal';
-import { CurrencyService } from '../services/currencyService';
 import AccountStatementModal from '../components/AccountStatementModal';
-import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 
 export default function Customers() {
   const raw = useOfflineData();
@@ -101,11 +99,6 @@ export default function Customers() {
     return { isValid: true, entity  };
   };
 
-  const getSafeAmount = (amount: string, currency: 'USD' | 'LBP') => {
-    const newAmount=CurrencyService.getInstance().safeConvertForDatabase(parseFloat(amount), currency);
-    return newAmount;
-  };
-
   const resetPaymentForm = () => {
     setPaymentForm({
       customerId: '',
@@ -118,37 +111,10 @@ export default function Customers() {
     setShowPaymentForm(null);
   };
 
-  const updateEntityBalance = async (
-    entity: Customer | Supplier,
-    entityId: string,
-    paymentAmount: number,
-    currency: 'USD' | 'LBP',
-    isCustomer: boolean
-  ) => {
-    const currentLbBalance = entity.lb_balance || 0;
-    const currentUsdBalance = entity.usd_balance || 0;
-
-    if (currency === 'LBP') {
-      const updateData = { lb_balance: Math.max( currentLbBalance - paymentAmount) };
-      if (isCustomer) {
-        await updateCustomer(entityId, updateData);
-      } else {
-        await updateSupplier(entityId, updateData);
-      }
-    } else {
-      const updateData = { usd_balance: Math.max( currentUsdBalance - paymentAmount) };
-      if (isCustomer) {
-        await updateCustomer(entityId, updateData);
-      } else {
-        await updateSupplier(entityId, updateData);
-      }
-    }
-  };
 
 
-
-  // Unified payment handler
-  const processPayment = async (
+  // Unified payment handler using context method
+  const processPaymentLocal = async (
     entityType: 'customer' | 'supplier',
     entityId: string,
     amount: string,
@@ -161,113 +127,41 @@ export default function Customers() {
     if (!validation.isValid || !validation.entity) return false;
 
     const entity = validation.entity;
-    const isCustomer = entityType === 'customer';
 
     try {
-      // For supplier payments, check cash drawer balance BEFORE processing
-      if (!isCustomer) {
-        const safeAmount = getSafeAmount(amount, currency);
-        const currentBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile?.store_id || 'default-store');
-        
-        // Convert payment amount to store currency for comparison
-        const storeCurrency = await cashDrawerUpdateService.getStorePreferredCurrency(userProfile?.store_id || 'default-store', getStore);
-        const normalizedPaymentAmount = cashDrawerUpdateService.normalizeAmountToStoreCurrency(
-          safeAmount.amount,
-          currency,
-          storeCurrency
-        );
-
-        if (normalizedPaymentAmount > currentBalance) {
-          showToast(
-            `Insufficient cash drawer balance. Payment amount: ${currency} ${Number(amount).toLocaleString()}, Available balance: ${storeCurrency} ${currentBalance.toLocaleString()}`,
-            'error'
-          );
-          return false;
-        }
-      }
-
-      // Update entity balance using context method
-      await updateEntityBalance(entity, entityId, Number(amount), currency, isCustomer);
-      
-      const safeAmount = getSafeAmount(amount, currency);
-
-      // Use the general cash drawer transaction utility
-      const cashDrawerType = isCustomer ? 'payment' : 'expense';
-      const cashDrawerResult = await raw.processCashDrawerTransaction({
-        type: cashDrawerType,
-        amount: safeAmount.amount,
-        currency: safeAmount.currency,
-        description: `${isCustomer ? 'Payment from' : 'Payment to'} ${entity.name}${description ? ': ' + description : ''}`,
-        reference: reference || `PAY-${Date.now()}`,
-        ...(isCustomer ? { customerId: entityId } : { supplierId: entityId })
+      // Use the unified payment processing function from context
+      const result = await raw.processPayment?.({
+        entityType,
+        entityId,
+        amount,
+        currency,
+        description,
+        reference,
+        storeId: userProfile?.store_id || '',
+        createdBy: userProfile?.id || ''
       });
 
-      // Create undo data for the payment
-      const baseUndoData = {
-        affected: [
-          { table: isCustomer ? 'customers' : 'suppliers', id: entityId }
-        ],
-        steps: [
-          // Restore entity balance to original value before payment
-          {
-            op: 'update',
-            table: isCustomer ? 'customers' : 'suppliers',
-            id: entityId,
-            changes: currency === 'LBP'
-              ? { lb_balance: (entity.lb_balance || 0), _synced: false }
-              : { usd_balance: (entity.usd_balance || 0), _synced: false }
-          }
-        ]
-      };
-
-      // Create comprehensive undo data including cash drawer
-      const undoData = raw.createCashDrawerUndoData(
-        cashDrawerResult.transactionId, 
-        cashDrawerResult.previousBalance, 
-        cashDrawerResult.accountId,
-        baseUndoData
-      );
-
-      raw.pushUndo(undoData);
-
-      // Refresh data to show new transaction in Recent Activity
-      await raw.refreshData();
-
-      // Show success message
-      const action = isCustomer ? 'received' : 'sent';
-      showToast(`Payment ${action}! ${entity.name} balance updated`, 'success');
-
-      return true;
+      if (result.success) {
+        // Show success message
+        const action = entityType === 'customer' ? 'received' : 'sent';
+        showToast(`Payment ${action}! ${entity.name} balance updated`, 'success');
+        return true;
+      } else {
+        showToast(result.error || 'Failed to process payment', 'error');
+        return false;
+      }
     } catch (err) {
       console.error('Payment processing error:', err);
-
-      // Provide more specific error messages based on error type
-      let errorMessage = 'Failed to record payment.';
-      if (err instanceof Error) {
-        if (err.message.includes('network') || err.message.includes('fetch')) {
-          errorMessage = 'Network error. Please check your connection and try again.';
-        } else if (err.message.includes('permission') || err.message.includes('unauthorized')) {
-          errorMessage = 'You do not have permission to process this payment.';
-        } else if (err.message.includes('Insufficient funds in cash drawer')) {
-          errorMessage = err.message; // Use the detailed message from cash drawer service
-        } else if (err.message.includes('balance') || err.message.includes('insufficient')) {
-          errorMessage = 'Insufficient funds or balance error.';
-        } else if (err.message.includes('currency')) {
-          errorMessage = 'Currency conversion error. Please try again.';
-        }
-      }
-
-      showToast(errorMessage, 'error');
+      showToast('Failed to record payment.', 'error');
       return false;
     }
   };
 
   // Payment handlers
   const handleCustomerPaymentSubmit = async (e: React.FormEvent) => {
-    
     e.preventDefault();
 
-    const success = await processPayment(
+    const success = await processPaymentLocal(
       'customer',
       paymentForm.customerId,
       paymentForm.amount,
@@ -284,7 +178,7 @@ export default function Customers() {
   const handleSupplierPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const success = await processPayment(
+    const success = await processPaymentLocal(
       'supplier',
       paymentForm.supplierId,
       paymentForm.amount,

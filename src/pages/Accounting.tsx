@@ -15,8 +15,6 @@ import Toast from '../components/common/Toast';
 import { CurrencyService } from '../services/currencyService';
 import ReceivedBills from '../components/accountingPage/tabs/ReceivedBills';
 import InventoryLogs from '../components/accountingPage/tabs/SoldBills';
-import { createId } from '../lib/db';
-import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 import DashboardOverview from '../components/accountingPage/tabs/DashboardOverview';
 import ExpenseManagement from '../components/accountingPage/tabs/PaymentsManagement';
 import NonPricedItems from '../components/accountingPage/tabs/NonPricedItems';
@@ -44,12 +42,10 @@ export default function Accounting() {
       </div>
     );
   }
-  const addExpenseCategory = raw.addExpenseCategory;
   const addTransaction = raw.addTransaction;
   const updateSale = raw.updateSale;
   const deleteSale = raw.deleteSale;
   const updateInventoryBatch = raw.updateInventoryBatch;
-  const getStore = raw.getStore;
   const addSupplier = raw.addSupplier;
   const defaultCommissionRate = raw.defaultCommissionRate;
   const transactions = raw.transactions?.map(t => ({...t, createdAt: t.created_at})) || [];
@@ -90,13 +86,9 @@ export default function Accounting() {
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('accounting_recent_suppliers', []);
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'customer-balances' | 'supplier-balances' | 'expenses' | 'journal' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'expenses' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer'>('dashboard');
   const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
   const [showForm, setShowForm] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
-  const [showAddSupplierForm, setShowAddSupplierForm] = useState(false);
-  const [showAddCategoryForm, setShowAddCategoryForm] = useState(false);
   const [dashboardPeriod, setDashboardPeriod] = useState<'today' | 'week' | 'month' | 'quarter' | 'year'>('today');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [flashingItemId, setFlashingItemId] = useState<string | null>(null);
@@ -162,7 +154,7 @@ export default function Accounting() {
     const fetchBalance = async () => {
       try {
         if (userProfile?.store_id) {
-          const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile.store_id);
+          const balance = await raw.getCurrentCashDrawerBalance?.(userProfile.store_id) || 0;
           setCashDrawerBalance(balance);
         }
       } catch (e) {
@@ -170,12 +162,12 @@ export default function Accounting() {
       }
     };
     fetchBalance();
-  }, [userProfile?.store_id]);
+  }, [userProfile?.store_id, raw]);
 
   const refreshCashDrawerBalance = async () => {
     try {
       if (userProfile?.store_id) {
-        const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(userProfile.store_id);
+        const balance = await raw.refreshCashDrawerBalance?.(userProfile.store_id) || 0;
         setCashDrawerBalance(balance);
       }
     } catch (e) {
@@ -229,15 +221,6 @@ export default function Accounting() {
     reference: ''
   });
 
-  const [journalForm, setJournalForm] = useState({
-    date: new Date().toISOString().split('T')[0],
-    reference: '',
-    description: '',
-    entries: [
-      { account: '', debit: 0, credit: 0 },
-      { account: '', debit: 0, credit: 0 }
-    ]
-  });
 
   // Enhanced financial calculations with period filtering
   const getPeriodData = useMemo(() => {
@@ -335,79 +318,7 @@ export default function Accounting() {
 
   const today = new Date().toISOString().split('T')[0];
 
-  // Calculate today's expenses with currency conversion
-  // Note: amounts are now stored in USD, so convert to display currency
-      const todayExpenses = transactions
-      .filter(t => t.type === 'expense' && t.createdAt.split('T')[0] === today)
-      .reduce((sum, t) => {
-        // Check if this transaction was originally LBP but converted to USD for storage
-        const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
-        if (originalLBPAmount) {
-          // Use the original LBP amount for calculations
-          const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
-          return sum + getConvertedAmount(originalAmount, 'LBP');
-        }
-        // Otherwise use the stored amount
-        return sum + getConvertedAmount(t.amount, t.currency || 'USD');
-      }, 0);
 
-    const todayIncome = transactions
-      .filter(t => t.type === 'income' && t.createdAt.split('T')[0] === today)
-      .reduce((sum, t) => {
-        // Check if this transaction was originally LBP but converted to USD for storage
-        const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
-        if (originalLBPAmount) {
-          // Use the original LBP amount for calculations
-          const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
-          return sum + getConvertedAmount(originalAmount, 'LBP');
-        }
-        // Otherwise use the stored amount
-        return sum + getConvertedAmount(t.amount, t.currency || 'USD');
-      }, 0);
-
-  // Enhanced KPI calculations
-  const kpiData = useMemo(() => {
-    const totalCustomers = customers.filter(c => c.is_active).length;
-    const totalSuppliers = suppliers.length;
-      const customersWithDebt = customers.filter(c => (c.lb_balance || 0) > 0 || (c.usd_balance || 0) > 0).length;
-  const totalCustomerDebt = customers.reduce((sum, c) => sum + (c.lb_balance || 0) + (c.usd_balance || 0), 0);
-    const avgDebtPerCustomer = customersWithDebt > 0 ? totalCustomerDebt / customersWithDebt : 0;
-
-    const recentTransactions = transactions
-      .filter(t => new Date(t.createdAt) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
-      .length;
-
-    const cashFlowTrend = transactions
-      .filter(t => new Date(t.createdAt) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
-      .reduce((acc, t) => {
-        const day = new Date(t.createdAt).toLocaleDateString();
-        if (!acc[day]) acc[day] = { income: 0, expenses: 0 };
-        // Check if this transaction was originally LBP but converted to USD for storage
-        const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
-        let amount;
-        if (originalLBPAmount) {
-          // Use the original LBP amount for calculations
-          const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
-          amount = getConvertedAmount(originalAmount, 'LBP');
-        } else {
-          // Otherwise use the stored amount
-          amount = getConvertedAmount(t.amount, t.currency || 'USD');
-        }
-        if (t.type === 'income') acc[day].income += amount;
-        else acc[day].expenses += amount;
-        return acc;
-      }, {} as Record<string, { income: number; expenses: number }>);
-
-    return {
-      totalCustomers,
-      totalSuppliers,
-      customersWithDebt,
-      totalCustomerDebt,
-      avgDebtPerCustomer,
-      recentTransactions,
-      cashFlowTrend
-    };
-  }, [customers, suppliers, transactions, getConvertedAmount]);
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
@@ -445,86 +356,26 @@ export default function Accounting() {
     }
 
     try {
-      // Update entity balance using context method
-      const paymentAmount = parseFloat(receiveForm.amount);
-
-      if (receiveForm.entityType === 'customer') {
-        const currentLbBalance = entity.lb_balance || 0;
-        const currentUsdBalance = entity.usd_balance || 0;
-
-        if (receiveForm.currency === 'LBP') {
-          await raw.updateCustomer(receiveForm.entityId, { 
-            lb_balance: currentLbBalance - paymentAmount  // Decrease customer balance (reduce debt)
-          });
-        } else {
-          await raw.updateCustomer(receiveForm.entityId, { 
-            usd_balance: currentUsdBalance - paymentAmount  // Decrease customer balance (reduce debt)
-          });
-        }
-      } else {
-        const currentLbBalance = entity.lb_balance || 0;
-        const currentUsdBalance = entity.usd_balance || 0;
-
-        if (receiveForm.currency === 'LBP') {
-          await raw.updateSupplier(receiveForm.entityId, { 
-            lb_balance: currentLbBalance + paymentAmount  // Increase supplier balance (we owe them)
-          });
-        } else {
-          await raw.updateSupplier(receiveForm.entityId, { 
-            usd_balance: currentUsdBalance + paymentAmount  // Increase supplier balance (we owe them)
-          });
-        }
-      }
-
-      // Use context method to process cash drawer transaction
-      const cashDrawerResult = await raw.processCashDrawerTransaction({
-        type: 'payment',
-        amount: paymentAmount,
+      // Use the unified payment processing function from context
+      const result = await raw.processPayment?.({
+        entityType: receiveForm.entityType,
+        entityId: receiveForm.entityId,
+        amount: receiveForm.amount,
         currency: receiveForm.currency as 'USD' | 'LBP',
-        description: `Payment received from ${entity.name}${receiveForm.description ? ': ' + receiveForm.description : ''}`,
+        description: receiveForm.description,
         reference: receiveForm.reference || `PAY-${Date.now()}`,
-        customerId: receiveForm.entityType === 'customer' ? receiveForm.entityId : undefined,
-        supplierId: receiveForm.entityType === 'supplier' ? receiveForm.entityId : undefined,
         storeId: userProfile?.store_id || '',
         createdBy: userProfile?.id || ''
       });
 
-      // Use the transaction ID from cash drawer result
-      const finalTransactionId = cashDrawerResult?.transactionId || createId();
-
-      // Store undo data for received payment using context helper
-      const paymentUndoData = raw.createCashDrawerUndoData(
-        cashDrawerResult?.transactionId,
-        cashDrawerResult?.previousBalance,
-        cashDrawerResult?.accountId,
-        {
-          affected: [
-            { table: receiveForm.entityType === 'customer' ? 'customers' : 'suppliers', id: receiveForm.entityId }
-          ],
-          steps: [
-            // Restore entity balance to original value before payment
-            {
-              op: 'update',
-              table: receiveForm.entityType === 'customer' ? 'customers' : 'suppliers',
-              id: receiveForm.entityId,
-              changes: receiveForm.currency === 'LBP'
-                ? { lb_balance: entity.lb_balance || 0, _synced: false }
-                : { usd_balance: entity.usd_balance || 0, _synced: false }
-            }
-          ]
-        }
-      );
-
-      raw.pushUndo(paymentUndoData);
-
-      await refreshCashDrawerBalance();
-
-      // Refresh data to show new transaction in Recent Activity
-      await raw.refreshData();
-
-      showToast(`Payment received! ${formatCurrencyWithSymbol(parseFloat(receiveForm.amount), receiveForm.currency)} received from ${entity.name}`, 'success');
+      if (result.success) {
+        await refreshCashDrawerBalance();
+        showToast(`Payment received! ${formatCurrencyWithSymbol(parseFloat(receiveForm.amount), receiveForm.currency)} received from ${entity.name}`, 'success');
+      } else {
+        showToast(result.error || 'Failed to record payment.', 'error');
+      }
     } catch (err) {
-    console.log(err);
+      console.log(err);
       showToast('Failed to record payment.', 'error');
     }
 
@@ -560,85 +411,24 @@ export default function Accounting() {
     }
 
     try {
-      // Update entity balance using context method (reduce debt)
-      const paymentAmount = parseFloat(payForm.amount);
-
-      if (payForm.entityType === 'customer') {
-        console.log('Paying to customer:', paymentAmount);
-        const currentLbBalance = entity.lb_balance || 0;
-        const currentUsdBalance = entity.usd_balance || 0;
-
-        if (payForm.currency === 'LBP') {
-          await raw.updateCustomer(payForm.entityId, { 
-            lb_balance: currentLbBalance + paymentAmount  // Increase customer balance (we owe them back)
-          });
-        } else {
-          await raw.updateCustomer(payForm.entityId, { 
-            usd_balance: currentUsdBalance + paymentAmount  // Increase customer balance (we owe them back)
-          });
-        }
-      } else {
-        const currentLbBalance = entity.lb_balance || 0;
-        const currentUsdBalance = entity.usd_balance || 0;
-
-        if (payForm.currency === 'LBP') {
-          await raw.updateSupplier(payForm.entityId, { 
-            lb_balance: currentLbBalance - paymentAmount  // Decrease supplier balance (reduce what we owe)
-          });
-        } else {
-          await raw.updateSupplier(payForm.entityId, { 
-            usd_balance: currentUsdBalance - paymentAmount  // Decrease supplier balance (reduce what we owe)
-          });
-        }
-      }
-
-      // Use context method to process cash drawer transaction
-      const payCashDrawerResult = await raw.processCashDrawerTransaction({
-        type: 'expense',
-        amount: paymentAmount,
+      // Use the unified payment processing function from context
+      const result = await raw.processPayment?.({
+        entityType: payForm.entityType,
+        entityId: payForm.entityId,
+        amount: payForm.amount,
         currency: payForm.currency as 'USD' | 'LBP',
-        description: `Payment sent to ${entity.name}${payForm.description ? ': ' + payForm.description : ''}`,
+        description: payForm.description,
         reference: payForm.reference || `PAY-${Date.now()}`,
-        customerId: payForm.entityType === 'customer' ? payForm.entityId : undefined,
-        supplierId: payForm.entityType === 'supplier' ? payForm.entityId : undefined,
         storeId: userProfile?.store_id || '',
         createdBy: userProfile?.id || ''
       });
 
-      // Use the transaction ID from cash drawer result
-      const finalPayTransactionId = payCashDrawerResult?.transactionId || createId();
-
-      // Store undo data for sent payment using context helper
-      const payUndoData = raw.createCashDrawerUndoData(
-        payCashDrawerResult?.transactionId,
-        payCashDrawerResult?.previousBalance,
-        payCashDrawerResult?.accountId,
-        {
-          affected: [
-            { table: payForm.entityType === 'customer' ? 'customers' : 'suppliers', id: payForm.entityId }
-          ],
-          steps: [
-            // Restore entity balance to original value before payment
-            {
-              op: 'update',
-              table: payForm.entityType === 'customer' ? 'customers' : 'suppliers',
-              id: payForm.entityId,
-              changes: payForm.currency === 'LBP'
-                ? { lb_balance: entity.lb_balance || 0, _synced: false }
-                : { usd_balance: entity.usd_balance || 0, _synced: false }
-            }
-          ]
-        }
-      );
-
-      raw.pushUndo(payUndoData);
-
-      await refreshCashDrawerBalance();
-
-      // Refresh data to show new transaction in Recent Activity
-      await raw.refreshData();
-
-      showToast(`Payment sent! ${formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency)} paid to ${entity.name}`, 'success');
+      if (result.success) {
+        await refreshCashDrawerBalance();
+        showToast(`Payment sent! ${formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency)} paid to ${entity.name}`, 'success');
+      } else {
+        showToast(result.error || 'Failed to record payment.', 'error');
+      }
     } catch (err) {
       console.log(err);
       showToast('Failed to record payment.', 'error');
@@ -698,47 +488,7 @@ export default function Accounting() {
     setShowForm(null);
   };
 
-  const handleJournalSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const totalDebit = journalForm.entries.reduce((sum, entry) => sum + entry.debit, 0);
-    const totalCredit = journalForm.entries.reduce((sum, entry) => sum + entry.credit, 0);
 
-    if (totalDebit !== totalCredit) {
-      alert('Total debits must equal total credits');
-      return;
-    }
-
-    // Remove addJournalEntry reference for now
-
-    setJournalForm({
-      date: new Date().toISOString().split('T')[0],
-      reference: '',
-      description: '',
-      entries: [
-        { account: '', debit: 0, credit: 0 },
-        { account: '', debit: 0, credit: 0 }
-      ]
-    });
-    setShowForm(null);
-  };
-
-  // Enhance getStatusColor and getStatusIcon for better contrast and accessibility
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'paid': return 'bg-green-100 text-green-900 border border-green-400';
-      case 'overdue': return 'bg-red-100 text-red-900 border border-red-400';
-      case 'partial': return 'bg-yellow-100 text-yellow-900 border border-yellow-400';
-      default: return 'bg-gray-100 text-gray-900 border border-gray-300';
-    }
-  };
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'paid': return <CheckCircle className="w-4 h-4" aria-label="Paid" />;
-      case 'overdue': return <AlertCircle className="w-4 h-4" aria-label="Overdue" />;
-      case 'partial': return <Clock className="w-4 h-4" aria-label="Partial" />;
-      default: return <Clock className="w-4 h-4" aria-label="Pending" />;
-    }
-  };
 
   // Add to Accounting component state:
   const [nonPricedItems, setNonPricedItems] = useState<any[]>([]);
@@ -758,7 +508,6 @@ export default function Accounting() {
     setNonPricedItems(nonPricedItems);
   }, [sales, activeTab]);
 
-  const handleEditNonPriced = (item: any) => setShowEditNonPriced(item);
 
   // Helper function to get current value including staged changes
   const getCurrentValue = (item: any, field: string) => {
@@ -1466,7 +1215,7 @@ export default function Accounting() {
       if (fees.commission > 0) {
         const safeCommissionAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.commission, 'USD');
         await addTransaction({
-          id: createId(),
+          id: raw.createId?.() || crypto.randomUUID(),
           type: 'income',
           category: 'Commission',
           supplier_id: bill.supplier_id,
@@ -1482,7 +1231,7 @@ export default function Accounting() {
       if (fees.porterage > 0) {
         const safePorterageAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.porterage, 'USD');
         await addTransaction({
-          id: createId(),
+          id: raw.createId?.() || crypto.randomUUID(),
           type: 'income',
           supplier_id: bill.supplier_id,
           category: 'Porterage',
@@ -1498,7 +1247,7 @@ export default function Accounting() {
       if (fees.transfer > 0) {
         const safeTransferAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.transfer, 'USD');
         await addTransaction({
-          id: createId(),
+          id: raw.createId?.() || crypto.randomUUID(),
           type: 'income',
           supplier_id: bill.supplier_id,
           category: 'Transfer Fee',
@@ -1514,7 +1263,7 @@ export default function Accounting() {
       if (fees.supplierAmount > 0) {
         const safeSupplierAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.supplierAmount, 'USD');
         await addTransaction({
-          id: createId(),
+          id: raw.createId?.() || crypto.randomUUID(),
           supplier_id: bill.supplier_id,
           type: 'expense',
           category: 'Supplier Payment',
@@ -1589,7 +1338,7 @@ export default function Accounting() {
 
       // Add commission transaction
       await addTransaction({
-        id: createId(),
+        id: raw.createId?.() || crypto.randomUUID(),
         type: 'expense',
         category: 'Commission',
         supplier_id: closingBill.supplier_id,
@@ -1602,7 +1351,7 @@ export default function Accounting() {
 
       // Add supplier payment transaction
       await addTransaction({
-        id: createId(),
+        id: raw.createId?.() || crypto.randomUUID(),
         type: 'expense',
         category: 'Supplier Payment',
         supplier_id: closingBill.supplier_id,
@@ -1737,48 +1486,6 @@ export default function Accounting() {
     );
   };
 
-  // Function to update existing inventory items with received_quantity
-  const updateInventoryItemsWithReceivedQuantity = async () => {
-    try {
-      console.log('Debug - Total inventory items:', inventory.length);
-      console.log('Debug - Inventory items with received_quantity issues:');
-
-      inventory.forEach((item, index) => {
-        console.log(`Item ${index + 1}:`, {
-          id: item.id,
-          received_quantity: item.received_quantity,
-          received_quantity_type: typeof item.received_quantity,
-          quantity: item.quantity
-        });
-      });
-
-      const itemsToUpdate = inventory.filter(item => 
-        item.received_quantity === null || item.received_quantity === undefined || item.received_quantity === 0
-      );
-
-      console.log('Debug - Filtered items to update:', itemsToUpdate.length);
-
-      if (itemsToUpdate.length > 0) {
-        console.log(`Found ${itemsToUpdate.length} inventory items without received_quantity`);
-        showToast(`Found ${itemsToUpdate.length} items that need received_quantity field. Please add new inventory items to see proper progress tracking.`, 'error');
-
-        // Log the items that need updating
-        itemsToUpdate.forEach((item, index) => {
-          console.log(`Item ${index + 1} needs received_quantity update:`, {
-            id: item.id,
-            current_quantity: item.quantity,
-            received_quantity: item.received_quantity,
-            received_quantity_type: typeof item.received_quantity
-          });
-        });
-      } else {
-        showToast('All inventory items have received_quantity field set!', 'success');
-      }
-    } catch (error) {
-      console.error('Error checking inventory items:', error);
-      showToast('Error checking inventory items', 'error');
-    }
-  };
 
   // Received bills functions
   const getReceivedBills = useMemo(() => {
@@ -2348,9 +2055,6 @@ export default function Accounting() {
             setRecentSuppliers,
             setRecentCategories,
 
-            setShowAddCustomerForm,
-            setShowAddSupplierForm,
-            setShowAddCategoryForm,
 
             handleReceiveSubmit,
             handlePaySubmit,
