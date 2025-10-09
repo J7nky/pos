@@ -126,14 +126,14 @@ export default function ReceivedBills({
   const initializeBatchEdit = (group: any) => {
     const first = group.items[0];
     const batchId = group.batchId || first?.batch_id;
-
+    console.log('first 1123', first);
     if (!batchId || batchId === null) {
       return;
     }
 
     // Initialize form with current batch data for ReceiveFormModal
     setBatchEditForm({
-      supplier_id: first?.supplier_id || '',
+      supplier_id: first?.supplierId || '',
       type: first?.type || 'commission',
       porterage_fee: (group.batchPorterage ?? '').toString(),
       transfer_fee: (group.batchTransferFee ?? '').toString(),

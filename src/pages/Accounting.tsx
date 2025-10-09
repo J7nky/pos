@@ -1819,14 +1819,9 @@ export default function Accounting() {
   };
   // Sales logs edit/delete handlers
   const handleEditSale = (sale: any) => {
-    setEditingSale({
-      ...sale,
-      quantity: sale.quantity || 1,
-      weight: sale.weight || null,
-      unitPrice: sale.unit_price || 0,
-      paymentMethod: sale.payment_method || 'cash',
-      status: sale.status || ''
-    });
+    console.log('handleEditSale called with sale:', sale);
+    // Sale is already a BillLineItem with correct field names
+    setEditingSale(sale);
     setShowEditSaleModal(true);
   };
 
@@ -2084,11 +2079,15 @@ export default function Accounting() {
       {/* Edit Sale Modal */}
       {showEditSaleModal && editingSale && (
         <EditSaleModal
+          originalSale={editingSale}
           isOpen={showEditSaleModal}
           sale={editingSale}
           customers={customers}
           formatCurrency={formatCurrency}
-          onClose={() => setShowEditSaleModal(false)}
+          onClose={() => {
+            setShowEditSaleModal(false);
+            setEditingSale(null);
+          }}
           onSave={handleSaveSaleEdit}
         />
       )}

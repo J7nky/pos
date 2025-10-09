@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocalStorage } from './useLocalStorage';
 
 interface UseInventoryFormsReturn {
   // Product form
@@ -50,6 +51,10 @@ interface UseInventoryFormsReturn {
 }
 
 export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFormsReturn => {
+  // Local storage for persisting supplier selection
+  const [lastSelectedSupplierId, setLastSelectedSupplierId] = useLocalStorage<string>('inventory_last_supplier_id', '');
+  const [lastSelectedType, setLastSelectedType] = useLocalStorage<string>('inventory_last_type', 'commission');
+
   // Product form state
   const [productForm, setProductForm] = useState({
     name: '',
@@ -67,10 +72,10 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
     type: 'commission' as 'commission' | 'cash'
   });
 
-  // Receive form state
+  // Receive form state - initialize with persisted values
   const [receiveForm, setReceiveForm] = useState({
-    supplier_id: '',
-    type: 'commission' as 'commission' | 'cash',
+    supplier_id: lastSelectedSupplierId,
+    type: lastSelectedType as 'commission' | 'cash',
     porterage_fee: '',
     transfer_fee: '',
     commission_rate: '',
@@ -85,6 +90,16 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
   const [productErrors, setProductErrors] = useState<any>({});
   const [supplierErrors, setSupplierErrors] = useState<any>({});
   const [receiveErrors, setReceiveErrors] = useState<any>({});
+
+  // Persist supplier selection and type changes
+  useEffect(() => {
+    if (receiveForm.supplier_id !== lastSelectedSupplierId) {
+      setLastSelectedSupplierId(receiveForm.supplier_id);
+    }
+    if (receiveForm.type !== lastSelectedType) {
+      setLastSelectedType(receiveForm.type);
+    }
+  }, [receiveForm.supplier_id, receiveForm.type, lastSelectedSupplierId, lastSelectedType, setLastSelectedSupplierId, setLastSelectedType]);
 
   // Update commission rate when form opens or supplier changes
   useEffect(() => {
@@ -141,8 +156,8 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
 
   const resetReceiveForm = () => {
     setReceiveForm({
-      supplier_id: '',
-      type: 'commission',
+      supplier_id: lastSelectedSupplierId, // Preserve last selected supplier
+      type: lastSelectedType as 'commission' | 'cash', // Preserve last selected type
       porterage_fee: '',
       transfer_fee: '',
       commission_rate: '',

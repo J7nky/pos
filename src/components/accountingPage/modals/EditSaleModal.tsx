@@ -4,6 +4,7 @@ import EditSaleForm from "../forms/EditSaleForm";
 
 interface EditSaleModalProps {
   isOpen: boolean;
+  originalSale: any;
   sale: any; // ideally you define a Sale type
   customers: any[];
   formatCurrency: (value: number) => string;
@@ -13,13 +14,19 @@ interface EditSaleModalProps {
 
 export default function EditSaleModal({
   isOpen,
+  originalSale,
   sale,
   customers,
   formatCurrency,
   onClose,
   onSave,
 }: EditSaleModalProps) {
-  if (!sale) return null;
+  console.log('EditSaleModal props:', { isOpen, originalSale, sale, customers: customers?.length });
+  
+  if (!sale) {
+    console.log('EditSaleModal: sale is null/undefined');
+    return null;
+  }
 
   return (
     <Modal
@@ -30,6 +37,7 @@ export default function EditSaleModal({
       headerBg="bg-gradient-to-r from-blue-600 to-blue-700"
     >
       <EditSaleForm
+        originalSale={originalSale}
         sale={sale}
         customers={customers}
         formatCurrency={formatCurrency}

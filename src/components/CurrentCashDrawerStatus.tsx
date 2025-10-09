@@ -154,6 +154,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
     setLoading(true);
     try {
       const currentStatus = await getCurrentStatus();
+      console.log(currentStatus,12312312);
       setStatus(currentStatus);
     } catch (error) {
       console.error('Error loading cash drawer status:', error);
@@ -313,10 +314,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
             
             <div className="mt-6 p-4 bg-gray-50 rounded-lg">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <span className="text-sm font-medium text-gray-600">Session ID:</span>
-                  <span className="ml-2 text-sm text-gray-900 font-mono">{status.sessionId}</span>
-                </div>
+               
                 <div>
                   <span className="text-sm font-medium text-gray-600">Opened At:</span>
                   <span className="ml-2 text-sm text-gray-900">

@@ -3,6 +3,7 @@ import { DollarSign, CreditCard, Clock, User, CheckCircle } from "lucide-react";
 import SearchableSelect from "../../common/SearchableSelect";
 
 type EditSaleFormProps = {
+  originalSale: any;
   sale: any;
   customers: { id: string; name: string }[];
   formatCurrency: (value: number) => string;
@@ -11,29 +12,66 @@ type EditSaleFormProps = {
 };
 
 export default function EditSaleForm({
+  originalSale,
   sale,
   customers,
   formatCurrency,
   onSave,
   onCancel,
 }: EditSaleFormProps) {
+  console.log('EditSaleForm props:', { originalSale, sale, customers: customers?.length });
+  
+  // Safety check for undefined originalSale
+  if (!originalSale || !sale) {
+    console.log('EditSaleForm: originalSale or sale is undefined', { originalSale, sale });
+    return (
+      <div className="p-4 text-center text-gray-500">
+        <p>Loading sale data...</p>
+      </div>
+    );
+  }
+
   const [formData, setFormData] = useState({
     quantity: sale.quantity || 1,
     weight: sale.weight || "",
-    unitPrice: sale.unitPrice || 0,
-    receivedValue: sale.received_value || sale.receivedValue || 0,
-    paymentMethod: sale.paymentMethod || "cash",
+    unitPrice: sale.unit_price || 0,
+    receivedValue: sale.received_value || 0,
+    paymentMethod: sale.payment_method || "cash",
     customerId: sale.customer_id || "",
-    status: sale.status || "",
+    status: sale.notes || "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Store original values for comparison
+  const originalValues = {
+    quantity: sale.quantity || 1,
+    weight: sale.weight || "",
+    unitPrice: sale.unit_price || 0,
+    receivedValue: sale.received_value || 0,
+    paymentMethod: sale.payment_method || "cash",
+    customerId: sale.customer_id || "",
+    status: sale.notes || "",
+  };
+
+  // Check if there are any changes
+  const hasChanges = () => {
+    return (
+      formData.quantity !== originalValues.quantity ||
+      formData.weight !== originalValues.weight ||
+      formData.unitPrice !== originalValues.unitPrice ||
+      formData.receivedValue !== originalValues.receivedValue ||
+      formData.paymentMethod !== originalValues.paymentMethod ||
+      formData.customerId !== originalValues.customerId ||
+      formData.status !== originalValues.status
+    );
+  };
 
   // Derived values
   const totalValue = formData.quantity * formData.unitPrice;
   const isPartialPayment = formData.receivedValue < totalValue;
   const isCredit = formData.paymentMethod === "credit";
-  const requiresCustomer = isCredit || isPartialPayment;
+  const requiresCustomer = originalSale?.customer_id !== null && originalSale?.customer_id !== undefined;
 
   const selectedCustomer = customers.find((c) => c.id === formData.customerId);
   const customerName = selectedCustomer?.name || "";
@@ -53,6 +91,10 @@ export default function EditSaleForm({
     if (requiresCustomer && !formData.customerId) {
       newErrors.customerId =
         "Customer is required for credit sales or partial payments";
+    }
+    // Also require customer for credit payments
+    if (formData.paymentMethod === "credit" && !formData.customerId) {
+      newErrors.customerId = "Customer is required for credit payments";
     }
     if (
       formData.paymentMethod !== "credit" &&
@@ -75,6 +117,7 @@ export default function EditSaleForm({
           ? parseFloat(formData.weight.toString())
           : null,
         receivedValue: formData.receivedValue,
+        notes: formData.status, // Map status to notes field
       });
     }
   };
@@ -90,6 +133,18 @@ export default function EditSaleForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Form Header with Changes Indicator */}
+      {hasChanges() && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <div className="flex items-center">
+            <div className="w-2 h-2 bg-amber-500 rounded-full mr-2"></div>
+            <span className="text-sm text-amber-800 font-medium">
+              You have unsaved changes
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Product Details */}
       <section className="space-y-4">
         <h4 className="text-md font-medium text-gray-800 border-b border-gray-200 pb-2">
@@ -242,51 +297,71 @@ export default function EditSaleForm({
         </div>
 
         {/* Customer Section */}
-        {requiresCustomer && (
-          <div
-            className={`p-4 rounded-lg border-2 ${
-              formData.customerId
-                ? "border-green-200 bg-green-50"
-                : "border-amber-200 bg-amber-50"
-            }`}
-          >
-            <div className="flex items-center mb-2">
-              <User className="w-4 h-4 mr-2 text-amber-600" />
+        <div
+          className={`p-4 rounded-lg border-2 ${
+            formData.customerId
+              ? "border-green-200 bg-green-50"
+              : requiresCustomer
+              ? "border-amber-200 bg-amber-50"
+              : "border-gray-200 bg-gray-50"
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center">
+              <User className="w-4 h-4 mr-2 text-gray-600" />
               <label className="text-sm font-medium text-gray-700">
-                Customer Required <span className="text-red-500">*</span>
+                Customer {requiresCustomer && <span className="text-red-500">*</span>}
               </label>
             </div>
-            <SearchableSelect
-              options={customers.map((c) => ({
-                value: c.id,
-                label: c.name,
-                id: c.id,
-              }))}
-              value={formData.customerId}
-              onChange={(value: any) =>
-                setFormData({ ...formData, customerId: value })
-              }
-              placeholder="Select customer..."
-              className={errors.customerId ? "border-red-500" : ""}
-            />
-            {errors.customerId && (
-              <p className="text-red-500 text-xs mt-1">{errors.customerId}</p>
-            )}
-
-            {isPartialPayment && customerName && (
-              <p className="text-sm text-amber-700 mt-2">
-                {formatCurrency(totalValue - formData.receivedValue)} will be
-                added to {customerName}'s balance.
-              </p>
-            )}
-            {isCredit && customerName && (
-              <p className="text-sm text-amber-700 mt-2">
-                Full amount ({formatCurrency(totalValue)}) will be added to{" "}
-                {customerName}'s credit balance.
-              </p>
+            {formData.customerId && !requiresCustomer && (
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, customerId: "" })}
+                className="text-xs text-gray-500 hover:text-gray-700 underline"
+              >
+                Clear
+              </button>
             )}
           </div>
-        )}
+          <SearchableSelect
+            options={customers.map((c) => ({
+              value: c.id,
+              label: c.name,
+              id: c.id,
+            }))}
+            value={formData.customerId}
+            onChange={(value: any) =>
+              setFormData({ ...formData, customerId: value })
+            }
+            placeholder="Select customer..."
+            className={errors.customerId ? "border-red-500" : ""}
+          />
+          {errors.customerId && (
+            <p className="text-red-500 text-xs mt-1">{errors.customerId}</p>
+          )}
+
+          {formData.customerId && (
+            <>
+              {isPartialPayment && customerName && (
+                <p className="text-sm text-amber-700 mt-2">
+                  {formatCurrency(totalValue - formData.receivedValue)} will be
+                  added to {customerName}'s balance.
+                </p>
+              )}
+              {isCredit && customerName && (
+                <p className="text-sm text-amber-700 mt-2">
+                  Full amount ({formatCurrency(totalValue)}) will be added to{" "}
+                  {customerName}'s credit balance.
+                </p>
+              )}
+              {!isPartialPayment && !isCredit && customerName && (
+                <p className="text-sm text-green-700 mt-2">
+                  Sale will be recorded for {customerName}.
+                </p>
+              )}
+            </>
+          )}
+        </div>
       </section>
 
       {/* Additional Details */}
@@ -316,7 +391,12 @@ export default function EditSaleForm({
         </button>
         <button
           type="submit"
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center"
+          disabled={!hasChanges()}
+          className={`px-6 py-2 rounded-lg transition-colors font-medium flex items-center ${
+            hasChanges()
+              ? "bg-blue-600 text-white hover:bg-blue-700"
+              : "bg-gray-300 text-gray-500 cursor-not-allowed"
+          }`}
         >
           <CheckCircle className="w-4 h-4 mr-2" />
           Save Changes

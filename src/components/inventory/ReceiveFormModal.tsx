@@ -74,8 +74,16 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       if (form.received_at !== today) {
         setForm({ ...form, received_at: today });
       }
+      
+      // Ensure Trade supplier is set for cash purchases
+      if (form.type === 'cash') {
+        const tradeSupplier = suppliers.find((s: any) => s.name === 'Trade');
+        if (tradeSupplier && form.supplier_id !== tradeSupplier.id) {
+          setForm({ ...form, supplier_id: tradeSupplier.id });
+        }
+      }
     }
-  }, [open]);
+  }, [open, suppliers, form.type]);
 
   // Populate existing batch items when in edit mode
   useEffect(() => {
@@ -115,9 +123,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
 
   // Get selected supplier for context display
   const selectedSupplier = form.type === 'cash' 
-    ? { name: 'Trade', id: 'trade' } 
-    : suppliers.find((s: any) => s.id === form.supplier_id);
-
+    ? suppliers.find((s: any) => s.name === 'Trade') || { name: 'Trade', id: 'trade' }
+    : suppliers.find((s: any) => s.id === form.supplier_id) || null;
+  
   // Enhanced validation with comprehensive field checking
   const validate = () => {
     const errors: any = {};
@@ -236,10 +244,10 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         }
       });
 
-      // Reset form after successful submission
+      // Reset form after successful submission - preserve supplier selection
       setForm({
-        supplier_id: '',
-        type: 'commission',
+        supplier_id: form.supplier_id, // Preserve current supplier selection
+        type: form.type, // Preserve current type
         porterage_fee: '',
         transfer_fee: '',
         commission_rate: '',
@@ -416,7 +424,16 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Supply Type *</label>
                     <select
                       value={form.type}
-                      onChange={(e) => setForm({ ...form, type: e.target.value })}
+                      onChange={(e) => {
+                        const newType = e.target.value;
+                        const tradeSupplier = suppliers.find((s: any) => s.name === 'Trade');
+                        setForm({ 
+                          ...form, 
+                          type: newType,
+                          // Set supplier_id based on type
+                          supplier_id: newType === 'cash' ? (tradeSupplier?.id || 'trade') : form.supplier_id
+                        });
+                      }}
                       className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                     >
                       <option value="commission">Commission</option>
