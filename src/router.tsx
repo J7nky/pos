@@ -1,6 +1,6 @@
 // src/router.tsx
 import React from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, createHashRouter } from "react-router-dom";
 import App from "./App";
 import Layout from "./layouts/Layout";
 import Home from './pages/Home';
@@ -12,7 +12,11 @@ import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
 import ErrorBoundary from './components/ErrorBoundary';
 
-export const router = createBrowserRouter([
+// Use hash router for Electron (file:// protocol) and browser router for web
+const isElectron = typeof window !== 'undefined' && window.electronAPI;
+const createRouter = isElectron ? createHashRouter : createBrowserRouter;
+
+export const router = createRouter([
   {
     path: "/",
     element: <App />, // This is the root component that handles auth and providers

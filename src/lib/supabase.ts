@@ -5,23 +5,30 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables. Please check your .env.local file.');
-  console.error('Required variables: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY');
-  throw new Error('Missing Supabase environment variables. Please check your .env.local file and ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set.');
+  console.warn('Missing Supabase environment variables. App will run in offline mode.');
+  console.warn('Required variables: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY');
+  console.warn('Please create a .env.local file with your Supabase credentials for full functionality.');
 }
 
 // Validate URL format
-try {
-  new URL(supabaseUrl);
-} catch (error) {
-  console.error('Invalid VITE_SUPABASE_URL format:', supabaseUrl);
-  console.error('Expected format: https://your-project-id.supabase.co');
-  throw new Error(`Invalid VITE_SUPABASE_URL format: ${supabaseUrl}. Expected format: https://your-project-id.supabase.co`);
+if (supabaseUrl) {
+  try {
+    new URL(supabaseUrl);
+  } catch (error) {
+    console.error('Invalid VITE_SUPABASE_URL format:', supabaseUrl);
+    console.error('Expected format: https://your-project-id.supabase.co');
+    throw new Error(`Invalid VITE_SUPABASE_URL format: ${supabaseUrl}. Expected format: https://your-project-id.supabase.co`);
+  }
 }
 
 // Check if we're online
 const isOnline = () => navigator.onLine;
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+
+// Use placeholder values if environment variables are missing
+const safeSupabaseUrl = supabaseUrl || 'https://placeholder.supabase.co';
+const safeSupabaseAnonKey = supabaseAnonKey || 'placeholder-key';
+
+export const supabase = createClient<Database>(safeSupabaseUrl, safeSupabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,

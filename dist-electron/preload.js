@@ -1,6 +1,10 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-const electron_1 = require("electron");
-electron_1.contextBridge.exposeInMainWorld("electronAPI", {
-// you can expose safe APIs here
+import { contextBridge, ipcRenderer } from "electron";
+contextBridge.exposeInMainWorld("electronAPI", {
+    // Thermal Printer API
+    printer: {
+        initialize: () => ipcRenderer.invoke('printer:initialize'),
+        print: (text) => ipcRenderer.invoke('printer:print', text),
+        openDrawer: () => ipcRenderer.invoke('printer:openDrawer'),
+        test: () => ipcRenderer.invoke('printer:test'),
+    },
 });

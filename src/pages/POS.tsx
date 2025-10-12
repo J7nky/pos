@@ -19,13 +19,10 @@ import {
   Trash2,
   X,
   PlusCircle,
-  Printer
 } from 'lucide-react';
 import { Customer, BillLineItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
-import { thermalPrinter, ReceiptData } from '../services/thermalPrinterService';
-import PrinterTest from '../components/PrinterTest';
 
 
 interface BillTab {
@@ -78,7 +75,6 @@ export default function POS() {
   // Add customer validation state
   const [customerError, setCustomerError] = useState<string | null>(null);
   const [customerFormError, setCustomerFormError] = useState<string | null>(null);
-  const [showPrinterTest, setShowPrinterTest] = useState(false);
   const showToast = (type: 'success' | 'error', message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
@@ -377,53 +373,6 @@ export default function POS() {
   const isWalkInCustomer = activeTab.selectedCustomer === 'Walk-in Customer'; // Empty string represents Walk-in Customer
   const hasZeroPricedItem = activeTab.cart.some(i => (i.unitPrice ?? 0) === 0);
 
-  // Print receipt function
-  const printReceipt = async (tab: BillTab, billData: any) => {
-    try {
-      // Get customer information
-      const customer = tab.selectedCustomer ? 
-        customers.find(c => c.id === tab.selectedCustomer) : null;
-
-      // Prepare receipt data
-      const receiptData: ReceiptData = {
-        billNumber: billData.bill_number,
-        billDate: billData.bill_date,
-        customerName: customer?.name || (tab.selectedCustomer ? 'Unknown Customer' : 'Walk-in Customer'),
-        customerPhone: customer?.phone,
-        items: tab.cart.map(item => {
-          const product = products.find(p => p.id === item.productId);
-          const supplier = suppliers.find(s => s.id === item.supplierId);
-          return {
-            name: product?.name || 'Unknown Product',
-            quantity: item.quantity,
-            unitPrice: item.unitPrice || 0,
-            total: item.lineTotal || 0,
-            weight: item.weight,
-            supplier: supplier?.name
-          };
-        }),
-        subtotal: total,
-        total: total,
-        amountPaid: parseFloat(tab.amountReceived) || 0,
-        change: change,
-        paymentMethod: tab.paymentMethod,
-        notes: tab.notes,
-        storeName: 'Your Store Name', // This should come from store settings
-        storeAddress: 'Your Store Address', // This should come from store settings
-        storePhone: 'Your Store Phone', // This should come from store settings
-        cashierName: userProfile?.name || 'Cashier'
-      };
-
-      // Print the receipt
-      const success = await thermalPrinter.printReceipt(receiptData);
-      if (!success) {
-        throw new Error('Failed to print receipt');
-      }
-    } catch (error) {
-      console.error('Print receipt error:', error);
-      throw error;
-    }
-  };
 
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
   const handleCheckout = async () => {handleCheckout
@@ -535,14 +484,18 @@ export default function POS() {
 
       // Prepare line items data
       const lineItemsData = activeTab.cart.map(item => ({
-        inventory_item_id: item.inventoryItemId,
-        product_id: item.productId,
-        payment_method:item.paymentMethod,
-        supplier_id: item.supplierId,
+        inventory_item_id: item.inventory_item_id,
+        product_id: item.product_id,
+        payment_method:item.payment_method,
+        supplier_id: item.supplier_id,
         quantity: item.quantity,
-        unit_price: item.unitPrice || 0,
-        line_total: item.lineTotal || 0,
+          unit_price: item.unit_price || 0,
+        line_total: item.line_total || 0,
         weight: item.weight || null,
+        received_value: item.received_value || 0,
+        notes: item.notes || null,
+        created_at: new Date().toISOString(),
+        created_by: userProfile?.id,
         line_order: activeTab.cart.indexOf(item) + 1
       }));
 
@@ -571,14 +524,6 @@ export default function POS() {
       // Trigger immediate sync after sale completion for critical data
       raw.debouncedSync?.();
 
-      // Print receipt after successful sale
-      try {
-        await printReceipt(activeTab, billData);
-      } catch (printError) {
-        console.error('Failed to print receipt:', printError);
-        // Don't fail the sale if printing fails, just log the error
-        showToast('error', 'Sale completed but receipt printing failed');
-      }
 
       if (activeTabs.length > 1) {
         closeTab(activeTabId);
@@ -695,14 +640,6 @@ export default function POS() {
           >
             <PlusCircle className="w-4 h-4 mr-1" />
             {t('pos.newBill')}
-          </button>
-          <button
-            onClick={() => setShowPrinterTest(true)}
-            className="flex items-center px-3 py-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
-            title="Test Printer"
-          >
-            <Printer className="w-4 h-4 mr-1" />
-            Test Printer
           </button>
         </div>
       </div>
@@ -1062,11 +999,6 @@ export default function POS() {
         </div>
       </div>
 
-      {/* Printer Test Modal */}
-      <PrinterTest
-        isOpen={showPrinterTest}
-        onClose={() => setShowPrinterTest(false)}
-      />
     </div>
   );
 }

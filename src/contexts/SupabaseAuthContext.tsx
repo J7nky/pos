@@ -77,21 +77,52 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
   // Initialize authentication
   useEffect(() => {
-    // Get initial session
+    // Check if we have valid Supabase credentials
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'https://placeholder.supabase.co') {
+      console.log('No valid Supabase credentials found. Running in offline mode.');
+      setLoading(false);
+      setUser(null);
+      setUserProfile(null);
+      return;
+    }
+
+    // Set a timeout to prevent hanging
+    const timeoutId = setTimeout(() => {
+      console.log('Supabase connection timeout - running in offline mode');
+      setLoading(false);
+      setUser(null);
+      setUserProfile(null);
+    }, 5000); // 5 second timeout
+
+    // Get initial session with timeout
     supabase.auth.getSession().then(({ data: { session } }) => {
+      clearTimeout(timeoutId);
       setUser(session?.user ?? null);
       setLoading(false);
+    }).catch((error) => {
+      clearTimeout(timeoutId);
+      console.error('Error getting session:', error);
+      setLoading(false);
+      setUser(null);
+      setUserProfile(null);
     });
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_, session) => {
+        clearTimeout(timeoutId);
         setUser(session?.user ?? null);
         setLoading(false);
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Load user profile when user changes

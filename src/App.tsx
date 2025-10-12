@@ -25,6 +25,16 @@ function AppContent() {
 
   // If user is not authenticated and not on login page, show SupabaseLogin
   if (!userProfile && location.pathname !== '/login') {
+    // Check if we're in offline mode (no Supabase credentials)
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'https://placeholder.supabase.co') {
+      // In offline mode, bypass authentication and go directly to the app
+      console.log('Offline mode: bypassing authentication');
+      return <Outlet />;
+    }
+    
     return <SupabaseLogin />;
   }
   

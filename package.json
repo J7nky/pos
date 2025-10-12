@@ -5,15 +5,14 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build:react": "vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
-    "build": "npm run build:react && npm run build:electron",
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && npm run build:electron && node_modules\\electron\\dist\\electron.exe .\"",
+     "pack": "electron-builder --dir",
+  "dist": "electron-builder",
+    "electron": "node_modules\\electron\\dist\\electron.exe .",
+    "build:electron": "tsc -p tsconfig_electron.json",
+    "build": "vite build && npm run build:electron",
     "preview": "vite preview",
-    "lint": "eslint .",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "dist": "npm run build && electron-builder"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.51.0",

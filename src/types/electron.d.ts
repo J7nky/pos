@@ -1,12 +1,6 @@
 declare global {
   interface Window {
     electronAPI: {
-      printer: {
-        initialize: () => Promise<boolean>;
-        print: (text: string) => Promise<boolean>;
-        openDrawer: () => Promise<boolean>;
-        test: () => Promise<boolean>;
-      };
     };
   }
 

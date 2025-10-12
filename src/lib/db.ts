@@ -91,14 +91,14 @@ class POSDatabase extends Dexie {
       stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
       
       // Cash drawer tables
-      cash_drawer_accounts: 'id, &store_id, account_code, updated_at',
-      cash_drawer_sessions: 'id, store_id, account_id, status, created_at',
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
       
       // Core tables with comprehensive indexing for performance
       // Tables WITH updated_at: products, suppliers, customers
       products: 'id, store_id, name, category, updated_at, _synced, _deleted',
-      suppliers: 'id, store_id, name, type, is_active, updated_at, lb_balance, usd_balance, _synced, _deleted',
-      customers: 'id, store_id, name, phone, is_active, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
 
       // Tables WITHOUT updated_at: inventory_items, transactions
       inventory_items: 'id, store_id, product_id, supplier_id, type, received_at, created_at, received_quantity, batch_id, _synced, _deleted',

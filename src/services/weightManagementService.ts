@@ -277,8 +277,7 @@ export class WeightManagementService {
           
           // Get sales for this specific inventory item
           const salesForThisItem = await db.bill_line_items
-            .where('inventory_item_id')
-            .equals(inventoryItem.id)
+            .filter(item => item.inventory_item_id === inventoryItem.id)
             .toArray();
 
           const soldWeight = salesForThisItem.reduce((sum, sale) => sum + (sale.weight || 0), 0);
@@ -438,8 +437,7 @@ export class WeightManagementService {
 
         // Get existing sales for this inventory item
         const existingSales = await db.bill_line_items
-          .where('inventory_item_id')
-          .equals(inventoryItemId)
+          .filter(item => item.inventory_item_id === inventoryItemId)
           .toArray();
 
         const totalSoldWeight = existingSales.reduce((sum, sale) => sum + (sale.weight || 0), 0);
