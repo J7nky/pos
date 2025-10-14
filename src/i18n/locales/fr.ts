@@ -27,6 +27,7 @@ const fr = {
   home: {
     welcome: 'Bon retour, {{name}}', subtitle: 'Voici ce qui se passe aujourd’hui dans votre magasin.', fastActions: 'Actions rapides', hide: 'Masquer', show: 'Afficher',
     quickSale: 'Vente rapide', quickSaleDesc: 'Commencer une nouvelle vente',
+    shortcuts: 'Raccourcis',
     receiveProducts: 'Réception produits', receiveProductsDesc: 'Ajouter du stock des fournisseurs',
     addCustomer: 'Ajouter client', addCustomerDesc: 'Enregistrer un nouveau client',
     recordExpense: 'Enregistrer dépense', recordExpenseDesc: 'Enregistrer les dépenses',

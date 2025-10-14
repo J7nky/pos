@@ -5,10 +5,10 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && npm run build:electron && node_modules\\electron\\dist\\electron.exe .\"",
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && npm run build:electron && node_modules/electron/dist/electron .\"",
      "pack": "electron-builder --dir",
   "dist": "electron-builder",
-    "electron": "node_modules\\electron\\dist\\electron.exe .",
+    "electron": "node_modules/electron/dist/electron .",
     "build:electron": "tsc -p tsconfig_electron.json",
     "build": "vite build && npm run build:electron",
     "preview": "vite preview",
