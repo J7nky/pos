@@ -23,6 +23,7 @@ import {
 import { Customer, BillLineItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
+import { useQRCodeGeneration } from '../hooks/useQRCodeGeneration';
 
 
 interface BillTab {
@@ -54,6 +55,7 @@ export default function POS() {
   const { userProfile } = useSupabaseAuth();
   const { formatCurrency } = useCurrency();
   const { t } = useI18n();
+  const { generateQRCodeForReceipt } = useQRCodeGeneration();
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
   const [activeTabs, setActiveTabs] = useLocalStorage<BillTab[]>('pos_active_tabs', []);
   const [activeTabId, setActiveTabId] = useLocalStorage<string>('pos_active_tab_id', '');
@@ -83,12 +85,12 @@ export default function POS() {
   };
 
   // Receipt printing function
-  const printReceipt = async (billData: any, lineItemsData: any[], customer: any) => {
+  const printReceipt = async (billData: any, lineItemsData: any[], customer: any, qrCodeData?: any) => {
     try {
       setIsPrinting(true);
       
       // Generate receipt content
-      const receiptContent = generateReceiptContent(billData, lineItemsData, customer, products);
+      const receiptContent = generateReceiptContent(billData, lineItemsData, customer, products, qrCodeData);
       
       // Print using Electron API
       if ((window as any).electronAPI?.printDocument) {
@@ -125,7 +127,7 @@ export default function POS() {
   };
 
   // Generate receipt content
-  const generateReceiptContent = (billData: any, lineItemsData: any[], customer: any, products: any[]) => {
+  const generateReceiptContent = (billData: any, lineItemsData: any[], customer: any, products: any[], qrCodeData?: any) => {
     // Get receipt settings from offline context
     const receiptSettings = raw.receiptSettings || {
       storeName: 'KIWI VEGETABLES MARKET',
@@ -212,6 +214,17 @@ TOTAL BALANCE:                    ${formatCurrency(billData.total_amount)} LBP
 ${dashSeparator}
            💬 ${receiptSettings.thankYouMessage}
 ${dashSeparator}`;
+
+    // Add QR code section if available and customer is selected
+    if (qrCodeData && customer) {
+      content += `
+📱 Scan QR code for account statement
+${dashSeparator}
+[QR CODE WOULD BE PRINTED HERE]
+Customer: ${customer.name}
+Bill: ${billData.bill_number}
+${dashSeparator}`;
+    }
 
     return content;
   };
@@ -662,15 +675,34 @@ ${dashSeparator}`;
       }
 
       // Use offline-first bill creation from OfflineDataContext
-      await raw.createBill(billData, lineItemsData, customerBalanceUpdate || undefined);
+      const billId = await raw.createBill(billData, lineItemsData, customerBalanceUpdate || undefined);
 
       // The sale is now handled entirely through the bill creation above
       // No need for separate sale_items creation since bill_line_items now contains all sale data
       // Inventory deductions and cash drawer updates are handled in the createBill function
 
+      // Generate QR code for customer account statement if customer is selected
+      let qrCodeData = null;
+      if (activeTab.selectedCustomer) {
+        try {
+          const customer = customers.find(c => c.id === activeTab.selectedCustomer);
+          if (customer) {
+            qrCodeData = await generateQRCodeForReceipt(
+              customer.id,
+              billId,
+              billData.bill_number,
+              customer.name
+            );
+          }
+        } catch (qrError) {
+          console.warn('Failed to generate QR code:', qrError);
+          // Don't fail the entire transaction if QR code generation fails
+        }
+      }
+
       // Print receipt after successful bill creation
       const customer = customers.find(c => c.id === activeTab.selectedCustomer);
-      await printReceipt(billData, lineItemsData, customer);
+      await printReceipt(billData, lineItemsData, customer, qrCodeData);
 
       await raw.refreshData(); // Ensure UI is in sync with backend
 

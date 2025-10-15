@@ -10,6 +10,8 @@ import Reports from './pages/Reports';
 import Customers from './pages/Customers';
 import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
+import PublicCustomerStatement from './pages/PublicCustomerStatement';
+import QRCodeDemo from './pages/QRCodeDemo';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // Use hash router for Electron (file:// protocol) and browser router for web
@@ -61,7 +63,18 @@ export const router = createRouter([
             element: <Settings />,
             errorElement: <ErrorBoundary />,
           },
+          {
+            path: "qr-demo",
+            element: <QRCodeDemo />,
+            errorElement: <ErrorBoundary />,
+          },
         ],
+      },
+      // Public routes (no authentication required)
+      {
+        path: "public/customer-statement/:customerId/:billId",
+        element: <PublicCustomerStatement />,
+        errorElement: <ErrorBoundary />,
       },
     ],
   },
