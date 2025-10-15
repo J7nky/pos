@@ -54,6 +54,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   }>>({});
   const selectRef = useRef<HTMLDivElement | null>(null);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [originalFormValues, setOriginalFormValues] = useState<any>(null);
 
   // Auto-focus first field when modal opens
   useEffect(() => {
@@ -84,6 +85,15 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       }
     }
   }, [open, suppliers, form.type]);
+
+  // Capture original form values when modal opens in edit mode
+  useEffect(() => {
+    if (open && isEditMode && !originalFormValues) {
+      setOriginalFormValues({ ...form });
+    } else if (!open) {
+      setOriginalFormValues(null);
+    }
+  }, [open, isEditMode, form, originalFormValues]);
 
   // Populate existing batch items when in edit mode
   useEffect(() => {
@@ -301,6 +311,54 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     } catch (error) {
       console.error('Failed to add supplier:', error);
     }
+  };
+
+  // Check if there are any changes from the original values
+  const hasChanges = () => {
+    if (!isEditMode || !originalFormValues) {
+      return true; // Allow submission for new items
+    }
+
+    // Compare key form fields that can be edited
+    const fieldsToCompare = [
+      'supplier_id',
+      'type',
+      'porterage_fee',
+      'transfer_fee',
+      'commission_rate',
+      'status',
+      'empty_plastic',
+      'plastic_count',
+      'plastic_price',
+      'received_at'
+    ];
+
+    for (const field of fieldsToCompare) {
+      const currentValue = form[field];
+      const originalValue = originalFormValues[field];
+      
+      // Handle different data types
+      if (field === 'empty_plastic') {
+        if (!!currentValue !== !!originalValue) {
+          return true;
+        }
+      } else if (field === 'commission_rate') {
+        const currentNum = currentValue ? parseFloat(currentValue) : null;
+        const originalNum = originalValue ? parseFloat(originalValue) : null;
+        if (currentNum !== originalNum) {
+          return true;
+        }
+      } else {
+        // String comparison
+        const currentStr = currentValue ? currentValue.toString() : '';
+        const originalStr = originalValue ? originalValue.toString() : '';
+        if (currentStr !== originalStr) {
+          return true;
+        }
+      }
+    }
+
+    return false; // No changes detected
   };
 
   if (!open) return null;
@@ -817,8 +875,8 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center"
-              disabled={loading}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading || (isEditMode && !hasChanges())}
             >
               {loading ? (
                 <>

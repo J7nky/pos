@@ -1,5 +1,5 @@
 import React from 'react';
-
+import { useI18n } from '../../i18n';
 interface RecentReceivesTableProps {
   recentReceives: any[];
   products: any[];
@@ -15,10 +15,11 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
   onEdit, 
   onDelete 
 }) => {
+  const { t } = useI18n();
   return (
     <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
       <div className="p-6 border-b border-gray-200 dark:border-slate-800">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Recent Product Receives</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100"> {t('inventory.recentProductReceives')}</h2>
       </div>
       
       <div className="overflow-x-auto">

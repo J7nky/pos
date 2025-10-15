@@ -14,7 +14,7 @@ import DeleteInventoryConfirm from '../components/inventory/DeleteInventoryConfi
 import RecentReceivesTable from '../components/inventory/RecentReceivesTable';
 import ProductTable from '../components/inventory/ProductTable';
 import { Product, Supplier, InventoryItem } from '../types/inventory';
-
+import { useI18n } from '../i18n';
 
 const Inventory: React.FC = () => {
   // Data from context
@@ -185,19 +185,20 @@ const Inventory: React.FC = () => {
       showToast('error', 'Failed to delete product.');
     }
   };
+  const { t } = useI18n();
 
   return (
     <div className="p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Inventory Management</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">{t('inventory.header')}</h1>
         {activeTab === 'receive' && (
           <button
             onClick={() => setShowReceiveForm(true)}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
           >
             <Plus className="w-5 h-5 mr-2" />
-            Receive Products
+            {t('inventory.receiveProducts')}
           </button>
         )}
         {activeTab === 'stock' && (
@@ -206,7 +207,7 @@ const Inventory: React.FC = () => {
             className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
           >
             <Plus className="w-5 h-5 mr-2" />
-            Add Product
+            {t('inventory.addProduct')}
           </button>
         )}
       </div>
@@ -222,7 +223,7 @@ const Inventory: React.FC = () => {
           }`}
         >
           <Truck className="w-4 h-4 inline mr-2" />
-          Product Reception
+          {t('inventory.productReception')}
         </button>
         <button
           onClick={() => setActiveTab('stock')}
@@ -233,7 +234,7 @@ const Inventory: React.FC = () => {
           }`}
         >
           <Package className="w-4 h-4 inline mr-2" />
-          Stock Products
+          {t('inventory.stockProducts')}
         </button>
       </div>
 
@@ -258,7 +259,7 @@ const Inventory: React.FC = () => {
               <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search products..."
+                placeholder={t('inventory.searchProducts')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
@@ -343,14 +344,14 @@ const Inventory: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-slate-900 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
             <div className="p-6 border-b border-gray-200 dark:border-slate-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-slate-100">Add New Supplier</h2>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-slate-100">{t('inventory.addNewSupplier')}</h2>
             </div>
             
             <form onSubmit={handleSupplierSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                    Supplier Name *
+                    {t('inventory.supplierName')} *
                   </label>
                   <input
                     type="text"
@@ -364,7 +365,7 @@ const Inventory: React.FC = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                    Phone *
+                    {t('inventory.phone')} *
                   </label>
                   <input
                     type="tel"
@@ -378,7 +379,7 @@ const Inventory: React.FC = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                    Email
+                    {t('inventory.email')}
                   </label>
                   <input
                     type="email"
@@ -390,21 +391,21 @@ const Inventory: React.FC = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                    Type *
+                    {t('inventory.type')} *
                   </label>
                   <select
                     value={supplierForm.type}
                     onChange={(e) => setSupplierForm((prev: any) => ({ ...prev, type: e.target.value as 'commission' | 'cash' }))}
                     className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                   >
-                    <option value="commission">Commission</option>
-                    <option value="cash">Cash</option>
+                    <option value="commission">{t('inventory.typeCommission')} </option>
+                    <option value="cash">{t('inventory.typeCash')}</option>
                   </select>
                 </div>
 
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                    Address
+                    {t('inventory.address')}
                   </label>
                   <textarea
                     value={supplierForm.address}
@@ -421,14 +422,14 @@ const Inventory: React.FC = () => {
                   onClick={() => setShowAddSupplierForm(false)}
                   className="px-4 py-2 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
                 >
-                  Cancel
+                  {t('inventory.cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                   disabled={loading.supplier}
                 >
-                  {loading.supplier ? 'Adding...' : 'Add Supplier'}
+                  {loading.supplier ? t('inventory.adding') : t('inventory.addSupplier')}
                 </button>
               </div>
             </form>

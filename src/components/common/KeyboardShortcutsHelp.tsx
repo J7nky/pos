@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Keyboard, X } from 'lucide-react';
 import AccessibleModal from './AccessibleModal';
 import AccessibleButton from './AccessibleButton';
+import { useI18n } from '../../i18n';
 
 interface ShortcutGroup {
   title: string;
@@ -14,6 +15,7 @@ interface KeyboardShortcutsHelpProps {
 
 export default function KeyboardShortcutsHelp({ shortcuts }: KeyboardShortcutsHelpProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const { t } = useI18n();
 
   return (
     <>
@@ -25,7 +27,7 @@ export default function KeyboardShortcutsHelp({ shortcuts }: KeyboardShortcutsHe
         ariaLabel="Show keyboard shortcuts"
         className="text-gray-500 hover:text-gray-700"
       >
-        Shortcuts
+        {t('home.shortcuts')}
       </AccessibleButton>
 
       <AccessibleModal
