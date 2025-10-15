@@ -1,11 +1,9 @@
-import { contextBridge, ipcRenderer } from "electron";
+const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  // Thermal Printer API
-  printer: {
-    initialize: () => ipcRenderer.invoke('printer:initialize'),
-    print: (text: string) => ipcRenderer.invoke('printer:print', text),
-    openDrawer: () => ipcRenderer.invoke('printer:openDrawer'),
-    test: () => ipcRenderer.invoke('printer:test'),
-  },
+  // Printer API
+  getPrinters: () => ipcRenderer.invoke('get-printers'),
+  printDocument: (options: any) => ipcRenderer.invoke('print-document', options),
+  testPrinter: (printerName: string) => ipcRenderer.invoke('test-printer', printerName),
+  getPrinterStatus: (printerName: string) => ipcRenderer.invoke('get-printer-status', printerName),
 });

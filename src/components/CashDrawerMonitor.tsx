@@ -50,13 +50,22 @@ export default function CashDrawerMonitor() {
   useEffect(() => {
     loadCashDrawerStatus();
 
-    // Live updates from cash drawer events
+    // Live updates from cash drawer events (local changes)
     const handleCashDrawerUpdated = (e: any) => {
       if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
       loadCashDrawerStatus();
     };
+
+    // Real-time updates from other devices
+    const handleRealTimeUpdate = (e: any) => {
+      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
+      console.log('💰 Real-time cash drawer update received:', e.detail);
+      loadCashDrawerStatus();
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+      window.addEventListener('cash-drawer-realtime-update', handleRealTimeUpdate as any);
     }
 
     // Refresh every 30 seconds (fallback)
@@ -65,6 +74,7 @@ export default function CashDrawerMonitor() {
       clearInterval(interval);
       if (typeof window !== 'undefined') {
         window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+        window.removeEventListener('cash-drawer-realtime-update', handleRealTimeUpdate as any);
       }
     };
   }, [raw.storeId]);

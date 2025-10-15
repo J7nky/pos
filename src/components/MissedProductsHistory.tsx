@@ -73,6 +73,11 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
 
 
   const handleDeleteItem = async (itemId: string) => {
+    if (!itemId) {
+      setError('Invalid item ID for deletion');
+      return;
+    }
+
     if (window.confirm('Are you sure you want to delete this missed product record?')) {
       try {
         const success = await missedProductsService.deleteMissedProduct(itemId);
@@ -80,6 +85,15 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
           // Refresh context data and then reload report
           await refreshData();
           await loadReport();
+          setToast({
+            message: 'Missed product record deleted successfully',
+            type: 'success',
+            visible: true
+          });
+          // Auto-hide toast after 3 seconds
+          setTimeout(() => {
+            setToast(prev => ({ ...prev, visible: false }));
+          }, 3000);
         } else {
           setError('Failed to delete item');
         }

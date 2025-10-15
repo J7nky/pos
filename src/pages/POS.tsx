@@ -75,9 +75,145 @@ export default function POS() {
   // Add customer validation state
   const [customerError, setCustomerError] = useState<string | null>(null);
   const [customerFormError, setCustomerFormError] = useState<string | null>(null);
+  // Add printing state
+  const [isPrinting, setIsPrinting] = useState(false);
   const showToast = (type: 'success' | 'error', message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  // Receipt printing function
+  const printReceipt = async (billData: any, lineItemsData: any[], customer: any) => {
+    try {
+      setIsPrinting(true);
+      
+      // Generate receipt content
+      const receiptContent = generateReceiptContent(billData, lineItemsData, customer, products);
+      
+      // Print using Electron API
+      if ((window as any).electronAPI?.printDocument) {
+        const result = await (window as any).electronAPI.printDocument({
+          content: receiptContent,
+          printerName: 'Xprinter XP-80', // Default to Xprinter, will auto-detect if not available
+          options: {
+            margins: {
+              top: 0,
+              bottom: 0,
+              left: 0,
+              right: 0
+            },
+            printBackground: false,
+            landscape: false
+          }
+        });
+
+        if (result.success) {
+          console.log('✅ Receipt printed successfully');
+        } else {
+          console.error('❌ Receipt printing failed:', result.message);
+          showToast('error', 'Receipt printing failed: ' + result.message);
+        }
+      } else {
+        console.log('⚠️ Electron API not available, skipping receipt printing');
+      }
+    } catch (error) {
+      console.error('❌ Error printing receipt:', error);
+      showToast('error', 'Failed to print receipt');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  // Generate receipt content
+  const generateReceiptContent = (billData: any, lineItemsData: any[], customer: any, products: any[]) => {
+    // Get receipt settings from offline context
+    const receiptSettings = raw.receiptSettings || {
+      storeName: 'KIWI VEGETABLES MARKET',
+      address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
+      phone1: '+961 70 123 456',
+      phone1Name: 'Samir',
+      phone2: '03 123 456',
+      phone2Name: 'Mohammad',
+      thankYouMessage: 'Thank You!',
+      billNumberPrefix: '000',
+      showPreviousBalance: true,
+      showItemCount: true,
+      receiptWidth: 32
+    };
+
+    const date = new Date(billData.bill_date).toLocaleDateString('en-GB');
+    const customerName = customer ? customer.name : 'Walk-in Customer';
+    const customerPhone = customer ? customer.phone : '';
+    
+    // Format bill number with prefix
+    const billNumber = `${receiptSettings.billNumberPrefix}${billData.bill_number.split('-')[1] || '12345'}`;
+    
+    // Create separator line based on receipt width
+    const separator = '='.repeat(receiptSettings.receiptWidth || 32);
+    const dashSeparator = '-'.repeat(receiptSettings.receiptWidth || 32);
+    
+    let content = `${separator}
+         ${receiptSettings.storeName}
+    ${receiptSettings.address}
+      Phones: ${receiptSettings.phone1Name}: ${receiptSettings.phone1} / ${receiptSettings.phone2Name}: ${receiptSettings.phone2}
+${separator}
+Bill No: ${billNumber}         Date: ${date}
+Customer: ${customerName}`;
+
+    if (customerPhone) {
+      content += `
+Phone: ${customerPhone}`;
+    }
+
+    content += `
+${dashSeparator}
+ITEM          QTY WT(kg) PRICE  SUBT
+${dashSeparator}`;
+
+    lineItemsData.forEach((item) => {
+      const product = products.find(p => p.id === item.product_id);
+      const productName = product ? product.name : 'Unknown Product';
+      const quantity = item.quantity || 0;
+      const weight = item.weight || 0;
+      const price = item.unit_price || 0;
+      const subtotal = item.line_total || 0;
+      
+      // Format with proper padding for receipt alignment (more compact)
+      const paddedName = productName.padEnd(12).substring(0, 12);
+      const paddedQty = quantity.toString().padStart(3);
+      const paddedWeight = weight > 0 ? weight.toFixed(1).padStart(5) : '     ';
+      const paddedPrice = formatCurrency(price).padStart(7);
+      const paddedSubtotal = formatCurrency(subtotal).padStart(7);
+      
+      content += `
+${paddedName} ${paddedQty} ${paddedWeight} ${paddedPrice} ${paddedSubtotal}`;
+    });
+
+    content += `
+${dashSeparator}`;
+
+    if (receiptSettings.showItemCount) {
+      content += `
+Total Items: ${lineItemsData.length}`;
+    }
+
+    content += `
+Subtotal:                         ${formatCurrency(billData.subtotal)} LBP`;
+
+    // Show previous balance if enabled and customer has balance
+    if (receiptSettings.showPreviousBalance && customer && customer.lb_balance > 0) {
+      content += `
+Previous Balance:                 ${formatCurrency(customer.lb_balance)} LBP`;
+    }
+
+    content += `
+${dashSeparator}
+TOTAL BALANCE:                    ${formatCurrency(billData.total_amount)} LBP
+${dashSeparator}
+           💬 ${receiptSettings.thankYouMessage}
+${dashSeparator}`;
+
+    return content;
   };
 
   // Define createNewTab function before it's used
@@ -484,20 +620,33 @@ export default function POS() {
 
       // Prepare line items data
       const lineItemsData = activeTab.cart.map(item => ({
-        inventory_item_id: item.inventory_item_id,
-        product_id: item.product_id,
-        payment_method:item.payment_method,
-        supplier_id: item.supplier_id,
+        inventory_item_id: item.inventory_item_id || item.inventoryItemId,
+        product_id: item.product_id || item.productId, // Handle both snake_case and camelCase
+        payment_method: item.payment_method || item.paymentMethod,
+        supplier_id: item.supplier_id || item.supplierId,
         quantity: item.quantity,
-          unit_price: item.unit_price || 0,
-        line_total: item.line_total || 0,
+        unit_price: item.unit_price || item.unitPrice || 0,
+        line_total: item.line_total || item.lineTotal || 0,
         weight: item.weight || null,
-        received_value: item.received_value || 0,
+        received_value: item.received_value || item.receivedValue || 0,
         notes: item.notes || null,
         created_at: new Date().toISOString(),
         created_by: userProfile?.id,
         line_order: activeTab.cart.indexOf(item) + 1
       }));
+
+      // Validate line items data before processing
+      for (const item of lineItemsData) {
+        if (!item.product_id || (typeof item.product_id !== 'string' && typeof item.product_id !== 'number')) {
+          throw new Error(`Invalid product_id in cart item: ${item.product_id}. Product ID must be a string or number.`);
+        }
+        if (!item.supplier_id || (typeof item.supplier_id !== 'string' && typeof item.supplier_id !== 'number')) {
+          throw new Error(`Invalid supplier_id in cart item: ${item.supplier_id}. Supplier ID must be a string or number.`);
+        }
+        if (!item.quantity || item.quantity <= 0) {
+          throw new Error(`Invalid quantity in cart item: ${item.quantity}. Quantity must be a positive number.`);
+        }
+      }
 
       // Prepare customer balance update if needed
       let customerBalanceUpdate = null;
@@ -519,6 +668,10 @@ export default function POS() {
       // No need for separate sale_items creation since bill_line_items now contains all sale data
       // Inventory deductions and cash drawer updates are handled in the createBill function
 
+      // Print receipt after successful bill creation
+      const customer = customers.find(c => c.id === activeTab.selectedCustomer);
+      await printReceipt(billData, lineItemsData, customer);
+
       await raw.refreshData(); // Ensure UI is in sync with backend
 
       // Trigger immediate sync after sale completion for critical data
@@ -536,7 +689,7 @@ export default function POS() {
           paymentMethod: 'cash'
         });
       }
-      showToast('success', `Sale completed successfully! Bill created.`);
+      showToast('success', `Sale completed successfully! Bill created and receipt printed.`);
     } catch (error) {
       console.error('Sale processing error:', error);
       showToast('error', `Sale failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -644,10 +797,20 @@ export default function POS() {
         </div>
       </div>
 
-      {/* Add spinner overlay for isProcessing or loading.products */}
-      {(isProcessing || raw.loading.products) && (
+      {/* Add spinner overlay for isProcessing, isPrinting, or loading.products */}
+      {(isProcessing || isPrinting || raw.loading.products) && (
         <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <div className="bg-white rounded-lg p-6 flex flex-col items-center space-y-4">
+            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <div className="text-center">
+              <p className="text-lg font-medium text-gray-900">
+                {isProcessing ? 'Processing Sale...' : isPrinting ? 'Printing Receipt...' : 'Loading...'}
+              </p>
+              {isPrinting && (
+                <p className="text-sm text-gray-600 mt-1">Please wait while your receipt is being printed</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -974,6 +1137,7 @@ export default function POS() {
         onClick={handleCheckout}
         disabled={  
           isProcessing ||
+          isPrinting ||
           activeTab.cart.length === 0 ||
           // Block walk-in sales when any item has price 0
           (isWalkInCustomer && hasZeroPricedItem) ||
@@ -984,7 +1148,7 @@ export default function POS() {
         variant="success"
         size="lg"
         touchOptimized
-        loading={isProcessing}
+        loading={isProcessing || isPrinting}
         shortcut="Ctrl+Enter"
         ariaLabel="Complete sale"
         tabIndex={10006}

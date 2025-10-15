@@ -293,6 +293,7 @@ export class CashDrawerUpdateService {
               store_id: transactionData.storeId,
               created_by: transactionData.createdBy,
               created_at: new Date().toISOString(),
+              device_id: this.getDeviceId(),
               _synced: false
             });
           });
@@ -815,6 +816,19 @@ export class CashDrawerUpdateService {
         };
       }
     });
+  }
+
+  /**
+   * Get unique device ID for tracking
+   */
+  private getDeviceId(): string {
+    // Generate a unique device ID based on browser fingerprint
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx?.fillText('Device ID', 10, 10);
+    const canvasFingerprint = canvas.toDataURL();
+    
+    return `device_${Date.now()}_${btoa(canvasFingerprint).slice(0, 8)}`;
   }
 
   /**

@@ -140,10 +140,17 @@ export default function Home() {
   useEffect(() => {
     loadCashDrawerStatus();
 
-    // Live update on cash drawer changes
+    // Live update on cash drawer changes (local changes)
     const handleCashDrawerUpdated = (e: any) => {
       // Optional: check store match
       if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
+      loadCashDrawerStatus();
+    };
+
+    // Real-time updates from other devices
+    const handleRealTimeUpdate = (e: any) => {
+      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
+      console.log('💰 Real-time cash drawer update received on Home page:', e.detail);
       loadCashDrawerStatus();
     };
     
@@ -157,6 +164,7 @@ export default function Home() {
     };
     
     window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+    window.addEventListener('cash-drawer-realtime-update', handleRealTimeUpdate as any);
     window.addEventListener('undo-completed', handleUndoCompleted as any);
 
     // Refresh every 30 seconds as a fallback
@@ -164,6 +172,7 @@ export default function Home() {
     return () => {
       clearInterval(interval);
       window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+      window.removeEventListener('cash-drawer-realtime-update', handleRealTimeUpdate as any);
       window.removeEventListener('undo-completed', handleUndoCompleted as any);
     };
   }, [raw.storeId]);
@@ -309,7 +318,7 @@ export default function Home() {
   return (
     <div className="p-6">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">{t('home.welcome', { name: userProfile?.name || '' })}</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('home.welcome', { name: userProfile?.name || '' })} 🔥</h1>
         <p className="text-gray-600 mt-2">
           {t('home.subtitle')}
         </p>
@@ -398,6 +407,7 @@ export default function Home() {
         )}
   
       </div>
+
     </div>
   );
   

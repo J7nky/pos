@@ -506,6 +506,7 @@ export class MissedProductsService {
     startDate?: string,
     endDate?: string
   ): Promise<Array<{
+    id: string;
     date: string;
     productName: string;
     varianceNumber: number;
@@ -551,6 +552,7 @@ export class MissedProductsService {
         const session = sessions.find(s => s.id === mp.session_id);
         
         return {
+          id: mp.id,
           date: session ? new Date(session.opened_at).toISOString().split('T')[0] : 'Unknown Date',
           productName: mp.product_name || 'Unknown Product',
           varianceNumber: mp.variance,
@@ -571,6 +573,12 @@ export class MissedProductsService {
    */
   public async deleteMissedProduct(itemId: string): Promise<boolean> {
     try {
+      // Validate itemId
+      if (!itemId || typeof itemId !== 'string' || itemId.trim() === '') {
+        console.error('Invalid itemId provided for deletion:', itemId);
+        return false;
+      }
+
       await db.missed_products
         .where('id')
         .equals(itemId)

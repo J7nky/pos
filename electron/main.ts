@@ -1,33 +1,82 @@
-import { app, BrowserWindow } from "electron";
-import path from "path";
-import { fileURLToPath } from "url";
+const { app, BrowserWindow, ipcMain } = require("electron");
+const path = require("path");
+const { exec } = require("child_process");
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Enable hot reloading in development
+if (process.env.NODE_ENV === 'development') {
+  try {
+    require('electron-reloader')(module);
+  } catch (error) {
+    console.log('electron-reloader not available');
+  }
+}
 
-let mainWindow: BrowserWindow | null = null;
+let mainWindow: any = null;
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
+      nodeIntegration: false,
+      contextIsolation: true,
     },
   });
 
-  if (process.env.VITE_DEV_SERVER_URL) {
+  // Check for Vite dev server URL
+  const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5178';
+  console.log('🔍 Vite URL:', viteUrl);
+  
+  if (process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL) {
     // Dev: load Vite server
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    console.log('🚀 Loading Vite dev server:', viteUrl);
+    mainWindow.loadURL(viteUrl);
     mainWindow.webContents.openDevTools();
-
+    
+    // Enable hot reloading for renderer
+    mainWindow.webContents.on('did-fail-load', () => {
+      console.log('Renderer failed to load, retrying...');
+      setTimeout(() => {
+        mainWindow.loadURL(viteUrl);
+      }, 1000);
+    });
   } else {
     // Prod: load built index.html
+    console.log('📦 Loading production build');
     mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 };
 
-app.on("ready", createWindow);
+// Register IPC handlers immediately
+console.log('🔧 Registering IPC handlers immediately...');
+
+ipcMain.handle('get-printers', async () => {
+  try {
+    console.log('🔍 [IPC] Detecting printers...');
+    console.log('🔍 [IPC] MainWindow exists:', !!mainWindow);
+    console.log('🔍 [IPC] WebContents exists:', !!mainWindow?.webContents);
+    
+    // Always use Windows system command for now to avoid Electron API issues
+    console.log('🔄 [IPC] Using Windows system command for printer detection...');
+    const windowsPrinters = await getWindowsPrinters();
+    console.log('📋 [IPC] Windows system command found:', windowsPrinters);
+    
+    console.log('✅ [IPC] Final printer list:', windowsPrinters);
+    return windowsPrinters;
+  } catch (error) {
+    console.error('❌ [IPC] Error getting printers:', error);
+    return [];
+  }
+});
+
+console.log('✅ IPC handlers registered immediately');
+
+app.on("ready", () => {
+  console.log('🚀 Electron app is ready, creating window...');
+  createWindow();
+  console.log('✅ Window created');
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
@@ -35,5 +84,344 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (mainWindow === null) createWindow();
+});
+
+// Helper function to get printers using Windows system command
+function getWindowsPrinters(): Promise<any[]> {
+  return new Promise((resolve) => {
+    try {
+      exec('wmic printer get name,default /format:csv', (error: any, stdout: any) => {
+        if (error) {
+          console.log('❌ Windows printer detection failed:', error.message);
+          resolve([]);
+          return;
+        }
+        
+        try {
+          const lines = stdout.split('\n').filter((line: any) => line.trim() && !line.includes('Node'));
+          const printers = lines.map((line: any) => {
+            const parts = line.split(',');
+            const name = parts[2]?.trim(); // Name is in the 3rd column
+            const isDefault = parts[1]?.trim() === 'TRUE'; // Default is in the 2nd column
+            
+            if (name && name !== 'Name' && name !== '') {
+              return {
+                name: name,
+                displayName: name,
+                description: `Windows printer: ${name}`,
+                isDefault: isDefault,
+                status: 'available'
+              };
+            }
+            return null;
+          }).filter(Boolean);
+          
+          console.log('🖨️ Windows printers found:', printers);
+          resolve(printers);
+        } catch (parseError) {
+          console.error('❌ Error parsing Windows printer output:', parseError);
+          resolve([]);
+        }
+      });
+    } catch (execError) {
+      console.error('❌ Error executing Windows printer command:', execError);
+      resolve([]);
+    }
+  });
+}
+
+
+ipcMain.handle('print-document', async (_event: any, options: any) => {
+  try {
+    const { content, printerName, printOptions } = options;
+    
+    console.log('🖨️ Starting print job to:', printerName);
+    console.log('📄 Content length:', content.length);
+    
+    // For thermal receipt printers, use direct Windows printing
+    if (printerName && (printerName.toLowerCase().includes('xprinter') || 
+                       printerName.toLowerCase().includes('thermal') ||
+                       printerName.toLowerCase().includes('receipt'))) {
+      console.log('🔄 Using direct Windows printing for thermal printer...');
+      return await printDirectToThermalPrinter(content, printerName);
+    }
+    
+    // Fallback to Electron's print system for regular printers
+    console.log('🔄 Using Electron print system...');
+    return await printWithElectron(content, printerName, printOptions);
+    
+  } catch (error) {
+    console.error('Error printing document:', error);
+    return {
+      success: false,
+      message: 'Failed to print document',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+});
+
+// Direct printing function for thermal printers
+async function printDirectToThermalPrinter(content: string, printerName: string): Promise<any> {
+  return new Promise((resolve) => {
+    try {
+      // Create a temporary file for printing
+      const fs = require('fs');
+      const path = require('path');
+      const tempFile = path.join(process.cwd(), 'temp-receipt.txt');
+      
+      // Write content to temp file
+      fs.writeFileSync(tempFile, content, 'utf8');
+      console.log('📝 Created temp file:', tempFile);
+      
+      // Try multiple printing methods
+      tryPrintMethod1(tempFile, printerName, resolve);
+      
+    } catch (error) {
+      console.error('❌ Error in direct printing:', error);
+      resolve({
+        success: false,
+        message: 'Direct print setup failed',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+}
+
+// Method 1: PowerShell Start-Process
+function tryPrintMethod1(tempFile: string, printerName: string, resolve: Function) {
+  console.log('🔄 Trying Method 1: PowerShell Start-Process...');
+  
+  const psCommand = `Start-Process -FilePath "${tempFile}" -Verb Print -Wait`;
+  console.log('🖨️ PowerShell command:', psCommand);
+  
+  exec(`powershell -Command "${psCommand}"`, (error: any, stdout: any, stderr: any) => {
+    if (error) {
+      console.error('❌ Method 1 failed:', error.message);
+      tryPrintMethod2(tempFile, printerName, resolve);
+    } else {
+      console.log('✅ Method 1 successful');
+      console.log('📤 Print output:', stdout);
+      cleanupAndResolve(tempFile, resolve, true, 'Print job sent via PowerShell');
+    }
+  });
+}
+
+// Method 2: Windows copy command
+function tryPrintMethod2(tempFile: string, printerName: string, resolve: Function) {
+  console.log('🔄 Trying Method 2: Windows copy command...');
+  
+  const copyCommand = `copy "${tempFile}" "${printerName}"`;
+  console.log('🖨️ Copy command:', copyCommand);
+  
+  exec(copyCommand, (error: any, stdout: any, stderr: any) => {
+    if (error) {
+      console.error('❌ Method 2 failed:', error.message);
+      tryPrintMethod3(tempFile, printerName, resolve);
+    } else {
+      console.log('✅ Method 2 successful');
+      console.log('📤 Print output:', stdout);
+      cleanupAndResolve(tempFile, resolve, true, 'Print job sent via copy command');
+    }
+  });
+}
+
+// Method 3: Notepad with print
+function tryPrintMethod3(tempFile: string, printerName: string, resolve: Function) {
+  console.log('🔄 Trying Method 3: Notepad print...');
+  
+  const notepadCommand = `notepad /p "${tempFile}"`;
+  console.log('🖨️ Notepad command:', notepadCommand);
+  
+  exec(notepadCommand, (error: any, stdout: any, stderr: any) => {
+    if (error) {
+      console.error('❌ Method 3 failed:', error.message);
+      tryPrintMethod4(tempFile, printerName, resolve);
+    } else {
+      console.log('✅ Method 3 successful');
+      console.log('📤 Print output:', stdout);
+      cleanupAndResolve(tempFile, resolve, true, 'Print job sent via Notepad');
+    }
+  });
+}
+
+// Method 4: Direct file association
+function tryPrintMethod4(tempFile: string, printerName: string, resolve: Function) {
+  console.log('🔄 Trying Method 4: Direct file association...');
+  
+  const directCommand = `"${tempFile}"`;
+  console.log('🖨️ Direct command:', directCommand);
+  
+  exec(directCommand, (error: any, stdout: any, stderr: any) => {
+    if (error) {
+      console.error('❌ Method 4 failed:', error.message);
+      // All methods failed
+      cleanupAndResolve(tempFile, resolve, false, 'All printing methods failed', error.message);
+    } else {
+      console.log('✅ Method 4 successful');
+      console.log('📤 Print output:', stdout);
+      cleanupAndResolve(tempFile, resolve, true, 'Print job sent via file association');
+    }
+  });
+}
+
+// Helper function to clean up and resolve
+function cleanupAndResolve(tempFile: string, resolve: Function, success: boolean, message: string, error?: string) {
+  // Clean up temp file
+  try {
+    const fs = require('fs');
+    fs.unlinkSync(tempFile);
+    console.log('🧹 Cleaned up temp file');
+  } catch (cleanupError) {
+    console.log('⚠️ Could not clean up temp file:', cleanupError);
+  }
+  
+  resolve({
+    success,
+    message,
+    error: error || undefined
+  });
+}
+
+// Electron print system (fallback)
+async function printWithElectron(content: string, printerName: string, printOptions: any): Promise<any> {
+  try {
+    // Create a new window for printing
+    const printWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: true
+      }
+    });
+
+    // Load content optimized for receipt printing
+    await printWindow.loadURL(`data:text/html,${encodeURIComponent(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Receipt Print</title>
+        <style>
+          body {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.2;
+            margin: 0;
+            padding: 0;
+            width: 80mm;
+            white-space: pre-line;
+            color: black;
+            background: white;
+          }
+          @media print {
+            body { 
+              margin: 0; 
+              padding: 0;
+              width: 80mm;
+              font-size: 14px;
+            }
+            @page { 
+              margin: 0;
+              size: 80mm auto;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        ${content.replace(/\n/g, '<br>')}
+      </body>
+      </html>
+    `)}`);
+
+    // Wait for content to load
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Print with receipt printer optimized options
+    const printOptions_ = {
+      silent: false,
+      printBackground: false,
+      deviceName: printerName || undefined,
+      pageSize: 'A4',
+      margins: {
+        marginType: 'none',
+        top: 0,
+        bottom: 0,
+        left: 0,
+        right: 0
+      },
+      landscape: false,
+      copies: 1,
+      ...printOptions
+    };
+
+    console.log('🖨️ Printing to:', printerName, 'with options:', printOptions_);
+    await printWindow.webContents.print(printOptions_);
+    
+    // Close the print window
+    printWindow.close();
+
+    return {
+      success: true,
+      message: 'Print job submitted successfully'
+    };
+  } catch (error) {
+    console.error('❌ Electron print failed:', error);
+    throw error;
+  }
+}
+
+ipcMain.handle('test-printer', async (_event: any, printerName: string) => {
+  try {
+    // Test if printer exists and is available
+    const { webContents } = mainWindow;
+    const printers = await webContents.getPrintersAsync();
+    const printer = printers.find((p: any) => p.name === printerName);
+    
+    if (!printer) {
+      return {
+        success: false,
+        message: 'Printer not found'
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Printer is available and ready'
+    };
+  } catch (error) {
+    console.error('Error testing printer:', error);
+    return {
+      success: false,
+      message: 'Failed to test printer',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+});
+
+ipcMain.handle('get-printer-status', async (_event: any, printerName: string) => {
+  try {
+    const { webContents } = mainWindow;
+    const printers = await webContents.getPrintersAsync();
+    const printer = printers.find((p: any) => p.name === printerName);
+    
+    if (!printer) {
+      return {
+        isOnline: false,
+        isReady: false,
+        status: 'Printer not found'
+      };
+    }
+
+    return {
+      isOnline: true,
+      isReady: true,
+      status: 'Ready'
+    };
+  } catch (error) {
+    console.error('Error getting printer status:', error);
+    return {
+      isOnline: false,
+      isReady: false,
+      status: 'Error checking status'
+    };
+  }
 });
 

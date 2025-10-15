@@ -302,6 +302,34 @@ const result = { uploaded: 0, errors: [] as string[] };
                  // Handle deleted records
         for (const record of deletedRecords as any[]) {
           try {
+            // Special handling for inventory_items with foreign key constraints
+            if (tableName === 'inventory_items') {
+              // Check if this inventory item is referenced by any bill_line_items
+              const { data: referencingItems, error: refError } = await supabase
+                .from('bill_line_items')
+                .select('id')
+                .eq('inventory_item_id', record.id)
+                .limit(1);
+
+              if (refError) {
+                result.errors.push(`Failed to check references for inventory item ${record.id}: ${refError.message}`);
+                continue;
+              }
+
+              if (referencingItems && referencingItems.length > 0) {
+                // Clear the inventory_item_id reference in all line items first
+                const { error: updateError } = await supabase
+                  .from('bill_line_items')
+                  .update({ inventory_item_id: null })
+                  .eq('inventory_item_id', record.id);
+
+                if (updateError) {
+                  result.errors.push(`Failed to clear references for inventory item ${record.id}: ${updateError.message}`);
+                  continue;
+                }
+              }
+            }
+
             const { error } = await supabase
               .from(tableName as any)
               .delete()
@@ -316,7 +344,7 @@ const result = { uploaded: 0, errors: [] as string[] };
           } catch (error) {
             result.errors.push(`Delete error for ${tableName}/${record.id}: ${error}`);
           }
-}
+        }
 
 } catch (error) {
         result.errors.push(`Table ${tableName} upload error: ${error}`);
@@ -490,16 +518,44 @@ const remoteBalance = Number(remoteRecord.current_balance || 0);
 if (Math.abs(localBalance - remoteBalance) > 0.01) {
       console.warn(`💰 Cash drawer balance conflict: Local: $${localBalance.toFixed(2)}, Remote: $${remoteBalance.toFixed(2)}`);
       
-      // Use max balance to preserve transactions
-      const finalBalance = Math.max(localBalance, remoteBalance);
-      
-await db.cash_drawer_accounts.update(localRecord.id, {
-current_balance: finalBalance,
-_synced: true,
-_lastSyncedAt: new Date().toISOString()
-});
-
-      return true;
+      // For cash drawer conflicts, recalculate balance from transactions instead of using max
+      // This ensures accuracy and prevents balance inflation
+      try {
+        const { cashDrawerUpdateService } = await import('./cashDrawerUpdateService');
+        const calculatedBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(localRecord.store_id);
+        
+        console.log(`💰 Recalculated balance from transactions: $${calculatedBalance.toFixed(2)}`);
+        
+        await db.cash_drawer_accounts.update(localRecord.id, {
+          current_balance: calculatedBalance,
+          updated_at: new Date().toISOString(),
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+        
+        return true;
+      } catch (error) {
+        console.error('Error recalculating cash drawer balance:', error);
+        
+        // Fallback to timestamp-based resolution
+        const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
+        const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
+        
+        if (remoteTimestamp >= localTimestamp) {
+          await db.cash_drawer_accounts.put({
+            ...remoteRecord,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        } else {
+          await db.cash_drawer_accounts.update(localRecord.id, {
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        }
+        
+        return true;
+      }
     }
 
 const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);

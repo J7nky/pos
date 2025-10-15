@@ -15,6 +15,10 @@ import {
   Smartphone,
   Calculator,
   DollarSign,
+  Printer,
+  Building,
+  Phone,
+  MapPin,
 } from 'lucide-react';
 
 export default function Settings() {
@@ -397,6 +401,15 @@ export default function Settings() {
         </div>
 
 
+        {/* Receipt Settings */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <div className="flex items-center mb-4">
+            <SettingsIcon className="w-6 h-6 text-gray-600 mr-3" />
+            <h2 className="text-xl font-semibold text-gray-900">Receipt Settings</h2>
+          </div>
+          <ReceiptSettings />
+        </div>
+
         {/* Language */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center mb-4">
@@ -417,6 +430,260 @@ export default function Settings() {
         </div>
       </div>
 
+    </div>
+  );
+}
+
+// Receipt Settings Component
+function ReceiptSettings() {
+  const offlineData = useOfflineData();
+  
+  // Get receipt settings from offline context (with defaults)
+  const receiptSettings = offlineData?.receiptSettings || {
+    storeName: 'KIWI VEGETABLES MARKET',
+    address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
+    phone1: '+961 70 123 456',
+    phone1Name: 'Samir',
+    phone2: '03 123 456',
+    phone2Name: 'Mohammad',
+    thankYouMessage: 'Thank You!',
+    billNumberPrefix: '000',
+    showPreviousBalance: true,
+    showItemCount: true,
+    receiptWidth: 32
+  };
+
+  const [tempSettings, setTempSettings] = useState(receiptSettings);
+  const [showSaveMessage, setShowSaveMessage] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    try {
+      // Update receipt settings in offline context
+      if (offlineData?.updateReceiptSettings) {
+        await offlineData.updateReceiptSettings(tempSettings);
+        setShowSaveMessage(true);
+        setSaveError(null);
+        setTimeout(() => setShowSaveMessage(false), 2000);
+      }
+    } catch (error) {
+      console.error('Error saving receipt settings:', error);
+      setSaveError('Failed to save receipt settings');
+      setTimeout(() => setSaveError(null), 3000);
+    }
+  };
+
+  const handleInputChange = (field: string, value: string) => {
+    setTempSettings(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleCheckboxChange = (field: string, checked: boolean) => {
+    setTempSettings(prev => ({
+      ...prev,
+      [field]: checked
+    }));
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Save Message */}
+      {showSaveMessage && (
+        <div className="flex items-center px-4 py-2 bg-green-100 text-green-800 rounded-lg">
+          <CheckCircle className="w-5 h-5 mr-2" />
+          Receipt settings saved successfully!
+        </div>
+      )}
+      {saveError && (
+        <div className="flex items-center px-4 py-2 bg-red-100 text-red-800 rounded-lg">
+          <AlertTriangle className="w-5 h-5 mr-2" />
+          {saveError}
+        </div>
+      )}
+
+      {/* Store Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium text-gray-900 flex items-center">
+          <Building className="w-5 h-5 mr-2" />
+          Store Information
+        </h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Store Name
+            </label>
+            <input
+              type="text"
+              value={tempSettings.storeName}
+              onChange={(e) => handleInputChange('storeName', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="KIWI VEGETABLES MARKET"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Address
+            </label>
+            <input
+              type="text"
+              value={tempSettings.address}
+              onChange={(e) => handleInputChange('address', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="63-B2-Whole Sale Market, Tripoli - Lebanon"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Phone 1 Name
+            </label>
+            <input
+              type="text"
+              value={tempSettings.phone1Name}
+              onChange={(e) => handleInputChange('phone1Name', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Samir"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Phone 1 Number
+            </label>
+            <input
+              type="text"
+              value={tempSettings.phone1}
+              onChange={(e) => handleInputChange('phone1', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="+961 70 123 456"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Phone 2 Name
+            </label>
+            <input
+              type="text"
+              value={tempSettings.phone2Name}
+              onChange={(e) => handleInputChange('phone2Name', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Mohammad"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Phone 2 Number
+            </label>
+            <input
+              type="text"
+              value={tempSettings.phone2}
+              onChange={(e) => handleInputChange('phone2', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="03 123 456"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Receipt Options */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium text-gray-900 flex items-center">
+          <Printer className="w-5 h-5 mr-2" />
+          Receipt Options
+        </h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Thank You Message
+            </label>
+            <input
+              type="text"
+              value={tempSettings.thankYouMessage}
+              onChange={(e) => handleInputChange('thankYouMessage', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Thank You!"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Bill Number Prefix
+            </label>
+            <input
+              type="text"
+              value={tempSettings.billNumberPrefix}
+              onChange={(e) => handleInputChange('billNumberPrefix', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="000"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Receipt Width (characters)
+            </label>
+            <input
+              type="number"
+              value={tempSettings.receiptWidth}
+              onChange={(e) => handleInputChange('receiptWidth', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="32"
+              min="20"
+              max="48"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="showPreviousBalance"
+              checked={tempSettings.showPreviousBalance}
+              onChange={(e) => handleCheckboxChange('showPreviousBalance', e.target.checked)}
+              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+            />
+            <label htmlFor="showPreviousBalance" className="ml-2 block text-sm text-gray-900">
+              Show Previous Balance
+            </label>
+          </div>
+          
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="showItemCount"
+              checked={tempSettings.showItemCount}
+              onChange={(e) => handleCheckboxChange('showItemCount', e.target.checked)}
+              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+            />
+            <label htmlFor="showItemCount" className="ml-2 block text-sm text-gray-900">
+              Show Total Items Count
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Save Button */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+        >
+          <Save className="w-4 h-4 mr-2" />
+          Save Receipt Settings
+        </button>
+      </div>
     </div>
   );
 }

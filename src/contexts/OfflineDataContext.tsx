@@ -11,6 +11,7 @@ import {
 } from '../lib/db';
 import { syncService, SyncResult } from '../services/syncService';
 import { crudHelperService } from '../services/crudHelperService';
+import { realTimeSyncService } from '../services/realTimeSyncService';
 // Removed SupabaseService import - using offline-first approach only
 
 type Tables = Database['public']['Tables'];
@@ -126,6 +127,8 @@ interface OfflineDataContextType {
   updateCurrency: (newCurrency: 'USD' | 'LBP') => Promise<void>;
   updateExchangeRate: (rate: number) => Promise<void>;
   updateLanguage: (language: 'en' | 'ar' | 'fr') => Promise<void>;
+  receiptSettings: any;
+  updateReceiptSettings: (settings: any) => Promise<void>;
 
   // Additional offline-specific features
   sync: (isAutomatic?: boolean) => Promise<SyncResult>;
@@ -274,6 +277,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<'en' | 'ar' | 'fr'>('ar');
   const [cashDrawer, setCashDrawer] = useState<any>(null);
   const [stockLevels, setStockLevels] = useState<any[]>([]);
+  const [receiptSettings, setReceiptSettings] = useState<any>(() => {
+    const stored = localStorage.getItem('receiptSettings');
+    return stored ? JSON.parse(stored) : {
+      storeName: 'KIWI VEGETABLES MARKET',
+      address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
+      phone1: '+961 70 123 456',
+      phone1Name: 'Samir',
+      phone2: '03 123 456',
+      phone2Name: 'Mohammad',
+      thankYouMessage: 'Thank You!',
+      billNumberPrefix: '000',
+      showPreviousBalance: true,
+      showItemCount: true,
+      receiptWidth: 32
+    };
+  });
 
 
 
@@ -340,8 +359,20 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // initializeExchangeRates();
       // Check undo validity after data is loaded
       setTimeout(() => checkUndoValidity(), 1000);
+      
+      // Initialize real-time sync for cash drawer updates
+      if (isOnline) {
+        realTimeSyncService.initializeRealTimeSync(storeId);
+      }
     }
-  }, [storeId]);
+    
+    // Cleanup real-time sync when storeId changes or component unmounts
+    return () => {
+      if (storeId) {
+        realTimeSyncService.disconnect();
+      }
+    };
+  }, [storeId, isOnline]);
   const initializeData = async () => {
     if (!storeId) return;
 
@@ -906,6 +937,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           }
         } else {
           // Fallback to FIFO if no specific inventory item ID (legacy support)
+          // Validate product_id before using it in database query
+          if (!item.product_id || (typeof item.product_id !== 'string' && typeof item.product_id !== 'number')) {
+            console.error('Invalid product_id in line item:', item);
+            throw new Error(`Invalid product_id: ${item.product_id}. Product ID must be a string or number.`);
+          }
+          
           const inventoryRecords = await db.inventory_items
             .where('product_id')
             .equals(item.product_id)
@@ -1352,7 +1389,39 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteInventoryItem = async (id: string): Promise<void> => {
-    crudHelperService.deleteEntity('inventory_items', id);
+    try {
+      // Check if this inventory item is referenced by any bill_line_items
+      const referencingLineItems = await db.bill_line_items
+        .where('inventory_item_id')
+        .equals(id)
+        .and(item => !item._deleted)
+        .toArray();
+
+      if (referencingLineItems.length > 0) {
+        // If there are active references, we need to handle them
+        // Set inventory_item_id to null in referencing line items
+        await db.transaction('rw', [db.bill_line_items, db.inventory_items], async () => {
+          // Clear the inventory_item_id reference in all line items
+          for (const lineItem of referencingLineItems) {
+            await db.bill_line_items.update(lineItem.id, {
+              inventory_item_id: null,
+              _synced: false
+            });
+          }
+          
+          // Now we can safely delete the inventory item
+          await crudHelperService.deleteEntity('inventory_items', id);
+        });
+        
+        console.log(`Cleared ${referencingLineItems.length} references before deleting inventory item ${id}`);
+      } else {
+        // No references, safe to delete
+        await crudHelperService.deleteEntity('inventory_items', id);
+      }
+    } catch (error) {
+      console.error('Error deleting inventory item:', error);
+      throw new Error(`Failed to delete inventory item: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   const addInventoryBatch: OfflineDataContextType['addInventoryBatch'] = async ({
@@ -1608,6 +1677,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           }
         } else {
           // Fallback to FIFO if no specific inventory item ID (legacy support)
+          // Validate product_id before using it in database query
+          if (!item.product_id || (typeof item.product_id !== 'string' && typeof item.product_id !== 'number')) {
+            console.error('Invalid product_id in line item:', item);
+            throw new Error(`Invalid product_id: ${item.product_id}. Product ID must be a string or number.`);
+          }
+          
           const inventoryRecords = await db.inventory_items
             .where('product_id')
             .equals(item.product_id)
@@ -2681,7 +2756,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateReceiptSettings = async (newSettings: any) => {
+    try {
+      // Update local state immediately
+      setReceiptSettings(newSettings);
 
+      // Save to localStorage
+      localStorage.setItem('receiptSettings', JSON.stringify(newSettings));
+
+      console.log('✅ Receipt settings updated locally:', newSettings);
+    } catch (error) {
+      console.error('❌ Error updating receipt settings:', error);
+      // Revert local state on error
+      setReceiptSettings(receiptSettings);
+    }
+  };
 
   const deductInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
     console.log('deductInventoryQuantity', productId, supplierId, quantity);
@@ -2978,6 +3067,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateCurrency,
       updateExchangeRate,
       updateLanguage,
+      receiptSettings,
+      updateReceiptSettings,
 
       // Additional offline-specific features
       sync: performSync,
