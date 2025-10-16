@@ -5,7 +5,7 @@ const fr = {
     actions: { cancel: 'Annuler', save: 'Enregistrer', delete: 'Supprimer', edit: 'Modifier', add: 'Ajouter', view: 'Voir', close: 'Fermer', export: 'Exporter', refresh: 'Rafraîchir', search: 'Rechercher', details: 'Détails' },
     status: { online: 'En ligne', offline: 'Hors ligne', synced: 'Synchronisé', unsyncedCount: '{{count}} non synchronisé(s)' },
     placeholders: { search: 'Rechercher...', optional: 'Facultatif' },
-    labels: { units: 'unités', kg: 'kg', piece: 'Pièce', box: 'Boîte', bag: 'Sac', bundle: 'Lot', dozen: 'Douzaine' },
+    labels: { units: 'unités', kg: 'kg', piece: 'Pièce', box: 'Boîte', bag: 'Sac', bundle: 'Lot', dozen: 'Douzaine', image: 'Image', name: 'Nom' },
     confirmations: { fullResyncConfirm: 'Cela effacera les données locales et retéléchargera depuis le serveur. Continuer ?' },
     alerts: { connectionRestored: 'Connexion rétablie', autoSyncingChanges: 'Synchronisation automatique de vos modifications...' }
   },
@@ -99,6 +99,7 @@ const fr = {
     quantityLabel: 'Quantité',
     weightOptional: 'Poids (facultatif)',
     priceOfPlastics: 'Prix des plastiques',
+    noProducts: 'Aucun produit trouvé',
     header: 'Gestion de stock', 
     receiveProducts: 'Réception produits', 
     addProduct: 'Ajouter produit', 

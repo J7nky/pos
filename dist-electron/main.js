@@ -121,15 +121,16 @@ function getWindowsPrinters() {
 }
 ipcMain.handle('print-document', async (_event, options) => {
     try {
-        const { content, printerName, printOptions } = options;
+        const { content, printerName, printOptions, qrCodeData, qrCodeUrl } = options;
         console.log('🖨️ Starting print job to:', printerName);
         console.log('📄 Content length:', content.length);
+        console.log('📱 QR Code Data:', qrCodeUrl ? 'Available' : 'Not available');
         // For thermal receipt printers, use direct Windows printing
         if (printerName && (printerName.toLowerCase().includes('xprinter') ||
             printerName.toLowerCase().includes('thermal') ||
             printerName.toLowerCase().includes('receipt'))) {
             console.log('🔄 Using direct Windows printing for thermal printer...');
-            return await printDirectToThermalPrinter(content, printerName);
+            return await printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl);
         }
         // Fallback to Electron's print system for regular printers
         console.log('🔄 Using Electron print system...');
@@ -145,15 +146,22 @@ ipcMain.handle('print-document', async (_event, options) => {
     }
 });
 // Direct printing function for thermal printers
-async function printDirectToThermalPrinter(content, printerName) {
+async function printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl) {
     return new Promise((resolve) => {
         try {
-            // Create a temporary file for printing
             const fs = require('fs');
             const path = require('path');
+            // If QR code is present, replace placeholder with ESC/POS commands
+            let finalContent = content;
+            if (qrCodeUrl && content.includes('[QR_CODE_PLACEHOLDER]')) {
+                // Generate ESC/POS QR code commands
+                const qrCodeCommands = generateESCPOSQRCode(qrCodeUrl);
+                finalContent = content.replace('[QR_CODE_PLACEHOLDER]', qrCodeCommands);
+                console.log('✅ QR code placeholder replaced with ESC/POS commands');
+            }
             const tempFile = path.join(process.cwd(), 'temp-receipt.txt');
             // Write content to temp file
-            fs.writeFileSync(tempFile, content, 'utf8');
+            fs.writeFileSync(tempFile, finalContent, 'utf8');
             console.log('📝 Created temp file:', tempFile);
             // Try multiple printing methods
             tryPrintMethod1(tempFile, printerName, resolve);
@@ -167,6 +175,32 @@ async function printDirectToThermalPrinter(content, printerName) {
             });
         }
     });
+}
+// Generate ESC/POS QR code commands for thermal printers
+function generateESCPOSQRCode(url) {
+    // ESC/POS QR code commands for Xprinter
+    // This is a simplified version - actual implementation would need binary data
+    const ESC = '\x1B';
+    const GS = '\x1D';
+    // QR code model selection (GS ( k pL pH cn fn n)
+    // Model 2 (most common)
+    const selectModel = `${GS}(k\x04\x00\x31\x41\x32\x00`;
+    // Set QR code size (1-16, where 8 is ~1 inch square)
+    const setSize = `${GS}(k\x03\x00\x31\x43\x06`; // Size 6
+    // Set error correction level (L=48, M=49, Q=50, H=51)
+    const setErrorLevel = `${GS}(k\x03\x00\x31\x45\x49`; // Level M (49)
+    // Store QR code data
+    const urlLength = url.length;
+    const pL = (urlLength + 3) % 256;
+    const pH = Math.floor((urlLength + 3) / 256);
+    const storeData = `${GS}(k${String.fromCharCode(pL)}${String.fromCharCode(pH)}\x31\x50\x30${url}`;
+    // Print QR code
+    const printQR = `${GS}(k\x03\x00\x31\x51\x30`;
+    // Center align
+    const centerAlign = `${ESC}a\x01`;
+    const leftAlign = `${ESC}a\x00`;
+    // Combine all commands
+    return `${centerAlign}${selectModel}${setSize}${setErrorLevel}${storeData}${printQR}${leftAlign}\n`;
 }
 // Method 1: PowerShell Start-Process
 function tryPrintMethod1(tempFile, printerName, resolve) {

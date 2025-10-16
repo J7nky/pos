@@ -56,6 +56,356 @@ export default function POS() {
   const { formatCurrency } = useCurrency();
   const { t } = useI18n();
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
+
+  // Function to convert QR code data URL to ASCII art for thermal printing
+  const convertQRCodeToASCII = async (qrCodeDataUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve('QR Code: [Error generating ASCII]');
+          return;
+        }
+
+        // Set canvas size to match QR code
+        const size = 32; // ASCII art size
+        canvas.width = size;
+        canvas.height = size;
+
+        // Draw QR code image to canvas
+        ctx.drawImage(img, 0, 0, size, size);
+
+        // Get image data
+        const imageData = ctx.getImageData(0, 0, size, size);
+        const data = imageData.data;
+
+        // Convert to ASCII art
+        let ascii = '';
+        for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+            const index = (y * size + x) * 4;
+            const r = data[index];
+            const g = data[index + 1];
+            const b = data[index + 2];
+            const brightness = (r + g + b) / 3;
+            
+            // Use different characters based on brightness
+            if (brightness < 85) {
+              ascii += '██'; // Dark pixel
+            } else if (brightness < 170) {
+              ascii += '▓▓'; // Medium pixel
+            } else {
+              ascii += '  '; // Light pixel (space)
+            }
+          }
+          ascii += '\n';
+        }
+        resolve(ascii);
+      };
+      img.onerror = () => {
+        resolve('QR Code: [Error loading image]');
+      };
+      img.src = qrCodeDataUrl;
+    });
+  };
+
+  // Alternative: Generate a simple QR code pattern using text
+  const generateSimpleQRPattern = (customerId: string, billId: string): string => {
+    // Create a simple pattern based on customer and bill IDs
+    const hash = (customerId + billId).split('').reduce((a, b) => {
+      a = ((a << 5) - a) + b.charCodeAt(0);
+      return a & a;
+    }, 0);
+    
+    const size = 16; // Smaller pattern for thermal printer
+    let pattern = '';
+    
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const index = (y * size + x) + hash;
+        const isDark = (index % 3 === 0) || (index % 7 === 0);
+        pattern += isDark ? '██' : '  ';
+      }
+      pattern += '\n';
+    }
+    
+    return pattern;
+  };
+
+  // Generate HTML preview with actual QR code image
+  const generateReceiptHTML = async (billData: any, lineItemsData: any[], customer: any, products: any[], qrCodeData?: any) => {
+    // Get receipt settings from offline context
+    const receiptSettings = raw.receiptSettings || {
+      storeName: 'KIWI VEGETABLES MARKET',
+      address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
+      phone1: '+961 70 123 456',
+      phone1Name: 'Samir',
+      phone2: '03 123 456',
+      phone2Name: 'Mohammad',
+      thankYouMessage: 'Thank You!',
+      billNumberPrefix: '000',
+      showPreviousBalance: true,
+      showItemCount: true,
+      receiptWidth: 32
+    };
+
+    const date = new Date(billData.bill_date).toLocaleDateString('en-GB');
+    const customerName = customer ? customer.name : 'Walk-in Customer';
+    const customerPhone = customer ? customer.phone : '';
+    
+    // Format bill number with prefix
+    const billNumber = `${receiptSettings.billNumberPrefix}${billData.bill_number.split('-')[1] || '12345'}`;
+    
+    // Generate items HTML
+    let itemsHTML = '';
+    lineItemsData.forEach((item) => {
+      const product = products.find(p => p.id === item.product_id);
+      const productName = product ? product.name : 'Unknown Product';
+      const quantity = item.quantity || 0;
+      const weight = item.weight || 0;
+      const price = item.unit_price || 0;
+      const subtotal = item.line_total || 0;
+      
+      itemsHTML += `
+        <tr>
+          <td>${productName}</td>
+          <td>${quantity}</td>
+          <td>${weight > 0 ? weight.toFixed(1) + ' kg' : '-'}</td>
+          <td>${formatCurrency(price)}</td>
+          <td>${formatCurrency(subtotal)}</td>
+        </tr>`;
+    });
+
+    // Generate QR code section
+    let qrCodeSection = '';
+    if (qrCodeData && customer) {
+      if (qrCodeData.qrCodeDataUrl) {
+        qrCodeSection = `
+          <div class="qr-section">
+            <h3>📱 Scan QR code for account statement</h3>
+            <div class="qr-code-container">
+              <img src="${qrCodeData.qrCodeDataUrl}" alt="QR Code" class="qr-code-image" />
+              <p class="qr-info">Customer: ${customer.name}</p>
+              <p class="qr-info">Bill: ${billData.bill_number}</p>
+              ${qrCodeData.qrCodeUrl ? `<p class="qr-url">URL: ${qrCodeData.qrCodeUrl}</p>` : ''}
+            </div>
+          </div>`;
+      } else {
+        qrCodeSection = `
+          <div class="qr-section">
+            <h3>📱 QR Code for account statement</h3>
+            <div class="qr-code-container">
+              <p class="qr-placeholder">QR Code will be printed here</p>
+              <p class="qr-info">Customer: ${customer.name}</p>
+              <p class="qr-info">Bill: ${billData.bill_number}</p>
+            </div>
+          </div>`;
+      }
+    }
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt Preview - ${billNumber}</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .receipt {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border: 1px solid #ddd;
+        }
+        .header {
+            text-align: center;
+            border-bottom: 2px solid #333;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .store-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .address {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .phones {
+            font-size: 11px;
+            color: #666;
+        }
+        .bill-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        .customer-info {
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 15px;
+        }
+        .items-table th {
+            background: #f0f0f0;
+            padding: 8px 4px;
+            text-align: left;
+            font-size: 12px;
+            border-bottom: 1px solid #ccc;
+        }
+        .items-table td {
+            padding: 6px 4px;
+            font-size: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        .summary {
+            border-top: 1px solid #333;
+            padding-top: 10px;
+            margin-top: 15px;
+        }
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        .total {
+            font-weight: bold;
+            font-size: 16px;
+            border-top: 2px solid #333;
+            padding-top: 10px;
+            margin-top: 10px;
+        }
+        .thank-you {
+            text-align: center;
+            margin: 15px 0;
+            font-style: italic;
+        }
+        .qr-section {
+            border-top: 1px solid #333;
+            padding-top: 15px;
+            margin-top: 15px;
+            text-align: center;
+        }
+        .qr-section h3 {
+            margin: 0 0 15px 0;
+            font-size: 14px;
+        }
+        .qr-code-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        .qr-code-image {
+            max-width: 200px;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .qr-placeholder {
+            background: #f0f0f0;
+            border: 2px dashed #ccc;
+            padding: 40px;
+            border-radius: 8px;
+            color: #666;
+            font-style: italic;
+        }
+        .qr-info {
+            margin: 5px 0;
+            font-size: 12px;
+            color: #666;
+        }
+        .qr-url {
+            font-size: 10px;
+            color: #999;
+            word-break: break-all;
+        }
+        .note {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 20px;
+            font-size: 12px;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="receipt">
+        <div class="header">
+            <div class="store-name">${receiptSettings.storeName}</div>
+            <div class="address">${receiptSettings.address}</div>
+            <div class="phones">Phones: ${receiptSettings.phone1Name}: ${receiptSettings.phone1} / ${receiptSettings.phone2Name}: ${receiptSettings.phone2}</div>
+        </div>
+        
+        <div class="bill-info">
+            <span>Bill No: ${billNumber}</span>
+            <span>Date: ${date}</span>
+        </div>
+        
+        <div class="customer-info">
+            <div>Customer: ${customerName}</div>
+            ${customerPhone ? `<div>Phone: ${customerPhone}</div>` : ''}
+        </div>
+        
+        <table class="items-table">
+            <thead>
+                <tr>
+                    <th>ITEM</th>
+                    <th>QTY</th>
+                    <th>WT(kg)</th>
+                    <th>PRICE</th>
+                    <th>SUBT</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${itemsHTML}
+            </tbody>
+        </table>
+        
+        ${receiptSettings.showItemCount ? `<div class="summary-row">Total Items: ${lineItemsData.length}</div>` : ''}
+        
+        <div class="summary">
+            <div class="summary-row">Subtotal: ${formatCurrency(billData.subtotal)} LBP</div>
+            ${receiptSettings.showPreviousBalance && customer && customer.lb_balance > 0 ? 
+              `<div class="summary-row">Previous Balance: ${formatCurrency(customer.lb_balance)} LBP</div>` : ''}
+        </div>
+        
+        <div class="total">
+            <div class="summary-row">TOTAL BALANCE: ${formatCurrency(billData.total_amount)} LBP</div>
+        </div>
+        
+        <div class="thank-you">💬 ${receiptSettings.thankYouMessage}</div>
+        
+        ${qrCodeSection}
+    </div>
+    
+    <div class="note">
+        <strong>Note:</strong> This is a preview of how the receipt will look. The QR code shown above is the actual scannable code that will be printed on the thermal printer. You can test scanning it with your phone camera or QR scanner app.
+    </div>
+</body>
+</html>`;
+
+    return html;
+  };
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
   const [activeTabs, setActiveTabs] = useLocalStorage<BillTab[]>('pos_active_tabs', []);
   const [activeTabId, setActiveTabId] = useLocalStorage<string>('pos_active_tab_id', '');
@@ -84,19 +434,57 @@ export default function POS() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  // Function to download receipt content as text file
+  const downloadReceipt = async (billData: any, lineItemsData: any[], customer: any, qrCodeData?: any) => {
+    try {
+      // Generate receipt content
+      const receiptContent = await generateReceiptContent(billData, lineItemsData, customer, products, qrCodeData);
+      
+      // Create and download the text file
+      const textBlob = new Blob([receiptContent], { type: 'text/plain;charset=utf-8' });
+      const textUrl = URL.createObjectURL(textBlob);
+      const textLink = document.createElement('a');
+      textLink.href = textUrl;
+      textLink.download = `receipt-${billData.bill_number}-${new Date().toISOString().split('T')[0]}.txt`;
+      document.body.appendChild(textLink);
+      textLink.click();
+      document.body.removeChild(textLink);
+      URL.revokeObjectURL(textUrl);
+      
+      // Create and download the HTML preview file
+      const htmlContent = await generateReceiptHTML(billData, lineItemsData, customer, products, qrCodeData);
+      const htmlBlob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+      const htmlUrl = URL.createObjectURL(htmlBlob);
+      const htmlLink = document.createElement('a');
+      htmlLink.href = htmlUrl;
+      htmlLink.download = `receipt-preview-${billData.bill_number}-${new Date().toISOString().split('T')[0]}.html`;
+      document.body.appendChild(htmlLink);
+      htmlLink.click();
+      document.body.removeChild(htmlLink);
+      URL.revokeObjectURL(htmlUrl);
+      
+      showToast('success', 'Receipt files downloaded successfully (TXT + HTML)');
+    } catch (error) {
+      console.error('❌ Error downloading receipt:', error);
+      showToast('error', 'Failed to download receipt');
+    }
+  };
+
   // Receipt printing function
   const printReceipt = async (billData: any, lineItemsData: any[], customer: any, qrCodeData?: any) => {
     try {
       setIsPrinting(true);
       
       // Generate receipt content
-      const receiptContent = generateReceiptContent(billData, lineItemsData, customer, products, qrCodeData);
+      const receiptContent = await generateReceiptContent(billData, lineItemsData, customer, products, qrCodeData);
       
       // Print using Electron API
       if ((window as any).electronAPI?.printDocument) {
         const result = await (window as any).electronAPI.printDocument({
           content: receiptContent,
           printerName: 'Xprinter XP-80', // Default to Xprinter, will auto-detect if not available
+          qrCodeData: qrCodeData?.qrCodeDataUrl, // Pass QR code image data for ESC/POS printing
+          qrCodeUrl: qrCodeData?.qrCodeUrl, // Pass QR code URL for ESC/POS encoding
           options: {
             margins: {
               top: 0,
@@ -127,7 +515,7 @@ export default function POS() {
   };
 
   // Generate receipt content
-  const generateReceiptContent = (billData: any, lineItemsData: any[], customer: any, products: any[], qrCodeData?: any) => {
+  const generateReceiptContent = async (billData: any, lineItemsData: any[], customer: any, products: any[], qrCodeData?: any) => {
     // Get receipt settings from offline context
     const receiptSettings = raw.receiptSettings || {
       storeName: 'KIWI VEGETABLES MARKET',
@@ -220,7 +608,7 @@ ${dashSeparator}`;
       content += `
 📱 Scan QR code for account statement
 ${dashSeparator}
-[QR CODE WOULD BE PRINTED HERE]
+[QR_CODE_PLACEHOLDER]
 Customer: ${customer.name}
 Bill: ${billData.bill_number}
 ${dashSeparator}`;
@@ -703,6 +1091,9 @@ ${dashSeparator}`;
       // Print receipt after successful bill creation
       const customer = customers.find(c => c.id === activeTab.selectedCustomer);
       await printReceipt(billData, lineItemsData, customer, qrCodeData);
+      
+      // Also download receipt for preview/testing
+      await downloadReceipt(billData, lineItemsData, customer, qrCodeData);
 
       await raw.refreshData(); // Ensure UI is in sync with backend
 
@@ -1163,7 +1554,7 @@ ${dashSeparator}`;
                 />
               </div>
  {/* Fixed Complete Sale Button at Bottom of Cart */}
- <div className="sticky bottom-0 bg-white p-4 shadow-md">
+ <div className="sticky bottom-0 bg-white p-4 shadow-md space-y-2">
       <AccessibleButton
         ref={completeSaleRef}
         onClick={handleCheckout}
@@ -1188,6 +1579,61 @@ ${dashSeparator}`;
       >
         Complete Sale
       </AccessibleButton>
+      
+      {/* Test Download Button - Only show when customer is selected and cart has items */}
+      {activeTab.selectedCustomer && activeTab.cart.length > 0 && (
+        <AccessibleButton
+          onClick={async () => {
+            try {
+              // Create test bill data
+              const testBillData = {
+                id: 'test-bill-' + Date.now(),
+                bill_number: 'TEST-' + Date.now(),
+                subtotal: activeTab.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+                total_amount: activeTab.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+                bill_date: new Date().toISOString()
+              };
+              
+              const testLineItems = activeTab.cart.map(item => ({
+                product_id: item.id,
+                quantity: item.quantity,
+                unit_price: item.price,
+                line_total: item.price * item.quantity,
+                product_name: item.name
+              }));
+              
+              const customer = customers.find(c => c.id === activeTab.selectedCustomer);
+              
+              // Generate QR code for test
+              let testQrCodeData = null;
+              if (customer) {
+                try {
+                  testQrCodeData = await generateQRCodeForReceipt(
+                    customer.id,
+                    testBillData.id,
+                    testBillData.bill_number,
+                    customer.name
+                  );
+                } catch (qrError) {
+                  console.warn('Failed to generate test QR code:', qrError);
+                }
+              }
+              
+              await downloadReceipt(testBillData, testLineItems, customer, testQrCodeData);
+            } catch (error) {
+              console.error('Error generating test receipt:', error);
+              showToast('error', 'Failed to generate test receipt');
+            }
+          }}
+          disabled={isProcessing || isPrinting}
+          size="sm"
+          variant="outline"
+          className="w-full"
+          title="Download receipt preview with QR code"
+        >
+          📄 Download Receipt Preview
+        </AccessibleButton>
+      )}
     </div>
               {/* Complete Sale button moved to Cart component */}
             </div>

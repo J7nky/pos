@@ -36,7 +36,9 @@ const ar = {
       box: 'صندوق',
       bag: 'كيس',
       bundle: 'ربطة',
-      dozen: 'دزينة'
+      dozen: 'دزينة',
+      image: 'الصورة',
+      name: 'الاسم'
     },
     confirmations: {
       fullResyncConfirm: 'سيتم مسح البيانات المحلية وإعادة تنزيلها من الخادم. هل تريد المتابعة؟'
@@ -245,7 +247,8 @@ const ar = {
     productPhotoOptional: 'صورة المنتج (اختياري)',
     uploadImageCta: 'انقر لرفع الصورة',
     uploadImageHint: 'PNG, JPG حتى 5MB',
-    editProductTitle: 'تعديل المنتج'
+    editProductTitle: 'تعديل المنتج',
+    noProducts: 'لا توجد منتجات'
 
   },
   pos: {

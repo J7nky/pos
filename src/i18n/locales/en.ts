@@ -4,7 +4,7 @@ const en = {
     actions: { cancel: 'Cancel', save: 'Save', delete: 'Delete', edit: 'Edit', add: 'Add', view: 'View', close: 'Close', export: 'Export', refresh: 'Refresh', search: 'Search', details: 'Details' },
     status: { online: 'Online', offline: 'Offline', synced: 'Synced', unsyncedCount: '{{count}} unsynced' },
     placeholders: { search: 'Search...', optional: 'Optional' },
-    labels: { units: 'units', kg: 'kg', piece: 'Piece', box: 'Box', bag: 'Bag', bundle: 'Bundle', dozen: 'Dozen' },
+    labels: { units: 'units', kg: 'kg', piece: 'Piece', box: 'Box', bag: 'Bag', bundle: 'Bundle', dozen: 'Dozen', image: 'Image', name: 'Name' },
     confirmations: { fullResyncConfirm: 'This will clear all local data and re-download from server. Continue?' },
     alerts: { connectionRestored: 'Connection Restored', autoSyncingChanges: 'Auto-syncing your changes...' }
   },
@@ -117,7 +117,8 @@ const en = {
     editProductTitle: 'Edit Product',
     unitLabel: 'Unit',
     quantityLabel: 'Quantity',
-    weightOptional: 'Weight (Optional)'
+    weightOptional: 'Weight (Optional)',
+    noProducts: 'No products found'
   },
   pos: { 
     header: 'Point of Sale', 

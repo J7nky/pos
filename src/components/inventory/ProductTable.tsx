@@ -1,16 +1,52 @@
 import React from 'react';
+import { useI18n } from '../../i18n';
 
 interface ProductTableProps {
   products: any[];
   onEdit: (product: any) => void;
   onDelete: (product: any) => void;
+  loading?: boolean;
 }
 
-const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete }) => {
+const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete, loading = false }) => {
+  const { t } = useI18n();
+  
+  if (loading) {
+    return (
+      <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
+        <div className="p-6 border-b border-gray-200 dark:border-slate-800">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">{t('inventory.stockProducts')}</h2>
+        </div>
+        <div className="p-6 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-gray-500 dark:text-slate-400">{t('app.loading')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (products.length === 0) {
+    return (
+      <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
+        <div className="p-6 border-b border-gray-200 dark:border-slate-800">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">{t('inventory.stockProducts')}</h2>
+        </div>
+        <div className="p-6 text-center">
+          <div className="w-16 h-16 bg-gray-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+          </div>
+          <p className="text-gray-500 dark:text-slate-400">{t('inventory.noProducts')}</p>
+        </div>
+      </div>
+    );
+  }
+  
   return (
     <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
       <div className="p-6 border-b border-gray-200 dark:border-slate-800">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Stock Products</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">{t('inventory.stockProducts')}</h2>
       </div>
       
       <div className="overflow-x-auto">
@@ -18,16 +54,16 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete 
           <thead className="bg-gray-50 dark:bg-slate-800">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Image
+                {t('common.labels.image')}
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Name
+                {t('inventory.productName')}
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Category
+                {t('inventory.category')}
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Actions
+                {t('inventory.actions')}
               </th>
             </tr>
           </thead>
@@ -54,13 +90,13 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete 
                       onClick={() => onEdit(product)} 
                       className="text-blue-600 hover:text-blue-800 hover:underline transition-colors"
                     >
-                      Edit
+                      {t('inventory.edit')}
                     </button>
                     <button 
                       onClick={() => onDelete(product)} 
                       className="text-red-600 hover:text-red-800 hover:underline transition-colors"
                     >
-                      Delete
+                      {t('inventory.delete')}
                     </button>
                   </div>
                 </td>
