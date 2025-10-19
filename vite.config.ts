@@ -19,4 +19,8 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
   },
+  define: {
+    // Set the public URL for QR code generation in development
+    'import.meta.env.VITE_PUBLIC_URL': JSON.stringify('https://souq-trablous.com'),
+  },
 });

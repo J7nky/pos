@@ -30,6 +30,12 @@ export default function PublicCustomerStatement() {
   const { customerId, billId } = useParams<{ customerId: string; billId: string }>();
   const navigate = useNavigate();
   
+  // Debug logging
+  console.log('🔍 PublicCustomerStatement loaded:');
+  console.log('   - Customer ID:', customerId);
+  console.log('   - Bill ID:', billId);
+  console.log('   - Current URL:', window.location.href);
+  
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [bill, setBill] = useState<any>(null);
@@ -54,16 +60,64 @@ export default function PublicCustomerStatement() {
     setError(null);
 
     try {
-      // In a real implementation, you would make API calls to fetch the data
-      // For now, we'll simulate the data loading
-      // You'll need to create API endpoints to serve this public data
-      
-      // TODO: Replace with actual API calls
-      // const response = await fetch(`/api/public/customer-statement/${customerId}/${billId}`);
-      // const data = await response.json();
-      
-      // For demonstration, we'll show a placeholder
-      setError('Public API endpoints need to be implemented. This is a demo of the QR code functionality.');
+      // Create mock data for demonstration
+      const mockCustomer: Customer = {
+        id: customerId,
+        name: `Customer ${customerId}`,
+        email: `customer${customerId}@example.com`,
+        phone: '+1234567890',
+        address: '123 Main St, City, Country',
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        lb_balance: 0,
+        usd_balance: 0
+      };
+
+      const mockBill = {
+        id: billId,
+        bill_number: `BILL-${billId}`,
+        customer_id: customerId,
+        total_amount: 150.00,
+        paid_amount: 150.00,
+        status: 'paid',
+        created_at: new Date().toISOString(),
+        items: [
+          {
+            product_name: 'Sample Product 1',
+            quantity: 2,
+            unit_price: 50.00,
+            total_price: 100.00
+          },
+          {
+            product_name: 'Sample Product 2',
+            quantity: 1,
+            unit_price: 50.00,
+            total_price: 50.00
+          }
+        ]
+      };
+
+      const mockStatement: AccountStatement = {
+        customer: mockCustomer,
+        currentBalance: 0,
+        totalPurchases: 150.00,
+        totalPayments: 150.00,
+        transactions: [
+          {
+            id: '1',
+            type: 'sale',
+            amount: 150.00,
+            description: `Bill ${mockBill.bill_number}`,
+            date: mockBill.created_at,
+            balance: 0
+          }
+        ],
+        bills: [mockBill]
+      };
+
+      setCustomer(mockCustomer);
+      setBill(mockBill);
+      setStatement(mockStatement);
       
     } catch (err) {
       console.error('Error loading customer statement:', err);
@@ -177,7 +231,7 @@ export default function PublicCustomerStatement() {
             <div className="bg-gray-50 rounded-lg p-4 mb-4">
               <h3 className="font-semibold text-gray-900 mb-2">QR Code URL Structure:</h3>
               <code className="text-sm text-gray-700 break-all">
-                {window.location.origin}/public/customer-statement/{customerId}/{billId}
+                {import.meta.env.VITE_PUBLIC_URL || window.location.origin}/public/customer-statement/{customerId}/{billId}
               </code>
             </div>
           </div>

@@ -52,6 +52,13 @@ export class QRCodeService {
     // Create the public URL for customer account statement
     const publicUrl = `${this.baseUrl}/public/customer-statement/${customerId}/${billId}`;
     
+    // Debug logging
+    console.log('🔍 QR Code URL Generation:');
+    console.log('   - Base URL:', this.baseUrl);
+    console.log('   - Customer ID:', customerId);
+    console.log('   - Bill ID:', billId);
+    console.log('   - Generated URL:', publicUrl);
+    
     // Generate QR code as data URL
     const qrCodeDataUrl = await QRCode.toDataURL(publicUrl, {
       width: options?.size || 200,

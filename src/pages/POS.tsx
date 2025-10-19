@@ -57,82 +57,6 @@ export default function POS() {
   const { t } = useI18n();
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
 
-  // Function to convert QR code data URL to ASCII art for thermal printing
-  const convertQRCodeToASCII = async (qrCodeDataUrl: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve('QR Code: [Error generating ASCII]');
-          return;
-        }
-
-        // Set canvas size to match QR code
-        const size = 32; // ASCII art size
-        canvas.width = size;
-        canvas.height = size;
-
-        // Draw QR code image to canvas
-        ctx.drawImage(img, 0, 0, size, size);
-
-        // Get image data
-        const imageData = ctx.getImageData(0, 0, size, size);
-        const data = imageData.data;
-
-        // Convert to ASCII art
-        let ascii = '';
-        for (let y = 0; y < size; y++) {
-          for (let x = 0; x < size; x++) {
-            const index = (y * size + x) * 4;
-            const r = data[index];
-            const g = data[index + 1];
-            const b = data[index + 2];
-            const brightness = (r + g + b) / 3;
-            
-            // Use different characters based on brightness
-            if (brightness < 85) {
-              ascii += '██'; // Dark pixel
-            } else if (brightness < 170) {
-              ascii += '▓▓'; // Medium pixel
-            } else {
-              ascii += '  '; // Light pixel (space)
-            }
-          }
-          ascii += '\n';
-        }
-        resolve(ascii);
-      };
-      img.onerror = () => {
-        resolve('QR Code: [Error loading image]');
-      };
-      img.src = qrCodeDataUrl;
-    });
-  };
-
-  // Alternative: Generate a simple QR code pattern using text
-  const generateSimpleQRPattern = (customerId: string, billId: string): string => {
-    // Create a simple pattern based on customer and bill IDs
-    const hash = (customerId + billId).split('').reduce((a, b) => {
-      a = ((a << 5) - a) + b.charCodeAt(0);
-      return a & a;
-    }, 0);
-    
-    const size = 16; // Smaller pattern for thermal printer
-    let pattern = '';
-    
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const index = (y * size + x) + hash;
-        const isDark = (index % 3 === 0) || (index % 7 === 0);
-        pattern += isDark ? '██' : '  ';
-      }
-      pattern += '\n';
-    }
-    
-    return pattern;
-  };
 
   // Generate HTML preview with actual QR code image
   const generateReceiptHTML = async (billData: any, lineItemsData: any[], customer: any, products: any[], qrCodeData?: any) => {
@@ -434,57 +358,64 @@ export default function POS() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Function to download receipt content as text file
-  const downloadReceipt = async (billData: any, lineItemsData: any[], customer: any, qrCodeData?: any) => {
-    try {
-      // Generate receipt content
-      const receiptContent = await generateReceiptContent(billData, lineItemsData, customer, products, qrCodeData);
-      
-      // Create and download the text file
-      const textBlob = new Blob([receiptContent], { type: 'text/plain;charset=utf-8' });
-      const textUrl = URL.createObjectURL(textBlob);
-      const textLink = document.createElement('a');
-      textLink.href = textUrl;
-      textLink.download = `receipt-${billData.bill_number}-${new Date().toISOString().split('T')[0]}.txt`;
-      document.body.appendChild(textLink);
-      textLink.click();
-      document.body.removeChild(textLink);
-      URL.revokeObjectURL(textUrl);
-      
-      // Create and download the HTML preview file
-      const htmlContent = await generateReceiptHTML(billData, lineItemsData, customer, products, qrCodeData);
-      const htmlBlob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-      const htmlUrl = URL.createObjectURL(htmlBlob);
-      const htmlLink = document.createElement('a');
-      htmlLink.href = htmlUrl;
-      htmlLink.download = `receipt-preview-${billData.bill_number}-${new Date().toISOString().split('T')[0]}.html`;
-      document.body.appendChild(htmlLink);
-      htmlLink.click();
-      document.body.removeChild(htmlLink);
-      URL.revokeObjectURL(htmlUrl);
-      
-      showToast('success', 'Receipt files downloaded successfully (TXT + HTML)');
-    } catch (error) {
-      console.error('❌ Error downloading receipt:', error);
-      showToast('error', 'Failed to download receipt');
-    }
-  };
 
   // Receipt printing function
   const printReceipt = async (billData: any, lineItemsData: any[], customer: any, qrCodeData?: any) => {
     try {
       setIsPrinting(true);
       
+      console.log('🔍 Print receipt - QR code data:', { 
+        hasQrCodeData: !!qrCodeData, 
+        qrCodeDataUrl: qrCodeData?.qrCodeDataUrl,
+        qrCodeUrl: qrCodeData?.qrCodeUrl 
+      });
+      
       // Generate receipt content
       const receiptContent = await generateReceiptContent(billData, lineItemsData, customer, products, qrCodeData);
       
       // Print using Electron API
       if ((window as any).electronAPI?.printDocument) {
+        // Get available printers and find the best one
+        let printerName = 'Default';
+        try {
+          const printerInfo = await (window as any).electronAPI.getPrinters();
+          console.log('🔍 Printer detection result:', JSON.stringify(printerInfo, null, 2));
+          
+          // Handle both structured response and raw array
+          if (Array.isArray(printerInfo)) {
+            // Raw array format - find Xprinter manually
+            const xprinter = printerInfo.find((p: any) => 
+              p.name.toLowerCase().includes('xprinter') ||
+              p.name.toLowerCase().includes('thermal') ||
+              p.name.toLowerCase().includes('receipt')
+            );
+            if (xprinter) {
+              printerName = xprinter.name;
+              console.log('🖨️ Using Xprinter from raw array:', printerName);
+            } else {
+              printerName = printerInfo[0]?.name || 'Default';
+              console.log('🖨️ Using first printer from raw array:', printerName);
+            }
+          } else if (printerInfo && printerInfo.success && printerInfo.recommended) {
+            printerName = printerInfo.recommended;
+            console.log('🖨️ Using recommended printer:', printerName);
+          } else if (printerInfo && printerInfo.success && printerInfo.thermalPrinters && printerInfo.thermalPrinters.length > 0) {
+            // Fallback: use first thermal printer if available
+            printerName = printerInfo.thermalPrinters[0].name;
+            console.log('🖨️ Using first thermal printer:', printerName);
+          } else {
+            console.log('⚠️ No recommended printer found, using default');
+            console.log('🔍 Available printers:', printerInfo?.printers?.map((p: any) => p.name));
+          }
+        } catch (error) {
+          console.log('⚠️ Could not detect printers, using default:', error);
+        }
+        
         const result = await (window as any).electronAPI.printDocument({
           content: receiptContent,
-          printerName: 'Xprinter XP-80', // Default to Xprinter, will auto-detect if not available
-          qrCodeData: qrCodeData?.qrCodeDataUrl, // Pass QR code image data for ESC/POS printing
-          qrCodeUrl: qrCodeData?.qrCodeUrl, // Pass QR code URL for ESC/POS encoding
+          printerName: printerName,
+          qrCodeData: qrCodeData?.qrCodeDataUrl, // Pass QR code image data for HTML printing
+          qrCodeUrl: qrCodeData?.qrCodeUrl, // Pass QR code URL for HTML display
           options: {
             margins: {
               top: 0,
@@ -499,12 +430,14 @@ export default function POS() {
 
         if (result.success) {
           console.log('✅ Receipt printed successfully');
+          showToast('success', 'Receipt printed successfully');
         } else {
           console.error('❌ Receipt printing failed:', result.message);
           showToast('error', 'Receipt printing failed: ' + result.message);
         }
       } else {
         console.log('⚠️ Electron API not available, skipping receipt printing');
+        showToast('error', 'Printing not available in web mode');
       }
     } catch (error) {
       console.error('❌ Error printing receipt:', error);
@@ -1580,60 +1513,8 @@ ${dashSeparator}`;
         Complete Sale
       </AccessibleButton>
       
-      {/* Test Download Button - Only show when customer is selected and cart has items */}
-      {activeTab.selectedCustomer && activeTab.cart.length > 0 && (
-        <AccessibleButton
-          onClick={async () => {
-            try {
-              // Create test bill data
-              const testBillData = {
-                id: 'test-bill-' + Date.now(),
-                bill_number: 'TEST-' + Date.now(),
-                subtotal: activeTab.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0),
-                total_amount: activeTab.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0),
-                bill_date: new Date().toISOString()
-              };
-              
-              const testLineItems = activeTab.cart.map(item => ({
-                product_id: item.id,
-                quantity: item.quantity,
-                unit_price: item.price,
-                line_total: item.price * item.quantity,
-                product_name: item.name
-              }));
-              
-              const customer = customers.find(c => c.id === activeTab.selectedCustomer);
-              
-              // Generate QR code for test
-              let testQrCodeData = null;
-              if (customer) {
-                try {
-                  testQrCodeData = await generateQRCodeForReceipt(
-                    customer.id,
-                    testBillData.id,
-                    testBillData.bill_number,
-                    customer.name
-                  );
-                } catch (qrError) {
-                  console.warn('Failed to generate test QR code:', qrError);
-                }
-              }
-              
-              await downloadReceipt(testBillData, testLineItems, customer, testQrCodeData);
-            } catch (error) {
-              console.error('Error generating test receipt:', error);
-              showToast('error', 'Failed to generate test receipt');
-            }
-          }}
-          disabled={isProcessing || isPrinting}
-          size="sm"
-          variant="outline"
-          className="w-full"
-          title="Download receipt preview with QR code"
-        >
-          📄 Download Receipt Preview
-        </AccessibleButton>
-      )}
+
+
     </div>
               {/* Complete Sale button moved to Cart component */}
             </div>

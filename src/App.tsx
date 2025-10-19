@@ -24,7 +24,10 @@ function AppContent() {
   }
 
   // If user is not authenticated and not on login page, show SupabaseLogin
-  if (!userProfile && location.pathname !== '/login') {
+  // EXCEPT for public routes that don't require authentication
+  const isPublicRoute = location.pathname.startsWith('/public/');
+  
+  if (!userProfile && location.pathname !== '/login' && !isPublicRoute) {
     // Check if we're in offline mode (no Supabase credentials)
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;

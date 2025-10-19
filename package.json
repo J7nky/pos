@@ -17,6 +17,7 @@
     "electron": "node_modules\\electron\\dist\\electron.exe .",
     "build:electron": "tsc -p tsconfig_electron.json",
     "build": "vite build && npm run build:electron",
+    "build:production": "vite build --mode production",
     "preview": "vite preview",
     "lint": "eslint ."
   },
@@ -27,11 +28,15 @@
     "@types/react-router-dom": "^5.3.3",
     "@types/uuid": "^10.0.0",
     "dexie": "^4.0.11",
+    "escpos": "^3.0.0-alpha.6",
     "lucide-react": "^0.540.0",
+    "node-thermal-printer": "^4.5.0",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.9.1",
+    "serialport": "^13.0.0",
+    "usb": "^2.9.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

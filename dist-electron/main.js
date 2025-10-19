@@ -2,6 +2,8 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const { exec } = require("child_process");
+const { ThermalPrinter, PrinterTypes } = require("node-thermal-printer");
+const fs = require("fs");
 // Enable hot reloading in development
 if (process.env.NODE_ENV === 'development') {
     try {
@@ -46,23 +48,7 @@ const createWindow = () => {
 };
 // Register IPC handlers immediately
 console.log('🔧 Registering IPC handlers immediately...');
-ipcMain.handle('get-printers', async () => {
-    try {
-        console.log('🔍 [IPC] Detecting printers...');
-        console.log('🔍 [IPC] MainWindow exists:', !!mainWindow);
-        console.log('🔍 [IPC] WebContents exists:', !!mainWindow?.webContents);
-        // Always use Windows system command for now to avoid Electron API issues
-        console.log('🔄 [IPC] Using Windows system command for printer detection...');
-        const windowsPrinters = await getWindowsPrinters();
-        console.log('📋 [IPC] Windows system command found:', windowsPrinters);
-        console.log('✅ [IPC] Final printer list:', windowsPrinters);
-        return windowsPrinters;
-    }
-    catch (error) {
-        console.error('❌ [IPC] Error getting printers:', error);
-        return [];
-    }
-});
+// Removed duplicate get-printers handler - using the improved version below
 console.log('✅ IPC handlers registered immediately');
 app.on("ready", () => {
     console.log('🚀 Electron app is ready, creating window...');
@@ -124,16 +110,19 @@ ipcMain.handle('print-document', async (_event, options) => {
         const { content, printerName, printOptions, qrCodeData, qrCodeUrl } = options;
         console.log('🖨️ Starting print job to:', printerName);
         console.log('📄 Content length:', content.length);
-        console.log('📱 QR Code Data:', qrCodeUrl ? 'Available' : 'Not available');
-        // For thermal receipt printers, use direct Windows printing
+        console.log('📱 QR Code Data:', qrCodeData ? 'Available' : 'Not available');
+        console.log('📱 QR Code URL:', qrCodeUrl ? 'Available' : 'Not available');
+        console.log('📱 Content has QR placeholder:', content.includes('[QR_CODE_PLACEHOLDER]'));
+        // For thermal receipt printers, use ESC/POS printing
         if (printerName && (printerName.toLowerCase().includes('xprinter') ||
             printerName.toLowerCase().includes('thermal') ||
-            printerName.toLowerCase().includes('receipt'))) {
-            console.log('🔄 Using direct Windows printing for thermal printer...');
+            printerName.toLowerCase().includes('receipt') ||
+            printerName.toLowerCase().includes('pos'))) {
+            console.log('🔄 Using ESC/POS thermal printing for:', printerName);
             return await printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl);
         }
         // Fallback to Electron's print system for regular printers
-        console.log('🔄 Using Electron print system...');
+        console.log('🔄 Using Electron print system for:', printerName);
         return await printWithElectron(content, printerName, printOptions);
     }
     catch (error) {
@@ -145,148 +134,548 @@ ipcMain.handle('print-document', async (_event, options) => {
         };
     }
 });
-// Direct printing function for thermal printers
+// Direct printing function for thermal printers using ESC/POS
 async function printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl) {
+    try {
+        console.log('🔄 Using ESC/POS thermal printing...');
+        console.log('🖨️ Printer:', printerName);
+        console.log('📱 QR Code available:', !!qrCodeData);
+        // Try ESC/POS printing first
+        try {
+            return await printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl);
+        }
+        catch (escposError) {
+            console.log('⚠️ ESC/POS print failed, trying HTML fallback...', escposError);
+            // Fallback to HTML-based printing
+            const htmlContent = convertTextToHTML(content, qrCodeData, qrCodeUrl);
+            try {
+                console.log('🔄 Trying Electron print system...');
+                return await printWithElectron(htmlContent, printerName, {
+                    margins: {
+                        marginType: 'none',
+                        top: 0,
+                        bottom: 0,
+                        left: 0,
+                        right: 0
+                    },
+                    printBackground: false,
+                    landscape: false,
+                    pageSize: {
+                        width: 80000, // 80mm in microns (80mm = 80,000 microns)
+                        height: 297000 // 297mm in microns (auto-length for thermal)
+                    }
+                });
+            }
+            catch (electronError) {
+                console.log('⚠️ Electron print failed, trying Windows print fallback...', electronError);
+                // Fallback to Windows printing with HTML content
+                return await printHTMLWithWindows(htmlContent, printerName);
+            }
+        }
+    }
+    catch (error) {
+        console.error('❌ Error in thermal printing:', error);
+        return {
+            success: false,
+            message: 'Thermal print failed',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        };
+    }
+}
+// Print using raw ESC/POS commands directly to Windows printer
+async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
+    return new Promise((resolve, reject) => {
+        try {
+            console.log('🔧 Building raw ESC/POS commands...');
+            // ESC/POS command constants
+            const ESC = '\x1B';
+            const GS = '\x1D';
+            const INIT = ESC + '@'; // Initialize printer
+            const ALIGN_CENTER = ESC + 'a' + '1';
+            const ALIGN_LEFT = ESC + 'a' + '0';
+            const BOLD_ON = ESC + 'E' + '1';
+            const BOLD_OFF = ESC + 'E' + '0';
+            const SIZE_NORMAL = GS + '!' + '\x00';
+            const SIZE_DOUBLE = GS + '!' + '\x11';
+            const CUT_PAPER = GS + 'V' + '\x00';
+            const LINE_FEED = '\n';
+            // Build ESC/POS command string
+            let escposData = INIT; // Initialize printer
+            // Parse receipt content
+            const lines = content.split('\n');
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                // Skip QR code placeholder
+                if (trimmedLine === '[QR_CODE_PLACEHOLDER]') {
+                    // Print QR code if URL is available
+                    if (qrCodeUrl) {
+                        console.log('📱 Adding QR code to ESC/POS data:', qrCodeUrl);
+                        escposData += ALIGN_CENTER;
+                        // QR Code ESC/POS command for EPSON-compatible printers
+                        // Model: GS ( k pL pH cn fn n1 n2
+                        const qrModel = GS + '(k' + '\x04\x00' + '1A' + '2\x00'; // Set model to 2
+                        const qrSize = GS + '(k' + '\x03\x00' + '1C' + '\x06'; // Set cell size to 6
+                        const qrErrorCorrection = GS + '(k' + '\x03\x00' + '1E' + '0'; // Error correction M
+                        // Store QR data
+                        const qrDataLength = qrCodeUrl.length + 3;
+                        const pL = String.fromCharCode(qrDataLength % 256);
+                        const pH = String.fromCharCode(Math.floor(qrDataLength / 256));
+                        const qrStore = GS + '(k' + pL + pH + '1P0' + qrCodeUrl;
+                        // Print QR code
+                        const qrPrint = GS + '(k' + '\x03\x00' + '1Q' + '0';
+                        escposData += qrModel + qrSize + qrErrorCorrection + qrStore + qrPrint;
+                        escposData += LINE_FEED + LINE_FEED;
+                        escposData += ALIGN_LEFT;
+                    }
+                    continue;
+                }
+                // Handle separators
+                if (trimmedLine.match(/^=+$/)) {
+                    escposData += ALIGN_LEFT + '================================' + LINE_FEED;
+                    continue;
+                }
+                if (trimmedLine.match(/^-+$/)) {
+                    escposData += ALIGN_LEFT + '--------------------------------' + LINE_FEED;
+                    continue;
+                }
+                // Handle store name (centered and bold)
+                if (trimmedLine.includes('MARKET') || trimmedLine.includes('VEGETABLES')) {
+                    escposData += ALIGN_CENTER + BOLD_ON + trimmedLine + BOLD_OFF + LINE_FEED;
+                    continue;
+                }
+                // Handle bill number and date (bold)
+                if (trimmedLine.includes('Bill No:') || trimmedLine.includes('Date:')) {
+                    escposData += ALIGN_LEFT + BOLD_ON + trimmedLine + BOLD_OFF + LINE_FEED;
+                    continue;
+                }
+                // Handle total balance (bold and larger)
+                if (trimmedLine.includes('TOTAL BALANCE:')) {
+                    escposData += ALIGN_LEFT + BOLD_ON + SIZE_DOUBLE + trimmedLine + SIZE_NORMAL + BOLD_OFF + LINE_FEED;
+                    continue;
+                }
+                // Handle thank you message (centered and bold)
+                if (trimmedLine.includes('Thank You')) {
+                    escposData += ALIGN_CENTER + BOLD_ON + trimmedLine + BOLD_OFF + LINE_FEED;
+                    continue;
+                }
+                // Handle QR code section header
+                if (trimmedLine.includes('Scan QR code')) {
+                    escposData += ALIGN_CENTER + trimmedLine + LINE_FEED;
+                    continue;
+                }
+                // Default: print line as-is
+                if (trimmedLine) {
+                    escposData += ALIGN_LEFT + trimmedLine + LINE_FEED;
+                }
+                else {
+                    escposData += LINE_FEED;
+                }
+            }
+            // Cut paper
+            escposData += LINE_FEED + LINE_FEED + LINE_FEED;
+            escposData += CUT_PAPER;
+            // Write ESC/POS data to a temporary file
+            const tempFile = path.join(process.cwd(), 'temp-receipt-escpos.bin');
+            fs.writeFileSync(tempFile, escposData, 'binary');
+            console.log('📝 Created ESC/POS temp file:', tempFile);
+            // Send to printer using Windows copy command
+            // Try multiple printer path formats for maximum compatibility
+            const printerPaths = [
+                `"\\\\localhost\\${printerName}"`, // Network printer path
+                `"${printerName}"`, // Direct printer name
+                `"\\\\${printerName}"` // UNC path
+            ];
+            const copyCommand = `copy /B "${tempFile}" ${printerPaths[0]}`;
+            console.log('🖨️ Sending to printer:', copyCommand);
+            exec(copyCommand, (error, stdout, stderr) => {
+                // Clean up temp file
+                try {
+                    fs.unlinkSync(tempFile);
+                    console.log('🧹 Cleaned up ESC/POS temp file');
+                }
+                catch (cleanupError) {
+                    console.log('⚠️ Could not clean up ESC/POS temp file');
+                }
+                if (error) {
+                    console.error('❌ Raw ESC/POS print failed:', error.message);
+                    reject(error);
+                }
+                else {
+                    console.log('✅ Raw ESC/POS print successful');
+                    resolve({
+                        success: true,
+                        message: 'Receipt printed successfully via raw ESC/POS'
+                    });
+                }
+            });
+        }
+        catch (error) {
+            console.error('❌ Raw ESC/POS error:', error);
+            reject(error);
+        }
+    });
+}
+// Print using ESC/POS commands for proper thermal printing
+async function printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            console.log('🔧 Initializing thermal printer with ESC/POS...');
+            // Try raw ESC/POS approach first (better Windows compatibility)
+            try {
+                const result = await printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl);
+                resolve(result);
+                return;
+            }
+            catch (rawError) {
+                console.log('⚠️ Raw ESC/POS failed, trying node-thermal-printer...', rawError);
+            }
+            // Fallback to node-thermal-printer
+            // Initialize thermal printer for Windows
+            // On Windows, we need to use the network or file path interface
+            const printer = new ThermalPrinter({
+                type: PrinterTypes.EPSON, // Most thermal printers use EPSON commands
+                interface: `printer:${printerName}`, // Try simple printer name first
+                characterSet: 'PC852_LATIN2',
+                removeSpecialCharacters: false,
+                lineCharacter: "=",
+                width: 48, // 80mm paper is typically 48 characters wide
+                options: {
+                    timeout: 10000
+                }
+            });
+            // Check if printer is connected
+            const isConnected = await printer.isPrinterConnected();
+            console.log('🔍 Printer connected:', isConnected);
+            if (!isConnected) {
+                throw new Error('Printer not connected');
+            }
+            // Parse receipt content and format for thermal printing
+            const lines = content.split('\n');
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                // Skip QR code placeholder - we'll handle it separately
+                if (trimmedLine === '[QR_CODE_PLACEHOLDER]') {
+                    continue;
+                }
+                // Handle separators
+                if (trimmedLine.match(/^=+$/)) {
+                    printer.drawLine();
+                    continue;
+                }
+                if (trimmedLine.match(/^-+$/)) {
+                    printer.drawLine();
+                    continue;
+                }
+                // Handle store name (centered and bold)
+                if (trimmedLine.includes('MARKET') || trimmedLine.includes('VEGETABLES')) {
+                    printer.alignCenter();
+                    printer.bold(true);
+                    printer.println(trimmedLine);
+                    printer.bold(false);
+                    continue;
+                }
+                // Handle bill number and date (bold)
+                if (trimmedLine.includes('Bill No:') || trimmedLine.includes('Date:')) {
+                    printer.alignLeft();
+                    printer.bold(true);
+                    printer.println(trimmedLine);
+                    printer.bold(false);
+                    continue;
+                }
+                // Handle total balance (bold and larger)
+                if (trimmedLine.includes('TOTAL BALANCE:')) {
+                    printer.alignLeft();
+                    printer.bold(true);
+                    printer.setTextSize(1, 1);
+                    printer.println(trimmedLine);
+                    printer.setTextNormal();
+                    printer.bold(false);
+                    continue;
+                }
+                // Handle thank you message (centered and bold)
+                if (trimmedLine.includes('Thank You')) {
+                    printer.alignCenter();
+                    printer.bold(true);
+                    printer.println(trimmedLine);
+                    printer.bold(false);
+                    continue;
+                }
+                // Handle QR code section header
+                if (trimmedLine.includes('Scan QR code')) {
+                    printer.alignCenter();
+                    printer.println(trimmedLine);
+                    // Print QR code if available
+                    if (qrCodeData || qrCodeUrl) {
+                        try {
+                            printer.alignCenter();
+                            // If we have QR code data URL, convert it to text and print as QR code
+                            if (qrCodeUrl) {
+                                console.log('📱 Printing QR code for URL:', qrCodeUrl);
+                                // Use ESC/POS QR code command
+                                printer.printQR(qrCodeUrl, {
+                                    cellSize: 6, // Size of QR code (1-8)
+                                    correction: 'M', // Error correction level (L, M, Q, H)
+                                    model: 2 // QR code model
+                                });
+                            }
+                            else if (qrCodeData) {
+                                // If only data URL is available, extract the URL or use a fallback
+                                console.log('📱 QR code data available but no URL');
+                                printer.println('QR Code: Please scan with app');
+                            }
+                        }
+                        catch (qrError) {
+                            console.error('❌ Error printing QR code:', qrError);
+                            printer.println('[QR Code Print Error]');
+                        }
+                    }
+                    continue;
+                }
+                // Default: print line as-is
+                if (trimmedLine) {
+                    printer.alignLeft();
+                    printer.println(trimmedLine);
+                }
+                else {
+                    printer.newLine();
+                }
+            }
+            // Cut paper
+            printer.cut();
+            // Execute print
+            console.log('🖨️ Executing ESC/POS print...');
+            await printer.execute();
+            console.log('✅ ESC/POS print successful');
+            resolve({
+                success: true,
+                message: 'Receipt printed successfully via ESC/POS'
+            });
+        }
+        catch (error) {
+            console.error('❌ ESC/POS print error:', error);
+            reject(error);
+        }
+    });
+}
+// Print HTML content using Windows system
+async function printHTMLWithWindows(htmlContent, printerName) {
     return new Promise((resolve) => {
         try {
             const fs = require('fs');
             const path = require('path');
-            // If QR code is present, replace placeholder with ESC/POS commands
-            let finalContent = content;
-            if (qrCodeUrl && content.includes('[QR_CODE_PLACEHOLDER]')) {
-                // Generate ESC/POS QR code commands
-                const qrCodeCommands = generateESCPOSQRCode(qrCodeUrl);
-                finalContent = content.replace('[QR_CODE_PLACEHOLDER]', qrCodeCommands);
-                console.log('✅ QR code placeholder replaced with ESC/POS commands');
-            }
-            const tempFile = path.join(process.cwd(), 'temp-receipt.txt');
-            // Write content to temp file
-            fs.writeFileSync(tempFile, finalContent, 'utf8');
-            console.log('📝 Created temp file:', tempFile);
-            // Try multiple printing methods
-            tryPrintMethod1(tempFile, printerName, resolve);
+            const { exec } = require('child_process');
+            // Save HTML content to a temporary file
+            const tempFile = path.join(process.cwd(), 'temp-receipt.html');
+            fs.writeFileSync(tempFile, htmlContent, 'utf8');
+            console.log('📝 Created HTML temp file:', tempFile);
+            // Create a plain text version for thermal printer
+            const textFile = tempFile.replace('.html', '.txt');
+            // Extract just the body content and convert to plain text
+            const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+            let textContent = bodyMatch ? bodyMatch[1] : htmlContent;
+            // Remove HTML tags and clean up
+            textContent = textContent
+                .replace(/<[^>]*>/g, '') // Remove HTML tags
+                .replace(/&nbsp;/g, ' ') // Replace HTML entities
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .replace(/&#39;/g, "'")
+                .replace(/&euro;/g, '€')
+                .replace(/&pound;/g, '£')
+                .replace(/&dollar;/g, '$')
+                .replace(/\s+/g, ' ') // Normalize whitespace
+                .replace(/\n\s*\n/g, '\n') // Remove empty lines
+                .trim();
+            fs.writeFileSync(textFile, textContent, 'utf8');
+            console.log('📝 Created text temp file:', textFile);
+            // Try multiple Windows printing approaches
+            const approaches = [
+                // Approach 1: Print text file directly to thermal printer
+                `powershell -Command "Get-Content '${textFile}' | Out-Printer -Name '${printerName}'"`,
+                // Approach 2: Use copy command to print
+                `copy "${textFile}" "\\\\localhost\\${printerName}"`,
+                // Approach 3: Use notepad to print text file
+                `notepad /p "${textFile}"`,
+                // Approach 4: Use type command to print
+                `type "${textFile}" > "\\\\localhost\\${printerName}"`,
+                // Approach 5: Open in default browser and print
+                `start "" "${tempFile}"`
+            ];
+            let currentApproach = 0;
+            const tryNextApproach = () => {
+                if (currentApproach >= approaches.length) {
+                    console.log('❌ All Windows print approaches failed');
+                    resolve({
+                        success: false,
+                        message: 'All Windows print approaches failed'
+                    });
+                    return;
+                }
+                const command = approaches[currentApproach];
+                console.log(`🔄 Trying Windows print approach ${currentApproach + 1}:`, command);
+                exec(command, (error, stdout, stderr) => {
+                    if (error) {
+                        console.log(`⚠️ Approach ${currentApproach + 1} failed:`, error.message);
+                        currentApproach++;
+                        tryNextApproach();
+                    }
+                    else {
+                        console.log(`✅ Approach ${currentApproach + 1} successful`);
+                        resolve({
+                            success: true,
+                            message: `HTML printed successfully via Windows approach ${currentApproach + 1}`
+                        });
+                    }
+                });
+            };
+            // Clean up temp files after a delay
+            setTimeout(() => {
+                try {
+                    if (fs.existsSync(tempFile)) {
+                        fs.unlinkSync(tempFile);
+                        console.log('🧹 Cleaned up HTML temp file');
+                    }
+                    if (fs.existsSync(textFile)) {
+                        fs.unlinkSync(textFile);
+                        console.log('🧹 Cleaned up text temp file');
+                    }
+                }
+                catch (cleanupError) {
+                    console.log('⚠️ Could not clean up temp files');
+                }
+            }, 10000);
+            tryNextApproach();
         }
         catch (error) {
-            console.error('❌ Error in direct printing:', error);
+            console.error('❌ Error in Windows HTML printing:', error);
             resolve({
                 success: false,
-                message: 'Direct print setup failed',
+                message: 'Windows HTML print setup failed',
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
         }
     });
 }
-// Generate ESC/POS QR code commands for thermal printers
-function generateESCPOSQRCode(url) {
-    // ESC/POS QR code commands for Xprinter
-    // This is a simplified version - actual implementation would need binary data
-    const ESC = '\x1B';
-    const GS = '\x1D';
-    // QR code model selection (GS ( k pL pH cn fn n)
-    // Model 2 (most common)
-    const selectModel = `${GS}(k\x04\x00\x31\x41\x32\x00`;
-    // Set QR code size (1-16, where 8 is ~1 inch square)
-    const setSize = `${GS}(k\x03\x00\x31\x43\x06`; // Size 6
-    // Set error correction level (L=48, M=49, Q=50, H=51)
-    const setErrorLevel = `${GS}(k\x03\x00\x31\x45\x49`; // Level M (49)
-    // Store QR code data
-    const urlLength = url.length;
-    const pL = (urlLength + 3) % 256;
-    const pH = Math.floor((urlLength + 3) / 256);
-    const storeData = `${GS}(k${String.fromCharCode(pL)}${String.fromCharCode(pH)}\x31\x50\x30${url}`;
-    // Print QR code
-    const printQR = `${GS}(k\x03\x00\x31\x51\x30`;
-    // Center align
-    const centerAlign = `${ESC}a\x01`;
-    const leftAlign = `${ESC}a\x00`;
-    // Combine all commands
-    return `${centerAlign}${selectModel}${setSize}${setErrorLevel}${storeData}${printQR}${leftAlign}\n`;
-}
-// Method 1: PowerShell Start-Process
-function tryPrintMethod1(tempFile, printerName, resolve) {
-    console.log('🔄 Trying Method 1: PowerShell Start-Process...');
-    const psCommand = `Start-Process -FilePath "${tempFile}" -Verb Print -Wait`;
-    console.log('🖨️ PowerShell command:', psCommand);
-    exec(`powershell -Command "${psCommand}"`, (error, stdout, stderr) => {
-        if (error) {
-            console.error('❌ Method 1 failed:', error.message);
-            tryPrintMethod2(tempFile, printerName, resolve);
-        }
-        else {
-            console.log('✅ Method 1 successful');
-            console.log('📤 Print output:', stdout);
-            cleanupAndResolve(tempFile, resolve, true, 'Print job sent via PowerShell');
-        }
-    });
-}
-// Method 2: Windows copy command
-function tryPrintMethod2(tempFile, printerName, resolve) {
-    console.log('🔄 Trying Method 2: Windows copy command...');
-    const copyCommand = `copy "${tempFile}" "${printerName}"`;
-    console.log('🖨️ Copy command:', copyCommand);
-    exec(copyCommand, (error, stdout, stderr) => {
-        if (error) {
-            console.error('❌ Method 2 failed:', error.message);
-            tryPrintMethod3(tempFile, printerName, resolve);
-        }
-        else {
-            console.log('✅ Method 2 successful');
-            console.log('📤 Print output:', stdout);
-            cleanupAndResolve(tempFile, resolve, true, 'Print job sent via copy command');
-        }
-    });
-}
-// Method 3: Notepad with print
-function tryPrintMethod3(tempFile, printerName, resolve) {
-    console.log('🔄 Trying Method 3: Notepad print...');
-    const notepadCommand = `notepad /p "${tempFile}"`;
-    console.log('🖨️ Notepad command:', notepadCommand);
-    exec(notepadCommand, (error, stdout, stderr) => {
-        if (error) {
-            console.error('❌ Method 3 failed:', error.message);
-            tryPrintMethod4(tempFile, printerName, resolve);
-        }
-        else {
-            console.log('✅ Method 3 successful');
-            console.log('📤 Print output:', stdout);
-            cleanupAndResolve(tempFile, resolve, true, 'Print job sent via Notepad');
-        }
-    });
-}
-// Method 4: Direct file association
-function tryPrintMethod4(tempFile, printerName, resolve) {
-    console.log('🔄 Trying Method 4: Direct file association...');
-    const directCommand = `"${tempFile}"`;
-    console.log('🖨️ Direct command:', directCommand);
-    exec(directCommand, (error, stdout, stderr) => {
-        if (error) {
-            console.error('❌ Method 4 failed:', error.message);
-            // All methods failed
-            cleanupAndResolve(tempFile, resolve, false, 'All printing methods failed', error.message);
-        }
-        else {
-            console.log('✅ Method 4 successful');
-            console.log('📤 Print output:', stdout);
-            cleanupAndResolve(tempFile, resolve, true, 'Print job sent via file association');
-        }
-    });
-}
-// Helper function to clean up and resolve
-function cleanupAndResolve(tempFile, resolve, success, message, error) {
-    // Clean up temp file
-    try {
-        const fs = require('fs');
-        fs.unlinkSync(tempFile);
-        console.log('🧹 Cleaned up temp file');
+// Convert text receipt to HTML for better printing
+function convertTextToHTML(content, qrCodeData, qrCodeUrl) {
+    console.log('🔍 QR Code data received:', { qrCodeData: !!qrCodeData, qrCodeUrl, hasPlaceholder: content.includes('[QR_CODE_PLACEHOLDER]') });
+    // Replace QR code placeholder with actual QR code image if available
+    let htmlContent = content;
+    if (qrCodeData && content.includes('[QR_CODE_PLACEHOLDER]')) {
+        console.log('✅ Using QR code image data');
+        const qrCodeHtml = `
+      <div style="text-align: center; margin: 10px 0;">
+        <img src="${qrCodeData}" alt="QR Code" style="max-width: 120px; height: auto; border: 1px solid #000;" />
+      </div>`;
+        htmlContent = content.replace('[QR_CODE_PLACEHOLDER]', qrCodeHtml);
     }
-    catch (cleanupError) {
-        console.log('⚠️ Could not clean up temp file:', cleanupError);
+    else if (qrCodeUrl && content.includes('[QR_CODE_PLACEHOLDER]')) {
+        console.log('✅ Using QR code URL fallback');
+        // Generate QR code using a service if no image data available
+        const qrCodeHtml = `
+      <div style="text-align: center; margin: 10px 0;">
+        <div style="border: 2px solid #000; padding: 10px; display: inline-block; font-family: monospace; font-size: 10px; background: white;">
+          QR Code: ${qrCodeUrl}
+        </div>
+      </div>`;
+        htmlContent = content.replace('[QR_CODE_PLACEHOLDER]', qrCodeHtml);
     }
-    resolve({
-        success,
-        message,
-        error: error || undefined
+    else if (content.includes('[QR_CODE_PLACEHOLDER]')) {
+        console.log('⚠️ No QR code data available, using placeholder');
+        // Fallback: show a placeholder
+        const qrCodeHtml = `
+      <div style="text-align: center; margin: 10px 0;">
+        <div style="border: 2px dashed #000; padding: 20px; display: inline-block; font-family: monospace; font-size: 12px; background: #f0f0f0;">
+          [QR CODE PLACEHOLDER]
+        </div>
+      </div>`;
+        htmlContent = content.replace('[QR_CODE_PLACEHOLDER]', qrCodeHtml);
+    }
+    // Convert text to HTML with proper formatting
+    const lines = htmlContent.split('\n');
+    const htmlLines = lines.map(line => {
+        // Handle separators
+        if (line.includes('=')) {
+            return `<div style="border-top: 1px solid #000; margin: 5px 0;"></div>`;
+        }
+        if (line.includes('-')) {
+            return `<div style="border-top: 1px dashed #000; margin: 3px 0;"></div>`;
+        }
+        // Handle empty lines
+        if (line.trim() === '') {
+            return '<div style="height: 5px;"></div>';
+        }
+        // Handle header (store name)
+        if (line.includes('KIWI VEGETABLES MARKET') || line.includes('MARKET')) {
+            return `<div style="text-align: center; font-weight: bold; font-size: 16px; margin: 10px 0;">${line.trim()}</div>`;
+        }
+        // Handle bill number and date
+        if (line.includes('Bill No:') || line.includes('Date:')) {
+            return `<div style="font-weight: bold; margin: 5px 0;">${line}</div>`;
+        }
+        // Handle customer info
+        if (line.includes('Customer:') || line.includes('Phone:')) {
+            return `<div style="margin: 3px 0;">${line}</div>`;
+        }
+        // Handle item headers
+        if (line.includes('ITEM') && line.includes('QTY')) {
+            return `<div style="font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 3px; margin: 5px 0;">${line}</div>`;
+        }
+        // Handle total balance
+        if (line.includes('TOTAL BALANCE:')) {
+            return `<div style="font-weight: bold; font-size: 14px; border-top: 2px solid #000; padding-top: 5px; margin: 10px 0;">${line}</div>`;
+        }
+        // Handle thank you message
+        if (line.includes('Thank You!') || line.includes('💬')) {
+            return `<div style="text-align: center; font-weight: bold; margin: 10px 0;">${line}</div>`;
+        }
+        // Handle QR code section
+        if (line.includes('📱 Scan QR code')) {
+            return `<div style="text-align: center; font-size: 12px; margin: 10px 0;">${line}</div>`;
+        }
+        // Default formatting
+        return `<div style="margin: 2px 0; font-family: 'Courier New', monospace;">${line}</div>`;
     });
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Receipt Print</title>
+      <style>
+        body {
+          font-family: 'Courier New', monospace;
+          font-size: 10px;
+          line-height: 1.1;
+          margin: 0;
+          padding: 2px;
+          width: 80mm;
+          max-width: 80mm;
+          color: black;
+          background: white;
+        }
+        @media print {
+          body { 
+            margin: 0; 
+            padding: 1px;
+            width: 80mm;
+            max-width: 80mm;
+            font-size: 9px;
+            line-height: 1.0;
+          }
+          @page { 
+            margin: 0;
+            size: 80mm auto;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      ${htmlLines.join('')}
+    </body>
+    </html>
+  `;
 }
 // Electron print system (fallback)
 async function printWithElectron(content, printerName, printOptions) {
@@ -295,11 +684,15 @@ async function printWithElectron(content, printerName, printOptions) {
         const printWindow = new BrowserWindow({
             show: false,
             webPreferences: {
-                nodeIntegration: true
+                nodeIntegration: true,
+                contextIsolation: false
             }
         });
-        // Load content optimized for receipt printing
-        await printWindow.loadURL(`data:text/html,${encodeURIComponent(`
+        // Check if content is already HTML or needs conversion
+        let htmlContent = content;
+        if (!content.includes('<!DOCTYPE html>')) {
+            // Convert plain text to HTML
+            htmlContent = `
       <!DOCTYPE html>
       <html>
       <head>
@@ -307,10 +700,10 @@ async function printWithElectron(content, printerName, printOptions) {
         <style>
           body {
             font-family: 'Courier New', monospace;
-            font-size: 14px;
+              font-size: 12px;
             line-height: 1.2;
             margin: 0;
-            padding: 0;
+              padding: 10px;
             width: 80mm;
             white-space: pre-line;
             color: black;
@@ -319,9 +712,9 @@ async function printWithElectron(content, printerName, printOptions) {
           @media print {
             body { 
               margin: 0; 
-              padding: 0;
+                padding: 5px;
               width: 80mm;
-              font-size: 14px;
+                font-size: 11px;
             }
             @page { 
               margin: 0;
@@ -334,9 +727,12 @@ async function printWithElectron(content, printerName, printOptions) {
         ${content.replace(/\n/g, '<br>')}
       </body>
       </html>
-    `)}`);
+      `;
+        }
+        // Load the HTML content
+        await printWindow.loadURL(`data:text/html,${encodeURIComponent(htmlContent)}`);
         // Wait for content to load
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 1500));
         // Print with receipt printer optimized options
         const printOptions_ = {
             silent: false,
@@ -368,6 +764,40 @@ async function printWithElectron(content, printerName, printOptions) {
         throw error;
     }
 }
+// Get available printers with better detection
+ipcMain.handle('get-printers', async () => {
+    try {
+        console.log('🔍 Getting available printers...');
+        // Use Windows system command for better printer detection
+        const printers = await getWindowsPrinters();
+        console.log('📋 Found printers:', printers.map((p) => p.name));
+        // Try to detect thermal printers specifically
+        const thermalPrinters = printers.filter((printer) => printer.name.toLowerCase().includes('xprinter') ||
+            printer.name.toLowerCase().includes('thermal') ||
+            printer.name.toLowerCase().includes('receipt') ||
+            printer.name.toLowerCase().includes('pos') ||
+            printer.name.toLowerCase().includes('80mm'));
+        console.log('🖨️ Thermal printers found:', thermalPrinters.map((p) => p.name));
+        const recommended = thermalPrinters.length > 0 ? thermalPrinters[0].name : printers[0]?.name || 'Default';
+        console.log('🎯 Recommended printer:', recommended);
+        return {
+            success: true,
+            printers: printers,
+            thermalPrinters: thermalPrinters,
+            recommended: recommended
+        };
+    }
+    catch (error) {
+        console.error('❌ Error getting printers:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+            printers: [],
+            thermalPrinters: [],
+            recommended: 'Default'
+        };
+    }
+});
 ipcMain.handle('test-printer', async (_event, printerName) => {
     try {
         // Test if printer exists and is available
