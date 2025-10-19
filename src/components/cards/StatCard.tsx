@@ -6,6 +6,7 @@ type Stat = {
   change?: string;
   color: string; // Tailwind class e.g. "bg-green-500"
   icon: React.ElementType;
+  isLoading?: boolean; // Optional loading state
 };
 
 interface StatCardProps {
@@ -34,12 +35,19 @@ const StatCard: React.FC<StatCardProps> = memo(({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-gray-600">{stat.title}</p>
-          <p className="text-2xl font-bold text-gray-900 mt-2">{stat.value}</p>
+          <div className="flex items-center mt-2">
+            <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+            {stat.isLoading && (
+              <div className="ml-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400"></div>
+              </div>
+            )}
+          </div>
           {stat.change && (
             <p className="text-sm text-gray-500 mt-1">{stat.change}</p>
           )}
         </div>
-        <div className={`p-3 rounded-full ${stat.color}`}>
+        <div className={`p-3 rounded-full ${stat.color} ${stat.isLoading ? 'opacity-75' : ''}`}>
           <stat.icon className="w-6 h-6 text-white" />
         </div>
       </div>

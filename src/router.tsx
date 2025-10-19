@@ -1,5 +1,4 @@
 // src/router.tsx
-import React from "react";
 import { createBrowserRouter, createHashRouter } from "react-router-dom";
 import App from "./App";
 import Layout from "./layouts/Layout";
@@ -11,8 +10,7 @@ import Customers from './pages/Customers';
 import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
-import QRCodeDemo from './pages/QRCodeDemo';
-import ErrorBoundary from './components/ErrorBoundary';
+import ErrorPage from './components/ErrorPage';
 
 // Use hash router for Electron (file:// protocol) and browser router for web
 const isElectron = typeof window !== 'undefined' && window.electronAPI;
@@ -22,51 +20,46 @@ export const router = createRouter([
   {
     path: "/",
     element: <App />, // This is the root component that handles auth and providers
-    errorElement: <ErrorBoundary />,
+    errorElement: <ErrorPage />,
     children: [
       {
         element: <Layout />, // This is the nested layout for authenticated users
-        errorElement: <ErrorBoundary />,
+        errorElement: <ErrorPage />,
         children: [
           {
             index: true,
             element: <Home />,
-            errorElement: <ErrorBoundary />,
+            errorElement: <ErrorPage />,
           },
           {
             path: "inventory",
             element: <Inventory />,
-            errorElement: <ErrorBoundary />,
+            errorElement: <ErrorPage />,
           },
           {
             path: "pos",
             element: <POS />,
-            errorElement: <ErrorBoundary />,
+            errorElement: <ErrorPage />,
           },
           {
             path: "reports",
             element: <Reports />,
-            errorElement: <ErrorBoundary />,
+            errorElement: <ErrorPage />,
           },
           {
             path: "accounting",
             element: <Accounting />,
-            errorElement: <ErrorBoundary />,
+            errorElement: <ErrorPage />,
           },
           {
             path: "customers",
             element: <Customers />,
-            errorElement: <ErrorBoundary />,
+            errorElement: <ErrorPage />,
           },
           {
             path: "settings",
             element: <Settings />,
-            errorElement: <ErrorBoundary />,
-          },
-          {
-            path: "qr-demo",
-            element: <QRCodeDemo />,
-            errorElement: <ErrorBoundary />,
+            errorElement: <ErrorPage />,
           },
         ],
       },
@@ -74,7 +67,7 @@ export const router = createRouter([
       {
         path: "public/customer-statement/:customerId/:billId",
         element: <PublicCustomerStatement />,
-        errorElement: <ErrorBoundary />,
+        errorElement: <ErrorPage />,
       },
     ],
   },

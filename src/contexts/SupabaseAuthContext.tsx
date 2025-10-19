@@ -46,32 +46,22 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   // Load user profile function
-  const loadUserProfile = async () => {
-    if (!user) {
-      setUserProfile(null);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true); // Keep loading state while fetching profile
-    
+  const loadUserProfile = async (userId: string) => {
     try {
       // Try to get profile from Supabase first
-      const profile = await SupabaseService.getUserProfile(user.id);
+      const profile = await SupabaseService.getUserProfile(userId);
       if (profile) {
         setUserProfile(profile as any);
       } else {
         // Fallback to cached profile
-        const cachedProfile = SupabaseService.getCachedUserProfile(user.id);
+        const cachedProfile = SupabaseService.getCachedUserProfile(userId);
         setUserProfile(cachedProfile);
       }
     } catch (error) {
       console.error('Error loading user profile:', error);
       // Try cached profile as fallback
-      const cachedProfile = SupabaseService.getCachedUserProfile(user.id);
+      const cachedProfile = SupabaseService.getCachedUserProfile(userId);
       setUserProfile(cachedProfile);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -98,10 +88,50 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     }, 5000); // 5 second timeout
 
     // Get initial session with timeout
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       clearTimeout(timeoutId);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      
+      console.log('🔐 Session loaded:', currentUser ? 'authenticated' : 'not authenticated');
+      
+      // Load profile immediately if user exists
+      if (currentUser) {
+        // Try to load cached profile first for instant UI
+        const cachedProfile = SupabaseService.getCachedUserProfile(currentUser.id);
+        if (cachedProfile) {
+          console.log('⚡ Using cached profile - UI ready immediately');
+          setUserProfile(cachedProfile);
+          // We have cached profile, show UI immediately
+          setLoading(false);
+          
+          // Then load fresh profile from server in background
+          loadUserProfile(currentUser.id).catch(err => {
+            console.error('Background profile update failed:', err);
+          });
+        } else {
+          console.log('📡 No cached profile - loading from server...');
+          // No cached profile, try to load from server with timeout
+          const profileLoadTimeout = setTimeout(() => {
+            console.warn('⏱️ Profile loading timeout - proceeding anyway');
+            setLoading(false);
+          }, 3000);
+          
+          try {
+            await loadUserProfile(currentUser.id);
+            clearTimeout(profileLoadTimeout);
+            console.log('✅ Profile loaded successfully');
+            setLoading(false);
+          } catch (error) {
+            clearTimeout(profileLoadTimeout);
+            console.error('❌ Profile loading failed:', error);
+            setLoading(false);
+          }
+        }
+      } else {
+        console.log('👤 No user - showing login');
+        setLoading(false);
+      }
     }).catch((error) => {
       clearTimeout(timeoutId);
       console.error('Error getting session:', error);
@@ -114,8 +144,41 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_, session) => {
         clearTimeout(timeoutId);
-        setUser(session?.user ?? null);
-        setLoading(false);
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+        
+        // Load profile when auth state changes
+        if (currentUser) {
+          // Try cached profile first
+          const cachedProfile = SupabaseService.getCachedUserProfile(currentUser.id);
+          if (cachedProfile) {
+            setUserProfile(cachedProfile);
+            setLoading(false);
+            // Load fresh profile in background
+            loadUserProfile(currentUser.id).catch(err => {
+              console.error('Background profile update failed:', err);
+            });
+          } else {
+            // No cached profile, try to load with timeout
+            const profileTimeout = setTimeout(() => {
+              console.warn('Profile loading timeout in auth change');
+              setLoading(false);
+            }, 3000);
+            
+            try {
+              await loadUserProfile(currentUser.id);
+              clearTimeout(profileTimeout);
+            } catch (error) {
+              clearTimeout(profileTimeout);
+              console.error('Profile loading failed:', error);
+            } finally {
+              setLoading(false);
+            }
+          }
+        } else {
+          setUserProfile(null);
+          setLoading(false);
+        }
       }
     );
 
@@ -124,16 +187,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe();
     };
   }, []);
-
-  // Load user profile when user changes
-  useEffect(() => {
-    if (user) {
-      loadUserProfile();
-    } else {
-      setUserProfile(null);
-      setLoading(false);
-    }
-  }, [user]);
 
   const signIn = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
@@ -144,21 +197,30 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       
       if (error) {
         setError(error.message);
+        setLoading(false);
         return { success: false, error: error.message };
       }
       
       if (!data.user) {
         setError('No user data returned');
+        setLoading(false);
         return { success: false, error: 'No user data returned' };
       }
+      
+      // Try to load cached profile immediately for faster UX
+      const cachedProfile = SupabaseService.getCachedUserProfile(data.user.id);
+      if (cachedProfile) {
+        setUserProfile(cachedProfile);
+        setLoading(false);
+      }
+      // Note: onAuthStateChange will handle loading fresh profile
       
       return { success: true };
     } catch (error: any) {
       const errorMessage = error?.message || 'An unexpected error occurred';
       setError(errorMessage);
-      return { success: false, error: errorMessage };
-    } finally {
       setLoading(false);
+      return { success: false, error: errorMessage };
     }
   };
 
@@ -175,28 +237,35 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       
       if (error) {
         setError(error.message);
+        setLoading(false);
         return { success: false, error: error.message };
       }
       
       if (!data.user) {
         setError('No user data returned');
+        setLoading(false);
         return { success: false, error: 'No user data returned' };
       }
 
       // Create user profile
-      await SupabaseService.createUserProfile({
+      const newProfile = {
         id: data.user.id,
         email,
         ...profile
-      });
-
+      };
+      
+      await SupabaseService.createUserProfile(newProfile);
+      
+      // Set the profile immediately
+      setUserProfile(newProfile as any);
+      setLoading(false);
+      
       return { success: true };
     } catch (error: any) {
       const errorMessage = error?.message || 'An unexpected error occurred';
       setError(errorMessage);
-      return { success: false, error: errorMessage };
-    } finally {
       setLoading(false);
+      return { success: false, error: errorMessage };
     }
   };
 
