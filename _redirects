@@ -1,0 +1,3 @@
+# Netlify redirects file (backup for netlify.toml)
+# This ensures SPA routing works correctly
+/*    /index.html   200

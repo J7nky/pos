@@ -18,6 +18,7 @@
     "build:electron": "tsc -p tsconfig_electron.json",
     "build": "vite build && npm run build:electron",
     "build:production": "vite build --mode production",
+    "build:netlify": "vite build --mode production",
     "preview": "vite preview",
     "lint": "eslint ."
   },

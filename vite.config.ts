@@ -20,7 +20,7 @@ export default defineConfig({
     sourcemap: true,
   },
   define: {
-    // Set the public URL for QR code generation in development
-    'import.meta.env.VITE_PUBLIC_URL': JSON.stringify('https://souq-trablous.com'),
+    // Set the public URL for QR code generation
+    'import.meta.env.VITE_PUBLIC_URL': JSON.stringify(process.env.VITE_PUBLIC_URL || (process.env.NODE_ENV === 'production' ? 'https://souq-trablous.netlify.app' : 'http://localhost:5175')),
   },
 });
