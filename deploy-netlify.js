@@ -65,9 +65,10 @@ console.log('   NODE_ENV=production');
 console.log('\n📚 Next steps:');
 console.log('1. Push your code to GitHub/GitLab/Bitbucket');
 console.log('2. Go to netlify.com and create a new site from Git');
-console.log('3. Set the build command to: npm run build:netlify');
+console.log('3. Set the build command to: npm install --include=dev && npm run build:netlify');
 console.log('4. Set the publish directory to: dist');
-console.log('5. Add the environment variables listed above');
-console.log('6. Deploy!');
+console.log('5. Set Node.js version to: 20');
+console.log('6. Add the environment variables listed above');
+console.log('7. Deploy!');
 
 console.log('\n✨ Netlify setup complete!');

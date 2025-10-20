@@ -51,9 +51,9 @@ TTL: 300
 3. **Connect your Git provider** (GitHub/GitLab/Bitbucket)
 4. **Select your repository** (`pos-1`)
 5. **Configure build settings:**
-   - Build command: `npm run build:netlify`
+   - Build command: `npm install --include=dev && npm run build:netlify`
    - Publish directory: `dist`
-   - Node version: `18` (or latest LTS)
+   - Node version: `20` (or latest LTS)
 
 6. **Add Environment Variables:**
    ```

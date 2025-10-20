@@ -6,11 +6,13 @@
   publish = "dist"
   
   # Default build command
-  command = "npm run build:production"
+  command = "npm install --include=dev && npm run build:netlify"
 
 [build.environment]
-  # Node.js version
-  NODE_VERSION = "18"
+  # Node.js version (use 20 for better Vite compatibility)
+  NODE_VERSION = "20"
+  # Ensure dev dependencies are installed
+  NPM_FLAGS = "--include=dev"
 
 # Redirect rules for SPA routing
 [[redirects]]
