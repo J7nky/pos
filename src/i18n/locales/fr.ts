@@ -1,13 +1,14 @@
 const fr = {
   app: { name: 'POS Produits', loading: 'Chargement...' },
   common: {
-
+    transactions: 'transactions',
     actions: { cancel: 'Annuler', save: 'Enregistrer', delete: 'Supprimer', edit: 'Modifier', add: 'Ajouter', view: 'Voir', close: 'Fermer', export: 'Exporter', refresh: 'Rafraîchir', search: 'Rechercher', details: 'Détails' },
     status: { online: 'En ligne', offline: 'Hors ligne', synced: 'Synchronisé', unsyncedCount: '{{count}} non synchronisé(s)' },
     placeholders: { search: 'Rechercher...', optional: 'Facultatif' },
     labels: { units: 'unités', kg: 'kg', piece: 'Pièce', box: 'Boîte', bag: 'Sac', bundle: 'Lot', dozen: 'Douzaine', image: 'Image', name: 'Nom' },
     confirmations: { fullResyncConfirm: 'Cela effacera les données locales et retéléchargera depuis le serveur. Continuer ?' },
-    alerts: { connectionRestored: 'Connexion rétablie', autoSyncingChanges: 'Synchronisation automatique de vos modifications...' }
+    alerts: { connectionRestored: 'Connexion rétablie', autoSyncingChanges: 'Synchronisation automatique de vos modifications...' },
+    currency: { USD: 'Dollar américain', LBP: 'Livre libanaise' }
   },
   nav: { home: 'Accueil', inventory: 'Stock', pos: 'Point de vente', customers: 'Clients', accounting: 'Comptabilité', reports: 'Rapports', settings: 'Paramètres' },
   layout: { title: 'ProducePOS', connection: { online: 'En ligne', offline: 'Hors ligne' }, unsynced: 'non synchronisé', signOut: 'Déconnexion' },
@@ -26,6 +27,9 @@ const fr = {
     language: 'Langue', language_ar: 'Arabe', language_en: 'Anglais', language_fr: 'Français'
   },
   home: {
+    today: 'Aujourd\'hui',
+    week: 'Semaine',
+    opened: 'Ouvert',
     welcome: 'Bon retour, {{name}}', subtitle: 'Voici ce qui se passe aujourd’hui dans votre magasin.', fastActions: 'Actions rapides', hide: 'Masquer', show: 'Afficher',
     quickSale: 'Vente rapide', quickSaleDesc: 'Commencer une nouvelle vente',
     shortcuts: 'Raccourcis',
@@ -34,7 +38,7 @@ const fr = {
     recordExpense: 'Enregistrer dépense', recordExpenseDesc: 'Enregistrer les dépenses',
     todaySales: 'Ventes du jour', todaySalesDesc: 'Voir les performances de vente',
     checkStock: 'Vérifier le stock', checkStockDesc: 'Surveiller les niveaux de stock',
-    cashInDrawer: 'Caisse', notOpenedToday: 'Non ouvert aujourd’hui', openCashDrawer: 'Ouvrir la caisse', todaysExpenses: 'Dépenses du jour', lowStockItems: 'Articles à faible stock', needAttention: 'Nécessite une attention', alertsDisabled: 'Alertes désactivées', lowStockAlert: 'Alerte de stock faible', allWellStocked: 'Tous les produits sont bien approvisionnés !', recentActions: 'Actions récentes', noRecentSales: 'Aucune action récente'
+    cashInDrawer: 'Caisse ({{currency}})', notOpenedToday: 'Non ouvert aujourd\'hui', openCashDrawer: 'Ouvrir la caisse', todaysExpenses: 'Dépenses du jour ({{currency}})', lowStockItems: 'Articles à faible stock', needAttention: 'Nécessite une attention', alertsDisabled: 'Alertes désactivées', lowStockAlert: 'Alerte de stock faible', allWellStocked: 'Tous les produits sont bien approvisionnés !', recentActions: 'Actions récentes', noRecentSales: 'Aucune action récente'
   },
   inventory: {
     trade: 'Trade',

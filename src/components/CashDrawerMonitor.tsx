@@ -160,14 +160,14 @@ export default function CashDrawerMonitor() {
                 className={`px-3 py-1 rounded-md text-sm border ${range === 'today' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
                 aria-pressed={range === 'today'}
               >
-                Today
+                {t('home.today')}
               </button>
               <button
                 onClick={() => setRange('week')}
                 className={`px-3 py-1 rounded-md text-sm border ${range === 'week' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
                 aria-pressed={range === 'week'}
               >
-                Week
+                {t('home.week')}
               </button>
               <Clock className="w-5 h-5 text-gray-400" />
             </div>

@@ -1,12 +1,15 @@
 const en = {
   app: { name: 'Produce POS', loading: 'Loading...' },
   common: {
+    transactions: 'transactions',
+    opened: 'Opened',
     actions: { cancel: 'Cancel', save: 'Save', delete: 'Delete', edit: 'Edit', add: 'Add', view: 'View', close: 'Close', export: 'Export', refresh: 'Refresh', search: 'Search', details: 'Details' },
     status: { online: 'Online', offline: 'Offline', synced: 'Synced', unsyncedCount: '{{count}} unsynced' },
     placeholders: { search: 'Search...', optional: 'Optional' },
     labels: { units: 'units', kg: 'kg', piece: 'Piece', box: 'Box', bag: 'Bag', bundle: 'Bundle', dozen: 'Dozen', image: 'Image', name: 'Name' },
     confirmations: { fullResyncConfirm: 'This will clear all local data and re-download from server. Continue?' },
-    alerts: { connectionRestored: 'Connection Restored', autoSyncingChanges: 'Auto-syncing your changes...' }
+    alerts: { connectionRestored: 'Connection Restored', autoSyncingChanges: 'Auto-syncing your changes...' },
+    currency: { USD: 'USD', LBP: 'LBP' }
   },
   nav: { home: 'Home', inventory: 'Inventory', pos: 'Point of Sale', customers: 'Customers', accounting: 'Accounting', reports: 'Reports', settings: 'Settings' },
   layout: { title: 'ProducePOS', connection: { online: 'Online', offline: 'Offline' }, unsynced: 'unsynced', signOut: 'Sign out' },
@@ -26,6 +29,8 @@ const en = {
   },
   home: {
     shortcuts: 'Shortcuts',
+    today: 'Today', 
+    week: 'Week',
     welcome: 'Welcome back, {{name}}', subtitle: "Here's what's happening at your store today.", fastActions: 'Fast Actions', hide: 'Hide', show: 'Show',
     quickSale: 'Quick Sale', quickSaleDesc: 'Start a new sale transaction',
     receiveProducts: 'Receive Products', receiveProductsDesc: 'Add new inventory from suppliers',
@@ -33,7 +38,7 @@ const en = {
     recordExpense: 'Record Expense', recordExpenseDesc: 'Log business expenses',
     todaySales: "Today's Sales", todaySalesDesc: 'View sales performance',
     checkStock: 'Check Stock', checkStockDesc: 'Monitor inventory levels',
-    cashInDrawer: 'Cash in Drawer', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled', lowStockAlert: 'Low Stock Alert', allWellStocked: 'All products are well stocked!', recentActions: 'Recent Actions', noRecentSales: 'No recent sales'
+    cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled', lowStockAlert: 'Low Stock Alert', allWellStocked: 'All products are well stocked!', recentActions: 'Recent Actions', noRecentSales: 'No recent sales'
   },
   inventory: {
     trade: 'Trade',

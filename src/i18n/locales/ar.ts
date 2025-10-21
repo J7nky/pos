@@ -6,6 +6,7 @@ const ar = {
     loading: 'جار التحميل...'
   },
   common: {
+    transactions: 'المعاملات',
     actions: {
       cancel: 'إلغاء',
       save: 'حفظ',
@@ -46,7 +47,8 @@ const ar = {
     alerts: {
       connectionRestored: 'تم استعادة الاتصال',
       autoSyncingChanges: 'جاري مزامنة تغييراتك تلقائيًا...'
-    }
+    },
+    currency: { USD: 'دولار أمريكي', LBP: 'ليرة لبنانية' }
   },
   nav: {
     home: 'الرئيسية',
@@ -122,6 +124,9 @@ const ar = {
     language_fr: 'الفرنسية'
   },
   home: {
+    opened: 'تم فتح الدرج',
+    today: 'اليوم',
+    week: 'الأسبوع',
     shortcuts: 'الاختصارات',
     welcome: 'أهلًا بعودتك، {{name}}',
     subtitle: 'هذا ما يحدث في متجرك اليوم.',
@@ -140,10 +145,10 @@ const ar = {
     todaySalesDesc: 'عرض أداء المبيعات',
     checkStock: 'فحص المخزون',
     checkStockDesc: 'مراقبة مستويات المخزون',
-    cashInDrawer: 'النقد في الدرج',
+    cashInDrawer: 'النقد في الدرج ({{currency}})',
     notOpenedToday: 'لم يفتح اليوم',
     openCashDrawer: 'فتح درج النقد',
-    todaysExpenses: 'مصروفات اليوم',
+    todaysExpenses: 'مصروفات اليوم ({{currency}})',
     lowStockItems: 'أصناف منخفضة المخزون',
     needAttention: 'يتطلب الانتباه',
     alertsDisabled: 'التنبيهات معطلة',

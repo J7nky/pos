@@ -281,7 +281,7 @@ export default function Home() {
       color: 'bg-amber-500',
       hoverColor: 'hover:bg-amber-600',
       action: () => {navigate('/accounting')},
-      stats: `${formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + expense.amount, 0))} today (${storePreferredCurrency})`
+      stats: `${formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + expense.amount, 0))} today (${t(`common.currency.${storePreferredCurrency}`)})`
     },
     {
       id: 'today-sales',
@@ -332,12 +332,12 @@ export default function Home() {
       return 'Not opened today';
     }
     
-    return `Opened: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}`;
+    return `${t('home.opened')}: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}`;
   };
 
   const stats = [
     {
-      title: `Cash in Drawer (${storePreferredCurrency})`,
+      title: t('home.cashInDrawer', { currency: t(`common.currency.${storePreferredCurrency}`) }),
       value: getCashDrawerDisplayValue(),
       icon: DollarSign,
       color: 'bg-green-500',
@@ -345,18 +345,18 @@ export default function Home() {
       isLoading: isLoadingCashDrawer && !isInitialLoad // Show subtle loading indicator
     },
     {
-      title: `Today's Expense (${storePreferredCurrency})`, 
+      title: t('home.todaysExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) }), 
       value: formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + expense.amount, 0)),
       icon: Receipt,
       color: 'bg-red-500',
-      change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today).length} transactions`
+      change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today).length} ${t('common.transactions')}`
     },
     {
-      title: 'Low Stock Items',
+      title: t('home.lowStockItems'),
       value: lowStockAlertsEnabled ? lowStockItems.length.toString() : lowStockItems.length.toString(),
       icon: AlertTriangle,
       color: lowStockAlertsEnabled ? 'bg-amber-500' : 'bg-gray-400', 
-      change: lowStockAlertsEnabled ? 'Need attention' : 'Alerts disabled'
+      change: lowStockAlertsEnabled ? t('home.needAttention') : t('home.alertsDisabled')
     }
   ];
 
