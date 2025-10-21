@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
+import { useI18n } from '../i18n';
 import { Plus, Search, Edit, CheckCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText } from 'lucide-react';
 import { Customer, Supplier } from '../types';
 import Toast from '../components/common/Toast';
@@ -11,6 +12,7 @@ import AccountStatementModal from '../components/AccountStatementModal';
 export default function Customers() {
   const raw = useOfflineData();
   const { pushUndo, getStore } = raw;
+  const { t } = useI18n();
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0, email: c.email || '', address: c.address || ''})) : [];
   const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at || 'commission', email: s.email || '', address: s.address || ''})) : [];
   const addCustomer = raw.addCustomer;
@@ -252,8 +254,8 @@ export default function Customers() {
   const handleCustomerFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerForm.name || !customerForm.phone) {
-      setCustomerFormError('Name and Phone are required.');
-      showToast('Name and Phone are required.', 'error');
+      setCustomerFormError(t('customers.nameRequired'));
+      showToast(t('customers.nameRequired'), 'error');
       return;
     }
     const exists = customers.some(c => c.name.trim().toLowerCase() === customerForm.name!.trim().toLowerCase() && c.phone.trim() === customerForm.phone!.trim() && (!editingCustomer || c.id !== editingCustomer.id));
@@ -313,13 +315,13 @@ export default function Customers() {
     <div className="p-6">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Customer & Supplier Management</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('customers.title')}</h1>
         <button
           onClick={activeTab === 'customers' ? handleAddCustomerClick : handleAddSupplierClick}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
         >
           <Plus className="w-5 h-5 mr-2" />
-          Add {activeTab === 'customers' ? 'Customer' : 'Supplier'}
+          {activeTab === 'customers' ? t('customers.addCustomer') : t('customers.addSupplier')}
         </button>
       </div>
 
@@ -336,7 +338,7 @@ export default function Customers() {
               }`}
             >
               <Users className="w-5 h-5 inline mr-2" />
-              Customers
+              {t('customers.clients')}
             </button>
             <button
               onClick={() => setActiveTab('suppliers')}
@@ -347,7 +349,7 @@ export default function Customers() {
               }`}
             >
               <Truck className="w-5 h-5 inline mr-2" />
-              Suppliers
+              {t('customers.suppliers')}
             </button>
           </nav>
         </div>
@@ -359,7 +361,7 @@ export default function Customers() {
           <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder={`Search ${activeTab} by name, phone, or email...`}
+            placeholder={t('customers.searchPlaceholder', { type: activeTab === 'customers' ? t('customers.clients') : t('customers.suppliers') })}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
@@ -371,75 +373,75 @@ export default function Customers() {
       {activeTab === 'customers' && (
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
           <div className="p-6 border-b">
-            <h2 className="text-lg font-semibold text-gray-900">All Customers</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{t('customers.allCustomers')}</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.name')}</th>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.contact')}</th>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.balance')}</th>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.status')}</th>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.actions')}</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredCustomers.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
-                      No customers found.
+                      {t('customers.noCustomersFound')}
                     </td>
                   </tr>
                 ) : (
                   filteredCustomers.map(customer => (
                     <tr key={customer.id}>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
                         <div className="text-sm font-medium text-gray-900">{customer.name}</div>
                         <div className="text-sm text-gray-500">{customer.address}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
                         <div className="text-sm text-gray-900">{customer.phone}</div>
                         <div className="text-sm text-gray-500">{customer.email}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm rtl:text-right ltr:text-left">
                         <div>
                           <span className={`font-medium ${(customer.lb_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            LBP: {(customer.lb_balance || 0).toLocaleString()}
+                            {t('customers.lbp')}: {(customer.lb_balance || 0).toLocaleString()}
                           </span>
                           <br />
                           <span className={`font-medium ${(customer.usd_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            USD: {(customer.usd_balance || 0).toLocaleString()}
+                            $: {(customer.usd_balance || 0).toLocaleString()}
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                           customer.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                         }`}>
-                          {customer.isActive ? 'Active' : 'Inactive'}
+                          {customer.isActive ? t('customers.active') : t('customers.inactive')}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-left text-sm font-medium">
-                        <div className="flex space-x-2">
+                      <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left text-sm font-medium">
+                        <div className="flex space-x-2 rtl:space-x-reverse">
                           <button
                             onClick={() => handleEditCustomerClick(customer)}
                             className="text-blue-600 hover:text-blue-900"
-                            title="Edit Customer"
+                            title={t('customers.editCustomer')}
                           >
                             <Edit className="w-4 h-4" />
                           </button>
                           <button 
                             onClick={() => handleRecordCustomerPayment(customer)}
                             className="text-green-600 hover:text-green-800"
-                            title="Record payment"
+                            title={t('customers.recordPayment')}
                           >
                             <DollarSign className="w-4 h-4" />
                           </button>
                           <button 
                             onClick={() => handleViewAccountStatement(customer, 'customer')}
                             className="text-purple-600 hover:text-purple-800"
-                            title="View Account Statement"
+                            title={t('customers.viewAccountStatement')}
                           >
                             <FileText className="w-4 h-4" />
                           </button>
@@ -458,37 +460,37 @@ export default function Customers() {
       {activeTab === 'suppliers' && (
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
           <div className="p-6 border-b">
-            <h2 className="text-lg font-semibold text-gray-900">All Suppliers</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{t('customers.allSuppliers')}</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
                              <thead className="bg-gray-50">
                  <tr>
-                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
-                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.name')}</th>
+                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.contact')}</th>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.balance')}</th>
+                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.actions')}</th>
                  </tr>
                </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                                                  {filteredSuppliers.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
-                      No suppliers found.
+                      {t('customers.noSuppliersFound')}
                     </td>
                   </tr>
                  ) : (
                                      filteredSuppliers.map(supplier => (
                      <tr key={supplier.id}>
-                       <td className="px-6 py-4 whitespace-nowrap">
+                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
                          <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
                          <div className="text-sm text-gray-500">{supplier.address}</div>
                        </td>
-                                             <td className="px-6 py-4 whitespace-nowrap">
+                                             <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
                         <div className="text-sm text-gray-900">{supplier.phone}</div>
                         <div className="text-sm text-gray-500">{supplier.email}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm rtl:text-right ltr:text-left">
                         <div>
                           <span className={`font-medium ${(supplier.lb_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
                             LBP: {(supplier.lb_balance || 0).toLocaleString()}
@@ -500,26 +502,26 @@ export default function Customers() {
                         </div>
                       </td>
                     
-                       <td className="px-6 py-4 whitespace-nowrap text-left text-sm font-medium">
-                         <div className="flex space-x-2">
+                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left text-sm font-medium">
+                         <div className="flex space-x-2 rtl:space-x-reverse">
                            <button
                              onClick={() => handleEditSupplierClick(supplier)}
                              className="text-blue-600 hover:text-blue-900"
-                             title="Edit Supplier"
+                             title={t('customers.editSupplier')}
                            >
                              <Edit className="w-4 h-4" />
                            </button>
-                           <button 
+                            <button 
                               onClick={() => handleRecordSupplierPayment(supplier)}
                               className="text-red-600 hover:text-red-800"
-                              title="Make payment"
+                              title={t('customers.makePayment')}
                             >
                               <CreditCard className="w-4 h-4" />
                             </button>
                            <button 
                              onClick={() => handleViewAccountStatement(supplier, 'supplier')}
                              className="text-purple-600 hover:text-purple-800"
-                             title="View Account Statement"
+                             title={t('customers.viewAccountStatement')}
                            >
                              <FileText className="w-4 h-4" />
                            </button>
@@ -540,13 +542,13 @@ export default function Customers() {
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
               <h2 className="text-xl font-semibold text-gray-900">
-                {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
+                {editingCustomer ? t('customers.editCustomerTitle') : t('customers.addNewCustomer')}
               </h2>
             </div>
             <form onSubmit={handleCustomerFormSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="name" className="block text-sm font-medium text-gray-700">Name *</label>
+                  <label htmlFor="name" className="block text-sm font-medium text-gray-700">{t('customers.nameLabel')}</label>
                   <input
                     type="text"
                     id="name"
@@ -558,7 +560,7 @@ export default function Customers() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="phone" className="block text-sm font-medium text-gray-700">Phone *</label>
+                  <label htmlFor="phone" className="block text-sm font-medium text-gray-700">{t('customers.phoneLabel')}</label>
                   <input
                     type="text"
                     id="phone"
@@ -570,7 +572,7 @@ export default function Customers() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
+                  <label htmlFor="email" className="block text-sm font-medium text-gray-700">{t('customers.emailLabel')}</label>
                   <input
                     type="email"
                     id="email"
@@ -581,7 +583,7 @@ export default function Customers() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="address" className="block text-sm font-medium text-gray-700">Address</label>
+                  <label htmlFor="address" className="block text-sm font-medium text-gray-700">{t('customers.addressLabel')}</label>
                   <input
                     type="text"
                     id="address"
@@ -610,13 +612,13 @@ export default function Customers() {
                   onClick={() => setShowCustomerForm(false)}
                   className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
                 >
-                  Cancel
+                  {t('customers.cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
-                  {editingCustomer ? 'Save Changes' : 'Add Customer'}
+                  {editingCustomer ? t('customers.save') : t('customers.addCustomer')}
                 </button>
               </div>
             </form>
@@ -680,7 +682,7 @@ export default function Customers() {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentAmount')} *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -697,20 +699,20 @@ export default function Customers() {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentCurrency')} *</label>
                   <select
                     value={paymentForm.currency}
                     onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
                   >
-                    <option value="USD">USD ($)</option>
-                    <option value="LBP">LBP (ل.ل)</option>
+                    <option value="USD">{t('customers.usd')}</option>
+                    <option value="LBP">{t('customers.lbp')}</option>
                   </select>
                 </div>
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description (optional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentDescription')} (optional)</label>
                 <input
                   type="text"
                   value={paymentForm.description}
@@ -807,7 +809,7 @@ export default function Customers() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description (optional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentDescription')} (optional)</label>
                 <input
                   type="text"
                   value={paymentForm.description}

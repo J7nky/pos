@@ -554,7 +554,7 @@ ${dashSeparator}`;
   const createNewTab = () => {
     const newTab: BillTab = {
       id: uuidv4(),
-      name: `Bill ${activeTabs.length + 1}`,
+      name: `${t('common.labels.bill')} ${activeTabs.length + 1}`,
       cart: [],
       selectedCustomer: '',
       paymentMethod: 'cash',
@@ -602,7 +602,7 @@ ${dashSeparator}`;
     const createNewTab = () => {
       const newTab: BillTab = {
         id: uuidv4(),
-        name: `Bill ${activeTabs.length + 1}`,
+        name: `${t('common.labels.bill')} ${activeTabs.length + 1}`,
         cart: [],
         selectedCustomer: '',
         paymentMethod: 'cash',
@@ -611,7 +611,7 @@ ${dashSeparator}`;
         createdAt: new Date().toISOString()
       };
       const updatedTabs = [...activeTabs, newTab];
-      setActiveTabs(updatedTabs);
+      setActiveTabs(updatedTabs); 
       setActiveTabId(newTab.id);
     };
 
@@ -1045,10 +1045,10 @@ ${dashSeparator}`;
           paymentMethod: 'cash'
         });
       }
-      showToast('success', `Sale completed successfully! Bill created and receipt printed.`);
+      showToast('success', `${t('common.labels.saleCompletedSuccessfully')}! ${t('common.labels.billCreatedAndReceiptPrinted')}.`);
     } catch (error) {
       console.error('Sale processing error:', error);
-      showToast('error', `Sale failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showToast('error', `${t('common.labels.saleFailed')}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
     setIsProcessing(false);
   };
@@ -1070,13 +1070,13 @@ ${dashSeparator}`;
   const handleCustomerFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerForm.name || !customerForm.phone) {
-      setCustomerFormError('Name and Phone are required.');
+      setCustomerFormError(`${t('common.labels.nameAndPhoneAreRequired')}.`);
       return;
     }
     // Check for duplicate customer (case-insensitive, trimmed)
     const exists = customers.some(c => c.name.trim().toLowerCase() === customerForm.name!.trim().toLowerCase() && c.phone.trim() === customerForm.phone!.trim());
     if (exists) {
-      setCustomerFormError('This customer already exists.');
+      setCustomerFormError(`${t('common.labels.thisCustomerAlreadyExists')}.`);
       return;
     }
     setCustomerFormError(null);
@@ -1102,7 +1102,7 @@ ${dashSeparator}`;
       setShowAddCustomerForm(false);
       setCustomerForm({ name: '', phone: '', email: '', address: '', isActive: true });
     } catch (error) {
-      setCustomerFormError('Failed to add customer.');
+      setCustomerFormError(`${t('common.labels.failedToAddCustomer')}.`);
     }
     setIsAddingCustomer(false);
   };
@@ -1174,14 +1174,14 @@ ${dashSeparator}`;
       <AccessibleModal
         isOpen={showAddCustomerForm}
         onClose={() => setShowAddCustomerForm(false)}
-        title="Add New Customer"
+        title={t('common.labels.addNewCustomer')}
         size="md"
       >
         <form onSubmit={handleCustomerFormSubmit} className="p-6 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label htmlFor="customer-name" className="block text-sm font-medium text-gray-700">
-                Name *
+                {t('common.labels.name')} *
               </label>
               <input
                 type="text"
@@ -1197,7 +1197,7 @@ ${dashSeparator}`;
             </div>
             <div>
               <label htmlFor="customer-phone" className="block text-sm font-medium text-gray-700">
-                Phone *
+                {t('common.labels.phone')} *
               </label>
               <input
                 type="text"
@@ -1249,7 +1249,7 @@ ${dashSeparator}`;
                 tabIndex={5}
               />
               <label htmlFor="customer-active" className="ml-2 block text-sm text-gray-900">
-                Is Active
+                {t('common.labels.isActive')}
               </label>
             </div>
           </div>
@@ -1266,7 +1266,7 @@ ${dashSeparator}`;
               disabled={isAddingCustomer}
               tabIndex={7}
             >
-              Cancel
+              {t('common.labels.cancel')}
             </AccessibleButton>
             <AccessibleButton
               type="submit"
@@ -1275,7 +1275,7 @@ ${dashSeparator}`;
               tabIndex={6}
               touchOptimized
             >
-              {isAddingCustomer ? 'Adding...' : 'Add Customer'}
+              {isAddingCustomer ? `${t('common.labels.adding')}...` : `${t('common.labels.addCustomer')}`}
             </AccessibleButton>
           </div>
         </form>
@@ -1295,15 +1295,8 @@ ${dashSeparator}`;
               <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder={t('pos.searchProducts')}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                ref={searchInputRef}
-                tabIndex={1}
-                accessKey="f"
-                aria-label="Search products or suppliers (Ctrl+F)"
-              />
+                placeholder={t('common.placeholders.searchProducts')}
+                value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" ref={searchInputRef} tabIndex={1} accessKey="f" aria-label={t('common.labels.searchProductsOrSuppliers')} />
             </div>
           </div>
 
@@ -1335,7 +1328,7 @@ ${dashSeparator}`;
               <div className="space-y-2">
 
                 <div className="flex justify-between font-semibold border-t pt-2">
-                  <span>Total:</span>
+                  <span>{t('common.labels.total')}:</span>
                   <span>{formatCurrency(total)}</span>
                 </div>
               </div>
@@ -1343,7 +1336,7 @@ ${dashSeparator}`;
               {/* Customer Selection (moved here) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Customer Name {(activeTab.paymentMethod === 'credit' || ((activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && parseFloat(activeTab.amountReceived || '0') < total)) ? <span className="text-red-500">*</span> : null}
+                  {t('common.labels.customerName')} {(activeTab.paymentMethod === 'credit' || ((activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && parseFloat(activeTab.amountReceived || '0') < total)) ? <span className="text-red-500">*</span> : null}
                 </label>
                 <div ref={customerSelectRef}>
                   <SearchableSelect
@@ -1356,7 +1349,7 @@ ${dashSeparator}`;
                           category: 'Customer'
                         }))
                       : [
-                          { id: '', label: 'Walk-in Customer', value: '', category: 'Customer' },
+                          { id: '', label: `${t('common.labels.walkInCustomer')}`, value: '', category: 'Customer' },
                           ...customers.filter(c => c.isActive).map(customer => ({
                             id: customer.id,
                             label: customer.name,
@@ -1370,13 +1363,13 @@ ${dashSeparator}`;
                     updateActiveTab({ selectedCustomer: value as string });
                     setCustomerError(null);
                   }}
-                  searchPlaceholder="Search customers..."
-                  placeholder={activeTab.paymentMethod === 'credit' ? 'Select Customer' : 'Walk-in Customer'}
+                  searchPlaceholder={t('common.placeholders.searchCustomers')}
+                  placeholder={activeTab.paymentMethod === 'credit' ? `${t('common.labels.selectCustomer')}` : `${t('common.labels.walkInCustomer')}`}
 
                   recentSelections={recentCustomers}
                   onRecentUpdate={setRecentCustomers}
                   showAddOption={true}
-                  addOptionText="Add New Customer"
+                  addOptionText={t('common.labels.addNewCustomer')}
                   onAddNew={() => setShowAddCustomerForm(true)}
                   className={`w-full ${customerError ? 'border border-red-500' : ''}`}
                   tabIndex={10000}
@@ -1389,7 +1382,7 @@ ${dashSeparator}`;
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Payment Method
+                  {t('common.labels.paymentMethod')}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
@@ -1402,10 +1395,10 @@ ${dashSeparator}`;
                     }`}
                     tabIndex={10001}
                     accessKey="1"
-                    aria-label="Cash payment (Ctrl+1)"
+                    aria-label={t('common.labels.cashPayment')}
                   >
                     <DollarSign className="w-4 h-4 mx-auto mb-1" />
-                    Cash
+                    {t('common.labels.cash')}
                   </button>
                   <button
                     type="button"
@@ -1416,10 +1409,10 @@ ${dashSeparator}`;
                         : 'bg-gray-50 border-gray-300'
                     }`}
                     tabIndex={10002}
-                    aria-label="Card payment"
+                    aria-label={t('common.labels.cardPayment')}
                   >
                     <CreditCard className="w-4 h-4 mx-auto mb-1" />
-                    Card
+                    {t('common.labels.card')}
                   </button>
                   <button
                     type="button"
@@ -1431,10 +1424,10 @@ ${dashSeparator}`;
                     }`}
                     tabIndex={10003}
                     accessKey="2"
-                    aria-label="Credit payment (Ctrl+2)"
+                    aria-label={`${t('common.labels.creditPayment')} (Ctrl+2)`}
                   >
                     <User className="w-4 h-4 mx-auto mb-1" />
-                    Credit
+                    {t('common.labels.credit')}
                   </button>
                 </div>
               </div>
@@ -1444,10 +1437,10 @@ ${dashSeparator}`;
                 (activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && (
                   <div>
                     <MoneyInput
-                      label="Amount Received"
+                      label={t('common.labels.amountReceived')}
                       value={activeTab.amountReceived}
                       onChange={(value) => updateActiveTab({ amountReceived: value })}
-                      placeholder="0.00"
+                      placeholder={t('common.placeholders.amountReceived')}
                       step="1000"
                       min="0"
                       autoCompleteValue={total}
@@ -1466,7 +1459,7 @@ ${dashSeparator}`;
                     />
                     {change > 0 && (
                       <p className="text-sm text-green-600 mt-1">
-                        Change: {formatCurrency(change)}
+                        {t('common.labels.change')}: {formatCurrency(change)}
                       </p>
                     )}
                   </div>
@@ -1475,14 +1468,14 @@ ${dashSeparator}`;
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Notes (Optional)
+                  {t('common.labels.notes')} ({t('common.placeholders.optional')})
                 </label>
                 <textarea
                   value={activeTab.notes}
                   onChange={(e) => updateActiveTab({ notes: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   rows={2}
-                  placeholder="Add notes..."
+                  placeholder={t('common.placeholders.addNotes')}
                   tabIndex={10005}
                 />
               </div>
@@ -1506,11 +1499,11 @@ ${dashSeparator}`;
         touchOptimized
         loading={isProcessing || isPrinting}
         shortcut="Ctrl+Enter"
-        ariaLabel="Complete sale"
+        ariaLabel={t('common.labels.completeSale')}
         tabIndex={10006}
         className="w-full"
       >
-        Complete Sale
+        {t('common.labels.completeSale')}
       </AccessibleButton>
       
 
@@ -1613,6 +1606,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
   );
 };
 const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, products }: any) => {
+  const { t } = useI18n();
   return (
     <div className="bg-white rounded-lg shadow-sm relative">
     {/* Enhanced Cart Header */}
@@ -1686,7 +1680,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                 <div className="grid grid-cols-2 md:grid-cols-[1fr_2fr_3fr_3fr] gap-3">
                   {/* Quantity */}
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Quantity</label>
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">{t('common.labels.quantity')}</label>
                     <div className="relative">
                       <input
                         type="number"
@@ -1710,14 +1704,14 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                         aria-label={`Quantity for ${product.name}`}
                       />
                       <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
-                        units
+                        {item.quantity===''? t('common.labels.units') : ''}
                       </div>
                     </div>
                   </div>
 
                   {/* Weight */}
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Weight</label>
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">{t('common.labels.weight')}</label>
                     <div className="relative">
                       <input
                         type="number"
@@ -1735,14 +1729,14 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                         aria-label={`Weight for ${product.name}`}
                       />
                       <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
-                        kg
+                        {item.weight===''? t('common.labels.kg') : ''}
                       </div>
                     </div>
                   </div>
 
                   {/* Unit Price */}
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Unit Price</label>
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">{t('common.labels.unitPrice')}</label>
                     <MoneyInput
                       step='1000'
                       min="0"
@@ -1757,7 +1751,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
 
                   {/* Total Price */}
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">Total</label>
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">{t('common.labels.total')}</label>
                     <div
                       className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       tabIndex={200 + index * 4 + 4}
@@ -1783,8 +1777,8 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
             <div className="bg-gray-100 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6">
               <ShoppingCart className="w-12 h-12 text-gray-400" />
             </div>
-            <h3 className="text-xl font-medium text-gray-900 mb-3">Your cart is empty</h3>
-            <p className="text-gray-600 text-lg">Start adding products to begin your sale</p>
+            <h3 className="text-xl font-medium text-gray-900 mb-3">{t('common.labels.yourCartIsEmpty')}</h3>
+            <p className="text-gray-600 text-lg">{t('common.labels.startAddingProductsToBeginYourSale')}</p>
           </div>
 
 

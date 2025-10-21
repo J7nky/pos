@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useI18n } from "../../../i18n";
 import {
   RefreshCw,
   Wallet,
@@ -150,16 +151,16 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
   }, [onReset]);
 
   if (!isVisible) return null;
-
+  const { t } = useI18n();
   return (
     <div className="mb-6 bg-gray-50 rounded-lg p-4 border border-gray-200">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
           <Filter className="w-4 h-4 text-gray-600" />
-          <h4 className="text-sm font-medium text-gray-900">Filters</h4>
+          <h4 className="text-sm font-medium text-gray-900">{t('dashboard.filters')}</h4>
           {hasActiveFilters && (
             <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-              Active
+              {t('dashboard.active')}
             </span>
           )}
         </div>
@@ -168,7 +169,7 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
             onClick={() => setIsExpanded(!isExpanded)}
             className="flex items-center text-sm text-gray-600 hover:text-gray-900 transition-colors"
           >
-            {isExpanded ? 'Less' : 'More'}
+            {isExpanded ? t('dashboard.less') : t('dashboard.more')}
             <ChevronDown className={`w-4 h-4 ml-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
           </button>
           {hasActiveFilters && (
@@ -177,7 +178,7 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
               className="flex items-center text-sm text-red-600 hover:text-red-700 transition-colors"
             >
               <RotateCcw className="w-4 h-4 mr-1" />
-              Reset
+              {t('dashboard.reset')}
             </button>
           )}
         </div>
@@ -191,7 +192,7 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="Search transactions..."
+            placeholder={t('dashboard.searchTransactions')}
             value={filters.searchTerm}
             onChange={(e) => updateFilter('searchTerm', e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
@@ -212,9 +213,9 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
           onChange={(e) => updateFilter('type', e.target.value)}
           className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
         >
-          <option value="">All Types</option>
-          <option value="income">Income</option>
-          <option value="expense">Expense</option>
+          <option value="">{t('dashboard.allTypes')}</option>
+          <option value="income">{t('dashboard.income')}</option>
+          <option value="expense">{t('dashboard.expense')}</option>
         </select>
 
         {/* Currency Filter */}
@@ -223,7 +224,7 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
           onChange={(e) => updateFilter('currency', e.target.value)}
           className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
         >
-          <option value="">All Currencies</option>
+          <option value="">{t('dashboard.allCurrencies')}</option>
           <option value="USD">USD</option>
           <option value="LBP">LBP</option>
         </select>
@@ -235,7 +236,7 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Date Range */}
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Start Date</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">{t('dashboard.startDate')}</label>
               <div className="relative">
                 <Calendar className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                 <input
@@ -248,7 +249,7 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">End Date</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">{t('dashboard.endDate')}</label>
               <div className="relative">
                 <Calendar className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                 <input
@@ -262,7 +263,7 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
 
             {/* Amount Range */}
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Min Amount</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">{t('dashboard.minAmount')}</label>
               <div className="relative">
                 <DollarSign className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                 <input
@@ -276,7 +277,7 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Max Amount</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">{t('dashboard.maxAmount')}</label>
               <div className="relative">
                 <DollarSign className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                 <input
@@ -293,15 +294,15 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
           {/* Sort Options */}
           <div className="mt-4 flex items-center space-x-4">
             <div className="flex items-center space-x-2">
-              <label className="text-xs font-medium text-gray-700">Sort by:</label>
+              <label className="text-xs font-medium text-gray-700">{t('dashboard.sortBy')}</label>
               <select
                 value={filters.sortBy}
                 onChange={(e) => updateFilter('sortBy', e.target.value)}
                 className="border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="date">Date</option>
-                <option value="amount">Amount</option>
-                <option value="category">Category</option>
+                <option value="date">{t('dashboard.date')}</option>
+                <option value="amount">{t('dashboard.amount')}</option>
+                <option value="category">{t('dashboard.category')}</option>
               </select>
             </div>
             <button
@@ -355,6 +356,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   products,
   suppliers,
 }) => {
+  const { t } = useI18n();
   // Enhanced filter state
   const [showFilters, setShowFilters] = useState(true);
   const [filters, setFilters] = useState<FilterState>({
@@ -462,18 +464,18 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   // Filter summary for display
   const filterSummary = useMemo(() => {
     const activeFilters = [];
-    if (filters.searchTerm) activeFilters.push(`Search: "${filters.searchTerm}"`);
-    if (filters.type) activeFilters.push(`Type: ${filters.type}`);
-    if (filters.currency) activeFilters.push(`Currency: ${filters.currency}`);
+    if (filters.searchTerm) activeFilters.push(`${t('dashboard.search')}: "${filters.searchTerm}"`);
+    if (filters.type) activeFilters.push(`${t('dashboard.type')}: ${filters.type}`);
+    if (filters.currency) activeFilters.push(`${t('dashboard.currency')}: ${filters.currency}`);
     if (filters.dateRange.start || filters.dateRange.end) {
       const start = filters.dateRange.start || 'Any';
       const end = filters.dateRange.end || 'Any';
-      activeFilters.push(`Date: ${start} to ${end}`);
+      activeFilters.push(`${t('dashboard.dateRange')}: ${start} to ${end}`);
     }
     if (filters.amountRange.min || filters.amountRange.max) {
       const min = filters.amountRange.min || '0';
       const max = filters.amountRange.max || '∞';
-      activeFilters.push(`Amount: ${min} - ${max}`);
+      activeFilters.push(`${t('dashboard.amountRange')}: ${min} - ${max}`);
     }
     return activeFilters;
   }, [filters]);
@@ -483,7 +485,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* Cash Drawer */}
         <StatCard
-          title="Cash Drawer Balance"
+          title={t('dashboard.cashDrawerBalance')}
           value={
             cashDrawerBalance === null
               ? "—"
@@ -497,14 +499,14 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               onClick={handleRefreshCashDrawer}
               className="inline-flex items-center px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 transition-colors duration-200"
             >
-              <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+              <RefreshCw className="w-3 h-3 mr-1" /> {t('dashboard.refresh')}
             </button>
           </div>
         </StatCard>
 
         {/* Revenue */}
         <StatCard
-          title={`Revenue (${dashboardPeriod})`}
+          title={`${t('dashboard.revenue')} (${dashboardPeriod})`}
           value={formatCurrency(getPeriodData.income)}
           borderColor="border-blue-500"
           icon={<TrendingUp className="w-6 h-6 text-blue-600" />}
@@ -524,13 +526,13 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             >
               {Math.abs(getPeriodData.incomeChange).toFixed(1)}%
             </span>
-            <span className="text-xs text-gray-500 ml-1">vs prev period</span>
+            <span className="text-xs text-gray-500 ml-1">{t('dashboard.vsPrevPeriod')}</span>
           </div>
         </StatCard>
 
         {/* Expenses */}
         <StatCard
-          title={`Expenses (${dashboardPeriod})`}
+          title={`${t('dashboard.expenses')} (${dashboardPeriod})`}
           value={formatCurrency(getPeriodData.expenses)}
           borderColor="border-red-500"
           icon={<TrendingDown className="w-6 h-6 text-red-600" />}
@@ -550,13 +552,13 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             >
               {Math.abs(getPeriodData.expenseChange).toFixed(1)}%
             </span>
-            <span className="text-xs text-gray-500 ml-1">vs prev period</span>
+            <span className="text-xs text-gray-500 ml-1">{t('dashboard.vsPrevPeriod')}</span>
           </div>
         </StatCard>
 
         {/* Customer Debt */}
         <StatCard
-          title="Total Customer Debt"
+          title={t('dashboard.totalCustomerDebt')}
           value={
             <div className="space-y-1">
               <div className="flex items-center">
@@ -578,7 +580,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               {customerDebtData.customersWithDebt}
             </span>
             <span className="text-xs text-gray-500 ml-1">
-              customers with debt
+              {t('dashboard.customersWithDebt')}
             </span>
           </div>
         </StatCard>
@@ -590,7 +592,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200 p-6">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center space-x-3">
-              <h3 className="text-lg font-semibold text-gray-900">Recent Transactions</h3>
+              <h3 className="text-lg font-semibold text-gray-900">{t('dashboard.recentTransactions')}</h3>
               {filterSummary.length > 0 && (
                 <div className="flex items-center space-x-1">
                   <span className="text-xs text-gray-500">({filterSummary.length} filters)</span>
@@ -631,11 +633,11 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           {/* Results Summary */}
           <div className="mb-4 flex items-center justify-between text-sm text-gray-600">
             <span>
-              Showing {filteredTransactions.length} of {transactions.length} transactions
+              {t('dashboard.showing')} {filteredTransactions.length} {t('dashboard.of')} {transactions.length} {t('dashboard.transactions')}
             </span>
             {filterSummary.length > 0 && (
               <span className="text-blue-600">
-                Filtered by {filterSummary.length} criteria
+                {t('dashboard.filteredBy')} {filterSummary.length} {t('dashboard.criteria')}
               </span>
             )}
           </div>
@@ -646,11 +648,11 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
                   <Search className="w-8 h-8 text-gray-400" />
                 </div>
-                <h4 className="text-lg font-medium text-gray-900 mb-2">No transactions found</h4>
+                <h4 className="text-lg font-medium text-gray-900 mb-2">{t('dashboard.noTransactionsFound')}</h4>
                 <div className="text-sm">
                   {filterSummary.length > 0 
-                    ? "Try adjusting your filters to see more results"
-                    : "No transactions available at the moment"
+                    ? t('dashboard.tryAdjustingFilters')
+                    : t('dashboard.noTransactionsAvailable')
                   }
                 </div>
                 {filterSummary.length > 0 && (
@@ -658,7 +660,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                     onClick={handleResetFilters}
                     className="mt-3 text-sm text-blue-600 hover:text-blue-700 transition-colors"
                   >
-                    Clear all filters
+                    {t('dashboard.clearAllFilters')}
                   </button>
                 )}
               </div>

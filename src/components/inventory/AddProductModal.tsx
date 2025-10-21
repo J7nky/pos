@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, X, Package, Camera, Upload } from 'lucide-react';
-
+import { useI18n } from '../../i18n';
 interface AddProductModalProps {
   open: boolean;
   onClose: () => void;
@@ -8,6 +8,7 @@ interface AddProductModalProps {
 }
 
 const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSuccess }) => {
+  const { t } = useI18n();
   const [form, setForm] = useState({
     name: '',
     category: 'Fruits',
@@ -113,8 +114,8 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
         <div className="p-6 border-b border-gray-200 dark:border-slate-800 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-slate-800 dark:to-slate-800">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Add New Product</h2>
-              <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">Create a new product for your inventory</p>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">{t('common.labels.addNewProduct')}</h2>
+              <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">{t('common.labels.createNewProductForInventory')}</p>
             </div>
             <button
               onClick={onClose}
@@ -139,36 +140,36 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
                   <Package className="w-5 h-5 mr-2 text-green-600" />
-                  Product Information
+                  {t('common.labels.productInformation')}
                 </h3>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Product Name *</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('common.labels.product')} *</label>
                     <input
                       type="text"
                       value={form.name}
                       onChange={(e) => setForm((prev: any) => ({ ...prev, name: e.target.value }))}
                       className={`w-full border ${errors.name ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500 dark:bg-slate-800 dark:text-slate-100`}
                       required
-                      placeholder="Enter product name"
+                      placeholder={t('common.labels.enterProductName')}
                       maxLength={100}
                     />
                     {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Category *</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('common.labels.category')} *</label>
                     <select
                       value={form.category}
                       onChange={(e) => setForm((prev: any) => ({ ...prev, category: e.target.value }))}
                       className={`w-full border ${errors.category ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500 dark:bg-slate-800 dark:text-slate-100`}
                     >
-                      <option value="Fruits">Fruits</option>
-                      <option value="Vegetables">Vegetables</option>
-                      <option value="Herbs">Herbs</option>
-                      <option value="Nuts">Nuts</option>
-                      <option value="Others">Others</option>
+                      <option value="Fruits">{t('common.labels.fruits')}</option>
+                      <option value="Vegetables">{t('common.labels.vegetables')}</option>
+                      <option value="Leafy">{t('common.labels.leafy')}</option>
+                      <option value="Nuts">{t('common.labels.nuts')}</option>
+                      <option value="Others">{t('common.labels.others')}</option>
                     </select>
                     {errors.category && <p className="text-xs text-red-600 mt-1">{errors.category}</p>}
                   </div>
@@ -181,12 +182,12 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
                   <Camera className="w-5 h-5 mr-2 text-purple-600" />
-                  Product Image
+                  {t('common.labels.productImage')}
                 </h3>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Product Photo (optional)</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('common.labels.productPhoto')} ({t('common.placeholders.optional')})</label>
                     <div className="border-2 border-dashed border-gray-300 dark:border-slate-700 rounded-lg p-6 text-center hover:border-green-400 transition-colors">
                       <input
                         type="file"
@@ -218,8 +219,8 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
                         ) : (
                           <>
                             <Upload className="w-8 h-8 text-gray-400 dark:text-slate-500 mb-2" />
-                            <span className="text-sm text-gray-600 dark:text-slate-300">Click to upload image</span>
-                            <span className="text-xs text-gray-500 dark:text-slate-400 mt-1">PNG, JPG up to 5MB</span>
+                            <span className="text-sm text-gray-600 dark:text-slate-300">{t('common.labels.clickToUploadImage')}</span>
+                            <span className="text-xs text-gray-500 dark:text-slate-400 mt-1">{t('common.labels.pngJpgUpTo5Mb')}</span>
                           </>
                         )}
                       </label>
@@ -245,7 +246,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
               onClick={onClose}
               className="px-6 py-2 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
             >
-              Cancel
+              {t('common.labels.cancel')}
             </button>
             <button
               type="submit"
@@ -255,12 +256,12 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
               {loading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                  Adding...
+                  {t('common.labels.adding')}...
                 </>
               ) : (
                 <>
                   <Plus className="w-4 h-4 mr-2" />
-                  Add Product
+                  {t('common.labels.addProduct')}
                 </>
               )}
             </button>

@@ -26,23 +26,23 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
         <table className="w-full">
           <thead className="bg-gray-50 dark:bg-slate-800">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Product
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                {t('common.labels.product')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Supplier
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                {t('common.labels.supplier')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Type
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                {t('common.labels.type')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Quantity
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                {t('common.labels.quantity')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Received
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                {t('common.labels.received')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
-                Actions
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                {t('common.labels.actions')}
               </th>
             </tr>
           </thead>
@@ -77,25 +77,25 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                       {item.batch_type}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-900 dark:text-slate-100">
+                  <td className="px-6 py-4 text-gray-900 dark:text-slate-100 rtl:text-right ltr:text-left">
                     {item.quantity} {item.unit}
                   </td>
-                  <td className="px-6 py-4 text-gray-500 dark:text-slate-400">
+                  <td className="px-6 py-4 text-gray-500 dark:text-slate-400 rtl:text-right ltr:text-left">
                     {new Date(item.created_at).toLocaleDateString()}
                   </td>
-                  <td className="px-6 py-4">
-                    <div className="flex space-x-2">
+                  <td className="px-6 py-4 rtl:text-right ltr:text-left">
+                    <div className="flex space-x-2 rtl:space-x-reverse">
                       <button 
                         onClick={() => onEdit(item)} 
                         className="text-blue-600 hover:text-blue-800 hover:underline transition-colors"
                       >
-                        Edit
+                        {t('common.actions.edit')}
                       </button>
                       <button 
                         onClick={() => onDelete(item)} 
                         className="text-red-600 hover:text-red-800 hover:underline transition-colors"
                       >
-                        Delete
+                        {t('common.actions.delete')}
                       </button>
                     </div>
                   </td>

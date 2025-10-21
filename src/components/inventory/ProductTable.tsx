@@ -53,16 +53,16 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete,
         <table className="w-full">
           <thead className="bg-gray-50 dark:bg-slate-800">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
                 {t('common.labels.image')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
                 {t('inventory.productName')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
                 {t('inventory.category')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+              <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
                 {t('inventory.actions')}
               </th>
             </tr>
@@ -70,7 +70,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete,
           <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
             {products.map((product: any) => (
               <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-                <td className="px-6 py-4">
+                <td className="px-6 py-4 rtl:text-right ltr:text-left">
                   <img
                     src={product.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
                     alt={product.name}
@@ -78,14 +78,14 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete,
                     onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
                   />
                 </td>
-                <td className="px-6 py-4 font-medium text-gray-900 dark:text-slate-100">
+                <td className="px-6 py-4 font-medium text-gray-900 dark:text-slate-100 rtl:text-right ltr:text-left">
                   {product.name}
                 </td>
-                <td className="px-6 py-4 text-gray-700 dark:text-slate-300">
+                <td className="px-6 py-4 text-gray-700 dark:text-slate-300 rtl:text-right ltr:text-left">
                   {product.category}
                 </td>
-                <td className="px-6 py-4">
-                  <div className="flex space-x-2">
+                <td className="px-6 py-4 rtl:text-right ltr:text-left">
+                  <div className="flex space-x-2 rtl:space-x-reverse">
                     <button 
                       onClick={() => onEdit(product)} 
                       className="text-blue-600 hover:text-blue-800 hover:underline transition-colors"

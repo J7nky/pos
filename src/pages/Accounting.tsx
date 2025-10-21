@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
+import { useI18n } from '../i18n';
 import { useCurrency } from '../hooks/useCurrency';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { 
@@ -28,6 +29,7 @@ import { CashDrawerBalanceReport } from '../components/CashDrawerBalanceReport';
 import { CurrentCashDrawerStatus } from '../components/CurrentCashDrawerStatus';
 
 export default function Accounting() {
+  const { t } = useI18n();
   let raw;
   try {
     raw = useOfflineData();
@@ -36,8 +38,8 @@ export default function Accounting() {
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-red-800">Error Loading Data</h3>
-          <p className="text-red-600">Unable to load accounting data. Please refresh the page or check your connection.</p>
+          <h3 className="text-lg font-semibold text-red-800">{t('accounting.errorLoadingData')}</h3>
+          <p className="text-red-600">{t('accounting.unableToLoadData')}</p>
         </div>
       </div>
     );
@@ -340,18 +342,18 @@ export default function Accounting() {
 
     // Validate required fields
     if (!receiveForm.amount || parseFloat(receiveForm.amount) <= 0) {
-      showToast('Please enter a valid amount', 'error');
+      showToast(t('accounting.pleaseEnterValidAmount'), 'error');
       return;
     }
 
     if (!receiveForm.entityId) {
-      showToast('Please select an entity', 'error');
+      showToast(t('accounting.pleaseSelectEntity'), 'error');
       return;
     }
 
     const entity = receiveForm.entityType === 'customer' ? customers.find(c => c.id === receiveForm.entityId) : suppliers.find(s => s.id === receiveForm.entityId);
     if (!entity) {
-      showToast('Entity not found', 'error');
+      showToast(t('accounting.entityNotFound'), 'error');
       return;
     }
 
@@ -370,13 +372,16 @@ export default function Accounting() {
 
       if (result.success) {
         await refreshCashDrawerBalance();
-        showToast(`Payment received! ${formatCurrencyWithSymbol(parseFloat(receiveForm.amount), receiveForm.currency)} received from ${entity.name}`, 'success');
+        showToast(t('accounting.paymentReceived', { 
+          amount: formatCurrencyWithSymbol(parseFloat(receiveForm.amount), receiveForm.currency),
+          entityName: entity.name 
+        }), 'success');
       } else {
         showToast(result.error || 'Failed to record payment.', 'error');
       }
     } catch (err) {
       console.log(err);
-      showToast('Failed to record payment.', 'error');
+      showToast(t('accounting.failedToRecordPayment'), 'error');
     }
 
     setReceiveForm({
@@ -395,18 +400,18 @@ export default function Accounting() {
     console.log('Paying to:', payForm.entityType);
     // Validate required fields
     if (!payForm.amount || parseFloat(payForm.amount) <= 0) {
-      showToast('Please enter a valid amount', 'error');
+      showToast(t('accounting.pleaseEnterValidAmount'), 'error');
       return;
     }
 
     if (!payForm.entityId) {
-      showToast('Please select an entity', 'error');
+      showToast(t('accounting.pleaseSelectEntity'), 'error');
       return;
     }
 
     const entity = payForm.entityType === 'customer' ? customers.find(c => c.id === payForm.entityId) : suppliers.find(s => s.id === payForm.entityId);
     if (!entity) {
-      showToast('Entity not found', 'error');
+      showToast(t('accounting.entityNotFound'), 'error');
       return;
     }
 
@@ -425,13 +430,16 @@ export default function Accounting() {
 
       if (result.success) {
         await refreshCashDrawerBalance();
-        showToast(`Payment sent! ${formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency)} paid to ${entity.name}`, 'success');
+        showToast(t('accounting.paymentSent', { 
+          amount: formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency),
+          entityName: entity.name 
+        }), 'success');
       } else {
         showToast(result.error || 'Failed to record payment.', 'error');
       }
     } catch (err) {
       console.log(err);
-      showToast('Failed to record payment.', 'error');
+      showToast(t('accounting.failedToRecordPayment'), 'error');
     }
 
     setPayForm({
@@ -472,10 +480,13 @@ export default function Accounting() {
       // Refresh data to show new transaction in Recent Activity
       await raw.refreshData();
 
-      showToast(`Expense recorded! ${formatCurrencyWithSymbol(parseFloat(expenseForm.amount), expenseForm.currency)} for ${category.name}`, 'success');
+      showToast(t('accounting.expenseRecorded', { 
+        amount: formatCurrencyWithSymbol(parseFloat(expenseForm.amount), expenseForm.currency),
+        categoryName: category.name 
+      }), 'success');
     } catch (err) {
       console.log(err);
-      showToast('Failed to record expense.', 'error');
+      showToast(t('accounting.failedToRecordExpense'), 'error');
     }
 
     setExpenseForm({
@@ -528,11 +539,11 @@ export default function Accounting() {
 
   const handleSaveNonPriced = async (updated: any) => {
     if (!updated.unitPrice || updated.unitPrice <= 0) {
-      showToast('Please enter a valid unit price', 'error');
+      showToast(t('accounting.pleaseEnterValidUnitPrice'), 'error');
       return;
     }
     if (!updated.quantity || updated.quantity <= 0) {
-      showToast('Please enter a valid quantity', 'error');
+      showToast(t('accounting.pleaseEnterValidQuantity'), 'error');
       return;
     }
 
@@ -555,10 +566,10 @@ export default function Accounting() {
       }
 
       setShowEditNonPriced(null);
-      showToast('Item updated successfully', 'success');
+      showToast(t('accounting.itemUpdatedSuccessfully'), 'success');
     } catch (error) {
       console.error('Error updating non-priced item:', error);
-      showToast('Error updating item', 'error');
+      showToast(t('accounting.errorUpdatingItem'), 'error');
     }
   };
 
@@ -593,10 +604,10 @@ export default function Accounting() {
         return newChanges;
       });
 
-      showToast('Item marked as priced successfully!', 'success');
+      showToast(t('accounting.itemMarkedAsPriced'), 'success');
     } catch (error) {
       console.error('Error marking item as priced:', error);
-      showToast('Error marking item as priced', 'error');
+      showToast(t('accounting.errorMarkingAsPriced'), 'error');
     }
   };
 
@@ -615,7 +626,7 @@ export default function Accounting() {
       .filter(item => item !== null);
 
     if (validItems.length === 0) {
-      showToast('No valid items selected (items must have price and quantity)', 'error');
+      showToast(t('accounting.noValidItemsSelected'), 'error');
       return;
     }
 
@@ -640,10 +651,10 @@ export default function Accounting() {
 
       setSelectedNonPriced([]);
       setShowBulkActions(false);
-      showToast(`${validItems.length} items marked as priced successfully!`, 'success');
+      showToast(t('accounting.itemsMarkedAsPriced', { count: validItems.length }), 'success');
     } catch (error) {
       console.error('Error bulk marking items as priced:', error);
-      showToast('Error marking items as priced', 'error');
+      showToast(t('accounting.errorMarkingItemsAsPriced'), 'error');
     }
   };
 
@@ -651,10 +662,10 @@ export default function Accounting() {
     if (window.confirm('Are you sure you want to delete this item?')) {
       try {
         await deleteSale(item.id);
-        showToast('Item deleted successfully', 'success');
+        showToast(t('accounting.itemDeletedSuccessfully'), 'success');
       } catch (error) {
         console.error('Error deleting non-priced item:', error);
-        showToast('Error deleting item', 'error');
+        showToast(t('accounting.errorDeletingItem'), 'error');
       }
     }
   };
@@ -668,10 +679,10 @@ export default function Accounting() {
 
         setSelectedNonPriced([]);
         setShowBulkActions(false);
-        showToast('Items deleted successfully', 'success');
+        showToast(t('accounting.itemsDeletedSuccessfully'), 'success');
       } catch (error) {
         console.error('Error bulk deleting items:', error);
-        showToast('Error deleting items', 'error');
+        showToast(t('accounting.errorDeletingItems'), 'error');
       }
     }
   };
@@ -948,7 +959,7 @@ export default function Accounting() {
     a.download = `inventory-transaction-logs-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
-    showToast('Inventory transaction logs exported successfully', 'success');
+    showToast(t('accounting.inventoryLogsExported'), 'success');
   };
 
   const handleViewInventoryItemDetails = (log: any) => {
@@ -1102,7 +1113,7 @@ export default function Accounting() {
       return bills;
     } catch (error) {
       console.error('Error processing pending bills:', error);
-      showToast('Error processing pending bills data', 'error');
+      showToast(t('accounting.errorProcessingPendingBills'), 'error');
       return [];
     }
   }, [inventory, sales, products, suppliers]);
@@ -1204,7 +1215,7 @@ export default function Accounting() {
     try {
       // Guard: do not allow closing an already closed bill
       if (bill?.status && typeof bill.status === 'string' && bill.status.includes('[CLOSED]')) {
-        showToast('This bill is already closed.', 'error');
+        showToast(t('accounting.billAlreadyClosed'), 'error');
         return;
       }
 
@@ -1295,7 +1306,7 @@ export default function Accounting() {
         console.warn('Failed to persist closed flag on inventory batch:', e);
       }
 
-      showToast('Bill closed successfully! All fees deducted and supplier balance updated.', 'success');
+      showToast(t('accounting.billClosedSuccessfully'), 'success');
     } catch (error) {
       console.error('Error closing received bill:', error);
       throw new Error('Failed to close bill. Please try again.');
@@ -1306,9 +1317,9 @@ export default function Accounting() {
     try {
       // Update batch information
       await updateInventoryBatch(batchId, updates);
-      showToast('Batch updated successfully', 'success');
+      showToast(t('accounting.batchUpdatedSuccessfully'), 'success');
     } catch (error) {
-      showToast('Error updating batch', 'error');
+      showToast(t('accounting.errorUpdatingBatch'), 'error');
     }
   };
 
@@ -1316,9 +1327,9 @@ export default function Accounting() {
     try {
       // Apply commission rate to batch
       await updateInventoryBatch(batchId, { commission_rate: commissionRate });
-      showToast('Commission rate applied successfully', 'success');
+      showToast(t('accounting.commissionRateApplied'), 'success');
     } catch (error) {
-      showToast('Error applying commission rate', 'error');
+      showToast(t('accounting.errorApplyingCommissionRate'), 'error');
     }
   };
 
@@ -1362,11 +1373,11 @@ export default function Accounting() {
         created_by: userProfile?.id || ''
       });
 
-      showToast('Bill closed successfully! Commission deducted and supplier payment recorded.', 'success');
+      showToast(t('accounting.billClosedCommissionDeducted'), 'success');
       setShowCloseBillModal(false);
       setClosingBill(null);
     } catch (error) {
-      showToast('Failed to close bill. Please try again.', 'error');
+      showToast(t('accounting.failedToCloseBill'), 'error');
     }
   };
 
@@ -1400,7 +1411,7 @@ export default function Accounting() {
     );
 
     if (billsToClose.length === 0) {
-      showToast('No completed bills selected for closing', 'error');
+      showToast(t('accounting.noCompletedBillsSelected'), 'error');
       return;
     }
 
@@ -1414,12 +1425,12 @@ export default function Accounting() {
         closedCount++;
       }
 
-      showToast(`Successfully closed ${closedCount} bills`, 'success');
+      showToast(t('accounting.successfullyClosedBills', { count: closedCount }), 'success');
       setSelectedBills(new Set());
       setShowPendingBillsBulkActions(false);
     } catch (error) {
       console.error('Error bulk closing bills:', error);
-      showToast('Error closing bills', 'error');
+      showToast(t('accounting.errorClosingBills'), 'error');
     }
   };
 
@@ -1459,10 +1470,10 @@ export default function Accounting() {
       link.click();
       document.body.removeChild(link);
 
-      showToast('Pending bills exported successfully', 'success');
+      showToast(t('accounting.pendingBillsExported'), 'success');
     } catch (error) {
       console.error('Error exporting pending bills:', error);
-      showToast('Error exporting pending bills', 'error');
+      showToast(t('accounting.errorExportingPendingBills'), 'error');
     }
   };
 
@@ -1665,7 +1676,7 @@ export default function Accounting() {
       console.log('Debug - Processed received bills:', bills.length);
     } catch (error) {
       console.error('Error processing received bills:', error);
-      showToast('Error processing received bills data', 'error');
+      showToast(t('accounting.errorProcessingReceivedBills'), 'error');
     }
 
     return bills;
@@ -1811,10 +1822,10 @@ export default function Accounting() {
       link.click();
       document.body.removeChild(link);
 
-      showToast('Received bills exported successfully', 'success');
+      showToast(t('accounting.receivedBillsExported'), 'success');
     } catch (error) {
       console.error('Error exporting received bills:', error);
-      showToast('Error exporting received bills', 'error');
+      showToast(t('accounting.errorExportingReceivedBills'), 'error');
     }
   };
   // Sales logs edit/delete handlers
@@ -1841,12 +1852,12 @@ export default function Accounting() {
         notes: updatedSale.notes || null
       });
 
-      showToast('Sale updated successfully', 'success');
+      showToast(t('accounting.saleUpdatedSuccessfully'), 'success');
       setShowEditSaleModal(false);
       setEditingSale(null);
     } catch (error) {
       console.error('Error updating sale:', error);
-      showToast('Error updating sale', 'error');
+      showToast(t('accounting.errorUpdatingSale'), 'error');
     }
   };
 
@@ -1860,12 +1871,12 @@ export default function Accounting() {
 
     try {
       await deleteSale(saleToDelete.id);
-      showToast('Sale deleted successfully', 'success');
+      showToast(t('accounting.saleDeletedSuccessfully'), 'success');
       setShowDeleteSaleModal(false);
       setSaleToDelete(null);
     } catch (error) {
       console.error('Error deleting sale:', error);
-      showToast('Error deleting sale', 'error');
+      showToast(t('accounting.errorDeletingSale'), 'error');
     }
   };
 
@@ -1876,7 +1887,7 @@ export default function Accounting() {
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading accounting data...</p>
+            <p className="text-gray-600">{t('accounting.loadingData')}</p>
           </div>
         </div>
       </div>
@@ -1967,7 +1978,7 @@ export default function Accounting() {
          {/* Cash Drawer Tab */}
          {activeTab === 'cash-drawer' && (
         <div className="bg-white rounded-lg shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Cash Drawer Management</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('accounting.cashDrawerManagement')}</h3>
           <div className="space-y-6">
             {/* Current Status */}
             <CurrentCashDrawerStatus 
@@ -2098,7 +2109,7 @@ export default function Accounting() {
           isOpen={showDeleteSaleModal && !!saleToDelete}
           onClose={() => setShowDeleteSaleModal(false)}
           onConfirm={handleConfirmDeleteSale}
-          title="Delete Customer"
+          title={t('accounting.deleteCustomer')}
           itemLabel="Customer"
           itemDetails={[
             { label: "Name", value: saleToDelete?.name },

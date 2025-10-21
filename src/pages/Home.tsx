@@ -251,7 +251,7 @@ export default function Home() {
       color: 'bg-green-500',
       hoverColor: 'hover:bg-green-600',
       action: () => {navigate('/pos');},
-      stats: `${todaySales.length} today`
+      stats: `${todaySales.length} ${t('home.today')}`
     },
     {
       id: 'receive-products',
@@ -261,7 +261,7 @@ export default function Home() {
       color: 'bg-blue-500',
       hoverColor: 'hover:bg-blue-600',
       action: () => {navigate('/inventory')},
-      stats: `${recentReceivesCount} recent receives`
+      stats: `${recentReceivesCount} ${t('common.recentReceives')}`
     },
     {
       id: 'add-customer',
@@ -271,7 +271,7 @@ export default function Home() {
       color: 'bg-purple-500',
       hoverColor: 'hover:bg-purple-600',
       action: () => {navigate('/customers')},
-      stats: `${customers.filter(c => c.isActive).length} active`
+      stats: `${customers.filter(c => c.isActive).length} ${t('common.active')}`
     },
     {
       id: 'record-expense',
@@ -281,7 +281,7 @@ export default function Home() {
       color: 'bg-amber-500',
       hoverColor: 'hover:bg-amber-600',
       action: () => {navigate('/accounting')},
-      stats: `${formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + expense.amount, 0))} today (${t(`common.currency.${storePreferredCurrency}`)})`
+      stats: `${formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + expense.amount, 0))} ${t('home.today')} (${t(`common.currency.${storePreferredCurrency}`)})`
     },
     {
       id: 'today-sales',
@@ -291,7 +291,7 @@ export default function Home() {
       color: 'bg-indigo-500',
       hoverColor: 'hover:bg-indigo-600',
       action: () => {navigate('/reports')},
-      stats: `${todaySales.length} sales`
+      stats: `${todaySales.length} ${t('home.sales')}`
     },
     {
       id: 'check-stock',
@@ -301,19 +301,19 @@ export default function Home() {
       color: 'bg-teal-500',
       hoverColor: 'hover:bg-teal-600',
       action: () => {navigate('/inventory')},
-      stats: lowStockAlertsEnabled ? `${lowStockItems.length} low stock` : `${products.length} products`
+      stats: lowStockAlertsEnabled ? `${lowStockItems.length} ${t('home.lowStock')}` : `${products.length} ${t('home.products')}`
     }
   ];
 
   // Smooth cash drawer value display
   const getCashDrawerDisplayValue = () => {
     if (isInitialLoad && isLoadingCashDrawer) {
-      return 'Loading...';
+      return t('common.loading');
     }
     
     if (!cashDrawerStatus) {
-      return 'Closed';
-    }
+      return t('common.closed');
+      }
     
     // Show last known value during updates to prevent flashing
     if (isLoadingCashDrawer && lastCashDrawerValue !== null) {
@@ -325,14 +325,14 @@ export default function Home() {
 
   const getCashDrawerDisplayChange = () => {
     if (isInitialLoad && isLoadingCashDrawer) {
-      return 'Loading...';
+      return t('common.loading');
     }
     
     if (!cashDrawerStatus) {
-      return 'Not opened today';
+      return t('home.notOpenedToday');
     }
     
-    return `${t('home.opened')}: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}`;
+    return `${t('common.opened')}: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}`;
   };
 
   const stats = [

@@ -1,7 +1,7 @@
 import React from "react";
 import { Package } from "lucide-react";
 import AccessibleButton from "./common/AccessibleButton";
-
+import { useI18n } from "../i18n";
 interface InventoryItem {
   inventoryItemId: string;
   supplierName: string;
@@ -52,6 +52,7 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
   hideSalePrice,
   formatCurrency,
 }) => {
+  const { t } = useI18n();
   return (
     <div className="group border border-gray-200 rounded-xl p-3 hover:shadow-lg hover:border-blue-300 transition-all duration-200 bg-white">
       {/* Product Image */}
@@ -118,16 +119,16 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
                         : "bg-green-100 text-green-700"
                     }`}
                   >
-                    {item.quantity} available
+                    {item.quantity} {t('common.labels.available')}
                   </span>
                   {item.sellingPrice && item.sellingPrice > 0 && (
                     <span className="text-[8px] text-yellow-600 bg-yellow-100 px-1 py-0.5 rounded-full">
-                      Price
+                      {t('common.labels.price')}
                     </span>
                   )}
                 </div>
                 <div className="text-[10px] text-gray-500">
-                  Received: {item.receivedQuantity}
+                  {t('common.labels.received')}: {item.receivedQuantity}
                 </div>
 
                 {/* Sale Price Tooltip */}
@@ -145,7 +146,7 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
                         Sale Price: {formatCurrency(item.sellingPrice)}
                       </div>
                       <div className="text-[10px] text-yellow-600 text-center mt-1">
-                        Click to hide
+                        {t('common.labels.clickToHide')}
                       </div>
                     </div>
                   )}
