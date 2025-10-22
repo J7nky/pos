@@ -1030,26 +1030,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           customerId: cashSaleItems[0]?.customer_id || undefined
         });
 
-        // Record cash sale transaction for financial tracking
-        await db.transaction('rw', [db.transactions], async () => {
-          const cashTransaction = {
-            id: createId(),
-            store_id: storeId,
-            created_at: now,
-            updated_at: now,
-            _synced: false,
-            type: 'income', // Cash sale is income
-            amount: totalCashAmount,
-            currency: 'LBP',
-            description: `Cash sale - Bill ${bill.bill_number}`,
-            reference: bill.bill_number,
-            customer_id: cashSaleItems[0]?.customer_id || null,
-            supplier_id: null,
-            category: "sale",
-            created_by: currentUserId,
-          };
-          await db.transactions.add(cashTransaction as any);
-        });
+        // // Record cash sale transaction for financial tracking
+        // await db.transaction('rw', [db.transactions], async () => {
+        //   const cashTransaction = {
+        //     id: createId(),
+        //     store_id: storeId,
+        //     created_at: now,
+        //     updated_at: now,
+        //     _synced: false,
+        //     type: 'income', // Cash sale is income
+        //     amount: totalCashAmount,
+        //     currency: 'LBP',
+        //     description: `Cash sale - Bill ${bill.bill_number}`,
+        //     reference: bill.bill_number,
+        //     customer_id: cashSaleItems[0]?.customer_id || null,
+        //     supplier_id: null,
+        //     category: "sale",
+        //     created_by: currentUserId,
+        //   };
+        //   await db.transactions.add(cashTransaction as any);
+        // });
 
         debug(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
       } catch (error) {

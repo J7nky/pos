@@ -17,6 +17,7 @@ import {
 import { paymentService, PaymentTransaction } from "../../../services/paymentService";
 import { isPaymentCategory, PAYMENT_CATEGORIES, getPaymentDirection, getPaymentEntityType } from "../../../constants/paymentCategories";
 import { paymentManagementService, PaymentUpdateData } from "../../../services/paymentManagementService";
+import { useI18n } from "../../../i18n";
 
 type Currency = "USD" | "LBP";
 
@@ -85,6 +86,8 @@ const PaymentsSummaryCards: React.FC<{
   formatCurrency: (value: number) => string;
   currency: Currency;
 }> = ({ payments, formatCurrency }) => {
+  const { t } = useI18n();
+  
   const summary = useMemo(() => {
     const received = payments.filter(p => p.paymentDirection === 'received');
     const paid = payments.filter(p => p.paymentDirection === 'paid');
@@ -103,9 +106,9 @@ const PaymentsSummaryCards: React.FC<{
       <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 border border-green-200">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-green-700">Payments Received</p>
+            <p className="text-sm font-medium text-green-700">{t('payments.paymentsReceived')}</p>
             <p className="text-2xl font-bold text-green-900 mt-1">{formatCurrency(summary.totalReceived)}</p>
-            <p className="text-xs text-green-600 mt-1">{summary.receivedCount} transactions</p>
+            <p className="text-xs text-green-600 mt-1">{summary.receivedCount} {t('common.transactions')}</p>
           </div>
           <div className="p-3 bg-green-200 rounded-lg">
             <TrendingUp className="w-6 h-6 text-green-700" />
@@ -116,9 +119,9 @@ const PaymentsSummaryCards: React.FC<{
       <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-xl p-6 border border-red-200">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-red-700">Payments Made</p>
+            <p className="text-sm font-medium text-red-700">{t('payments.paymentsMade')}</p>
             <p className="text-2xl font-bold text-red-900 mt-1">{formatCurrency(summary.totalPaid)}</p>
-            <p className="text-xs text-red-600 mt-1">{summary.paidCount} transactions</p>
+            <p className="text-xs text-red-600 mt-1">{summary.paidCount} {t('common.transactions')}</p>
           </div>
           <div className="p-3 bg-red-200 rounded-lg">
             <DollarSign className="w-6 h-6 text-red-700" />
@@ -129,14 +132,14 @@ const PaymentsSummaryCards: React.FC<{
       <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 border border-blue-200">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-blue-700">Net Amount</p>
+            <p className="text-sm font-medium text-blue-700">{t('payments.netAmount')}</p>
             <p className={`text-2xl font-bold mt-1 ${
               summary.netAmount >= 0 ? 'text-green-900' : 'text-red-900'
             }`}>
               {formatCurrency(Math.abs(summary.netAmount))}
             </p>
             <p className="text-xs text-blue-600 mt-1">
-              {summary.netAmount >= 0 ? 'Net Positive' : 'Net Negative'}
+              {summary.netAmount >= 0 ? t('payments.netPositive') : t('payments.netNegative')}
             </p>
           </div>
           <div className="p-3 bg-blue-200 rounded-lg">
@@ -148,9 +151,9 @@ const PaymentsSummaryCards: React.FC<{
       <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-purple-700">Total Transactions</p>
+            <p className="text-sm font-medium text-purple-700">{t('payments.totalTransactions')}</p>
             <p className="text-2xl font-bold text-purple-900 mt-1">{payments.length}</p>
-            <p className="text-xs text-purple-600 mt-1">All payment activities</p>
+            <p className="text-xs text-purple-600 mt-1">{t('payments.allPaymentActivities')}</p>
           </div>
           <div className="p-3 bg-purple-200 rounded-lg">
             <RefreshCw className="w-6 h-6 text-purple-700" />
@@ -168,6 +171,7 @@ const PaymentFiltersPanel: React.FC<{
   suppliers: Array<{ id: string; name: string }>;
   categories: string[];
 }> = ({ filters, onFiltersChange, customers, suppliers, categories }) => {
+  const { t } = useI18n();
   const [isExpanded, setIsExpanded] = useState(false);
 
   const updateFilters = (updates: Partial<PaymentFilters>) => {
@@ -183,7 +187,7 @@ const PaymentFiltersPanel: React.FC<{
         >
           <div className="flex items-center space-x-2">
             <Filter className="w-5 h-5 text-gray-500" />
-            <h3 className="text-lg font-medium text-gray-900">Filters & Search</h3>
+            <h3 className="text-lg font-medium text-gray-900">{t('payments.filtersAndSearch')}</h3>
           </div>
           <ChevronDown className={`w-5 h-5 text-gray-500 transition-transform ${
             isExpanded ? 'rotate-180' : ''
@@ -195,12 +199,12 @@ const PaymentFiltersPanel: React.FC<{
         <div className="p-6 space-y-4">
           {/* Search */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.search')}</label>
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search descriptions, references, entities..."
+                placeholder={t('payments.searchPlaceholder')}
                 value={filters.search}
                 onChange={(e) => updateFilters({ search: e.target.value })}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -211,7 +215,7 @@ const PaymentFiltersPanel: React.FC<{
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Date Range */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Date Range</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.dateRange')}</label>
               <div className="space-y-2">
                 <input
                   type="date"
@@ -230,13 +234,13 @@ const PaymentFiltersPanel: React.FC<{
 
             {/* Category */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.category')}</label>
               <select
                 value={filters.category}
                 onChange={(e) => updateFilters({ category: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">All Categories</option>
+                <option value="">{t('payments.allCategories')}</option>
                 {categories.map(category => (
                   <option key={category} value={category}>{category}</option>
                 ))}
@@ -245,15 +249,15 @@ const PaymentFiltersPanel: React.FC<{
 
             {/* Entity Type */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Entity Type</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.entityType')}</label>
               <select
                 value={filters.entityType}
                 onChange={(e) => updateFilters({ entityType: e.target.value as any, entityId: '' })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="all">All Entities</option>
-                <option value="customer">Customers</option>
-                <option value="supplier">Suppliers</option>
+                <option value="all">{t('payments.allEntities')}</option>
+                <option value="customer">{t('payments.customers')}</option>
+                <option value="supplier">{t('payments.suppliers')}</option>
               </select>
             </div>
 
@@ -261,14 +265,14 @@ const PaymentFiltersPanel: React.FC<{
             {filters.entityType !== 'all' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {filters.entityType === 'customer' ? 'Customer' : 'Supplier'}
+                  {filters.entityType === 'customer' ? t('payments.customer') : t('payments.supplier')}
                 </label>
                 <select
                   value={filters.entityId}
                   onChange={(e) => updateFilters({ entityId: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="">All {filters.entityType === 'customer' ? 'Customers' : 'Suppliers'}</option>
+                  <option value="">{filters.entityType === 'customer' ? t('payments.allCustomers') : t('payments.allSuppliers')}</option>
                   {(filters.entityType === 'customer' ? customers : suppliers).map(entity => (
                     <option key={entity.id} value={entity.id}>{entity.name}</option>
                   ))}
@@ -280,27 +284,27 @@ const PaymentFiltersPanel: React.FC<{
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Direction */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Direction</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.direction')}</label>
               <select
                 value={filters.direction}
                 onChange={(e) => updateFilters({ direction: e.target.value as any })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="all">All Directions</option>
-                <option value="received">Received</option>
-                <option value="paid">Paid</option>
+                <option value="all">{t('payments.allDirections')}</option>
+                <option value="received">{t('payments.received')}</option>
+                <option value="paid">{t('payments.paid')}</option>
               </select>
             </div>
 
             {/* Currency */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Currency</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.currency')}</label>
               <select
                 value={filters.currency}
                 onChange={(e) => updateFilters({ currency: e.target.value as any })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="all">All Currencies</option>
+                <option value="all">{t('payments.allCurrencies')}</option>
                 <option value="USD">USD</option>
                 <option value="LBP">LBP</option>
               </select>
@@ -308,18 +312,18 @@ const PaymentFiltersPanel: React.FC<{
 
             {/* Amount Range */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Amount Range</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.amountRange')}</label>
               <div className="flex space-x-2">
                 <input
                   type="number"
-                  placeholder="Min"
+                  placeholder={t('payments.min')}
                   value={filters.amountRange.min}
                   onChange={(e) => updateFilters({ amountRange: { ...filters.amountRange, min: e.target.value } })}
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                 />
                 <input
                   type="number"
-                  placeholder="Max"
+                  placeholder={t('payments.max')}
                   value={filters.amountRange.max}
                   onChange={(e) => updateFilters({ amountRange: { ...filters.amountRange, max: e.target.value } })}
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
@@ -343,7 +347,7 @@ const PaymentFiltersPanel: React.FC<{
               })}
               className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
             >
-              Clear All Filters
+              {t('payments.clearAllFilters')}
             </button>
           </div>
         </div>
@@ -361,6 +365,7 @@ const PaymentEditModal: React.FC<{
   suppliers: Array<{ id: string; name: string }>;
   formatCurrency: (value: number) => string;
 }> = ({ isOpen, payment, onClose, onSave, customers, suppliers }) => {
+  const { t } = useI18n();
   const [formData, setFormData] = useState<Partial<Transaction>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -386,16 +391,16 @@ const PaymentEditModal: React.FC<{
     // Validate form
     const newErrors: Record<string, string> = {};
     if (!formData.amount || formData.amount <= 0) {
-      newErrors.amount = 'Amount must be greater than 0';
+      newErrors.amount = t('payments.amountRequired');
     }
     if (!formData.description?.trim()) {
-      newErrors.description = 'Description is required';
+      newErrors.description = t('payments.descriptionRequired');
     }
     if (!formData.customer_id && !formData.supplier_id) {
-      newErrors.entity = 'Either customer or supplier must be selected';
+      newErrors.entity = t('payments.entityRequired');
     }
     if (formData.customer_id && formData.supplier_id) {
-      newErrors.entity = 'Cannot select both customer and supplier';
+      newErrors.entity = t('payments.bothEntitiesError');
     }
 
     setErrors(newErrors);
@@ -406,7 +411,7 @@ const PaymentEditModal: React.FC<{
       await onSave(formData);
       onClose();
     } catch (error) {
-      setErrors({ general: 'Failed to update payment. Please try again.' });
+      setErrors({ general: t('payments.updateFailed') });
     } finally {
       setIsLoading(false);
     }
@@ -423,15 +428,15 @@ const PaymentEditModal: React.FC<{
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Edit Payment</h2>
+              <h2 className="text-xl font-semibold text-gray-900">{t('payments.editPayment')}</h2>
               <p className="text-sm text-gray-600 mt-1">
-                {paymentDirection === 'received' ? 'Payment Received' : 'Payment Made'} •
+                {paymentDirection === 'received' ? t('payments.paymentReceived') : t('payments.paymentMade')} •
                 <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ml-1 ${
                   entityType === 'customer' ? 'bg-blue-100 text-blue-800' : 
                   entityType === 'supplier' ? 'bg-purple-100 text-purple-800' : 
                   'bg-gray-100 text-gray-800'
                 }`}>
-                  {entityType === 'customer' ? 'Customer' : entityType === 'supplier' ? 'Supplier' : 'Unknown'}
+                  {entityType === 'customer' ? t('payments.customer') : entityType === 'supplier' ? t('payments.supplier') : t('payments.unknown')}
                 </span>
               </p>
             </div>
@@ -455,7 +460,7 @@ const PaymentEditModal: React.FC<{
             {/* Amount */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Amount *
+                {t('payments.amount')} *
               </label>
               <div className="relative">
                 <input
@@ -478,7 +483,7 @@ const PaymentEditModal: React.FC<{
             {/* Currency */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Currency
+                {t('payments.currency')}
               </label>
               <select
                 value={formData.currency || 'USD'}
@@ -494,7 +499,7 @@ const PaymentEditModal: React.FC<{
           {/* Description */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Description *
+              {t('payments.description')} *
             </label>
             <textarea
               value={formData.description || ''}
@@ -503,7 +508,7 @@ const PaymentEditModal: React.FC<{
               className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                 errors.description ? 'border-red-300' : 'border-gray-300'
               }`}
-              placeholder="Payment description..."
+              placeholder={t('payments.descriptionPlaceholder')}
             />
             {errors.description && (
               <p className="text-xs text-red-600 mt-1">{errors.description}</p>
@@ -513,26 +518,26 @@ const PaymentEditModal: React.FC<{
           {/* Reference */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Reference
+              {t('payments.reference')}
             </label>
             <input
               type="text"
               value={formData.reference || ''}
               onChange={(e) => setFormData({ ...formData, reference: e.target.value || null })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Reference number or note..."
+              placeholder={t('payments.referencePlaceholder')}
             />
           </div>
 
           {/* Entity Selection */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Related Entity *
+              {t('payments.relatedEntity')} *
             </label>
             <div className="space-y-3">
               {/* Customer Selection */}
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Customer</label>
+                <label className="block text-sm text-gray-600 mb-1">{t('payments.customer')}</label>
                 <select
                   value={formData.customer_id || ''}
                   onChange={(e) => setFormData({ 
@@ -542,7 +547,7 @@ const PaymentEditModal: React.FC<{
                   })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="">Select customer...</option>
+                  <option value="">{t('payments.selectCustomer')}</option>
                   {customers.map(customer => (
                     <option key={customer.id} value={customer.id}>{customer.name}</option>
                   ))}
@@ -551,7 +556,7 @@ const PaymentEditModal: React.FC<{
 
               {/* Supplier Selection */}
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Supplier</label>
+                <label className="block text-sm text-gray-600 mb-1">{t('payments.supplier')}</label>
                 <select
                   value={formData.supplier_id || ''}
                   onChange={(e) => setFormData({ 
@@ -561,7 +566,7 @@ const PaymentEditModal: React.FC<{
                   })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="">Select supplier...</option>
+                  <option value="">{t('payments.selectSupplier')}</option>
                   {suppliers.map(supplier => (
                     <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
                   ))}
@@ -576,7 +581,7 @@ const PaymentEditModal: React.FC<{
           {/* Payment Category */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Category
+              {t('payments.category')}
             </label>
             <select
               value={formData.category || ''}
@@ -596,7 +601,7 @@ const PaymentEditModal: React.FC<{
             disabled={isLoading}
             className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50"
           >
-            Cancel
+            {t('payments.cancel')}
           </button>
           <button
             onClick={handleSave}
@@ -606,10 +611,10 @@ const PaymentEditModal: React.FC<{
             {isLoading ? (
               <>
                 <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                Saving...
+                {t('payments.saving')}
               </>
             ) : (
-              'Save Changes'
+              t('payments.saveChanges')
             )}
           </button>
         </div>
@@ -641,6 +646,7 @@ const PaymentsTable: React.FC<{
   onDelete,
   onView
 }) => {
+  const { t } = useI18n();
   const [sortField, setSortField] = useState<'created_at' | 'amount' | 'category'>('created_at');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
@@ -695,23 +701,23 @@ const PaymentsTable: React.FC<{
   const getEntityName = (payment: PaymentTransaction) => {
     if (payment.customer_id) {
       const customer = customers.find(c => c.id === payment.customer_id);
-      return customer?.name || 'Unknown Customer';
+      return customer?.name || t('payments.unknownCustomer');
     }
     if (payment.supplier_id) {
       const supplier = suppliers.find(s => s.id === payment.supplier_id);
-      return supplier?.name || 'Unknown Supplier';
+      return supplier?.name || t('payments.unknownSupplier');
     }
-    return 'No Entity';
+    return t('payments.noEntity');
   };
 
   const getDirectionBadge = (direction: string) => {
     return direction === 'received' ? (
       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-        Received
+        {t('payments.received')}
       </span>
     ) : (
       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-        Paid
+        {t('payments.paid')}
       </span>
     );
   };
@@ -719,15 +725,15 @@ const PaymentsTable: React.FC<{
   const getEntityTypeBadge = (entityType: string) => {
     return entityType === 'customer' ? (
       <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-        Customer
+        {t('payments.customer')}
       </span>
     ) : entityType === 'supplier' ? (
       <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-        Supplier
+        {t('payments.supplier')}
       </span>
     ) : (
       <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-        Unknown
+        {t('payments.unknown')}
       </span>
     );
   };

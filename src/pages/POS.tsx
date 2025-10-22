@@ -751,7 +751,7 @@ ${dashSeparator}`;
     const existingItem = activeTab.cart.find(item => 
       item.inventoryItemId === inventoryItemId
     );
-
+    console.log(existingItem,'existingItem in addToCart');
     if (existingItem) {
       // If this specific inventory item is already in cart, increase quantity if available
       if (available > 0) {
@@ -1026,7 +1026,6 @@ ${dashSeparator}`;
       await printReceipt(billData, lineItemsData, customer, qrCodeData);
       
       // Also download receipt for preview/testing
-      await downloadReceipt(billData, lineItemsData, customer, qrCodeData);
 
       await raw.refreshData(); // Ensure UI is in sync with backend
 

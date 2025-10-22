@@ -293,7 +293,6 @@ export class CashDrawerUpdateService {
               store_id: transactionData.storeId,
               created_by: transactionData.createdBy,
               created_at: new Date().toISOString(),
-              device_id: this.getDeviceId(),
               _synced: false
             });
           });
@@ -464,7 +463,7 @@ export class CashDrawerUpdateService {
         console.warn(`💰 Balance discrepancy detected: Stored: $${storedBalance.toFixed(2)}, Calculated: $${calculatedBalance.toFixed(2)}`);
         
         // Update stored balance to match calculated balance
-        await db.cash_drawer_accounts.update(account.id, {
+        await db.cash_drawer_accounts.update(account?.id as string, {
           current_balance: calculatedBalance as any,
           updated_at: new Date().toISOString(),
           _synced: false

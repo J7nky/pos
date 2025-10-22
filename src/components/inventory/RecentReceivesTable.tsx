@@ -16,6 +16,42 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
   onDelete 
 }) => {
   const { t } = useI18n();
+
+  // Function to translate batch type
+  const translateBatchType = (batchType: string) => {
+    switch (batchType) {
+      case 'commission':
+        return t('inventory.commission');
+      case 'cash':
+        return t('inventory.typeCash');
+      case 'credit':
+        return t('inventory.creditPurchase');
+      default:
+        return batchType;
+    }
+  };
+
+  // Function to translate units
+  const translateUnit = (unit: string) => {
+    switch (unit?.toLowerCase()) {
+      case 'kg':
+        return t('common.labels.kg');
+      case 'box':
+        return t('common.labels.box');
+      case 'bag':
+        return t('common.labels.bag');
+      case 'bundle':
+        return t('common.labels.bundle');
+      case 'dozen':
+        return t('common.labels.dozen');
+      case 'piece':
+        return t('common.labels.piece');
+      case 'units':
+        return t('common.labels.units');
+      default:
+        return unit;
+    }
+  };
   return (
     <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
       <div className="p-6 border-b border-gray-200 dark:border-slate-800">
@@ -74,11 +110,11 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                         ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
                         : 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
                     }`}>
-                      {item.batch_type}
+                      {translateBatchType(item.batch_type)}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-gray-900 dark:text-slate-100 rtl:text-right ltr:text-left">
-                    {item.quantity} {item.unit}
+                    {item.quantity} {translateUnit(item.unit)}
                   </td>
                   <td className="px-6 py-4 text-gray-500 dark:text-slate-400 rtl:text-right ltr:text-left">
                     {new Date(item.created_at).toLocaleDateString()}

@@ -316,6 +316,9 @@ export interface Transaction {
   created_at: string;
   supplier_id: string | null;
   customer_id: string | null;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
 }
 
 export interface CashDrawer {

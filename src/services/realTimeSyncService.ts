@@ -202,10 +202,10 @@ export class RealTimeSyncService {
     try {
       const { eventType, new: newRecord, old: oldRecord } = payload;
       
-      // Skip updates from the same device to avoid loops
-      if (newRecord?.device_id === this.deviceId) {
-        return;
-      }
+      // // Skip updates from the same device to avoid loops
+      // if (newRecord?.device_id === this.deviceId) {
+      //   return;
+      // }
 
       if (eventType === 'UPDATE' && newRecord) {
         const newBalance = Number(newRecord.current_balance || 0);
@@ -268,10 +268,10 @@ export class RealTimeSyncService {
     try {
       const { eventType, new: newRecord } = payload;
       
-      // Skip updates from the same device
-      if (newRecord?.device_id === this.deviceId) {
-        return;
-      }
+      // // Skip updates from the same device
+      // if (newRecord?.device_id === this.deviceId) {
+      //   return;
+      // }
 
       if (eventType === 'INSERT' && newRecord) {
         console.log(`💰 Real-time session opened: ${newRecord.status}`);
