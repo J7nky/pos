@@ -4,6 +4,8 @@ const path = require("path");
 const { exec } = require("child_process");
 const { ThermalPrinter, PrinterTypes } = require("node-thermal-printer");
 const fs = require("fs");
+const iconv = require("iconv-lite");
+const { createCanvas } = require("canvas");
 // Enable hot reloading in development
 if (process.env.NODE_ENV === 'development') {
     try {
@@ -134,6 +136,222 @@ ipcMain.handle('print-document', async (_event, options) => {
         };
     }
 });
+// Helper function: Render Arabic text to bitmap image
+function renderTextToBitmap(text, options = {}) {
+    const { fontSize = 24, fontFamily = 'Arial, sans-serif', width = 576, // 72mm for 80mm paper (8 dots per mm)
+    align = 'left', bold = false, padding = 10 } = options;
+    // Create canvas
+    const canvas = createCanvas(width, 100); // Height will be adjusted
+    const ctx = canvas.getContext('2d');
+    // Set font
+    ctx.font = `${bold ? 'bold ' : ''}${fontSize}px ${fontFamily}`;
+    ctx.fillStyle = 'black';
+    ctx.textBaseline = 'top';
+    // Measure text
+    const metrics = ctx.measureText(text);
+    const textWidth = metrics.width;
+    const textHeight = fontSize * 1.5; // Approximate height with padding
+    // Resize canvas to fit text
+    canvas.height = Math.ceil(textHeight + padding * 2);
+    // Re-set font after resize (canvas clears on resize)
+    ctx.font = `${bold ? 'bold ' : ''}${fontSize}px ${fontFamily}`;
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'black';
+    ctx.textBaseline = 'top';
+    // Calculate X position based on alignment
+    let x = padding;
+    if (align === 'center') {
+        x = (width - textWidth) / 2;
+    }
+    else if (align === 'right') {
+        x = width - textWidth - padding;
+    }
+    // Draw text
+    ctx.fillText(text, x, padding);
+    // Convert to monochrome bitmap
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imageData.data;
+    // Convert to 1-bit monochrome
+    const bytesPerLine = Math.ceil(canvas.width / 8);
+    const bitmapData = Buffer.alloc(bytesPerLine * canvas.height);
+    for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+            const pixelIndex = (y * canvas.width + x) * 4;
+            const r = pixels[pixelIndex];
+            const g = pixels[pixelIndex + 1];
+            const b = pixels[pixelIndex + 2];
+            // Convert to grayscale and threshold
+            const gray = (r + g + b) / 3;
+            const isBlack = gray < 128;
+            if (isBlack) {
+                const byteIndex = y * bytesPerLine + Math.floor(x / 8);
+                const bitIndex = 7 - (x % 8);
+                bitmapData[byteIndex] |= (1 << bitIndex);
+            }
+        }
+    }
+    return bitmapData;
+}
+// Helper function: Create ESC/POS bitmap command
+function createBitmapCommand(bitmapData, width, height) {
+    const GS = '\x1D';
+    const bytesPerLine = Math.ceil(width / 8);
+    // GS v 0 command for printing raster bitmap
+    // GS v 0 m xL xH yL yH d1...dk
+    const xL = bytesPerLine & 0xFF;
+    const xH = (bytesPerLine >> 8) & 0xFF;
+    const yL = height & 0xFF;
+    const yH = (height >> 8) & 0xFF;
+    const header = Buffer.from([
+        0x1D, 0x76, 0x30, 0x00, // GS v 0 m (m=0 for normal, m=1 for double width, m=2 for double height, m=3 for quad)
+        xL, xH, // Width in bytes
+        yL, yH // Height in dots
+    ]);
+    return Buffer.concat([header, bitmapData]);
+}
+// Test function for image-based Arabic printing
+async function testImageBasedArabicPrinting(printerName) {
+    console.log('');
+    console.log('╔════════════════════════════════════════╗');
+    console.log('║  IMAGE-BASED ARABIC PRINTING TEST      ║');
+    console.log('╚════════════════════════════════════════╝');
+    console.log('');
+    const ESC = '\x1B';
+    const GS = '\x1D';
+    const INIT = ESC + '@';
+    const ALIGN_CENTER = ESC + 'a' + '1';
+    const ALIGN_LEFT = ESC + 'a' + '0';
+    const CUT_PAPER = GS + 'V' + '\x00';
+    const LINE_FEED = '\n';
+    try {
+        // Start ESC/POS data
+        let escposData = Buffer.from(INIT, 'binary');
+        escposData = Buffer.concat([escposData, Buffer.from(ALIGN_CENTER + 'IMAGE-BASED ARABIC TEST' + LINE_FEED, 'binary')]);
+        escposData = Buffer.concat([escposData, Buffer.from('='.repeat(32) + LINE_FEED + LINE_FEED, 'binary')]);
+        escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT, 'binary')]);
+        // Test texts
+        const testTexts = [
+            { text: 'مرحبا (Hello)', fontSize: 24, bold: false },
+            { text: 'شكراً لك (Thank You)', fontSize: 24, bold: true },
+            { text: 'متجر الخضروات', fontSize: 20, bold: false },
+            { text: 'الإجمالي: 50.000 ل.ل', fontSize: 22, bold: true },
+        ];
+        for (const testItem of testTexts) {
+            console.log(`📝 Rendering: "${testItem.text}" (${testItem.fontSize}px, ${testItem.bold ? 'bold' : 'normal'})`);
+            // Render text to bitmap
+            const bitmapData = renderTextToBitmap(testItem.text, {
+                fontSize: testItem.fontSize,
+                width: 576, // 80mm paper width
+                bold: testItem.bold,
+                align: 'left'
+            });
+            // Create bitmap command
+            const bitmapCommand = createBitmapCommand(bitmapData, 576, Math.ceil(testItem.fontSize * 1.5 + 20));
+            // Add to ESC/POS data
+            escposData = Buffer.concat([escposData, bitmapCommand]);
+            escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED, 'binary')]);
+            console.log(`✅ Rendered successfully (${bitmapData.length} bytes)`);
+        }
+        // Add footer
+        escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED + '='.repeat(32) + LINE_FEED, 'binary')]);
+        escposData = Buffer.concat([escposData, Buffer.from(ALIGN_CENTER + 'End of test' + LINE_FEED, 'binary')]);
+        escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED + LINE_FEED + LINE_FEED, 'binary')]);
+        escposData = Buffer.concat([escposData, Buffer.from(CUT_PAPER, 'binary')]);
+        // Write to file
+        const tempFile = path.join(process.cwd(), 'temp-arabic-image-test.bin');
+        fs.writeFileSync(tempFile, escposData);
+        console.log('📝 Created test file:', tempFile);
+        console.log('📦 Total size:', escposData.length, 'bytes');
+        // Send to printer
+        const copyCommand = `copy /B "${tempFile}" "\\\\localhost\\${printerName}"`;
+        console.log('📤 Sending to printer...');
+        return new Promise((resolve, reject) => {
+            exec(copyCommand, (error) => {
+                try {
+                    fs.unlinkSync(tempFile);
+                }
+                catch (e) { }
+                if (error) {
+                    console.error('❌ Print failed:', error);
+                    reject(error);
+                }
+                else {
+                    console.log('✅ Image-based Arabic test printed successfully!');
+                    console.log('📋 Check the receipt - Arabic should be perfectly readable!');
+                    resolve({ success: true, message: 'Image-based Arabic printing test completed' });
+                }
+            });
+        });
+    }
+    catch (error) {
+        console.error('❌ Test failed:', error);
+        return { success: false, message: 'Test failed', error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+}
+// Test function to print with all code pages for debugging
+async function testAllArabicCodePages(printerName) {
+    console.log('');
+    console.log('╔════════════════════════════════════════╗');
+    console.log('║  ARABIC CODE PAGE TEST MODE            ║');
+    console.log('╚════════════════════════════════════════╝');
+    console.log('');
+    const testText = 'Test Arabic: مرحبا شكرا';
+    const ESC = '\x1B';
+    const GS = '\x1D';
+    const INIT = ESC + '@';
+    const ALIGN_CENTER = ESC + 'a' + '1';
+    const ALIGN_LEFT = ESC + 'a' + '0';
+    const CUT_PAPER = GS + 'V' + '\x00';
+    const codePagesToTest = [
+        { num: 221, hex: '\xDD', name: 'CP221 (Xprinter Arabic!)', encoding: 'win1256' },
+        { num: 22, hex: '\x16', name: 'CP22 (Xprinter Arabic Alt)', encoding: 'win1256' },
+        { num: 0, hex: '\x00', name: 'CP0 (Default)', encoding: 'utf8' },
+        { num: 16, hex: '\x10', name: 'CP16', encoding: 'cp864' },
+        { num: 17, hex: '\x11', name: 'CP17', encoding: 'cp864' },
+        { num: 28, hex: '\x1C', name: 'CP28', encoding: 'iso-8859-6' },
+    ];
+    let escposData = INIT;
+    escposData += ALIGN_CENTER;
+    escposData += 'ARABIC CODE PAGE TEST\n';
+    escposData += '====================\n\n';
+    escposData += ALIGN_LEFT;
+    for (const cp of codePagesToTest) {
+        console.log(`Testing ${cp.name}...`);
+        escposData += `\nCode Page ${cp.num} (${cp.name}):\n`;
+        escposData += ESC + 't' + cp.hex; // Set code page
+        escposData += testText + '\n';
+        escposData += '--------------------\n';
+    }
+    escposData += '\n\n\n';
+    escposData += CUT_PAPER;
+    const tempFile = path.join(process.cwd(), 'temp-test-codepages.bin');
+    try {
+        const dataToWrite = iconv.encode(escposData, 'cp864');
+        fs.writeFileSync(tempFile, dataToWrite);
+        const copyCommand = `copy /B "${tempFile}" "\\\\localhost\\${printerName}"`;
+        console.log('📤 Sending test to printer...');
+        return new Promise((resolve, reject) => {
+            exec(copyCommand, (error) => {
+                try {
+                    fs.unlinkSync(tempFile);
+                }
+                catch (e) { }
+                if (error) {
+                    reject(error);
+                }
+                else {
+                    console.log('✅ Test printed! Check which code page shows Arabic correctly.');
+                    resolve({ success: true, message: 'Code page test completed' });
+                }
+            });
+        });
+    }
+    catch (error) {
+        console.error('❌ Test failed:', error);
+        return { success: false, message: 'Test failed' };
+    }
+}
 // Direct printing function for thermal printers using ESC/POS
 async function printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl) {
     try {
@@ -199,8 +417,33 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
             const SIZE_DOUBLE = GS + '!' + '\x11';
             const CUT_PAPER = GS + 'V' + '\x00';
             const LINE_FEED = '\n';
-            // Build ESC/POS command string
-            let escposData = INIT; // Initialize printer
+            // Code page selection for Arabic support
+            // Try multiple code pages - Xprinter models vary
+            const CODE_PAGES = {
+                CP0: { cmd: ESC + 't' + '\x00', name: 'CP0 (USA/Europe)', encoding: 'ascii' },
+                CP16: { cmd: ESC + 't' + '\x10', name: 'CP16 (Arabic Alt)', encoding: 'cp864' },
+                CP17: { cmd: ESC + 't' + '\x11', name: 'CP17 (CP864)', encoding: 'cp864' },
+                CP23: { cmd: ESC + 't' + '\x17', name: 'CP23 (Windows-1256)', encoding: 'win1256' },
+                CP28: { cmd: ESC + 't' + '\x1C', name: 'CP28 (Arabic Standard)', encoding: 'iso-8859-6' },
+            };
+            // Check if content contains Arabic characters
+            const hasArabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(content);
+            // Build ESC/POS command - using Buffer for binary data
+            let escposData = Buffer.from(INIT, 'binary');
+            // Log Arabic detection
+            if (hasArabic) {
+                console.log('====================================');
+                console.log('🖼️ ARABIC TEXT DETECTED - USING IMAGE-BASED RENDERING');
+                console.log('====================================');
+                // Extract Arabic characters for debugging
+                const arabicChars = content.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g) || [];
+                console.log('📝 Arabic text found:', arabicChars.slice(0, 3).join(', ') + (arabicChars.length > 3 ? '...' : ''));
+                console.log('📊 Total Arabic segments:', arabicChars.length);
+                console.log('✨ Will render Arabic text as images for perfect display');
+            }
+            else {
+                console.log('ℹ️  No Arabic text detected, using standard text encoding');
+            }
             // Parse receipt content
             const lines = content.split('\n');
             for (const line of lines) {
@@ -210,7 +453,7 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
                     // Print QR code if URL is available
                     if (qrCodeUrl) {
                         console.log('📱 Adding QR code to ESC/POS data:', qrCodeUrl);
-                        escposData += ALIGN_CENTER;
+                        escposData = Buffer.concat([escposData, Buffer.from(ALIGN_CENTER, 'binary')]);
                         // QR Code ESC/POS command for EPSON-compatible printers
                         // Model: GS ( k pL pH cn fn n1 n2
                         const qrModel = GS + '(k' + '\x04\x00' + '1A' + '2\x00'; // Set model to 2
@@ -223,61 +466,99 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
                         const qrStore = GS + '(k' + pL + pH + '1P0' + qrCodeUrl;
                         // Print QR code
                         const qrPrint = GS + '(k' + '\x03\x00' + '1Q' + '0';
-                        escposData += qrModel + qrSize + qrErrorCorrection + qrStore + qrPrint;
-                        escposData += LINE_FEED + LINE_FEED;
-                        escposData += ALIGN_LEFT;
+                        escposData = Buffer.concat([escposData, Buffer.from(qrModel + qrSize + qrErrorCorrection + qrStore + qrPrint, 'binary')]);
+                        escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED + LINE_FEED + ALIGN_LEFT, 'binary')]);
                     }
                     continue;
                 }
+                // Check if line contains Arabic
+                const lineHasArabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(trimmedLine);
                 // Handle separators
                 if (trimmedLine.match(/^=+$/)) {
-                    escposData += ALIGN_LEFT + '================================' + LINE_FEED;
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT + '================================' + LINE_FEED, 'binary')]);
                     continue;
                 }
                 if (trimmedLine.match(/^-+$/)) {
-                    escposData += ALIGN_LEFT + '--------------------------------' + LINE_FEED;
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT + '--------------------------------' + LINE_FEED, 'binary')]);
+                    continue;
+                }
+                // If line contains Arabic, render as image
+                if (lineHasArabic) {
+                    console.log(`🖼️ Rendering Arabic line as image: "${trimmedLine.substring(0, 50)}${trimmedLine.length > 50 ? '...' : ''}"`);
+                    // Determine styling
+                    const isCentered = trimmedLine.includes('MARKET') || trimmedLine.includes('VEGETABLES') || trimmedLine.includes('Scan QR code');
+                    const isBold = trimmedLine.includes('Bill No:') || trimmedLine.includes('Date:') || trimmedLine.includes('TOTAL') || trimmedLine.includes('Thank You');
+                    const isLarge = trimmedLine.includes('TOTAL BALANCE');
+                    // Render as image
+                    const bitmapData = renderTextToBitmap(trimmedLine, {
+                        fontSize: isLarge ? 28 : 22,
+                        width: 576,
+                        bold: isBold,
+                        align: isCentered ? 'center' : 'left'
+                    });
+                    const bitmapHeight = Math.ceil((isLarge ? 28 : 22) * 1.5 + 20);
+                    const bitmapCommand = createBitmapCommand(bitmapData, 576, bitmapHeight);
+                    escposData = Buffer.concat([escposData, bitmapCommand]);
+                    escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED, 'binary')]);
                     continue;
                 }
                 // Handle store name (centered and bold)
                 if (trimmedLine.includes('MARKET') || trimmedLine.includes('VEGETABLES')) {
-                    escposData += ALIGN_CENTER + BOLD_ON + trimmedLine + BOLD_OFF + LINE_FEED;
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_CENTER + BOLD_ON + trimmedLine + BOLD_OFF + LINE_FEED, 'binary')]);
                     continue;
                 }
                 // Handle bill number and date (bold)
                 if (trimmedLine.includes('Bill No:') || trimmedLine.includes('Date:')) {
-                    escposData += ALIGN_LEFT + BOLD_ON + trimmedLine + BOLD_OFF + LINE_FEED;
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT + BOLD_ON + trimmedLine + BOLD_OFF + LINE_FEED, 'binary')]);
                     continue;
                 }
                 // Handle total balance (bold and larger)
                 if (trimmedLine.includes('TOTAL BALANCE:')) {
-                    escposData += ALIGN_LEFT + BOLD_ON + SIZE_DOUBLE + trimmedLine + SIZE_NORMAL + BOLD_OFF + LINE_FEED;
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT + BOLD_ON + SIZE_DOUBLE + trimmedLine + SIZE_NORMAL + BOLD_OFF + LINE_FEED, 'binary')]);
                     continue;
                 }
                 // Handle thank you message (centered and bold)
                 if (trimmedLine.includes('Thank You')) {
-                    escposData += ALIGN_CENTER + BOLD_ON + trimmedLine + BOLD_OFF + LINE_FEED;
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_CENTER + BOLD_ON + trimmedLine + BOLD_OFF + LINE_FEED, 'binary')]);
                     continue;
                 }
                 // Handle QR code section header
                 if (trimmedLine.includes('Scan QR code')) {
-                    escposData += ALIGN_CENTER + trimmedLine + LINE_FEED;
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_CENTER + trimmedLine + LINE_FEED, 'binary')]);
                     continue;
                 }
                 // Default: print line as-is
                 if (trimmedLine) {
-                    escposData += ALIGN_LEFT + trimmedLine + LINE_FEED;
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT + trimmedLine + LINE_FEED, 'binary')]);
                 }
                 else {
-                    escposData += LINE_FEED;
+                    escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED, 'binary')]);
                 }
             }
             // Cut paper
-            escposData += LINE_FEED + LINE_FEED + LINE_FEED;
-            escposData += CUT_PAPER;
+            escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED + LINE_FEED + LINE_FEED + CUT_PAPER, 'binary')]);
             // Write ESC/POS data to a temporary file
             const tempFile = path.join(process.cwd(), 'temp-receipt-escpos.bin');
-            fs.writeFileSync(tempFile, escposData, 'binary');
+            // For receipts with Arabic (rendered as images), no encoding needed - already binary
+            console.log('');
+            console.log('📦 PREPARING RECEIPT DATA...');
+            console.log('====================================');
+            console.log('📊 Total size:', escposData.length, 'bytes');
+            if (hasArabic) {
+                console.log('✅ Arabic text rendered as images - no encoding needed');
+                console.log('🖼️  Receipt contains image-based Arabic text');
+            }
+            // Log hex dump of first 200 bytes for debugging
+            console.log('');
+            console.log('🔍 HEX DUMP (First 100 bytes):');
+            console.log('====================================');
+            const hexDump = escposData.slice(0, 100).toString('hex').match(/.{1,2}/g)?.join(' ') || '';
+            console.log(hexDump);
+            console.log('====================================');
+            console.log('');
+            fs.writeFileSync(tempFile, escposData);
             console.log('📝 Created ESC/POS temp file:', tempFile);
+            console.log('✅ Receipt ready for printing');
             // Send to printer using Windows copy command
             // Try multiple printer path formats for maximum compatibility
             const printerPaths = [
@@ -332,10 +613,12 @@ async function printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
             // Fallback to node-thermal-printer
             // Initialize thermal printer for Windows
             // On Windows, we need to use the network or file path interface
+            // Check if content contains Arabic characters
+            const hasArabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(content);
             const printer = new ThermalPrinter({
                 type: PrinterTypes.EPSON, // Most thermal printers use EPSON commands
                 interface: `printer:${printerName}`, // Try simple printer name first
-                characterSet: 'PC852_LATIN2',
+                characterSet: hasArabic ? 'CP864' : 'PC852_LATIN2', // Use CP864 (Arabic DOS) for Xprinter
                 removeSpecialCharacters: false,
                 lineCharacter: "=",
                 width: 48, // 80mm paper is typically 48 characters wide
@@ -848,6 +1131,36 @@ ipcMain.handle('get-printer-status', async (_event, printerName) => {
             isOnline: false,
             isReady: false,
             status: 'Error checking status'
+        };
+    }
+});
+// Handle Arabic code page test - prints with all code pages to find which works
+ipcMain.handle('test-arabic-codepages', async (_event, printerName) => {
+    try {
+        console.log('🧪 Arabic code page test requested for printer:', printerName);
+        return await testAllArabicCodePages(printerName);
+    }
+    catch (error) {
+        console.error('❌ Test error:', error);
+        return {
+            success: false,
+            message: 'Test failed',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        };
+    }
+});
+// Handle image-based Arabic printing test
+ipcMain.handle('test-image-arabic', async (_event, printerName) => {
+    try {
+        console.log('🖼️ Image-based Arabic test requested for printer:', printerName);
+        return await testImageBasedArabicPrinting(printerName);
+    }
+    catch (error) {
+        console.error('❌ Test error:', error);
+        return {
+            success: false,
+            message: 'Test failed',
+            error: error instanceof Error ? error.message : 'Unknown error'
         };
     }
 });
