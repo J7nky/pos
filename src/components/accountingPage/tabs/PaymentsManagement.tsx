@@ -104,34 +104,34 @@ const PaymentsSummaryCards: React.FC<{
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 border border-green-200">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between rtl:flex-row-reverse">
+          <div className="rtl:text-right">
             <p className="text-sm font-medium text-green-700">{t('payments.paymentsReceived')}</p>
             <p className="text-2xl font-bold text-green-900 mt-1">{formatCurrency(summary.totalReceived)}</p>
             <p className="text-xs text-green-600 mt-1">{summary.receivedCount} {t('common.transactions')}</p>
           </div>
-          <div className="p-3 bg-green-200 rounded-lg">
+          <div className="p-3 bg-green-200 rounded-lg rtl:ml-3 ltr:mr-3">
             <TrendingUp className="w-6 h-6 text-green-700" />
           </div>
         </div>
       </div>
 
       <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-xl p-6 border border-red-200">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between rtl:flex-row-reverse">
+          <div className="rtl:text-right">
             <p className="text-sm font-medium text-red-700">{t('payments.paymentsMade')}</p>
             <p className="text-2xl font-bold text-red-900 mt-1">{formatCurrency(summary.totalPaid)}</p>
             <p className="text-xs text-red-600 mt-1">{summary.paidCount} {t('common.transactions')}</p>
           </div>
-          <div className="p-3 bg-red-200 rounded-lg">
+          <div className="p-3 bg-red-200 rounded-lg rtl:ml-3 ltr:mr-3">
             <DollarSign className="w-6 h-6 text-red-700" />
           </div>
         </div>
       </div>
 
       <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 border border-blue-200">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between rtl:flex-row-reverse">
+          <div className="rtl:text-right">
             <p className="text-sm font-medium text-blue-700">{t('payments.netAmount')}</p>
             <p className={`text-2xl font-bold mt-1 ${
               summary.netAmount >= 0 ? 'text-green-900' : 'text-red-900'
@@ -142,20 +142,20 @@ const PaymentsSummaryCards: React.FC<{
               {summary.netAmount >= 0 ? t('payments.netPositive') : t('payments.netNegative')}
             </p>
           </div>
-          <div className="p-3 bg-blue-200 rounded-lg">
+          <div className="p-3 bg-blue-200 rounded-lg rtl:ml-3 ltr:mr-3">
             <ArrowUpDown className="w-6 h-6 text-blue-700" />
           </div>
         </div>
       </div>
 
       <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between rtl:flex-row-reverse">
+          <div className="rtl:text-right">
             <p className="text-sm font-medium text-purple-700">{t('payments.totalTransactions')}</p>
             <p className="text-2xl font-bold text-purple-900 mt-1">{payments.length}</p>
             <p className="text-xs text-purple-600 mt-1">{t('payments.allPaymentActivities')}</p>
           </div>
-          <div className="p-3 bg-purple-200 rounded-lg">
+          <div className="p-3 bg-purple-200 rounded-lg rtl:ml-3 ltr:mr-3">
             <RefreshCw className="w-6 h-6 text-purple-700" />
           </div>
         </div>
@@ -183,9 +183,9 @@ const PaymentFiltersPanel: React.FC<{
       <div className="p-4 border-b border-gray-100">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="flex items-center justify-between w-full text-left"
+          className="flex items-center justify-between w-full text-left rtl:flex-row-reverse"
         >
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 rtl:space-x-reverse">
             <Filter className="w-5 h-5 text-gray-500" />
             <h3 className="text-lg font-medium text-gray-900">{t('payments.filtersAndSearch')}</h3>
           </div>
@@ -199,15 +199,15 @@ const PaymentFiltersPanel: React.FC<{
         <div className="p-6 space-y-4">
           {/* Search */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.search')}</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.search')}</label>
             <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 rtl:left-auto rtl:right-3" />
               <input
                 type="text"
                 placeholder={t('payments.searchPlaceholder')}
                 value={filters.search}
                 onChange={(e) => updateFilters({ search: e.target.value })}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent rtl:pl-4 rtl:pr-10"
               />
             </div>
           </div>
@@ -215,7 +215,7 @@ const PaymentFiltersPanel: React.FC<{
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Date Range */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.dateRange')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.dateRange')}</label>
               <div className="space-y-2">
                 <input
                   type="date"
@@ -234,7 +234,7 @@ const PaymentFiltersPanel: React.FC<{
 
             {/* Category */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.category')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.category')}</label>
               <select
                 value={filters.category}
                 onChange={(e) => updateFilters({ category: e.target.value })}
@@ -242,14 +242,14 @@ const PaymentFiltersPanel: React.FC<{
               >
                 <option value="">{t('payments.allCategories')}</option>
                 {categories.map(category => (
-                  <option key={category} value={category}>{category}</option>
+                  <option key={category} value={category}>{translatePaymentCategory(category)}</option>
                 ))}
               </select>
             </div>
 
             {/* Entity Type */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.entityType')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.entityType')}</label>
               <select
                 value={filters.entityType}
                 onChange={(e) => updateFilters({ entityType: e.target.value as any, entityId: '' })}
@@ -264,7 +264,7 @@ const PaymentFiltersPanel: React.FC<{
             {/* Entity Selection */}
             {filters.entityType !== 'all' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
                   {filters.entityType === 'customer' ? t('payments.customer') : t('payments.supplier')}
                 </label>
                 <select
@@ -284,7 +284,7 @@ const PaymentFiltersPanel: React.FC<{
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Direction */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.direction')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.direction')}</label>
               <select
                 value={filters.direction}
                 onChange={(e) => updateFilters({ direction: e.target.value as any })}
@@ -298,7 +298,7 @@ const PaymentFiltersPanel: React.FC<{
 
             {/* Currency */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.currency')}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.currency')}</label>
               <select
                 value={filters.currency}
                 onChange={(e) => updateFilters({ currency: e.target.value as any })}
@@ -312,8 +312,8 @@ const PaymentFiltersPanel: React.FC<{
 
             {/* Amount Range */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.amountRange')}</label>
-              <div className="flex space-x-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.amountRange')}</label>
+              <div className="flex space-x-2 rtl:space-x-reverse">
                 <input
                   type="number"
                   placeholder={t('payments.min')}
@@ -333,7 +333,7 @@ const PaymentFiltersPanel: React.FC<{
           </div>
 
           {/* Clear Filters */}
-          <div className="flex justify-end pt-4 border-t border-gray-100">
+          <div className="flex justify-end pt-4 border-t border-gray-100 rtl:justify-start">
             <button
               onClick={() => onFiltersChange({
                 search: '',
@@ -364,7 +364,8 @@ const PaymentEditModal: React.FC<{
   customers: Array<{ id: string; name: string }>;
   suppliers: Array<{ id: string; name: string }>;
   formatCurrency: (value: number) => string;
-}> = ({ isOpen, payment, onClose, onSave, customers, suppliers }) => {
+  translatePaymentCategory: (category: string) => string;
+}> = ({ isOpen, payment, onClose, onSave, customers, suppliers, translatePaymentCategory }) => {
   const { t } = useI18n();
   const [formData, setFormData] = useState<Partial<Transaction>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -426,12 +427,12 @@ const PaymentEditModal: React.FC<{
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between rtl:flex-row-reverse">
+            <div className="rtl:text-right">
               <h2 className="text-xl font-semibold text-gray-900">{t('payments.editPayment')}</h2>
               <p className="text-sm text-gray-600 mt-1">
                 {paymentDirection === 'received' ? t('payments.paymentReceived') : t('payments.paymentMade')} •
-                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ml-1 ${
+                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium rtl:ml-1 ltr:mr-1 ${
                   entityType === 'customer' ? 'bg-blue-100 text-blue-800' : 
                   entityType === 'supplier' ? 'bg-purple-100 text-purple-800' : 
                   'bg-gray-100 text-gray-800'
@@ -459,7 +460,7 @@ const PaymentEditModal: React.FC<{
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Amount */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
                 {t('payments.amount')} *
               </label>
               <div className="relative">
@@ -476,13 +477,13 @@ const PaymentEditModal: React.FC<{
                 />
               </div>
               {errors.amount && (
-                <p className="text-xs text-red-600 mt-1">{errors.amount}</p>
+                <p className="text-xs text-red-600 mt-1 rtl:text-right">{errors.amount}</p>
               )}
             </div>
 
             {/* Currency */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
                 {t('payments.currency')}
               </label>
               <select
@@ -498,7 +499,7 @@ const PaymentEditModal: React.FC<{
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
               {t('payments.description')} *
             </label>
             <textarea
@@ -511,13 +512,13 @@ const PaymentEditModal: React.FC<{
               placeholder={t('payments.descriptionPlaceholder')}
             />
             {errors.description && (
-              <p className="text-xs text-red-600 mt-1">{errors.description}</p>
+              <p className="text-xs text-red-600 mt-1 rtl:text-right">{errors.description}</p>
             )}
           </div>
 
           {/* Reference */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
               {t('payments.reference')}
             </label>
             <input
@@ -531,13 +532,13 @@ const PaymentEditModal: React.FC<{
 
           {/* Entity Selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
               {t('payments.relatedEntity')} *
             </label>
             <div className="space-y-3">
               {/* Customer Selection */}
               <div>
-                <label className="block text-sm text-gray-600 mb-1">{t('payments.customer')}</label>
+                <label className="block text-sm text-gray-600 mb-1 rtl:text-right">{t('payments.customer')}</label>
                 <select
                   value={formData.customer_id || ''}
                   onChange={(e) => setFormData({ 
@@ -556,7 +557,7 @@ const PaymentEditModal: React.FC<{
 
               {/* Supplier Selection */}
               <div>
-                <label className="block text-sm text-gray-600 mb-1">{t('payments.supplier')}</label>
+                <label className="block text-sm text-gray-600 mb-1 rtl:text-right">{t('payments.supplier')}</label>
                 <select
                   value={formData.supplier_id || ''}
                   onChange={(e) => setFormData({ 
@@ -574,13 +575,13 @@ const PaymentEditModal: React.FC<{
               </div>
             </div>
             {errors.entity && (
-              <p className="text-xs text-red-600 mt-1">{errors.entity}</p>
+              <p className="text-xs text-red-600 mt-1 rtl:text-right">{errors.entity}</p>
             )}
           </div>
 
           {/* Payment Category */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
               {t('payments.category')}
             </label>
             <select
@@ -589,13 +590,13 @@ const PaymentEditModal: React.FC<{
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               {Object.values(PAYMENT_CATEGORIES).map(category => (
-                <option key={category} value={category}>{category}</option>
+                <option key={category} value={category}>{translatePaymentCategory(category)}</option>
               ))}
             </select>
           </div>
         </div>
 
-        <div className="p-6 border-t border-gray-200 flex justify-end space-x-3">
+        <div className="p-6 border-t border-gray-200 flex justify-end space-x-3 rtl:justify-start rtl:space-x-reverse">
           <button
             onClick={onClose}
             disabled={isLoading}
@@ -610,7 +611,7 @@ const PaymentEditModal: React.FC<{
           >
             {isLoading ? (
               <>
-                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                <RefreshCw className="w-4 h-4 rtl:ml-2 ltr:mr-2 animate-spin" />
                 {t('payments.saving')}
               </>
             ) : (
@@ -634,6 +635,7 @@ const PaymentsTable: React.FC<{
   onEdit: (payment: Transaction) => void;
   onDelete: (payment: Transaction) => void;
   onView: (payment: Transaction) => void;
+  translatePaymentCategory: (category: string) => string;
 }> = ({ 
   payments, 
   formatCurrency, 
@@ -644,7 +646,8 @@ const PaymentsTable: React.FC<{
   suppliers,
   onEdit,
   onDelete,
-  onView
+  onView,
+  translatePaymentCategory
 }) => {
   const { t } = useI18n();
   const [sortField, setSortField] = useState<'created_at' | 'amount' | 'category'>('created_at');
@@ -743,8 +746,8 @@ const PaymentsTable: React.FC<{
       <div className="bg-white rounded-xl shadow-sm border border-gray-200">
         <div className="p-12 text-center">
           <DollarSign className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No Payments Found</h3>
-          <p className="text-gray-500">No payment transactions match your current filters.</p>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">{t('payments.noPaymentsFound')}</h3>
+          <p className="text-gray-500">{t('payments.noPaymentsMessage')}</p>
         </div>
       </div>
     );
@@ -753,14 +756,14 @@ const PaymentsTable: React.FC<{
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200">
       <div className="p-6 border-b border-gray-100">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">Payment Transactions</h3>
+        <div className="flex items-center justify-between rtl:flex-row-reverse">
+          <div className="rtl:text-right">
+            <h3 className="text-lg font-semibold text-gray-900">{t('payments.paymentTransactions')}</h3>
             <p className="text-sm text-gray-600 mt-1">
-              Showing {paginatedPayments.length} of {sortedPayments.length} transactions
+              {t('payments.showingResults', { current: paginatedPayments.length, total: sortedPayments.length })}
             </p>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 rtl:space-x-reverse">
             <button
               onClick={() => {
                 const csvContent = generateCSVContent(sortedPayments, customers, suppliers);
@@ -768,8 +771,8 @@ const PaymentsTable: React.FC<{
               }}
               className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
-              <Download className="w-4 h-4 mr-2" />
-              Export CSV
+              <Download className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
+              {t('payments.exportCSV')}
             </button>
           </div>
         </div>
@@ -781,58 +784,58 @@ const PaymentsTable: React.FC<{
             <tr>
               <th 
                 onClick={() => handleSort('created_at')}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors rtl:text-right"
               >
-                <div className="flex items-center space-x-1">
-                  <span>Date & Time</span>
+                <div className="flex items-center space-x-1 rtl:space-x-reverse">
+                  <span>{t('payments.dateTime')}</span>
                   {sortField === 'created_at' && (
                     <ArrowUpDown className={`w-4 h-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
                   )}
                 </div>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Direction
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                {t('payments.direction')}
               </th>
               <th 
                 onClick={() => handleSort('category')}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors rtl:text-right"
               >
-                <div className="flex items-center space-x-1">
-                  <span>Category</span>
+                <div className="flex items-center space-x-1 rtl:space-x-reverse">
+                  <span>{t('payments.category')}</span>
                   {sortField === 'category' && (
                     <ArrowUpDown className={`w-4 h-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
                   )}
                 </div>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Entity
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                {t('payments.entity')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Description
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                {t('payments.description')}
               </th>
               <th 
                 onClick={() => handleSort('amount')}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors rtl:text-right"
               >
-                <div className="flex items-center space-x-1">
-                  <span>Amount</span>
+                <div className="flex items-center space-x-1 rtl:space-x-reverse">
+                  <span>{t('payments.amount')}</span>
                   {sortField === 'amount' && (
                     <ArrowUpDown className={`w-4 h-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
                   )}
                 </div>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Reference
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                {t('payments.reference')}
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                {t('payments.actions')}
               </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {paginatedPayments.map((payment) => (
               <tr key={payment.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-6 py-4 whitespace-nowrap">
+                <td className="px-6 py-4 whitespace-nowrap rtl:text-right">
                   <div className="text-sm text-gray-900">
                     {new Date(payment.created_at).toLocaleDateString()}
                   </div>
@@ -843,21 +846,21 @@ const PaymentsTable: React.FC<{
                 <td className="px-6 py-4 whitespace-nowrap">
                   {getDirectionBadge(payment.paymentDirection)}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-gray-900">{payment.category}</div>
+                <td className="px-6 py-4 whitespace-nowrap rtl:text-right">
+                  <div className="text-sm font-medium text-gray-900">{translatePaymentCategory(payment.category)}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-2 rtl:space-x-reverse">
                     {getEntityTypeBadge(payment.entityType)}
                     <span className="text-sm text-gray-900">{getEntityName(payment)}</span>
                   </div>
                 </td>
-                <td className="px-6 py-4">
+                <td className="px-6 py-4 rtl:text-right">
                   <div className="text-sm text-gray-900 max-w-xs truncate" title={payment.description}>
                     {payment.description}
                   </div>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
+                <td className="px-6 py-4 whitespace-nowrap rtl:text-right">
                   <div className="text-sm font-semibold text-gray-900">
                     {formatCurrencyWithSymbol(payment.amount, payment.currency)}
                   </div>
@@ -867,31 +870,31 @@ const PaymentsTable: React.FC<{
                     </div>
                   )}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
+                <td className="px-6 py-4 whitespace-nowrap rtl:text-right">
                   <div className="text-sm text-gray-500">
                     {payment.reference || '-'}
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-2 rtl:space-x-reverse">
                     <button
                       onClick={() => onView(payment as Transaction)}
                       className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                      title="View Details"
+                      title={t('payments.viewDetails')}
                     >
                       <Eye className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => onEdit(payment as Transaction)}
                       className="p-1 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
-                      title="Edit Payment"
+                      title={t('payments.editPayment')}
                     >
                       <Edit3 className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => onDelete(payment as Transaction)}
                       className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                      title="Delete Payment"
+                      title={t('payments.deletePayment')}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -905,27 +908,31 @@ const PaymentsTable: React.FC<{
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-          <div className="text-sm text-gray-700">
-            Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, sortedPayments.length)} of {sortedPayments.length} results
+        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between rtl:flex-row-reverse">
+          <div className="text-sm text-gray-700 rtl:text-right">
+            {t('payments.showingResults', { 
+              start: ((currentPage - 1) * itemsPerPage) + 1, 
+              end: Math.min(currentPage * itemsPerPage, sortedPayments.length), 
+              total: sortedPayments.length 
+            })}
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 rtl:space-x-reverse">
             <button
               onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
               disabled={currentPage === 1}
               className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              Previous
+              {t('payments.previous')}
             </button>
             <span className="text-sm text-gray-700">
-              Page {currentPage} of {totalPages}
+              {t('payments.page')} {currentPage} {t('payments.of')} {totalPages}
             </span>
             <button
               onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
               disabled={currentPage === totalPages}
               className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              Next
+              {t('payments.next')}
             </button>
           </div>
         </div>
@@ -995,6 +1002,24 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
   onDeleteTransaction,
   showToast
 }) => {
+  const { t } = useI18n();
+  
+  // Helper function to translate payment categories
+  const translatePaymentCategory = (category: string): string => {
+    const categoryMap: { [key: string]: string } = {
+      'Customer Payment': t('payments.customerPayment'),
+      'Customer Credit Sale': t('payments.customerCreditSale'),
+      'Supplier Payment': t('payments.supplierPayment'),
+      'Supplier Commission': t('payments.supplierCommission'),
+      'Cash Payment': t('payments.cashPayment'),
+      'Cash Sale': t('payments.cashSale'),
+      'Payment Received': t('payments.paymentReceived'),
+      'Payment Sent': t('payments.paymentSent'),
+      'Expense Payment': t('payments.expensePayment')
+    };
+    return categoryMap[category] || category;
+  };
+  
   const [filters, setFilters] = useState<PaymentFilters>({
     search: '',
     dateRange: { start: '', end: '' },
@@ -1131,14 +1156,17 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
           await onUpdateTransaction(editModal.payment.id, updates);
         }
         
-        let successMessage = 'Payment updated successfully';
+        let successMessage = t('payments.paymentUpdatedSuccessfully');
         if (result.balanceUpdates) {
           const updates = [];
           if (result.balanceUpdates.cashDrawer) {
-            updates.push(`Cash drawer: ${result.balanceUpdates.cashDrawer.previousBalance.toFixed(2)} → ${result.balanceUpdates.cashDrawer.newBalance.toFixed(2)}`);
+            updates.push(t('payments.cashDrawerUpdated', { 
+              previous: result.balanceUpdates.cashDrawer.previousBalance.toFixed(2), 
+              new: result.balanceUpdates.cashDrawer.newBalance.toFixed(2) 
+            }));
           }
           if (result.balanceUpdates.entity) {
-            updates.push(`${result.balanceUpdates.entity.entityType} balance updated`);
+            updates.push(t('payments.entityBalanceUpdated', { entityType: result.balanceUpdates.entity.entityType }));
           }
           if (updates.length > 0) {
             successMessage += `. ${updates.join(', ')}`;
@@ -1151,7 +1179,7 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
       }
     } catch (error) {
       console.error('Payment update error:', error);
-      showToast?.(`Failed to update payment: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      showToast?.(t('payments.failedToUpdatePayment', { error: error instanceof Error ? error.message : 'Unknown error' }), 'error');
       throw error;
     }
   };
@@ -1178,14 +1206,17 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
         
         setDeleteConfirm({ isOpen: false, payment: null, impactSummary: null });
         
-        let successMessage = 'Payment deleted successfully';
+        let successMessage = t('payments.paymentDeletedSuccessfully');
         if (result.balanceUpdates) {
           const updates = [];
           if (result.balanceUpdates.cashDrawer) {
-            updates.push(`Cash drawer: ${result.balanceUpdates.cashDrawer.previousBalance.toFixed(2)} → ${result.balanceUpdates.cashDrawer.newBalance.toFixed(2)}`);
+            updates.push(t('payments.cashDrawerUpdated', { 
+              previous: result.balanceUpdates.cashDrawer.previousBalance.toFixed(2), 
+              new: result.balanceUpdates.cashDrawer.newBalance.toFixed(2) 
+            }));
           }
           if (result.balanceUpdates.entity) {
-            updates.push(`${result.balanceUpdates.entity.entityType} balance updated`);
+            updates.push(t('payments.entityBalanceUpdated', { entityType: result.balanceUpdates.entity.entityType }));
           }
           if (updates.length > 0) {
             successMessage += `. ${updates.join(', ')}`;
@@ -1198,24 +1229,24 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
       }
     } catch (error) {
       console.error('Payment delete error:', error);
-      showToast?.(`Failed to delete payment: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      showToast?.(t('payments.failedToDeletePayment', { error: error instanceof Error ? error.message : 'Unknown error' }), 'error');
     }
   };
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Payment Management</h2>
-          <p className="text-gray-600 mt-1">Track and manage all payment transactions</p>
+      <div className="flex justify-between items-center rtl:flex-row-reverse">
+        <div className="rtl:text-right">
+          <h2 className="text-2xl font-bold text-gray-900">{t('payments.title')}</h2>
+          <p className="text-gray-600 mt-1">{t('payments.subtitle')}</p>
         </div>
         <button
           onClick={() => setShowForm("expense")}
           className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center shadow-sm"
         >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Payment
+          <Plus className="w-5 h-5 rtl:ml-2 ltr:mr-2" />
+          {t('payments.addPayment')}
         </button>
       </div>
 
@@ -1247,6 +1278,7 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
         onEdit={handleEditPayment}
         onDelete={handleDeletePayment}
         onView={handleViewPayment}
+        translatePaymentCategory={translatePaymentCategory}
       />
 
       {/* Edit Modal */}
@@ -1258,6 +1290,7 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
         customers={customers}
         suppliers={suppliers}
         formatCurrency={formatCurrency}
+        translatePaymentCategory={translatePaymentCategory}
       />
 
       {/* Delete Confirmation Modal */}
@@ -1269,20 +1302,20 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
                 <Trash2 className="w-6 h-6 text-red-600" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900 text-center mb-2">
-                Delete Payment
+                {t('payments.deletePaymentTitle')}
               </h3>
               <p className="text-gray-600 text-center mb-6">
-                Are you sure you want to delete this payment? This action cannot be undone and will affect related balances.
+                {t('payments.deletePaymentMessage')}
               </p>
               
               {/* Payment Details */}
               <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                <h4 className="font-medium text-gray-900 mb-2">Payment Details</h4>
+                <h4 className="font-medium text-gray-900 mb-2">{t('payments.paymentDetails')}</h4>
                 <div className="text-sm text-gray-600 space-y-1">
-                  <p><strong>Amount:</strong> {formatCurrencyWithSymbol(deleteConfirm.payment.amount, deleteConfirm.payment.currency)}</p>
-                  <p><strong>Description:</strong> {deleteConfirm.payment.description}</p>
-                  <p><strong>Date:</strong> {new Date(deleteConfirm.payment.created_at).toLocaleDateString()}</p>
-                  <p><strong>Category:</strong> {deleteConfirm.payment.category}</p>
+                  <p><strong>{t('payments.amount')}:</strong> {formatCurrencyWithSymbol(deleteConfirm.payment.amount, deleteConfirm.payment.currency)}</p>
+                  <p><strong>{t('payments.description')}:</strong> {deleteConfirm.payment.description}</p>
+                  <p><strong>{t('payments.dateTime')}:</strong> {new Date(deleteConfirm.payment.created_at).toLocaleDateString()}</p>
+                  <p><strong>{t('payments.category')}:</strong> {translatePaymentCategory(deleteConfirm.payment.category)}</p>
                 </div>
               </div>
 
@@ -1291,45 +1324,45 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
                   <h4 className="font-medium text-yellow-800 mb-2 flex items-center">
                     <RefreshCw className="w-4 h-4 mr-2" />
-                    Balance Impact
+                    {t('payments.balanceImpact')}
                   </h4>
                   <div className="text-sm text-yellow-700 space-y-2">
                     {deleteConfirm.impactSummary.cashDrawerImpact && (
                       <div className="flex items-center justify-between">
-                        <span>Cash Drawer:</span>
+                        <span>{t('payments.cashDrawer')}</span>
                         <span className="font-medium">
                           {deleteConfirm.impactSummary.estimatedBalanceChanges.cashDrawer > 0 ? '+' : ''}
-                          {formatCurrency(Math.abs(deleteConfirm.impactSummary.estimatedBalanceChanges.cashDrawer))} will be reversed
+                          {formatCurrency(Math.abs(deleteConfirm.impactSummary.estimatedBalanceChanges.cashDrawer))} {t('payments.willBeReversed')}
                         </span>
                       </div>
                     )}
                     {deleteConfirm.impactSummary.entityImpact.entityName && (
                       <div className="flex items-center justify-between">
-                        <span>{deleteConfirm.impactSummary.entityImpact.type === 'customer' ? 'Customer' : 'Supplier'} Balance:</span>
+                        <span>{deleteConfirm.impactSummary.entityImpact.type === 'customer' ? t('payments.customerBalance') : t('payments.supplierBalance')}</span>
                         <span className="font-medium">
-                          {deleteConfirm.impactSummary.entityImpact.entityName} balance will be adjusted
+                          {deleteConfirm.impactSummary.entityImpact.entityName} {t('payments.balanceWillBeAdjusted')}
                         </span>
                       </div>
                     )}
                     {!deleteConfirm.impactSummary.cashDrawerImpact && !deleteConfirm.impactSummary.entityImpact.entityName && (
-                      <p className="text-yellow-600">No balance impacts detected for this payment.</p>
+                      <p className="text-yellow-600">{t('payments.noBalanceImpacts')}</p>
                     )}
                   </div>
                 </div>
               )}
 
-              <div className="flex space-x-3">
+              <div className="flex space-x-3 rtl:space-x-reverse">
                 <button
                   onClick={() => setDeleteConfirm({ isOpen: false, payment: null, impactSummary: null })}
                   className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
-                  Cancel
+                  {t('payments.cancel')}
                 </button>
                 <button
                   onClick={confirmDelete}
                   className="flex-1 px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors"
                 >
-                  Delete Payment
+                  {t('payments.deletePaymentButton')}
                 </button>
               </div>
             </div>
@@ -1342,8 +1375,8 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Payment Details</h2>
+              <div className="flex items-center justify-between rtl:flex-row-reverse">
+                <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">{t('payments.paymentDetailsTitle')}</h2>
                 <button
                   onClick={() => setViewModal({ isOpen: false, payment: null })}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -1355,70 +1388,70 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Transaction Info</h3>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4 rtl:text-right">{t('payments.transactionInfo')}</h3>
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Amount</label>
-                      <p className="text-lg font-semibold text-gray-900">
+                      <label className="block text-sm font-medium text-gray-700 rtl:text-right">{t('payments.amount')}</label>
+                      <p className="text-lg font-semibold text-gray-900 rtl:text-right">
                         {formatCurrencyWithSymbol(viewModal.payment.amount, viewModal.payment.currency)}
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Direction</label>
-                      <p className="text-sm text-gray-900">
-                        {getPaymentDirection(viewModal.payment) === 'received' ? 'Payment Received' : 'Payment Made'}
+                      <label className="block text-sm font-medium text-gray-700 rtl:text-right">{t('payments.direction')}</label>
+                      <p className="text-sm text-gray-900 rtl:text-right">
+                        {getPaymentDirection(viewModal.payment) === 'received' ? t('payments.paymentReceived') : t('payments.paymentMade')}
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Category</label>
-                      <p className="text-sm text-gray-900">{viewModal.payment.category}</p>
+                      <label className="block text-sm font-medium text-gray-700 rtl:text-right">{t('payments.category')}</label>
+                      <p className="text-sm text-gray-900 rtl:text-right">{translatePaymentCategory(viewModal.payment.category)}</p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Date & Time</label>
-                      <p className="text-sm text-gray-900">
+                      <label className="block text-sm font-medium text-gray-700 rtl:text-right">{t('payments.dateTime')}</label>
+                      <p className="text-sm text-gray-900 rtl:text-right">
                         {new Date(viewModal.payment.created_at).toLocaleString()}
                       </p>
                     </div>
                   </div>
                 </div>
                 <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Entity Info</h3>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4 rtl:text-right">{t('payments.entityInfo')}</h3>
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Entity Type</label>
-                      <p className="text-sm text-gray-900 capitalize">{getPaymentEntityType(viewModal.payment)}</p>
+                      <label className="block text-sm font-medium text-gray-700 rtl:text-right">{t('payments.entityType')}</label>
+                      <p className="text-sm text-gray-900 capitalize rtl:text-right">{getPaymentEntityType(viewModal.payment)}</p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Entity Name</label>
-                      <p className="text-sm text-gray-900">
+                      <label className="block text-sm font-medium text-gray-700 rtl:text-right">{t('payments.entityName')}</label>
+                      <p className="text-sm text-gray-900 rtl:text-right">
                         {viewModal.payment.customer_id 
-                          ? customers.find(c => c.id === viewModal.payment!.customer_id)?.name || 'Unknown Customer'
+                          ? customers.find(c => c.id === viewModal.payment!.customer_id)?.name || t('payments.unknownCustomer')
                           : viewModal.payment.supplier_id 
-                          ? suppliers.find(s => s.id === viewModal.payment!.supplier_id)?.name || 'Unknown Supplier'
-                          : 'No Entity'
+                          ? suppliers.find(s => s.id === viewModal.payment!.supplier_id)?.name || t('payments.unknownSupplier')
+                          : t('payments.noEntity')
                         }
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Reference</label>
-                      <p className="text-sm text-gray-900">{viewModal.payment.reference || '-'}</p>
+                      <label className="block text-sm font-medium text-gray-700 rtl:text-right">{t('payments.reference')}</label>
+                      <p className="text-sm text-gray-900 rtl:text-right">{viewModal.payment.reference || '-'}</p>
                     </div>
                   </div>
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg">
+                <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.description')}</label>
+                <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg rtl:text-right">
                   {viewModal.payment.description}
                 </p>
               </div>
             </div>
-            <div className="p-6 border-t border-gray-200 flex justify-end">
+            <div className="p-6 border-t border-gray-200 flex justify-end rtl:justify-start">
               <button
                 onClick={() => setViewModal({ isOpen: false, payment: null })}
                 className="px-4 py-2 bg-gray-600 text-white hover:bg-gray-700 rounded-lg transition-colors"
               >
-                Close
+                {t('payments.close')}
               </button>
             </div>
           </div>

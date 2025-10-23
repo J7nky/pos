@@ -14,6 +14,7 @@ import {
 import { Bill } from '../../../lib/db';
 import WeightComparisonReport from '../../WeightComparisonReport';
 import ReceiveFormModal from '../../inventory/ReceiveFormModal';
+import { useI18n } from '../../../i18n';
 
 type ReceivedBillsProps = {
   inventory: any[];
@@ -59,6 +60,7 @@ export default function ReceivedBills({
   flashingItemId,
   autoExpandGroupId
 }: ReceivedBillsProps) {
+  const { t } = useI18n();
   const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
   // const [receivedBills, setReceivedBills] = useState<Bill[]>([]);
   const [receivedBillsSupplierFilter, setReceivedBillsSupplierFilter] = useState('');
@@ -558,10 +560,14 @@ export default function ReceivedBills({
     };
     const config = statusConfig[status] || statusConfig['pending'];
     const IconComponent = config.icon;
+    
+    // Map status to translation key
+    const statusTranslationKey = `receivedBills.status${status.charAt(0).toUpperCase()}${status.slice(1).replace('-', '')}`;
+    
     return (
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${config.color}`}>
-        <IconComponent className="w-3 h-3 mr-1" />
-        {status.replace('-', ' ')}
+        <IconComponent className="w-3 h-3 rtl:ml-1 ltr:mr-1" />
+        {t(statusTranslationKey)}
       </span>
     );
   };
@@ -571,33 +577,32 @@ export default function ReceivedBills({
 
   return (
     <div>
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-xl font-semibold text-gray-900">Received Bills</h2>
+      <div className="flex justify-between items-center rtl:flex-row-reverse">
+        <div className="rtl:text-right">
+          <h2 className="text-xl font-semibold text-gray-900">{t('receivedBills.title')}</h2>
           <p className="mt-1"></p>
           {(() => {
             const problematicItems = inventory.filter(item => item.received_quantity === null || item.received_quantity === undefined || item.received_quantity === 0);
             return problematicItems.length > 0 ? (
               <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-xs text-yellow-800">⚠️ {problematicItems.length} inventory item(s) don't have received_quantity set. Click "Fix Data" to check, or add new inventory items for proper progress tracking.</p>
+                <p className="text-xs text-yellow-800 rtl:text-right">⚠️ {t('receivedBills.problematicItemsWarning', { count: problematicItems.length })}</p>
               </div>
             ) : null;
           })()}
         </div>
-        <div className="flex items-center space-x-2 pb-4">
+        <div className="flex items-center space-x-2 pb-4 rtl:space-x-reverse">
           <button onClick={exportReceivedBills} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center">
-            <FileText className="w-4 h-4 mr-2" />
-            Export CSV
+            <FileText className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
+            {t('receivedBills.exportCSV')}
           </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pb-4">
         <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Total Bills</p>
-
+          <div className="flex items-center justify-between rtl:flex-row-reverse">
+            <div className="rtl:text-right">
+              <p className="text-sm text-gray-600">{t('receivedBills.totalBills')}</p>
               <p className="text-2xl font-bold text-gray-900">{groupedReceivedBills.length}</p>
             </div>
             <div className="p-2 bg-blue-100 rounded-full">
@@ -606,9 +611,9 @@ export default function ReceivedBills({
           </div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">In Progress</p>
+          <div className="flex items-center justify-between rtl:flex-row-reverse">
+            <div className="rtl:text-right">
+              <p className="text-sm text-gray-600">{t('receivedBills.inProgress')}</p>
               <p className="text-2xl font-bold text-blue-600">{groupedReceivedBills.filter(bill => bill.status === 'in-progress').length}</p>
             </div>
             <div className="p-2 bg-blue-100 rounded-full">
@@ -617,9 +622,9 @@ export default function ReceivedBills({
           </div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Completed</p>
+          <div className="flex items-center justify-between rtl:flex-row-reverse">
+            <div className="rtl:text-right">
+              <p className="text-sm text-gray-600">{t('receivedBills.completed')}</p>
               <p className="text-2xl font-bold text-green-600">{groupedReceivedBills.filter(bill => bill.status === 'completed').length}</p>
             </div>
             <div className="p-2 bg-green-100 rounded-full">
@@ -628,9 +633,9 @@ export default function ReceivedBills({
           </div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Total Revenue</p>
+          <div className="flex items-center justify-between rtl:flex-row-reverse">
+            <div className="rtl:text-right">
+              <p className="text-sm text-gray-600">{t('receivedBills.totalRevenue')}</p>
               <p className="text-2xl font-bold text-green-600">{formatCurrency(groupedReceivedBills.reduce((sum, g) => sum + (g.totalRevenue || 0), 0))}</p>
             </div>
             <div className="p-2 bg-green-100 rounded-full">
@@ -643,54 +648,54 @@ export default function ReceivedBills({
       <div className="bg-white p-4 rounded-lg shadow-sm border">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('receivedBills.search')}</label>
             <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 rtl:left-auto rtl:right-3" />
               <input
                 type="text"
-                placeholder="Search products, suppliers..."
+                placeholder={t('receivedBills.searchPlaceholder')}
                 value={receivedBillsSearchTerm}
                 onChange={(e) => setReceivedBillsSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 rtl:pl-4 rtl:pr-10"
               />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Product</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('receivedBills.product')}</label>
             <select value={receivedBillsProductFilter} onChange={(e) => setReceivedBillsProductFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
-              <option value="">All Products</option>
+              <option value="">{t('receivedBills.allProducts')}</option>
               {products.filter(p => p).map(product => (
                 <option key={product.id} value={product.id}>{product.name}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Supplier</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('receivedBills.supplier')}</label>
             <select value={receivedBillsSupplierFilter} onChange={(e) => setReceivedBillsSupplierFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
-              <option value="">All Suppliers</option>
+              <option value="">{t('receivedBills.allSuppliers')}</option>
               {suppliers.map(supplier => (
                 <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('receivedBills.status')}</label>
             <select value={receivedBillsStatusFilter} onChange={(e) => setReceivedBillsStatusFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
-              <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="in-progress">In Progress</option>
-              <option value="halfway">Halfway</option>
-              <option value="nearly-complete">Nearly Complete</option>
-              <option value="completed">Completed</option>
-              <option value="closed">Closed</option>
+              <option value="all">{t('receivedBills.allStatus')}</option>
+              <option value="pending">{t('receivedBills.pending')}</option>
+              <option value="in-progress">{t('receivedBills.inProgress')}</option>
+              <option value="halfway">{t('receivedBills.halfway')}</option>
+              <option value="nearly-complete">{t('receivedBills.nearlyComplete')}</option>
+              <option value="completed">{t('receivedBills.completed')}</option>
+              <option value="closed">{t('receivedBills.closed')}</option>
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('receivedBills.type')}</label>
             <select value={receivedBillsTypeFilter} onChange={(e) => setReceivedBillsTypeFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
-              <option value="all">All Types</option>
-              <option value="commission">Commission</option>
-              <option value="cash">Cash</option>
+              <option value="all">{t('receivedBills.allTypes')}</option>
+              <option value="commission">{t('receivedBills.commission')}</option>
+              <option value="cash">{t('receivedBills.cash')}</option>
             </select>
           </div>
         </div>
@@ -701,35 +706,35 @@ export default function ReceivedBills({
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button onClick={() => handleReceivedBillsSort('date')} className="flex items-center space-x-1 hover:text-gray-700">
-                    <span>Date</span>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                  <button onClick={() => handleReceivedBillsSort('date')} className="flex items-center space-x-1 hover:text-gray-700 rtl:space-x-reverse">
+                    <span>{t('receivedBills.date')}</span>
                     {receivedBillsSort === 'date' && (receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />)}
                   </button>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button onClick={() => handleReceivedBillsSort('product')} className="flex items-center space-x-1 hover:text-gray-700">
-                    <span>Product</span>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                  <button onClick={() => handleReceivedBillsSort('product')} className="flex items-center space-x-1 hover:text-gray-700 rtl:space-x-reverse">
+                    <span>{t('receivedBills.product')}</span>
                     {receivedBillsSort === 'product' && (receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />)}
                   </button>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button onClick={() => handleReceivedBillsSort('supplier')} className="flex items-center space-x-1 hover:text-gray-700">
-                    <span>Supplier</span>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                  <button onClick={() => handleReceivedBillsSort('supplier')} className="flex items-center space-x-1 hover:text-gray-700 rtl:space-x-reverse">
+                    <span>{t('receivedBills.supplier')}</span>
                     {receivedBillsSort === 'supplier' && (receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />)}
                   </button>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button onClick={() => handleReceivedBillsSort('progress')} className="flex items-center space-x-1 hover:text-gray-700">
-                    <span>Progress</span>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.type')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.quantity')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                  <button onClick={() => handleReceivedBillsSort('progress')} className="flex items-center space-x-1 hover:text-gray-700 rtl:space-x-reverse">
+                    <span>{t('receivedBills.progress')}</span>
                     {receivedBillsSort === 'progress' && (receivedBillsSortDir === 'asc' ? <ChevronRight className="w-4 h-4" /> : <ChevronRight className="w-4 h-4 rotate-180" />)}
                   </button>
                 </th>
 
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.status')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.actions')}</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -740,53 +745,53 @@ export default function ReceivedBills({
                     onClick={() => group.isBatch && toggleGroup(group.groupId)}
                   >
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 rtl:space-x-reverse">
                         {group.isBatch && (
                           <div className="p-1">
                             <ChevronRight className={`w-4 h-4 text-gray-500 transition-transform ${expandedGroups.has(group.groupId) ? 'rotate-90' : ''}`} />
                           </div>
                         )}
-                        <div className="text-sm text-gray-900">{new Date(group.receivedAt).toLocaleDateString()}</div>
+                        <div className="text-sm text-gray-900 rtl:text-right">{new Date(group.receivedAt).toLocaleDateString()}</div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                        {group.isBatch && <span className="px-1.5 py-0.5 text-[10px] bg-indigo-100 text-indigo-700 rounded">Batch</span>}
-                        <span>{group.productName}</span>
+                      <div className="text-sm font-medium text-gray-900 flex items-center gap-2 rtl:space-x-reverse">
+                        {group.isBatch && <span className="px-1.5 py-0.5 text-[10px] bg-indigo-100 text-indigo-700 rounded">{t('receivedBills.batch')}</span>}
+                        <span className="rtl:text-right">{group.productName}</span>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{group.supplierName}</div>
+                      <div className="text-sm text-gray-900 rtl:text-right">{group.supplierName}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {group.type === 'mixed' ? (
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800`}>
-                          mixed
+                          {t('receivedBills.mixed')}
                         </span>
                       ) : (
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${group.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
-                          {group.type}
+                          {t(`receivedBills.${group.type}`)}
                         </span>
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        <div>Original: {group.originalQuantity}</div>
-                        <div>Remaining: {group.remainingQuantity}</div>
+                      <div className="text-sm text-gray-900 rtl:text-right">
+                        <div>{t('receivedBills.original')}: {group.originalQuantity}</div>
+                        <div>{t('receivedBills.remaining')}: {group.remainingQuantity}</div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="w-32 bg-gray-200 rounded-full h-2 mr-2">
+                      <div className="flex items-center rtl:space-x-reverse">
+                        <div className="w-32 bg-gray-200 rounded-full h-2 rtl:ml-2 ltr:mr-2">
                           <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${group.progress}%` }}></div>
                         </div>
-                        <span className="text-sm text-gray-900">{group.progress.toFixed(1)}%</span>
+                        <span className="text-sm text-gray-900 rtl:text-right">{group.progress.toFixed(1)}%</span>
                       </div>
                     </td>
                   
                     <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(group.status)}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 rtl:space-x-reverse">
                         {group.isBatch ? (
                           <>
                             <button
@@ -797,7 +802,7 @@ export default function ReceivedBills({
                               }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
-                              Edit Batch
+                              {t('receivedBills.editBatch')}
                             </button>
                             <button
                               onClick={(e) => {
@@ -807,7 +812,7 @@ export default function ReceivedBills({
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
                               <FileText className="w-3.5 h-3.5 text-gray-500" />
-                              <span>Details</span>
+                              <span>{t('receivedBills.details')}</span>
                             </button>
                             <button
                               onClick={(e) => {
@@ -824,7 +829,7 @@ export default function ReceivedBills({
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
                               <Activity className="w-3.5 h-3.5 text-gray-500" />
-                              <span>Sales Logs</span>
+                              <span>{t('receivedBills.salesLogs')}</span>
                             </button>
                             <button
                               onClick={(e) => {
@@ -835,7 +840,7 @@ export default function ReceivedBills({
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
                               <Scale className="w-3.5 h-3.5 text-gray-500" />
-                              <span>Weight Analysis</span>
+                              <span>{t('receivedBills.weightAnalysis')}</span>
                             </button>
                           </>
                         ) : (
@@ -848,7 +853,7 @@ export default function ReceivedBills({
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
                               <FileText className="w-3.5 h-3.5 text-gray-500" />
-                              <span>Details</span>
+                              <span>{t('receivedBills.details')}</span>
                             </button>
                             <button
                               onClick={(e) => {
@@ -858,7 +863,7 @@ export default function ReceivedBills({
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
                               <Activity className="w-3.5 h-3.5 text-gray-500" />
-                              <span>Sales Logs</span>
+                              <span>{t('receivedBills.salesLogs')}</span>
                             </button>
                             <button
                               onClick={(e) => {
@@ -869,7 +874,7 @@ export default function ReceivedBills({
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
                               <Scale className="w-3.5 h-3.5 text-gray-500" />
-                              <span>Weight Analysis</span>
+                              <span>{t('receivedBills.weightAnalysis')}</span>
                             </button>
                           </>
                         )}
@@ -880,22 +885,22 @@ export default function ReceivedBills({
                     <tr className="bg-gray-50">
                       <td colSpan={9} className="px-6 py-4">
                         <div className="border rounded-lg overflow-hidden">
-                          <div className="bg-gray-100 px-4 py-2 text-sm text-gray-700 flex items-center justify-between">
-                            <div>
-                              {group.items.length} item{group.items.length !== 1 ? 's' : ''} in this {group.isBatch ? 'batch' : 'bill'}
+                          <div className="bg-gray-100 px-4 py-2 text-sm text-gray-700 flex items-center justify-between rtl:flex-row-reverse">
+                            <div className="rtl:text-right">
+                              {t('receivedBills.itemsInBatch', { count: group.items.length, type: group.isBatch ? t('receivedBills.batch') : t('receivedBills.bill') })}
                             </div>
                           </div>
                           <div className="overflow-x-auto">
                             <table className="min-w-full divide-y divide-gray-200">
                               <thead className="bg-gray-50">
                                 <tr>
-                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
-                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
-                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
-                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.product')}</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.type')}</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.quantity')}</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.progress')}</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.revenue')}</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.status')}</th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('receivedBills.actions')}</th>
                                 </tr>
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-200">
@@ -910,43 +915,43 @@ export default function ReceivedBills({
                                       }`}
                                       style={shouldFlash ? { transform: 'scale(1)' } : {}}
                                     >
-                                    <td className={`px-6 py-3 whitespace-nowrap text-sm font-medium ${
+                                    <td className={`px-6 py-3 whitespace-nowrap text-sm font-medium rtl:text-right ${
                                       shouldFlash ? 'text-blue-900 font-bold' : 'text-gray-900'
                                     }`}>{bill.productName}</td>
                                     <td className="px-6 py-3 whitespace-nowrap">
                                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bill.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
-                                        {bill.type}
+                                        {t(`receivedBills.${bill.type}`)}
                                       </span>
                                     </td>
-                                    <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">
-                                      <div>Original: {bill.originalQuantity} {bill.unit}</div>
-                                      <div>Remaining: {bill.remainingQuantity} {bill.unit}</div>
+                                    <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900 rtl:text-right">
+                                      <div>{t('receivedBills.original')}: {bill.originalQuantity} {bill.unit}</div>
+                                      <div>{t('receivedBills.remaining')}: {bill.remainingQuantity} {bill.unit}</div>
                                     </td>
                                     <td className="px-6 py-3 whitespace-nowrap">
-                                      <div className="flex items-center">
-                                        <div className="w-24 bg-gray-200 rounded-full h-2 mr-2">
+                                      <div className="flex items-center rtl:space-x-reverse">
+                                        <div className="w-24 bg-gray-200 rounded-full h-2 rtl:ml-2 ltr:mr-2">
                                           <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${bill.progress}%` }}></div>
                                         </div>
-                                        <span className="text-sm text-gray-900">{bill.progress.toFixed(1)}%</span>
+                                        <span className="text-sm text-gray-900 rtl:text-right">{bill.progress.toFixed(1)}%</span>
                                       </div>
                                     </td>
-                                    <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{formatCurrency(bill.totalRevenue)}</td>
+                                    <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900 rtl:text-right">{formatCurrency(bill.totalRevenue)}</td>
                                     <td className="px-6 py-3 whitespace-nowrap">{getStatusBadge(bill.status)}</td>
                                     <td className="px-6 py-3 whitespace-nowrap">
-                                      <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-2 rtl:space-x-reverse">
                                         <button
                                           onClick={() => handleViewReceivedBillDetails(bill)}
                                           className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                                         >
                                           <FileText className="w-3.5 h-3.5 text-gray-500" />
-                                          <span>Details</span>
+                                          <span>{t('receivedBills.details')}</span>
                                         </button>
                                         <button
                                           onClick={() => handleViewReceivedBillSalesLogs(bill)}
                                           className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                                         >
                                           <Activity className="w-3.5 h-3.5 text-gray-500" />
-                                          <span>Sales Logs</span>
+                                          <span>{t('receivedBills.salesLogs')}</span>
                                         </button>
                                         <button
                                           onClick={() => {
@@ -956,7 +961,7 @@ export default function ReceivedBills({
                                           className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                                         >
                                           <Scale className="w-3.5 h-3.5 text-gray-500" />
-                                          <span>Weight Analysis</span>
+                                          <span>{t('receivedBills.weightAnalysis')}</span>
                                         </button>
                                       </div>
                                     </td>
@@ -977,14 +982,18 @@ export default function ReceivedBills({
         </div>
 
         {groupTotalPages > 1 && (
-          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-            <div className="text-sm text-gray-700">
-              Showing {((receivedBillsPage - 1) * 10) + 1} to {Math.min(receivedBillsPage * 10, groupedReceivedBills.length)} of {groupedReceivedBills.length} results
+          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between rtl:flex-row-reverse">
+            <div className="text-sm text-gray-700 rtl:text-right">
+              {t('receivedBills.showingResults', { 
+                start: ((receivedBillsPage - 1) * 10) + 1, 
+                end: Math.min(receivedBillsPage * 10, groupedReceivedBills.length), 
+                total: groupedReceivedBills.length 
+              })}
             </div>
-            <div className="flex items-center space-x-2">
-              <button onClick={() => setReceivedBillsPage(Math.max(1, receivedBillsPage - 1))} disabled={receivedBillsPage === 1} className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">Previous</button>
-              <span className="text-sm text-gray-700">Page {receivedBillsPage} of {groupTotalPages}</span>
-              <button onClick={() => setReceivedBillsPage(Math.min(groupTotalPages, receivedBillsPage + 1))} disabled={receivedBillsPage === groupTotalPages} className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
+            <div className="flex items-center space-x-2 rtl:space-x-reverse">
+              <button onClick={() => setReceivedBillsPage(Math.max(1, receivedBillsPage - 1))} disabled={receivedBillsPage === 1} className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">{t('receivedBills.previous')}</button>
+              <span className="text-sm text-gray-700 rtl:text-right">{t('receivedBills.page')} {receivedBillsPage} {t('receivedBills.of')} {groupTotalPages}</span>
+              <button onClick={() => setReceivedBillsPage(Math.min(groupTotalPages, receivedBillsPage + 1))} disabled={receivedBillsPage === groupTotalPages} className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">{t('receivedBills.next')}</button>
             </div>
           </div>
         )}
@@ -994,8 +1003,8 @@ export default function ReceivedBills({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Received Bill Details</h2>
+              <div className="flex items-center justify-between rtl:flex-row-reverse">
+                <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">{t('receivedBills.receivedBillDetails')}</h2>
                 <button onClick={() => setShowReceivedBillDetails(false)} className="text-gray-400 hover:text-gray-600">
                   <X className="w-6 h-6" />
                 </button>

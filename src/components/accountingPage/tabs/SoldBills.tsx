@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useCurrency } from '../../../hooks/useCurrency';
+import { useI18n } from '../../../i18n';
 
 import { 
   FileText, 
@@ -81,6 +82,7 @@ export default function InventoryLogs() {
   const { userProfile } = useSupabaseAuth();
   const raw = useOfflineData();
   const { formatCurrency } = useCurrency();
+  const { t } = useI18n();
   const storeId = userProfile?.store_id;
 
   // Get data from offline context
@@ -416,8 +418,8 @@ export default function InventoryLogs() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <RefreshCw className="w-6 h-6 animate-spin text-gray-400 mr-2" />
-        <span className="text-gray-500">Loading financial operations...</span>
+        <RefreshCw className="w-6 h-6 animate-spin text-gray-400 rtl:ml-2 ltr:mr-2" />
+        <span className="text-gray-500 rtl:text-right">{t('soldBills.loadingFinancialOperations')}</span>
       </div>
     );
   }
@@ -433,29 +435,29 @@ export default function InventoryLogs() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center">
-          <Activity className="w-6 h-6 text-blue-600 mr-3" />
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">Sold Bills</h2>
-            <p className="text-gray-600">Review and manage sold bills</p>
+      <div className="flex items-center justify-between rtl:flex-row-reverse">
+        <div className="flex items-center rtl:space-x-reverse">
+          <Activity className="w-6 h-6 text-blue-600 rtl:ml-3 ltr:mr-3" />
+          <div className="rtl:text-right">
+            <h2 className="text-2xl font-bold text-gray-900">{t('soldBills.title')}</h2>
+            <p className="text-gray-600">{t('soldBills.subtitle')}</p>
           </div>
         </div>
         
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 rtl:space-x-reverse">
           {/* Sync Status Indicator */}
-          <div className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-gray-100">
+          <div className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-gray-100 rtl:space-x-reverse">
             <div className={`w-2 h-2 rounded-full ${
               syncStatus === 'syncing' ? 'bg-yellow-500 animate-pulse' :
               syncStatus === 'synced' ? 'bg-green-500' :
               syncStatus === 'error' ? 'bg-red-500' :
               'bg-gray-400'
             }`} />
-            <span className="text-sm text-gray-600">
-              {syncStatus === 'syncing' ? 'Syncing...' :
-               syncStatus === 'synced' ? 'Synced' :
-               syncStatus === 'error' ? 'Sync Error' :
-               'Offline'}
+            <span className="text-sm text-gray-600 rtl:text-right">
+              {syncStatus === 'syncing' ? t('soldBills.syncing') :
+               syncStatus === 'synced' ? t('soldBills.synced') :
+               syncStatus === 'error' ? t('soldBills.syncError') :
+               t('soldBills.offline')}
             </span>
           </div>
           
@@ -471,15 +473,15 @@ export default function InventoryLogs() {
             onClick={exportBills}
             className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
           >
-            <Download className="w-4 h-4 mr-2" />
-            Export
+            <Download className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
+            {t('soldBills.export')}
           </button>
           <button
             onClick={loadBills}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
           >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
+            <RefreshCw className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
+            {t('soldBills.refresh')}
           </button>
           <button
             onClick={async () => {
@@ -488,19 +490,19 @@ export default function InventoryLogs() {
                 await raw.sync();
                 setSyncStatus('synced');
                 setTimeout(() => setSyncStatus('idle'), 3000);
-                showToast('Sync completed successfully', 'success');
+                showToast(t('soldBills.syncCompletedSuccessfully'), 'success');
               } catch (error) {
                 console.error('Sync failed:', error);
                 setSyncStatus('error');
                 setTimeout(() => setSyncStatus('idle'), 5000);
-                showToast('Sync failed', 'error');
+                showToast(t('soldBills.syncFailed'), 'error');
               }
             }}
             className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center"
             disabled={syncStatus === 'syncing'}
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-            {syncStatus === 'syncing' ? 'Syncing...' : 'Sync'}
+            <RefreshCw className={`w-4 h-4 rtl:ml-2 ltr:mr-2 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+            {syncStatus === 'syncing' ? t('soldBills.syncing') : t('soldBills.sync')}
           </button>
         </div>
       </div>
@@ -510,15 +512,15 @@ export default function InventoryLogs() {
       {/* Search and Filters */}
       { (
         <div className="bg-white rounded-lg shadow-sm p-4">
-          <div className="flex items-center space-x-4 mb-4">
+          <div className="flex items-center space-x-4 mb-4 rtl:space-x-reverse">
             <div className="flex-1 relative">
-              <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 rtl:left-auto rtl:right-3" />
               <input
                 type="text"
-                placeholder="Search bills by number, customer, or notes..."
+                placeholder={t('soldBills.searchPlaceholder')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 rtl:pl-4 rtl:pr-10"
               />
             </div>
           </div>
@@ -526,7 +528,7 @@ export default function InventoryLogs() {
           {showFilters && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-gray-200">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date From</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.dateFrom')}</label>
                 <input
                   type="date"
                   value={dateFrom}
@@ -535,7 +537,7 @@ export default function InventoryLogs() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date To</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.dateTo')}</label>
                 <input
                   type="date"
                   value={dateTo}
@@ -544,29 +546,29 @@ export default function InventoryLogs() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Status</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.paymentStatus')}</label>
                 <select
                   value={paymentStatusFilter}
                   onChange={(e) => setPaymentStatusFilter(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="">All Payment Status</option>
-                  <option value="paid">Paid</option>
-                  <option value="partial">Partial</option>
-                  <option value="pending">Pending</option>
+                  <option value="">{t('soldBills.allPaymentStatus')}</option>
+                  <option value="paid">{t('soldBills.paid')}</option>
+                  <option value="partial">{t('soldBills.partial')}</option>
+                  <option value="pending">{t('soldBills.pending')}</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Bill Status</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.billStatus')}</label>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="">All Status</option>
-                  <option value="active">Active</option>
-                  <option value="cancelled">Cancelled</option>
-                  <option value="refunded">Refunded</option>
+                  <option value="">{t('soldBills.allStatus')}</option>
+                  <option value="active">{t('soldBills.active')}</option>
+                  <option value="cancelled">{t('soldBills.cancelled')}</option>
+                  <option value="refunded">{t('soldBills.refunded')}</option>
                 </select>
               </div>
             </div>
@@ -581,23 +583,23 @@ export default function InventoryLogs() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Bill Details
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                    {t('soldBills.billDetails')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Customer
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                    {t('soldBills.customer')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Amount
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                    {t('soldBills.amount')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Payment
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                    {t('soldBills.payment')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                    {t('soldBills.status')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                    {t('soldBills.actions')}
                   </th>
                 </tr>
               </thead>
@@ -606,8 +608,8 @@ export default function InventoryLogs() {
                   <tr>
                     <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                       <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                      <p className="text-lg font-medium">No bills found</p>
-                      <p className="text-sm">Bills created from POS will appear here</p>
+                      <p className="text-lg font-medium rtl:text-right">{t('soldBills.noBillsFound')}</p>
+                      <p className="text-sm rtl:text-right">{t('soldBills.noBillsMessage')}</p>
                     </td>
                   </tr>
                 ) : (
@@ -616,55 +618,55 @@ export default function InventoryLogs() {
                   map((bill) => (
                     <tr key={bill.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
+                        <div className="rtl:text-right">
                           <div className="text-sm font-medium text-gray-900">{bill.bill_number}</div>
                           <div className="text-sm text-gray-500">
                             {new Date(bill.bill_date).toLocaleDateString()} at {new Date(bill.bill_date).toLocaleTimeString()}
                           </div>
                           <div className="text-xs text-gray-400">
-                            Created by {bill.users?.name || 'Unknown'}
+                            {t('soldBills.createdBy')} {bill.users?.name || t('soldBills.unknown')}
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <User className="w-4 h-4 text-gray-400 mr-2" />
-                          <span className="text-sm text-gray-900">
+                        <div className="flex items-center rtl:space-x-reverse">
+                          <User className="w-4 h-4 text-gray-400 rtl:ml-2 ltr:mr-2" />
+                          <span className="text-sm text-gray-900 rtl:text-right">
                             {getCustomerName(bill.customer_id)}
                           </span>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
+                        <div className="rtl:text-right">
                           <div className="text-sm font-medium text-gray-900">
                             {formatCurrency(bill.total_amount)}
                           </div>
                           {bill.total_amount - bill.amount_paid > 0 && (
                             <div className="text-xs text-red-600">
-                              Due: {formatCurrency(bill.total_amount - bill.amount_paid)}
+                              {t('soldBills.due')}: {formatCurrency(bill.total_amount - bill.amount_paid)}
                             </div>
                           )}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-2 rtl:space-x-reverse">
                           <span className={`px-2 py-1 text-xs rounded-full ${getPaymentStatusColor(bill.payment_status)}`}>
-                            {bill.payment_status}
+                            {t(`soldBills.${bill.payment_status}`)}
                           </span>
-                          <div className="flex items-center text-xs text-gray-500">
+                          <div className="flex items-center text-xs text-gray-500 rtl:space-x-reverse">
                             {bill.payment_method === 'cash' && <DollarSign className="w-3 h-3" />}
                             {bill.payment_method === 'card' && <CreditCard className="w-3 h-3" />}
                             {bill.payment_method === 'credit' && <Clock className="w-3 h-3" />}
-                            <span className="ml-1 capitalize">{bill.payment_method}</span>
+                            <span className="rtl:mr-1 ltr:ml-1 capitalize">{t(`soldBills.${bill.payment_method}`)}</span>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-2 rtl:space-x-reverse">
                           <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(bill.status)}`}>
-                            {bill.status}
+                            {t(`soldBills.${bill.status}`)}
                           </span>
-                          <div className="flex items-center space-x-1">
+                          <div className="flex items-center space-x-1 rtl:space-x-reverse">
                             {bill._synced ? (
                               <CheckCircle className="w-3 h-3 text-green-500" />
                             ) : (
@@ -674,11 +676,11 @@ export default function InventoryLogs() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-2 rtl:space-x-reverse">
                           <button
                             onClick={() => handleViewBill(bill)}
                             className="text-blue-600 hover:text-blue-900"
-                            title="View Details"
+                            title={t('soldBills.viewDetails')}
                           >
                             <Eye className="w-4 h-4" />
                           </button>
@@ -686,7 +688,7 @@ export default function InventoryLogs() {
                             <button
                               onClick={() => handleEditBill(bill)}
                               className="text-green-600 hover:text-green-900"
-                              title="Edit Bill"
+                              title={t('soldBills.editBill')}
                             >
                               <Edit className="w-4 h-4" />
                             </button>
@@ -695,7 +697,7 @@ export default function InventoryLogs() {
                             <button
                               onClick={() => handleDeleteBill(bill)}
                               className="text-red-600 hover:text-red-900"
-                              title="Cancel Bill"
+                              title={t('soldBills.cancelBill')}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -706,7 +708,7 @@ export default function InventoryLogs() {
                               setShowAuditTrail(true);
                             }}
                             className="text-purple-600 hover:text-purple-900"
-                            title="View Audit Trail"
+                            title={t('soldBills.viewAuditTrail')}
                           >
                             <History className="w-4 h-4" />
                           </button>
@@ -728,12 +730,12 @@ export default function InventoryLogs() {
       {showBillDetails && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <h2 className="text-xl font-semibold text-gray-900">
-                  Bill Details - {selectedBill.bill_number}
+            <div className="p-6 border-b flex items-center justify-between rtl:flex-row-reverse">
+              <div className="flex items-center space-x-3 rtl:space-x-reverse">
+                <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
+                  {t('soldBills.billDetails')} - {selectedBill.bill_number}
                 </h2>
-                <div className="flex items-center space-x-1">
+                <div className="flex items-center space-x-1 rtl:space-x-reverse">
                   {selectedBill._synced ? (
                     <CheckCircle className="w-5 h-5 text-green-500" />
                   ) : (
@@ -753,46 +755,46 @@ export default function InventoryLogs() {
               {/* Bill Header */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Bill Information</h3>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4 rtl:text-right">{t('soldBills.billInformation')}</h3>
                   <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Bill Number:</span>
-                      <span className="font-medium">{selectedBill.bill_number}</span>
+                    <div className="flex justify-between rtl:flex-row-reverse">
+                      <span className="text-gray-600 rtl:text-right">{t('soldBills.billNumber')}:</span>
+                      <span className="font-medium rtl:text-right">{selectedBill.bill_number}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Date:</span>
-                      <span className="font-medium">{new Date(selectedBill.bill_date).toLocaleString()}</span>
+                    <div className="flex justify-between rtl:flex-row-reverse">
+                      <span className="text-gray-600 rtl:text-right">{t('soldBills.date')}:</span>
+                      <span className="font-medium rtl:text-right">{new Date(selectedBill.bill_date).toLocaleString()}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Customer:</span>
-                      <span className="font-medium">{getCustomerName(selectedBill.customer_id)}</span>
+                    <div className="flex justify-between rtl:flex-row-reverse">
+                      <span className="text-gray-600 rtl:text-right">{t('soldBills.customer')}:</span>
+                      <span className="font-medium rtl:text-right">{getCustomerName(selectedBill.customer_id)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Payment Method:</span>
-                      <span className="font-medium capitalize">{selectedBill.payment_method}</span>
+                    <div className="flex justify-between rtl:flex-row-reverse">
+                      <span className="text-gray-600 rtl:text-right">{t('soldBills.paymentMethod')}:</span>
+                      <span className="font-medium rtl:text-right capitalize">{t(`soldBills.${selectedBill.payment_method}`)}</span>
                     </div>
                   </div>
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Payment Information</h3>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4 rtl:text-right">{t('soldBills.paymentInformation')}</h3>
                   <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Subtotal:</span>
-                      <span className="font-medium">{formatCurrency(selectedBill.subtotal)}</span>
+                    <div className="flex justify-between rtl:flex-row-reverse">
+                      <span className="text-gray-600 rtl:text-right">{t('soldBills.subtotal')}:</span>
+                      <span className="font-medium rtl:text-right">{formatCurrency(selectedBill.subtotal)}</span>
                     </div>
-                    <div className="flex justify-between border-t pt-2">
-                      <span className="text-gray-900 font-semibold">Total:</span>
-                      <span className="font-bold text-lg">{formatCurrency(selectedBill.total_amount)}</span>
+                    <div className="flex justify-between border-t pt-2 rtl:flex-row-reverse">
+                      <span className="text-gray-900 font-semibold rtl:text-right">{t('soldBills.total')}:</span>
+                      <span className="font-bold text-lg rtl:text-right">{formatCurrency(selectedBill.total_amount)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Amount Paid:</span>
-                      <span className="font-medium text-green-600">{formatCurrency(selectedBill.amount_paid)}</span>
+                    <div className="flex justify-between rtl:flex-row-reverse">
+                      <span className="text-gray-600 rtl:text-right">{t('soldBills.amountPaid')}:</span>
+                      <span className="font-medium text-green-600 rtl:text-right">{formatCurrency(selectedBill.amount_paid)}</span>
                     </div>
                     {selectedBill.total_amount - selectedBill.amount_paid > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Amount Due:</span>
-                        <span className="font-medium text-red-600">{formatCurrency(selectedBill.total_amount - selectedBill.amount_paid)}</span>
+                      <div className="flex justify-between rtl:flex-row-reverse">
+                        <span className="text-gray-600 rtl:text-right">{t('soldBills.amountDue')}:</span>
+                        <span className="font-medium text-red-600 rtl:text-right">{formatCurrency(selectedBill.total_amount - selectedBill.amount_paid)}</span>
                       </div>
                     )}
                   </div>
@@ -801,16 +803,16 @@ export default function InventoryLogs() {
 
               {/* Line Items */}
               <div>
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Line Items</h3>
+                <h3 className="text-lg font-medium text-gray-900 mb-4 rtl:text-right">{t('soldBills.lineItems')}</h3>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.product')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.supplier')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.quantity')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.price')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.total')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
@@ -834,8 +836,8 @@ export default function InventoryLogs() {
               {/* Notes */}
               {selectedBill.notes && (
                 <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">Notes</h3>
-                  <p className="text-gray-600 bg-gray-50 p-3 rounded-lg">{selectedBill.notes}</p>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2 rtl:text-right">{t('soldBills.notes')}</h3>
+                  <p className="text-gray-600 bg-gray-50 p-3 rounded-lg rtl:text-right">{selectedBill.notes}</p>
                 </div>
               )}
             </div>
@@ -847,9 +849,9 @@ export default function InventoryLogs() {
       {showEditBill && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Edit Bill - {selectedBill.bill_number}
+            <div className="p-6 border-b flex items-center justify-between rtl:flex-row-reverse">
+              <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
+                {t('soldBills.editBill')} - {selectedBill.bill_number}
               </h2>
               <button
                 onClick={() => setShowEditBill(false)}
@@ -862,13 +864,13 @@ export default function InventoryLogs() {
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Customer</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.customer')}</label>
                   <select
                     value={editForm.customer_id || ''}
                     onChange={(e) => setEditForm(prev => ({ ...prev, customer_id: e.target.value || null }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option value="">Walk-in Customer</option>
+                    <option value="">{t('soldBills.walkInCustomer')}</option>
                     {customers.map(customer => (
                       <option key={customer.id} value={customer.id}>
                         {customer.name}
@@ -878,20 +880,20 @@ export default function InventoryLogs() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.paymentMethod')}</label>
                   <select
                     value={editForm.payment_method || 'cash'}
                     onChange={(e) => setEditForm(prev => ({ ...prev, payment_method: e.target.value as any }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option value="cash">Cash</option>
-                    <option value="card">Card</option>
-                    <option value="credit">Credit</option>
+                    <option value="cash">{t('soldBills.cash')}</option>
+                    <option value="card">{t('soldBills.card')}</option>
+                    <option value="credit">{t('soldBills.credit')}</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount Paid</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.amountPaid')}</label>
                   <input
                     type="number"
                     step="0.01"
@@ -913,37 +915,37 @@ export default function InventoryLogs() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Payment Status</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.paymentStatus')}</label>
                   <select
                     value={editForm.payment_status || 'pending'}
                     onChange={(e) => setEditForm(prev => ({ ...prev, payment_status: e.target.value as any }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option value="paid">Paid</option>
-                    <option value="partial">Partial</option>
-                    <option value="pending">Pending</option>
+                    <option value="paid">{t('soldBills.paid')}</option>
+                    <option value="partial">{t('soldBills.partial')}</option>
+                    <option value="pending">{t('soldBills.pending')}</option>
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.notes')}</label>
                 <textarea
                   value={editForm.notes || ''}
                   onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
                   rows={3}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Add notes about this bill..."
+                  placeholder={t('soldBills.addNotesPlaceholder')}
                 />
               </div>
 
-              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 rtl:space-x-reverse">
                 <button
                   onClick={() => setShowEditBill(false)}
                   className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   disabled={isEditing}
                 >
-                  Cancel
+                  {t('soldBills.cancel')}
                 </button>
                 <button
                   onClick={handleSaveBill}
@@ -952,13 +954,13 @@ export default function InventoryLogs() {
                 >
                   {isEditing ? (
                     <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
+                      <RefreshCw className="w-4 h-4 rtl:ml-2 ltr:mr-2 animate-spin" />
+                      {t('soldBills.saving')}
                     </>
                   ) : (
                     <>
-                      <Save className="w-4 h-4 mr-2" />
-                      Save Changes
+                      <Save className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
+                      {t('soldBills.saveChanges')}
                     </>
                   )}
                 </button>
@@ -972,9 +974,9 @@ export default function InventoryLogs() {
       {showAuditTrail && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Audit Trail - {selectedBill.bill_number}
+            <div className="p-6 border-b flex items-center justify-between rtl:flex-row-reverse">
+              <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
+                {t('soldBills.auditTrail')} - {selectedBill.bill_number}
               </h2>
               <button
                 onClick={() => setShowAuditTrail(false)}
@@ -1006,32 +1008,32 @@ export default function InventoryLogs() {
                         </span>
                       </div>
                       
-                      <div className="text-sm text-gray-600 mb-2">
-                        Changed by: {log.users?.name || 'Unknown User'}
+                      <div className="text-sm text-gray-600 mb-2 rtl:text-right">
+                        {t('soldBills.changedBy')}: {log.users?.name || t('soldBills.unknownUser')}
                       </div>
                       
                       {log.field_changed && (
-                        <div className="text-sm text-gray-600 mb-2">
-                          Field: <span className="font-mono bg-gray-100 px-1 rounded">{log.field_changed}</span>
+                        <div className="text-sm text-gray-600 mb-2 rtl:text-right">
+                          {t('soldBills.field')}: <span className="font-mono bg-gray-100 px-1 rounded">{log.field_changed}</span>
                         </div>
                       )}
                       
                       {log.change_reason && (
-                        <div className="text-sm text-gray-600 mb-2">
-                          Reason: {log.change_reason}
+                        <div className="text-sm text-gray-600 mb-2 rtl:text-right">
+                          {t('soldBills.reason')}: {log.change_reason}
                         </div>
                       )}
                       
                       {(log.old_value || log.new_value) && (
-                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
+                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded rtl:text-right">
                           {log.old_value && (
                             <div className="mb-1">
-                              <span className="font-medium">Old:</span> {log.old_value.length > 100 ? `${log.old_value.substring(0, 100)}...` : log.old_value}
+                              <span className="font-medium">{t('soldBills.old')}:</span> {log.old_value.length > 100 ? `${log.old_value.substring(0, 100)}...` : log.old_value}
                             </div>
                           )}
                           {log.new_value && (
                             <div>
-                              <span className="font-medium">New:</span> {log.new_value.length > 100 ? `${log.new_value.substring(0, 100)}...` : log.new_value}
+                              <span className="font-medium">{t('soldBills.new')}:</span> {log.new_value.length > 100 ? `${log.new_value.substring(0, 100)}...` : log.new_value}
                             </div>
                           )}
                         </div>
@@ -1042,7 +1044,7 @@ export default function InventoryLogs() {
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   <History className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                  <p>No audit trail available for this bill</p>
+                  <p className="rtl:text-right">{t('soldBills.noAuditTrailAvailable')}</p>
                 </div>
               )}
             </div>

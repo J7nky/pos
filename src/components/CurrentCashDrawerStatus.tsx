@@ -5,6 +5,7 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { InventoryVerificationModal } from './accountingPage/modals/InventoryVerificationModal';
 import { MissedProductsSummary } from './MissedProductsSummary';
 import { missedProductsService } from '../services/missedProductsService';
+import { useI18n } from '../i18n';
 
 interface CurrentCashDrawerStatusProps {
   storeId: string;
@@ -21,6 +22,7 @@ const CashBalanceModal: React.FC<{
   loading: boolean;
   error?: string;
 }> = ({ isOpen, onClose, onConfirm, expectedAmount, loading, error }) => {
+  const { t } = useI18n();
   const [actualAmount, setActualAmount] = useState(expectedAmount);
 
   useEffect(() => {
@@ -41,8 +43,8 @@ const CashBalanceModal: React.FC<{
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Verify Cash Balance</h3>
+        <div className="flex items-center justify-between mb-4 rtl:flex-row-reverse">
+          <h3 className="text-lg font-semibold text-gray-900 rtl:text-right">{t('cashDrawer.verifyCashBalance')}</h3>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600"
@@ -53,26 +55,26 @@ const CashBalanceModal: React.FC<{
 
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center">
-              <AlertTriangle className="w-5 h-5 text-red-600 mr-2" />
-              <span className="text-sm text-red-800">{error}</span>
+            <div className="flex items-center rtl:space-x-reverse">
+              <AlertTriangle className="w-5 h-5 text-red-600 rtl:ml-2 ltr:mr-2" />
+              <span className="text-sm text-red-800 rtl:text-right">{error}</span>
             </div>
           </div>
         )}
 
         <div className="mb-4">
           <div className="bg-blue-50 p-3 rounded-lg mb-4">
-            <p className="text-sm text-blue-800">
-              <strong>Expected Amount:</strong> {formatCurrency(expectedAmount)}
+            <p className="text-sm text-blue-800 rtl:text-right">
+              <strong>{t('cashDrawer.expectedAmount')}:</strong> {formatCurrency(expectedAmount)}
             </p>
-            <p className="text-sm text-blue-600 mt-1">
-              Count the actual cash in the drawer and enter the amount below.
+            <p className="text-sm text-blue-600 mt-1 rtl:text-right">
+              {t('cashDrawer.countCashInstructions')}
             </p>
           </div>
 
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Actual Amount in Drawer
+            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
+              {t('cashDrawer.actualAmountInDrawer')}
             </label>
             <input
               type="number"
@@ -82,11 +84,11 @@ const CashBalanceModal: React.FC<{
               className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                 actualAmount <= 0 ? 'border-red-300' : 'border-gray-300'
               }`}
-              placeholder="Enter actual amount"
+              placeholder={t('cashDrawer.enterActualAmount')}
             />
             {actualAmount <= 0 && (
-              <p className="mt-1 text-sm text-red-600">
-                Please enter a valid amount greater than 0
+              <p className="mt-1 text-sm text-red-600 rtl:text-right">
+                {t('cashDrawer.validAmountRequired')}
               </p>
             )}
           </div>
@@ -97,23 +99,23 @@ const CashBalanceModal: React.FC<{
                 ? 'bg-green-50 border border-green-200' 
                 : 'bg-red-50 border border-red-200'
             }`}>
-              <p className={`text-sm ${
+              <p className={`text-sm rtl:text-right ${
                 actualAmount > expectedAmount ? 'text-green-800' : 'text-red-800'
               }`}>
-                <strong>Variance:</strong> {formatCurrency(Math.abs(actualAmount - expectedAmount))}
-                {actualAmount > expectedAmount ? ' (Over)' : ' (Short)'}
+                <strong>{t('cashDrawer.variance')}:</strong> {formatCurrency(Math.abs(actualAmount - expectedAmount))}
+                {actualAmount > expectedAmount ? ` (${t('cashDrawer.over')})` : ` (${t('cashDrawer.short')})`}
               </p>
             </div>
           )}
         </div>
 
-        <div className="flex justify-end space-x-3">
+        <div className="flex justify-end space-x-3 rtl:space-x-reverse">
           <button
             onClick={onClose}
             disabled={loading}
             className="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 disabled:opacity-50"
           >
-            Cancel
+            {t('cashDrawer.cancel')}
           </button>
           <button
             onClick={() => onConfirm(actualAmount)}
@@ -124,7 +126,7 @@ const CashBalanceModal: React.FC<{
                 : 'bg-red-600 text-white hover:bg-red-700'
             }`}
           >
-            {loading ? 'Closing...' : 'Close Drawer'}
+            {loading ? t('cashDrawer.closing') : t('cashDrawer.closeDrawer')}
           </button>
         </div>
       </div>
@@ -136,6 +138,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
   storeId, 
   getCurrentStatus 
 }) => {
+  const { t } = useI18n();
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showInventoryModal, setShowInventoryModal] = useState(false);
@@ -273,57 +276,57 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
   return (
     <>
       <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-        <h4 className="text-lg font-semibold text-gray-900 mb-4">Current Status</h4>
+        <h4 className="text-lg font-semibold text-gray-900 mb-4 rtl:text-right">{t('cashDrawer.currentStatus')}</h4>
         
         {status.status === 'active' ? (
           <>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                <div className="flex items-center">
-                  <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
-                  <span className="text-sm font-medium text-green-800">Active Session</span>
+                <div className="flex items-center rtl:space-x-reverse">
+                  <CheckCircle className="w-5 h-5 text-green-600 rtl:ml-2 ltr:mr-2" />
+                  <span className="text-sm font-medium text-green-800 rtl:text-right">{t('cashDrawer.activeSession')}</span>
                 </div>
-                <div className="mt-2 text-2xl font-bold text-green-900">
+                <div className="mt-2 text-2xl font-bold text-green-900 rtl:text-right">
                   {formatCurrency(status.currentBalance)}
                 </div>
-                <div className="text-sm text-green-600">Current Balance</div>
+                <div className="text-sm text-green-600 rtl:text-right">{t('cashDrawer.currentBalance')}</div>
               </div>
               
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                <div className="flex items-center">
-                  <User className="w-5 h-5 text-blue-600 mr-2" />
-                  <span className="text-sm font-medium text-blue-800">Opened By</span>
+                <div className="flex items-center rtl:space-x-reverse">
+                  <User className="w-5 h-5 text-blue-600 rtl:ml-2 ltr:mr-2" />
+                  <span className="text-sm font-medium text-blue-800 rtl:text-right">{t('cashDrawer.openedBy')}</span>
                 </div>
-                <div className="mt-2 text-lg font-semibold text-blue-900">
+                <div className="mt-2 text-lg font-semibold text-blue-900 rtl:text-right">
                   {status.openedBy}
                 </div>
-                <div className="text-sm text-blue-600">Employee</div>
+                <div className="text-sm text-blue-600 rtl:text-right">{t('cashDrawer.employee')}</div>
               </div>
               
               <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-                <div className="flex items-center">
-                  <Clock className="w-5 h-5 text-purple-600 mr-2" />
-                  <span className="text-sm font-medium text-purple-800">Session Duration</span>
+                <div className="flex items-center rtl:space-x-reverse">
+                  <Clock className="w-5 h-5 text-purple-600 rtl:ml-2 ltr:mr-2" />
+                  <span className="text-sm font-medium text-purple-800 rtl:text-right">{t('cashDrawer.sessionDuration')}</span>
                 </div>
-                <div className="mt-2 text-lg font-semibold text-purple-900">
+                <div className="mt-2 text-lg font-semibold text-purple-900 rtl:text-right">
                   {formatDuration(status.sessionDuration)}
                 </div>
-                <div className="text-sm text-purple-600">Time Open</div>
+                <div className="text-sm text-purple-600 rtl:text-right">{t('cashDrawer.timeOpen')}</div>
               </div>
             </div>
             
             <div className="mt-6 p-4 bg-gray-50 rounded-lg">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                
-                <div>
-                  <span className="text-sm font-medium text-gray-600">Opened At:</span>
-                  <span className="ml-2 text-sm text-gray-900">
+                <div className="rtl:text-right">
+                  <span className="text-sm font-medium text-gray-600">{t('cashDrawer.openedAt')}:</span>
+                  <span className="rtl:mr-2 ltr:ml-2 text-sm text-gray-900">
                     {new Date(status.openedAt).toLocaleString()}
                   </span>
                 </div>
-                <div>
-                  <span className="text-sm font-medium text-gray-600">Opening Amount:</span>
-                  <span className="ml-2 text-sm text-gray-900 font-semibold">
+                <div className="rtl:text-right">
+                  <span className="text-sm font-medium text-gray-600">{t('cashDrawer.openingAmount')}:</span>
+                  <span className="rtl:mr-2 ltr:ml-2 text-sm text-gray-900 font-semibold">
                     {formatCurrency(status.openingAmount)}
                   </span>
                 </div>
@@ -335,40 +338,40 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
             
             {/* Process Status Indicator */}
             <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">Cash Drawer Closing Process</h4>
-              <div className="flex items-center space-x-6">
-                <div className={`flex items-center ${inventoryVerificationData ? 'text-green-600' : 'text-gray-500'}`}>
+              <h4 className="text-sm font-medium text-blue-800 mb-2 rtl:text-right">{t('cashDrawer.closingProcess')}</h4>
+              <div className="flex items-center space-x-6 rtl:space-x-reverse">
+                <div className={`flex items-center rtl:space-x-reverse ${inventoryVerificationData ? 'text-green-600' : 'text-gray-500'}`}>
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
                     inventoryVerificationData ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'
                   }`}>
                     {inventoryVerificationData ? '✓' : '1'}
                   </div>
-                  <span className="ml-2 text-sm font-medium">Inventory Check</span>
+                  <span className="rtl:mr-2 ltr:ml-2 text-sm font-medium rtl:text-right">{t('cashDrawer.inventoryCheck')}</span>
                 </div>
-                <div className="text-gray-300">→</div>
-                <div className={`flex items-center ${inventoryVerificationData ? 'text-blue-600' : 'text-gray-400'}`}>
+                <div className="text-gray-300 rtl:rotate-180">→</div>
+                <div className={`flex items-center rtl:space-x-reverse ${inventoryVerificationData ? 'text-blue-600' : 'text-gray-400'}`}>
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
                     inventoryVerificationData ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'
                   }`}>
                     2
                   </div>
-                  <span className="ml-2 text-sm font-medium">Cash Balance</span>
+                  <span className="rtl:mr-2 ltr:ml-2 text-sm font-medium rtl:text-right">{t('cashDrawer.cashBalance')}</span>
                 </div>
-                <div className="text-gray-300">→</div>
-                <div className="flex items-center text-gray-400">
+                <div className="text-gray-300 rtl:rotate-180">→</div>
+                <div className="flex items-center text-gray-400 rtl:space-x-reverse">
                   <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold bg-gray-100 text-gray-400">
                     3
                   </div>
-                  <span className="ml-2 text-sm font-medium">Close Drawer</span>
+                  <span className="rtl:mr-2 ltr:ml-2 text-sm font-medium rtl:text-right">{t('cashDrawer.closeDrawer')}</span>
                 </div>
               </div>
               {inventoryVerificationData && (
-                <p className="mt-2 text-xs text-blue-600">✓ Inventory verification completed. You can cancel and restart if needed.</p>
+                <p className="mt-2 text-xs text-blue-600 rtl:text-right">✓ {t('cashDrawer.inventoryVerificationCompleted')}</p>
               )}
             </div>
             
             {/* Close Cash Drawer Button */}
-            <div className="mt-6 flex justify-between items-center">
+            <div className="mt-6 flex justify-between items-center rtl:flex-row-reverse">
                 <button
                   onClick={async () => {
                     // Check if inventory verification has already been completed for this session
@@ -381,14 +384,14 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
                   }}
                   className="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 text-sm font-medium"
                 >
-                  {inventoryVerificationData ? 'Continue to Cash Balance' : 'Start Closing Process'}
+                  {inventoryVerificationData ? t('cashDrawer.continueToCashBalance') : t('cashDrawer.startClosingProcess')}
                 </button>
               
               <button
                 onClick={loadStatus}
                 className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm"
               >
-                Refresh Status
+                {t('cashDrawer.refreshStatus')}
               </button>
             </div>
           </>
@@ -397,13 +400,13 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
             <div className="mb-4">
               <Wallet className="w-16 h-16 text-gray-300 mx-auto" />
             </div>
-            <p className="text-lg font-medium text-gray-900 mb-2">No Active Session</p>
-            <p className="text-gray-600 mb-4">{status.message}</p>
+            <p className="text-lg font-medium text-gray-900 mb-2 rtl:text-right">{t('cashDrawer.noActiveSession')}</p>
+            <p className="text-gray-600 mb-4 rtl:text-right">{status.message}</p>
             <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-              <div className="flex items-center">
-                <AlertTriangle className="w-5 h-5 text-yellow-600 mr-2" />
-                <span className="text-sm text-yellow-800">
-                  Cash drawer must be opened to start tracking transactions
+              <div className="flex items-center rtl:space-x-reverse">
+                <AlertTriangle className="w-5 h-5 text-yellow-600 rtl:ml-2 ltr:mr-2" />
+                <span className="text-sm text-yellow-800 rtl:text-right">
+                  {t('cashDrawer.mustBeOpenedMessage')}
                 </span>
               </div>
             </div>
@@ -413,7 +416,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
                 onClick={loadStatus}
                 className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm"
               >
-                Refresh Status
+                {t('cashDrawer.refreshStatus')}
               </button>
             </div>
           </div>
