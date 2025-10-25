@@ -20,6 +20,12 @@
   to = "/index.html"
   status = 200
 
+# Specific redirect for public customer statement routes
+[[redirects]]
+  from = "/public/customer-statement/*"
+  to = "/index.html"
+  status = 200
+
 # Headers for security and performance
 [[headers]]
   for = "/*"

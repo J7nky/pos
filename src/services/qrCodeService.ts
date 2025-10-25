@@ -13,8 +13,15 @@ export class QRCodeService {
   private baseUrl: string;
 
   private constructor() {
-    // Get base URL from environment or use current origin
+    // Use public URL from environment (set by Vite config)
     this.baseUrl = import.meta.env.VITE_PUBLIC_URL || window.location.origin;
+    
+    // Debug logging to show which URL is being used
+    console.log('🔧 QR Code Service Initialization:');
+    console.log('   - Environment VITE_PUBLIC_URL:', import.meta.env.VITE_PUBLIC_URL || 'Not set');
+    console.log('   - Current origin:', window.location.origin);
+    console.log('   - Selected base URL:', this.baseUrl);
+    console.log('   - Is production URL?', this.baseUrl.includes('souq-trablous.com'));
   }
 
   public static getInstance(): QRCodeService {
@@ -30,8 +37,8 @@ export class QRCodeService {
   public async generateBillQRCode(
     customerId: string,
     billId: string,
-    billNumber: string,
-    customerName: string,
+    _billNumber: string,
+    _customerName: string,
     options?: {
       size?: number;
       margin?: number;
@@ -41,23 +48,15 @@ export class QRCodeService {
       };
     }
   ): Promise<string> {
-    const qrData: QRCodeData = {
-      customerId,
-      billId,
-      billNumber,
-      customerName,
-      timestamp: new Date().toISOString()
-    };
-
     // Create the public URL for customer account statement
     const publicUrl = `${this.baseUrl}/public/customer-statement/${customerId}/${billId}`;
     
     // Debug logging
     console.log('🔍 QR Code URL Generation:');
-    console.log('   - Base URL:', this.baseUrl);
+    console.log('   - Public URL:', this.baseUrl);
     console.log('   - Customer ID:', customerId);
     console.log('   - Bill ID:', billId);
-    console.log('   - Generated URL:', publicUrl);
+    console.log('   - Generated QR URL:', publicUrl);
     
     // Generate QR code as data URL
     const qrCodeDataUrl = await QRCode.toDataURL(publicUrl, {
@@ -79,8 +78,8 @@ export class QRCodeService {
   public async generateBillQRCodeSVG(
     customerId: string,
     billId: string,
-    billNumber: string,
-    customerName: string,
+    _billNumber: string,
+    _customerName: string,
     options?: {
       size?: number;
       margin?: number;
@@ -152,5 +151,12 @@ export class QRCodeService {
    */
   public getCustomerStatementUrl(customerId: string, billId: string): string {
     return `${this.baseUrl}/public/customer-statement/${customerId}/${billId}`;
+  }
+
+  /**
+   * Get the current base URL being used
+   */
+  public getBaseUrl(): string {
+    return this.baseUrl;
   }
 }
