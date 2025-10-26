@@ -55,113 +55,73 @@ export default function PublicCustomerStatement() {
     setError(null);
 
     try {
-      // Step 1: Validate the token and get customer_id
-      const { data: tokenData, error: tokenError } = await supabase
-        .from('public_access_tokens')
-        .select('customer_id, bill_id, expires_at, revoked, access_count')
-        .eq('token', token)
-        .single() as { data: any; error: any };
+      // Step 1: Validate token and get customer data using secure database function
+      console.log('📥 Fetching customer data...');
+      const { data: customerData, error: customerError } = await supabase
+        .rpc('get_customer_by_token', { p_token: token });
       
-      if (tokenError || !tokenData) {
-        console.error('❌ Token validation failed:', tokenError);
+      if (customerError || !customerData || customerData.length === 0) {
+        console.error('❌ Token validation failed:', customerError);
         setError('Invalid access link. Please check the QR code and try again.');
         setIsLoading(false);
         return;
       }
 
-      if (tokenData.revoked) {
-        console.error('❌ Token has been revoked');
-        setError('This access link has been revoked. Please contact support.');
-        setIsLoading(false);
-        return;
-      }
-
-      if (new Date(tokenData.expires_at) < new Date()) {
-        console.error('❌ Token has expired');
-        setError('This access link has expired. Please request a new statement.');
-        setIsLoading(false);
-        return;
-      }
-
-      console.log('✅ Token validated successfully for customer:', tokenData.customer_id);
-      setCustomerId(tokenData.customer_id);
+      const customerRecord = customerData[0];
+      console.log('✅ Token validated successfully for customer:', customerRecord.id);
+      setCustomerId(customerRecord.id);
 
       // Step 2: Log the access (update access count and timestamp)
       const updateData = { 
         accessed_at: new Date().toISOString(),
-        access_count: (tokenData.access_count || 0) + 1
+        access_count: 1 // We'll increment this in the database function
       };
       await (supabase as any)
         .from('public_access_tokens')
         .update(updateData)
         .eq('token', token);
 
-      // Step 3: Set token in session context for RLS validation
-      // Note: We'll use a custom header approach since current_setting() requires server-side support
-      // For now, we'll rely on client-side filtering which is already secure through token validation
-      
-      // Fetch customer data from Supabase
-      console.log('📥 Fetching customer data...');
-      const { data: customerData, error: customerError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('id', tokenData.customer_id)
-        .single() as { data: any; error: any };
-      
-      if (customerError || !customerData) {
-        console.error('❌ Customer not found:', customerError);
-        setError('Customer not found. Please check the QR code and try again.');
-        setIsLoading(false);
-        return;
-      }
-
-      // Transform Supabase customer data to match Customer type
+      // Transform customer data to match Customer type
       const customer: Customer = {
-        id: customerData.id,
-        name: customerData.name,
-        email: customerData.email || undefined,
-        phone: customerData.phone || undefined,
-        address: customerData.address || undefined,
-        isActive: customerData.is_active ?? true,
-        createdAt: customerData.created_at,
-        lb_balance: customerData.lb_balance || 0,
-        usd_balance: customerData.usd_balance || 0
+        id: customerRecord.id,
+        name: customerRecord.name,
+        email: customerRecord.email || undefined,
+        phone: customerRecord.phone || undefined,
+        address: customerRecord.address || undefined,
+        isActive: customerRecord.is_active ?? true,
+        createdAt: customerRecord.created_at,
+        lb_balance: customerRecord.lb_balance || 0,
+        usd_balance: customerRecord.usd_balance || 0
       };
 
       setCustomer(customer);
 
-      // Fetch all bill line items for this customer
+      // Fetch all bill line items for this customer using secure function
       console.log('📥 Fetching bill line items...');
       const { data: salesData } = await supabase
-        .from('bill_line_items')
-        .select('*')
-        .eq('customer_id', tokenData.customer_id) as { data: any; error: any };
+        .rpc('get_customer_bill_line_items', { p_token: token });
       
-      // Fetch all transactions for this customer
+      // Fetch all transactions for this customer using secure function
       console.log('📥 Fetching transactions...');
       const { data: transactionsData } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('customer_id', tokenData.customer_id) as { data: any; error: any };
+        .rpc('get_customer_transactions', { p_token: token });
 
-      // Fetch all products for product details
+      // Fetch all products for product details (no token needed - public data)
       console.log('📥 Fetching products...');
       const { data: productsData } = await supabase
         .from('products')
         .select('*') as { data: any; error: any };
 
-      // Fetch inventory items
+      // Fetch inventory items (no token needed - public data)
       console.log('📥 Fetching inventory items...');
       const { data: inventoryData } = await supabase
         .from('inventory_items')
         .select('*') as { data: any; error: any };
 
-      // Fetch bills for this customer
+      // Fetch bills for this customer using secure function
       console.log('📥 Fetching bills...');
       const { data: billsData } = await supabase
-        .from('bills')
-        .select('*')
-        .eq('customer_id', tokenData.customer_id) as { data: any; error: any };
+        .rpc('get_customer_bills', { p_token: token });
 
       // Generate statement using AccountStatementService
       console.log('📊 Generating statement...');
