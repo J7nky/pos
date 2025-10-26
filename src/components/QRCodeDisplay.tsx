@@ -31,8 +31,8 @@ export default function QRCodeDisplay({
   }, [customerId, billId, billNumber, customerName, size]);
 
   const generateQRCode = async () => {
-    if (!customerId || !billId) {
-      setError('Missing customer or bill information');
+    if (!customerId) {
+      setError('Missing customer information');
       setIsLoading(false);
       return;
     }
@@ -42,7 +42,7 @@ export default function QRCodeDisplay({
       setError(null);
 
       const qrService = QRCodeService.getInstance();
-      const qrCodeUrl = await qrService.generateBillQRCode(
+      const result = await qrService.generateBillQRCode(
         customerId,
         billId,
         billNumber,
@@ -50,7 +50,7 @@ export default function QRCodeDisplay({
         { size }
       );
 
-      setQrCodeDataUrl(qrCodeUrl);
+      setQrCodeDataUrl(result.qrCodeDataUrl);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate QR code';
       setError(errorMessage);

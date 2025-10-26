@@ -65,7 +65,7 @@ export const router = createRouter([
       },
       // Public routes (no authentication required)
       {
-        path: "public/customer-statement/:customerId/:billId",
+        path: "public/statement/:token",
         element: <PublicCustomerStatement />,
         errorElement: <ErrorPage />,
       },

@@ -18,9 +18,9 @@ export function useQRCodeGeneration() {
 
   const generateQRCode = useCallback(async (
     customerId: string,
-    billId: string,
-    billNumber: string,
-    customerName: string,
+    billId?: string | null,
+    billNumber?: string,
+    customerName?: string,
     options?: {
       size?: number;
       margin?: number;
@@ -30,10 +30,10 @@ export function useQRCodeGeneration() {
       };
     }
   ) => {
-    if (!customerId || !billId) {
+    if (!customerId) {
       setState(prev => ({
         ...prev,
-        error: 'Missing customer or bill information',
+        error: 'Missing customer information',
         isLoading: false
       }));
       return;
@@ -48,8 +48,8 @@ export function useQRCodeGeneration() {
 
       const qrService = QRCodeService.getInstance();
       
-      // Generate QR code data URL
-      const qrCodeDataUrl = await qrService.generateBillQRCode(
+      // Generate QR code - returns both image and URL
+      const result = await qrService.generateBillQRCode(
         customerId,
         billId,
         billNumber,
@@ -57,17 +57,14 @@ export function useQRCodeGeneration() {
         options
       );
 
-      // Get the public URL
-      const qrCodeUrl = qrService.getCustomerStatementUrl(customerId, billId);
-
       setState({
-        qrCodeDataUrl,
-        qrCodeUrl,
+        qrCodeDataUrl: result.qrCodeDataUrl,
+        qrCodeUrl: result.publicUrl,
         isLoading: false,
         error: null
       });
 
-      return { qrCodeDataUrl, qrCodeUrl };
+      return { qrCodeDataUrl: result.qrCodeDataUrl, qrCodeUrl: result.publicUrl };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate QR code';
       setState(prev => ({
@@ -81,9 +78,9 @@ export function useQRCodeGeneration() {
 
   const generateQRCodeForPrint = useCallback(async (
     customerId: string,
-    billId: string,
-    billNumber: string,
-    customerName: string
+    billId?: string | null,
+    billNumber?: string,
+    customerName?: string
   ) => {
     return generateQRCode(customerId, billId, billNumber, customerName, {
       size: 300,
@@ -97,9 +94,9 @@ export function useQRCodeGeneration() {
 
   const generateQRCodeForReceipt = useCallback(async (
     customerId: string,
-    billId: string,
-    billNumber: string,
-    customerName: string
+    billId?: string | null,
+    billNumber?: string,
+    customerName?: string
   ) => {
     return generateQRCode(customerId, billId, billNumber, customerName, {
       size: 120,

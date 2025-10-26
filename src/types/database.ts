@@ -371,6 +371,46 @@ export interface Database {
           last_modified_at?: string | null;
         };
       };
+      public_access_tokens: {
+        Row: {
+          id: string;
+          customer_id: string;
+          bill_id: string | null;
+          token: string;
+          expires_at: string;
+          created_at: string;
+          accessed_at: string | null;
+          access_count: number;
+          revoked: boolean;
+          last_ip_address: string | null;
+          last_user_agent: string | null;
+        };
+        Insert: {
+          id?: string;
+          customer_id: string;
+          bill_id?: string | null;
+          token?: string;
+          expires_at?: string;
+          created_at?: string;
+          accessed_at?: string | null;
+          access_count?: number;
+          revoked?: boolean;
+          last_ip_address?: string | null;
+          last_user_agent?: string | null;
+        };
+        Update: {
+          id?: string;
+          customer_id?: string;
+          bill_id?: string | null;
+          token?: string;
+          expires_at?: string;
+          accessed_at?: string | null;
+          access_count?: number;
+          revoked?: boolean;
+          last_ip_address?: string | null;
+          last_user_agent?: string | null;
+        };
+      };
       bill_line_items: {
         Row: {
           id: string;

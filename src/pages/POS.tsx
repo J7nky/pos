@@ -1008,9 +1008,11 @@ ${dashSeparator}`;
         try {
           const customer = customers.find(c => c.id === activeTab.selectedCustomer);
           if (customer) {
+            // Don't pass billId since bill is only local at this point (not synced to Supabase yet)
+            // Token will give customer access to their full statement
             qrCodeData = await generateQRCodeForReceipt(
               customer.id,
-              billId,
+              null, // Bill not in Supabase yet - use customer-level token
               billData.bill_number,
               customer.name
             );
