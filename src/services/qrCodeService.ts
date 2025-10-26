@@ -114,16 +114,20 @@ export class QRCodeService {
     // Generate secure access token (billId is optional)
     const token = await this.generateAccessToken(customerId, billId);
     
-    // Create the public URL with token
-    const publicUrl = `${this.baseUrl}/public/statement/${token}`;
+    // URL-encode the token to handle special characters (/, +, =, etc.)
+    const encodedToken = encodeURIComponent(token);
+    
+    // Create the public URL with encoded token
+    const publicUrl = `${this.baseUrl}/public/statement/${encodedToken}`;
     
     // Debug logging
     console.log('🔍 QR Code URL Generation:');
     console.log('   - Public URL:', this.baseUrl);
     console.log('   - Customer ID:', customerId);
     console.log('   - Bill ID:', billId || 'Not provided');
-    console.log('   - Token:', `${token.substring(0, 10)}...`);
-    console.log('   - Generated QR URL:', `${this.baseUrl}/public/statement/${token.substring(0, 10)}...`);
+    console.log('   - Token (raw):', `${token.substring(0, 10)}...`);
+    console.log('   - Token (encoded):', `${encodedToken.substring(0, 10)}...`);
+    console.log('   - Generated QR URL:', `${this.baseUrl}/public/statement/${encodedToken.substring(0, 10)}...`);
     
     // Generate QR code as data URL
     const qrCodeDataUrl = await QRCode.toDataURL(publicUrl, {
@@ -167,8 +171,11 @@ export class QRCodeService {
     // Generate secure access token (billId is optional)
     const token = await this.generateAccessToken(customerId, billId);
     
-    // Create the public URL with token
-    const publicUrl = `${this.baseUrl}/public/statement/${token}`;
+    // URL-encode the token to handle special characters (/, +, =, etc.)
+    const encodedToken = encodeURIComponent(token);
+    
+    // Create the public URL with encoded token
+    const publicUrl = `${this.baseUrl}/public/statement/${encodedToken}`;
     
     const svgString = await QRCode.toString(publicUrl, {
       type: 'svg',

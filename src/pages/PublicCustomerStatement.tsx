@@ -26,11 +26,15 @@ interface PublicCustomerStatementProps {
 }
 
 export default function PublicCustomerStatement() {
-  const { token } = useParams<{ token: string }>();
+  const { token: encodedToken } = useParams<{ token: string }>();
+  
+  // URL-decode the token (it was encoded to handle special characters)
+  const token = encodedToken ? decodeURIComponent(encodedToken) : undefined;
   
   // Debug logging
   console.log('🔍 PublicCustomerStatement loaded:');
-  console.log('   - Token:', token ? `${token.substring(0, 10)}...` : 'none');
+  console.log('   - Token (encoded):', encodedToken ? `${encodedToken.substring(0, 10)}...` : 'none');
+  console.log('   - Token (decoded):', token ? `${token.substring(0, 10)}...` : 'none');
   console.log('   - Current URL:', window.location.href);
   
   const [statement, setStatement] = useState<AccountStatement | null>(null);

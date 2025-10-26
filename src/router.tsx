@@ -10,7 +10,6 @@ import Customers from './pages/Customers';
 import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
-import LegacyQRRedirect from './pages/LegacyQRRedirect';
 import ErrorPage from './components/ErrorPage';
 
 // Use hash router for Electron (file:// protocol) and browser router for web
@@ -68,12 +67,6 @@ export const router = createRouter([
       {
         path: "public/statement/:token",
         element: <PublicCustomerStatement />,
-        errorElement: <ErrorPage />,
-      },
-      // Legacy route for backward compatibility with old QR codes
-      {
-        path: "public/customer-statement/:customerId/:billId",
-        element: <LegacyQRRedirect />,
         errorElement: <ErrorPage />,
       },
     ],
