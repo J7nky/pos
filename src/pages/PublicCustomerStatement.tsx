@@ -30,13 +30,7 @@ export default function PublicCustomerStatement() {
   
   // URL-decode the token (it was encoded to handle special characters)
   const token = encodedToken ? decodeURIComponent(encodedToken) : undefined;
-  
-  // Debug logging
-  console.log('🔍 PublicCustomerStatement loaded:');
-  console.log('   - Token (encoded):', encodedToken ? `${encodedToken.substring(0, 10)}...` : 'none');
-  console.log('   - Token (decoded):', token ? `${token.substring(0, 10)}...` : 'none');
-  console.log('   - Current URL:', window.location.href);
-  
+
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [customerId, setCustomerId] = useState<string | null>(null);
@@ -62,12 +56,11 @@ export default function PublicCustomerStatement() {
 
     try {
       // Step 1: Validate the token and get customer_id
-      console.log('🔐 Validating access token...');
       const { data: tokenData, error: tokenError } = await supabase
         .from('public_access_tokens')
         .select('customer_id, bill_id, expires_at, revoked, access_count')
         .eq('token', token)
-        .single();
+        .single() as { data: any; error: any };
       
       if (tokenError || !tokenData) {
         console.error('❌ Token validation failed:', tokenError);
@@ -94,12 +87,13 @@ export default function PublicCustomerStatement() {
       setCustomerId(tokenData.customer_id);
 
       // Step 2: Log the access (update access count and timestamp)
-      await supabase
+      const updateData = { 
+        accessed_at: new Date().toISOString(),
+        access_count: (tokenData.access_count || 0) + 1
+      };
+      await (supabase as any)
         .from('public_access_tokens')
-        .update({ 
-          accessed_at: new Date().toISOString(),
-          access_count: (tokenData.access_count || 0) + 1
-        })
+        .update(updateData)
         .eq('token', token);
 
       // Step 3: Set token in session context for RLS validation
@@ -112,7 +106,7 @@ export default function PublicCustomerStatement() {
         .from('customers')
         .select('*')
         .eq('id', tokenData.customer_id)
-        .single();
+        .single() as { data: any; error: any };
       
       if (customerError || !customerData) {
         console.error('❌ Customer not found:', customerError);
@@ -141,33 +135,33 @@ export default function PublicCustomerStatement() {
       const { data: salesData } = await supabase
         .from('bill_line_items')
         .select('*')
-        .eq('customer_id', tokenData.customer_id);
+        .eq('customer_id', tokenData.customer_id) as { data: any; error: any };
       
       // Fetch all transactions for this customer
       console.log('📥 Fetching transactions...');
       const { data: transactionsData } = await supabase
         .from('transactions')
         .select('*')
-        .eq('customer_id', tokenData.customer_id);
+        .eq('customer_id', tokenData.customer_id) as { data: any; error: any };
 
       // Fetch all products for product details
       console.log('📥 Fetching products...');
       const { data: productsData } = await supabase
         .from('products')
-        .select('*');
+        .select('*') as { data: any; error: any };
 
       // Fetch inventory items
       console.log('📥 Fetching inventory items...');
       const { data: inventoryData } = await supabase
         .from('inventory_items')
-        .select('*');
+        .select('*') as { data: any; error: any };
 
       // Fetch bills for this customer
       console.log('📥 Fetching bills...');
       const { data: billsData } = await supabase
         .from('bills')
         .select('*')
-        .eq('customer_id', tokenData.customer_id);
+        .eq('customer_id', tokenData.customer_id) as { data: any; error: any };
 
       // Generate statement using AccountStatementService
       console.log('📊 Generating statement...');

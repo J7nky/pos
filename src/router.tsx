@@ -10,6 +10,7 @@ import Customers from './pages/Customers';
 import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
+import SecurityTest from './pages/SecurityTest';
 import ErrorPage from './components/ErrorPage';
 
 // Use hash router for Electron (file:// protocol) and browser router for web
@@ -67,6 +68,11 @@ export const router = createRouter([
       {
         path: "public/statement/:token",
         element: <PublicCustomerStatement />,
+        errorElement: <ErrorPage />,
+      },
+      {
+        path: "security-test",
+        element: <SecurityTest />,
         errorElement: <ErrorPage />,
       },
     ],
