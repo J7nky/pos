@@ -311,6 +311,10 @@ export class DataValidationService {
       delete cleanRecord.updated_at;
     }
 
+    if (tableName === 'transactions') {
+      delete cleanRecord.status; // Remove status field that doesn't exist in Supabase schema
+    }
+
     // Remove updated_at for tables without it
     const tablesWithoutUpdatedAt = ['inventory_items', 'transactions', 'inventory_bills', 'bill_line_items', 'bill_audit_logs'];
     if (tablesWithoutUpdatedAt.includes(tableName)) {

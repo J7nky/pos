@@ -243,9 +243,10 @@ export class RealTimeSyncService {
 
       console.log(`💰 Real-time transaction received: ${transaction.category} - $${transaction.amount}`);
       
-      // Add transaction to local database
+      // Add transaction to local database (filter out fields not in local schema)
+      const { status, ...transactionData } = transaction;
       await db.transactions.add({
-        ...transaction,
+        ...transactionData,
         _synced: true,
         _lastSyncedAt: new Date().toISOString()
       });

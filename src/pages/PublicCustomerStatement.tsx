@@ -55,30 +55,13 @@ export default function PublicCustomerStatement() {
     setError(null);
 
     try {
-      // Step 1: Test if functions exist
-      console.log('🔍 DEBUG: Testing if database functions exist...');
-      try {
-        const { data: testData, error: testError } = await supabase
-          .rpc('get_customer_by_token', { p_token: 'test-token' });
-        console.log('🔍 DEBUG: Function test result:', { testData, testError });
-      } catch (testErr) {
-        console.error('🔍 DEBUG: Function test failed:', testErr);
-      }
-
-      // Step 2: Validate token and get customer data using secure database function
-      console.log('🔍 DEBUG: Starting token validation with token:', token);
-      console.log('🔍 DEBUG: Token length:', token?.length);
-      console.log('🔍 DEBUG: Token type:', typeof token);
-      
+      // Step 1: Validate token and get customer data using secure database function
+      console.log('📥 Fetching customer data...');
       const { data: customerData, error: customerError } = await supabase
         .rpc('get_customer_by_token', { p_token: token });
       
-      console.log('🔍 DEBUG: Customer data response:', { customerData, customerError });
-      console.log('🔍 DEBUG: Customer data length:', customerData?.length);
-      
       if (customerError || !customerData || customerData.length === 0) {
         console.error('❌ Token validation failed:', customerError);
-        console.error('❌ Customer data:', customerData);
         setError('Invalid access link. Please check the QR code and try again.');
         setIsLoading(false);
         return;
@@ -114,33 +97,21 @@ export default function PublicCustomerStatement() {
       setCustomer(customer);
 
       // Fetch all bill line items for this customer using secure function
-      console.log('🔍 DEBUG: Fetching bill line items with token:', token);
+      console.log('📥 Fetching bill line items...');
       const { data: salesData, error: salesError } = await supabase
         .rpc('get_customer_bill_line_items', { p_token: token });
       
-      console.log('🔍 DEBUG: Bill line items response:', { salesData, salesError });
-      console.log('🔍 DEBUG: Sales error details:', salesError);
-      
       if (salesError) {
         console.warn('⚠️ Bill line items function failed, using empty array:', salesError);
-        console.warn('⚠️ Sales error code:', salesError.code);
-        console.warn('⚠️ Sales error message:', salesError.message);
-        console.warn('⚠️ Sales error details:', salesError.details);
       }
       
       // Fetch all transactions for this customer using secure function
-      console.log('🔍 DEBUG: Fetching transactions with token:', token);
+      console.log('📥 Fetching transactions...');
       const { data: transactionsData, error: transactionsError } = await supabase
         .rpc('get_customer_transactions', { p_token: token });
 
-      console.log('🔍 DEBUG: Transactions response:', { transactionsData, transactionsError });
-      console.log('🔍 DEBUG: Transactions error details:', transactionsError);
-
       if (transactionsError) {
         console.warn('⚠️ Transactions function failed, using empty array:', transactionsError);
-        console.warn('⚠️ Transactions error code:', transactionsError.code);
-        console.warn('⚠️ Transactions error message:', transactionsError.message);
-        console.warn('⚠️ Transactions error details:', transactionsError.details);
       }
 
       // Fetch all products for product details (no token needed - public data)
@@ -156,18 +127,12 @@ export default function PublicCustomerStatement() {
         .select('*') as { data: any; error: any };
 
       // Fetch bills for this customer using secure function
-      console.log('🔍 DEBUG: Fetching bills with token:', token);
+      console.log('📥 Fetching bills...');
       const { data: billsData, error: billsError } = await supabase
         .rpc('get_customer_bills', { p_token: token });
 
-      console.log('🔍 DEBUG: Bills response:', { billsData, billsError });
-      console.log('🔍 DEBUG: Bills error details:', billsError);
-
       if (billsError) {
         console.warn('⚠️ Bills function failed, using empty array:', billsError);
-        console.warn('⚠️ Bills error code:', billsError.code);
-        console.warn('⚠️ Bills error message:', billsError.message);
-        console.warn('⚠️ Bills error details:', billsError.details);
       }
 
       // Generate statement using AccountStatementService

@@ -55,8 +55,8 @@ RETURNS TABLE (
   product_id UUID,
   quantity NUMERIC,
   weight NUMERIC,
-  price NUMERIC,
-  total_amount NUMERIC,
+  unit_price NUMERIC,
+  line_total NUMERIC,
   created_at TIMESTAMPTZ
 )
 LANGUAGE plpgsql
@@ -79,8 +79,8 @@ BEGIN
     bli.product_id,
     bli.quantity,
     bli.weight,
-    bli.price,
-    bli.total_amount,
+    bli.unit_price,
+    bli.line_total,
     bli.created_at
   FROM bill_line_items bli
   INNER JOIN public_access_tokens t ON t.customer_id = bli.customer_id
@@ -100,8 +100,6 @@ RETURNS TABLE (
   type TEXT,
   description TEXT,
   reference TEXT,
-  payment_method TEXT,
-  date TIMESTAMPTZ,
   created_at TIMESTAMPTZ
 )
 LANGUAGE plpgsql
@@ -125,8 +123,6 @@ BEGIN
     tr.type,
     tr.description,
     tr.reference,
-    tr.payment_method,
-    tr.date,
     tr.created_at
   FROM transactions tr
   INNER JOIN public_access_tokens t ON t.customer_id = tr.customer_id
@@ -143,7 +139,6 @@ RETURNS TABLE (
   customer_id UUID,
   bill_number TEXT,
   total_amount NUMERIC,
-  currency TEXT,
   status TEXT,
   created_at TIMESTAMPTZ
 )
@@ -165,7 +160,6 @@ BEGIN
     b.customer_id,
     b.bill_number,
     b.total_amount,
-    b.currency,
     b.status,
     b.created_at
   FROM bills b
