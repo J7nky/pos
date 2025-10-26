@@ -22,6 +22,7 @@ import CashDrawerMonitor from '../components/CashDrawerMonitor';
 import FastActionCard from '../components/cards/FastActionCard';
 import StatCard from '../components/cards/StatCard';
 import LowStockItem from '../components/LowStockItem';
+import CashDrawerOpeningModal from '../components/common/CashDrawerOpeningModal';
 
 interface CashDrawerStatus {
   currentBalance: number;
@@ -37,6 +38,7 @@ export default function Home() {
   const [isLoadingCashDrawer, setIsLoadingCashDrawer] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [lastCashDrawerValue, setLastCashDrawerValue] = useState<number | null>(null);
+  const [showOpeningModal, setShowOpeningModal] = useState(false);
 
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
@@ -221,24 +223,46 @@ export default function Home() {
     ? stockLevels.filter(item => item.currentStock < lowStockThreshold)
     : [];
 
-  const handleOpenDrawer = async () => {
-    const openingAmount = prompt('Enter opening cash amount:');
-    if (openingAmount && userProfile) {
-      try {
-        await openCashDrawer(parseFloat(openingAmount), userProfile.id);        
-        // Wait a moment for the database to be updated
-        await new Promise(resolve => setTimeout(resolve, 100));
-        // Immediately refresh local status with loading indicator
-        await loadCashDrawerStatus(true);        
-        // Notify any listeners
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
-            detail: { storeId: raw.storeId, event: 'opened' }
-          }));
+  const handleOpenDrawer = () => {
+    setShowOpeningModal(true);
+  };
+
+  const [recommendedAmount, setRecommendedAmount] = useState(0);
+
+  // Load recommended amount when modal opens
+  useEffect(() => {
+    if (showOpeningModal) {
+      const fetchRecommendedAmount = async () => {
+        try {
+          const result = await raw.getRecommendedOpeningAmount();
+          setRecommendedAmount(result.amount);
+        } catch (error) {
+          console.error('Error fetching recommended amount:', error);
+          setRecommendedAmount(0);
         }
-      } catch (e: any) {
-        console.error('Failed to open cash drawer:', e);
-      }
+      };
+      fetchRecommendedAmount();
+    }
+  }, [showOpeningModal, raw]);
+
+  const handleConfirmOpening = async (openingAmount: number) => {
+    if (!userProfile) {
+      throw new Error('User not authenticated');
+    }
+    
+    await openCashDrawer(openingAmount, userProfile.id);
+    
+    // Wait a moment for the database to be updated
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Immediately refresh local status with loading indicator
+    await loadCashDrawerStatus(true);
+    
+    // Notify any listeners
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
+        detail: { storeId: raw.storeId, event: 'opened' }
+      }));
     }
   };
 
@@ -452,6 +476,16 @@ export default function Home() {
         )}
   
       </div>
+
+      {/* Cash Drawer Opening Modal */}
+      <CashDrawerOpeningModal
+        isOpen={showOpeningModal}
+        onClose={() => setShowOpeningModal(false)}
+        onConfirm={handleConfirmOpening}
+        suggestedAmount={recommendedAmount}
+        title={t('pos.openCashDrawer')}
+        description={t('pos.enterOpeningCashAmount')}
+      />
 
     </div>
   );

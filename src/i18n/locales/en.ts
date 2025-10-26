@@ -187,7 +187,14 @@ const en = {
     weight: 'Weight',
     price: 'Price',
     searchCustomers: 'Search customers...', 
-    searchProducts: 'Search products or suppliers...' 
+    searchProducts: 'Search products or suppliers...',
+    openCashDrawer: 'Open Cash Drawer',
+    openingAmount: 'Opening Amount',
+    useSuggestedAmount: 'Use suggested amount:',
+    opening: 'Opening...',
+    openDrawer: 'Open Drawer',
+    enterOpeningCashAmount: 'Enter the opening cash amount in the cash drawer.',
+    cashDrawerClosed: 'The cash drawer is closed. Please enter the opening cash amount.' 
   },
   reports: { header: 'Reports & Analytics', exportReport: 'Export Report', generateReport: 'Generate Report', reportType: 'Report Type', startDate: 'Start Date', endDate: 'End Date', salesReport: 'Sales Report', inventoryReport: 'Inventory Report', customerReport: 'Customer Report', profitAnalysis: 'Profit Analysis', totalRevenue: 'Total Revenue', totalSales: 'Total Sales', averageSale: 'Average Sale', customerDebt: 'Customer Debt', topSellingProducts: 'Top Selling Products', currentStockLevels: 'Current Stock Levels', status: { outOfStock: 'Out of Stock', lowStock: 'Low Stock', inStock: 'In Stock', never: 'Never' } },
   syncStatus: { header: 'Sync Status', connection: 'Connection', lastSync: 'Last Sync', pendingChanges: 'Pending Changes', items: 'items', manualSync: 'Manual Sync', fullResync: 'Full Resync', validateAndClean: 'Validate & Clean Data', workingOffline: 'Working Offline', offlineNote: 'Changes will auto-sync when connection is restored.', autoSyncEnabled: 'Auto-sync enabled • Changes sync automatically when online' },

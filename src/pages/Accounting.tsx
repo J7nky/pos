@@ -88,11 +88,11 @@ export default function Accounting() {
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('accounting_recent_suppliers', []);
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'expenses' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer'>('dashboard');
+  const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'expenses' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer'>('accounting_active_tab', 'dashboard');
   const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
   const [showForm, setShowForm] = useState<string | null>(null);
-  const [dashboardPeriod, setDashboardPeriod] = useState<'today' | 'week' | 'month' | 'quarter' | 'year'>('today');
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [dashboardPeriod, setDashboardPeriod] = useLocalStorage<'today' | 'week' | 'month' | 'quarter' | 'year'>('accounting_dashboard_period', 'today');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useLocalStorage<boolean>('accounting_show_advanced_filters', false);
   const [flashingItemId, setFlashingItemId] = useState<string | null>(null);
   const [autoExpandGroupId, setAutoExpandGroupId] = useState<string | null>(null);
 
@@ -874,22 +874,34 @@ export default function Accounting() {
     if (inventoryLogsDateFilter !== 'all') {
       const now = new Date();
       let startDate: Date;
+      let endDate: Date;
 
       switch (inventoryLogsDateFilter) {
         case 'today':
           startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          endDate = new Date(startDate);
+          endDate.setHours(23, 59, 59, 999);
           break;
         case 'week':
           startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          startDate.setHours(0, 0, 0, 0);
+          endDate = new Date(now);
+          endDate.setHours(23, 59, 59, 999);
           break;
         case 'month':
           startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          endDate = new Date(now);
+          endDate.setHours(23, 59, 59, 999);
           break;
         default:
           startDate = new Date(0);
+          endDate = new Date();
       }
 
-      filtered = filtered.filter(log => new Date(log.date) >= startDate);
+      filtered = filtered.filter(log => {
+        const logDate = new Date(log.date);
+        return logDate >= startDate && logDate <= endDate;
+      });
     }
 
     // Apply sorting

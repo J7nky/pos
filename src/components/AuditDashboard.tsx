@@ -72,7 +72,9 @@ export default function AuditDashboard({
       case 'today':
         return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
       case 'week':
-        return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        weekStart.setHours(0, 0, 0, 0);
+        return weekStart.toISOString();
       case 'month':
         return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
       case 'quarter':
@@ -81,7 +83,9 @@ export default function AuditDashboard({
       case 'year':
         return new Date(now.getFullYear(), 0, 1).toISOString();
       default:
-        return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const defaultStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        defaultStart.setHours(0, 0, 0, 0);
+        return defaultStart.toISOString();
     }
   };
 

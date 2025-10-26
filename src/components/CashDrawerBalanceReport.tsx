@@ -13,7 +13,6 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
   getBalanceReport,
   getSessionDetails
 }) => {
-  const { t } = useI18n();
   const [balanceReport, setBalanceReport] = useState<any>({ sessions: [], summary: {} });
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -38,7 +37,9 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
   const loadBalanceReport = async () => {
     setLoading(true);
     try {
+      console.log('📊 Loading balance report with dates:', { startDate, endDate });
       const report = await getBalanceReport(startDate, endDate);
+      console.log('📊 Balance report result:', report);
       setBalanceReport(report);
     } catch (error) {
       console.error('Error loading balance report:', error);
@@ -96,12 +97,13 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
     setSessionDetails(null);
     
     try {
-      const details = await getSessionDetails(session.sessionId);
+      const details = await getSessionDetails(session.id || session.sessionId);
       setSessionDetails(details);
     } catch (error) {
       console.error('Error loading session details:', error);
     }
   };
+  const { t } = useI18n();
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6" dir="auto">
@@ -181,20 +183,20 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.employee')}</th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.date')}</th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.opening')}</th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.expected')}</th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.actual')}</th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.variance')}</th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.status')}</th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.notes')}</th>
+                  <th key="employee" className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.employee')}</th>
+                  <th key="date" className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.date')}</th>
+                  <th key="opening" className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.opening')}</th>
+                  <th key="expected" className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.expected')}</th>
+                  <th key="actual" className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.actual')}</th>
+                  <th key="variance" className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.variance')}</th>
+                  <th key="status" className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.status')}</th>
+                  <th key="notes" className="px-6 py-3 text-xs font-medium text-gray-500 uppercase rtl:text-right ltr:text-left">{t('balanceReport.notes')}</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {balanceReport.sessions && balanceReport.sessions.map((balance: any) => (
+                {balanceReport.sessions && balanceReport.sessions.map((balance: any, index: number) => (
                   <tr 
-                    key={balance.sessionId} 
+                    key={balance.id || balance.sessionId || `session-${index}`} 
                     className="hover:bg-gray-50 cursor-pointer"
                     onClick={() => loadSessionDetails(balance)}
                   >
@@ -364,10 +366,10 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
                             <table className="min-w-full divide-y divide-gray-200">
                               <thead className="bg-gray-50">
                                 <tr>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.product')}</th>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.quantity')}</th>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.unitPrice')}</th>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.total')}</th>
+                                  <th key="product" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.product')}</th>
+                                  <th key="quantity" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.quantity')}</th>
+                                  <th key="unitPrice" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.unitPrice')}</th>
+                                  <th key="total" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.total')}</th>
                                 </tr>
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-200">
@@ -393,9 +395,9 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
                             <table className="min-w-full divide-y divide-gray-200">
                               <thead className="bg-gray-50">
                                 <tr>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.description')}</th>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.amount')}</th>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.reference')}</th>
+                                  <th key="description" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.description')}</th>
+                                  <th key="amount" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.amount')}</th>
+                                  <th key="reference" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.reference')}</th>
                                 </tr>
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-200">
@@ -420,9 +422,9 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
                             <table className="min-w-full divide-y divide-gray-200">
                               <thead className="bg-gray-50">
                                 <tr>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.description')}</th>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.amount')}</th>
-                                  <th className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.category')}</th>
+                                  <th key="description-exp" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.description')}</th>
+                                  <th key="amount-exp" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.amount')}</th>
+                                  <th key="category" className="px-3 py-2 text-xs font-medium text-gray-500 rtl:text-right ltr:text-left">{t('balanceReport.category')}</th>
                                 </tr>
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-200">

@@ -97,12 +97,13 @@ export default function CashDrawerMonitor() {
     if (!Array.isArray(transactionHistory)) return [];
     const now = new Date();
     if (range === 'today') {
+      console.log('💰 Today transactions:', transactionHistory);
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const end = new Date(start);
-      end.setDate(start.getDate() + 1);
+      end.setHours(23, 59, 59, 999); // Include the entire day until 23:59:59.999
       return transactionHistory.filter(t => {
         const d = new Date(t.created_at);
-        return d >= start && d < end;
+        return d >= start && d <= end;
       });
     } else {
       // last 7 days including today

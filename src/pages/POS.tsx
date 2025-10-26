@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePOSKeyboard } from '../hooks/usePOSKeyboard';
 import AccessibleModal from '../components/common/AccessibleModal';
 import AccessibleButton from '../components/common/AccessibleButton';
@@ -9,6 +9,7 @@ import SearchableSelect from '../components/common/SearchableSelect';
 import MoneyInput from '../components/common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import EnhancedProductCard from '../components/EnhancedProductCard';
+import CashDrawerOpeningModal from '../components/common/CashDrawerOpeningModal';
 
 import { 
   Search, 
@@ -353,6 +354,29 @@ export default function POS() {
   const [customerFormError, setCustomerFormError] = useState<string | null>(null);
   // Add printing state
   const [isPrinting, setIsPrinting] = useState(false);
+  // Add cash drawer opening modal state
+  const [showCashDrawerModal, setShowCashDrawerModal] = useState(false);
+  const [pendingCashDrawerOpening, setPendingCashDrawerOpening] = useState<(() => void) | null>(null);
+  const [recommendedDrawerAmount, setRecommendedDrawerAmount] = useState(0);
+
+  // Load recommended amount when modal opens
+  useEffect(() => {
+    if (showCashDrawerModal) {
+      const fetchRecommendedAmount = async () => {
+        try {
+          const result = await raw.getRecommendedOpeningAmount();
+          setRecommendedDrawerAmount(result.amount);
+        } catch (error) {
+          console.error('Error fetching recommended amount:', error);
+          // Fallback to sale amount if available
+          const fallbackAmount = activeTab.amountReceived ? parseFloat(activeTab.amountReceived) : total;
+          setRecommendedDrawerAmount(fallbackAmount);
+        }
+      };
+      fetchRecommendedAmount();
+    }
+  }, [showCashDrawerModal, raw]);
+
   const showToast = (type: 'success' | 'error', message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
@@ -845,56 +869,13 @@ ${dashSeparator}`;
 
 
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
-  const handleCheckout = async () => {handleCheckout
+  const handleCheckout = async () => {
     if (activeTab.cart.length === 0) return;
     // Disallow completing sale if walk-in customer and any item has zero price
     if (!activeTab.selectedCustomer && activeTab.cart.some(i => (i.unitPrice ?? 0) === 0)) {
       setCustomerError('Please set a price or select a customer. Walk-in sales cannot include zero-priced items.');
       return;
     }
-    // Check for non-priced items
-    // if (hasNonPriced) {
-    //   if (!activeTab.selectedCustomer) {
-    //     setCustomerError('Customer is required for non-priced items.');
-    //     return;
-    //   }
-    //   setCustomerError(null);
-    //   setIsProcessing(true);
-    //   try {
-    //     // Store each non-priced item for later pricing
-    //     for (const item of activeTab.cart.filter(i => !i.unitPrice || i.unitPrice === 0)) {
-    //       await addNonPricedItem({
-    //         id: uuidv4(),
-    //         customerId: activeTab.selectedCustomer,
-    //         productId: item.productId,
-    //         productName: item.productName,
-    //         supplierId: item.supplierId,
-    //         supplierName: item.supplierName,
-    //         quantity: item.quantity,
-    //         weight: item.weight,
-    //         notes: item.notes,
-    //         inventoryItemId: item.inventoryItemId, // Add the specific inventory item ID
-    //         createdAt: new Date().toISOString(),
-    //         status: 'non-priced',
-    //       });
-    //     }
-    //     // Remove non-priced items from cart and proceed with regular sale if any
-    //     const pricedCart = activeTab.cart.filter(i => i.unitPrice && i.unitPrice > 0);
-    //     if (pricedCart.length > 0) {
-    //       updateActiveTab({ cart: pricedCart });
-    //       showToast('success', 'Non-priced items stored. Please complete sale for priced items.');
-    //     } else {
-    //       // All items were non-priced, clear cart
-    //       updateActiveTab({ cart: [], selectedCustomer: '', amountReceived: '', notes: '', paymentMethod: 'cash' });
-    //       showToast('success', 'Non-priced items stored for later pricing.');
-    //     }
-    //   } catch (error) {
-    //     showToast('error', 'Failed to store non-priced items!');
-    //   }
-    //   setIsProcessing(false);
-    //   return;
-    // }
-
 
     // Validation: if credit, require customer; if not credit and amountReceived < total, require customer
     console.log(activeTab.paymentMethod, activeTab.amountReceived, total);
@@ -906,32 +887,69 @@ ${dashSeparator}`;
       return;
     }
     setCustomerError(null);
-    setIsProcessing(true);
+    
     try {
-      // Auto open cash drawer if not open
+      // Check if cash drawer is open
       const currentCashDrawerStatus = await raw.getCurrentCashDrawerStatus();
-      console.log(currentCashDrawerStatus,'currentCashDrawerStatus')
       console.log('Current cash drawer status:', currentCashDrawerStatus);
 
       if (!currentCashDrawerStatus || currentCashDrawerStatus.status !== 'active') {
-        console.log('Auto opening cash drawer - no active session found');
-        let openingAmount = 0;
-        if (activeTab.paymentMethod === 'cash') {
-          openingAmount = parseFloat(activeTab.amountReceived) || total;
-        }
-        if (userProfile?.id) {
-          try {
-            await raw.openCashDrawer(openingAmount, userProfile.id);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : 'Failed to open cash drawer session';
-            showToast('error', msg);
-            setIsProcessing(false);
-            return;
-          }
-        }
+        // Cash drawer is closed - show modal to enter opening amount
+        console.log('Cash drawer is closed - showing opening modal');
+        setShowCashDrawerModal(true);
+        setIsProcessing(false);
+        
+        // Store the checkout continuation function
+        setPendingCashDrawerOpening(() => () => {
+          processSale(); // This will be called after modal confirmation
+        });
+        
+        return; // Wait for modal to be confirmed
       } else {
         console.log('Active cash drawer session found:', currentCashDrawerStatus.sessionId);
       }
+      
+      // If drawer is open, proceed with sale
+      await processSale();
+      
+    } catch (error) {
+      console.error('Error checking cash drawer:', error);
+      showToast('error', 'Failed to check cash drawer status');
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCashDrawerModalConfirm = async (openingAmount: number) => {
+    if (!userProfile?.id) {
+      throw new Error('User not authenticated');
+    }
+    
+    setIsProcessing(true);
+    
+    try {
+      // Open cash drawer with the entered amount
+      await raw.openCashDrawer(openingAmount, userProfile.id);
+      
+      // Close modal
+      setShowCashDrawerModal(false);
+      
+      // Now proceed with the sale
+      if (pendingCashDrawerOpening) {
+        pendingCashDrawerOpening();
+        setPendingCashDrawerOpening(null);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to open cash drawer session';
+      showToast('error', msg);
+      setIsProcessing(false);
+      throw err;
+    }
+  };
+
+  const processSale = async () => {
+    setIsProcessing(true);
+    
+    try {
 
       // Prepare bill data
       const amountReceived = parseFloat(activeTab.amountReceived) || 0;
@@ -1281,6 +1299,20 @@ ${dashSeparator}`;
           </div>
         </form>
       </AccessibleModal>
+
+      {/* Cash Drawer Opening Modal */}
+      <CashDrawerOpeningModal
+        isOpen={showCashDrawerModal}
+        onClose={() => {
+          setShowCashDrawerModal(false);
+          setPendingCashDrawerOpening(null);
+          setIsProcessing(false);
+        }}
+        onConfirm={handleCashDrawerModalConfirm}
+        suggestedAmount={recommendedDrawerAmount}
+        title="Open Cash Drawer"
+        description="The cash drawer is closed. Please enter the opening cash amount."
+      />
 
       {/* Add toast display at top right */}
       {toast && (
@@ -1648,20 +1680,27 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
             const product = products.find((p: any) => p.id === item.productId);
+            
+            // Skip rendering if product not found (data might be syncing)
+            if (!product) {
+              console.warn('Product not found for cart item:', item.productId);
+              return null;
+            }
+            
             return (
               <div key={item.id} className="p-4 hover:bg-gray-50 transition-colors duration-150">
                 {/* Product Header */}
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="flex items-center space-x-2 mb-1">
-                      <h4 className="font-semibold text-gray-900 text-base">{product.name}</h4>
+                      <h4 className="font-semibold text-gray-900 text-base">{product?.name || 'Unknown Product'}</h4>
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full font-medium">
                         #{index + 1}
                       </span>
                     </div>
                     <p className="text-sm text-gray-600 flex items-center">
                       <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
-                      {product.supplierName}
+                      {product?.supplierName || 'Unknown Supplier'}
                     </p>
 
                   </div>
@@ -1670,7 +1709,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     variant="ghost"
                     size="sm"
                     className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors duration-150 min-h-[44px]"
-                    ariaLabel={`Remove ${product.name} from cart`}
+                    ariaLabel={`Remove ${product?.name || 'item'} from cart`}
                     tabIndex={-1}
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1702,7 +1741,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                         }}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
                         tabIndex={200 + index * 4 + 1}
-                        aria-label={`Quantity for ${product.name}`}
+                        aria-label={`Quantity for ${product?.name || 'product'}`}
                       />
                       <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
                         {item.quantity===''? t('common.labels.units') : ''}
@@ -1720,14 +1759,14 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                         value={item.weight ?? ''}
                         onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
                         className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
-                          product.name?.toLowerCase().includes('plastic') 
+                          product?.name?.toLowerCase().includes('plastic') 
                             ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
                             : 'bg-white'
                         }`}
                         placeholder="0.00"
-                        disabled={product.name?.toLowerCase()==='plastic'}
+                        disabled={product?.name?.toLowerCase()==='plastic'}
                         tabIndex={200 + index * 4 + 2}
-                        aria-label={`Weight for ${product.name}`}
+                        aria-label={`Weight for ${product?.name || 'product'}`}
                       />
                       <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
                         {item.weight===''? t('common.labels.kg') : ''}
@@ -1746,7 +1785,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
                       placeholder="0.00"
                       tabIndex={200 + index * 4 + 3}
-                      ariaLabel={`Price for ${product.name}`}
+                      ariaLabel={`Price for ${product?.name || 'product'}`}
                     />
                   </div>
 
@@ -1758,7 +1797,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       tabIndex={200 + index * 4 + 4}
                       style={{ padding: '8px'}}
                       role="status"
-                        aria-label={`Total for ${product.name} is ${formatCurrency(item.lineTotal)}`}
+                        aria-label={`Total for ${product?.name || 'product'} is ${formatCurrency(item.lineTotal)}`}
                     >
                       <div className="text-lg font-bold text-blue-700 text-center" aria-hidden="true" style={{ height: '26.4px' }}>
                         {formatCurrency(item.lineTotal)}

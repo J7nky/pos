@@ -2549,7 +2549,33 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const getRecommendedOpeningAmount = async () => {
     if (!storeId) return { amount: 0, source: 'default' as const };
-    return await db.getCashDrawerSessionDetails(storeId);
+    
+    try {
+      // Get the last closed session
+      const closedSessions = await db.cash_drawer_sessions
+        .where('store_id')
+        .equals(storeId)
+        .filter(sess => sess.status === 'closed')
+        .toArray();
+      
+      if (closedSessions.length > 0) {
+        // Sort by closed_at date (most recent first)
+        closedSessions.sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime());
+        const lastSession = closedSessions[0];
+        
+        return {
+          amount: lastSession.actual_amount || 0,
+          source: 'previous_session' as const,
+          previousSessionId: lastSession.id,
+          previousEmployee: lastSession.closed_by
+        };
+      }
+      
+      return { amount: 0, source: 'default' as const };
+    } catch (error) {
+      console.error('Error getting recommended opening amount:', error);
+      return { amount: 0, source: 'default' as const };
+    }
   };
 
   const getStockLevels = () => stockLevels;

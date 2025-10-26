@@ -534,10 +534,14 @@ class POSDatabase extends Dexie {
 
       // Filter by date range if provided
       if (startDate) {
-        sessions = sessions.filter(sess => sess.closed_at! >= startDate);
+        // If startDate is just a date (YYYY-MM-DD), include the entire day
+        const startFilter = startDate.includes('T') ? startDate : `${startDate}T00:00:00.000Z`;
+        sessions = sessions.filter(sess => sess.closed_at! >= startFilter);
       }
       if (endDate) {
-        sessions = sessions.filter(sess => sess.closed_at! <= endDate);
+        // If endDate is just a date (YYYY-MM-DD), include the entire day
+        const endFilter = endDate.includes('T') ? endDate : `${endDate}T23:59:59.999Z`;
+        sessions = sessions.filter(sess => sess.closed_at! <= endFilter);
       }
 
       // Sort by closing date (most recent first)
@@ -545,11 +549,14 @@ class POSDatabase extends Dexie {
 
       const reportData = sessions.map(session => ({
         id: session.id,
+        sessionId: session.id,
         date: session.closed_at!,
+        employeeName: session.closed_by || 'Unknown',
         openingAmount: session.opening_amount || 0,
         expectedAmount: session.expected_amount || 0,
         actualAmount: session.actual_amount || 0,
         variance: session.variance || 0,
+        status: session.variance === 0 ? 'balanced' : 'unbalanced',
         closedBy: session.closed_by || 'Unknown',
         notes: session.notes || null
       }));
