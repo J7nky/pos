@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
 import { Customer, Product } from '../types';
-import { db } from '../lib/db';
+import { supabase } from '../lib/supabase';
 
 interface PublicCustomerStatementProps {
   // This component will be used in a public route, so it needs to fetch its own data
@@ -57,43 +57,73 @@ export default function PublicCustomerStatement() {
     setError(null);
 
     try {
-      // Fetch customer data from IndexedDB
-      const customerData = await db.customers.get(customerId);
+      // Fetch customer data from Supabase
+      const { data: customerData, error: customerError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', customerId)
+        .single();
       
-      if (!customerData) {
-        setError('Customer not found. This account statement may not be available offline.');
+      if (customerError || !customerData) {
+        setError('Customer not found. Please check the QR code and try again.');
         setIsLoading(false);
         return;
       }
 
-      setCustomer(customerData);
+      // Transform Supabase customer data to match Customer type
+      const customer: Customer = {
+        id: customerData.id,
+        name: customerData.name,
+        email: customerData.email || undefined,
+        phone: customerData.phone || undefined,
+        address: customerData.address || undefined,
+        isActive: customerData.is_active ?? true,
+        createdAt: customerData.created_at,
+        lb_balance: customerData.lb_balance || 0,
+        usd_balance: customerData.usd_balance || 0
+      };
 
-      // Fetch all sales for this customer
-      const sales = await db.sales.where('customer_id').equals(customerId).toArray();
+      setCustomer(customer);
+
+      // Fetch all bill line items for this customer
+      const { data: salesData } = await supabase
+        .from('bill_line_items')
+        .select('*')
+        .eq('customer_id', customerId);
       
       // Fetch all transactions for this customer
-      const transactions = await db.transactions.where('customer_id').equals(customerId).toArray();
+      const { data: transactionsData } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('customer_id', customerId);
 
       // Fetch all products for product details
-      const products = await db.products.toArray();
+      const { data: productsData } = await supabase
+        .from('products')
+        .select('*');
 
       // Fetch inventory items
-      const inventory = await db.inventory_items.toArray();
+      const { data: inventoryData } = await supabase
+        .from('inventory_items')
+        .select('*');
 
       // Fetch bills for this customer
-      const customerBills = await db.bills.where('customer_id').equals(customerId).toArray();
+      const { data: billsData } = await supabase
+        .from('bills')
+        .select('*')
+        .eq('customer_id', customerId);
 
       // Generate statement using AccountStatementService
       const accountStatementService = AccountStatementService.getInstance();
       const generatedStatement = accountStatementService.generateCustomerStatement(
-        customerData,
-        sales,
-        transactions,
-        products,
-        inventory,
+        customer,
+        salesData || [],
+        transactionsData || [],
+        (productsData || []) as Product[],
+        inventoryData || [],
         dateRange,
         viewMode,
-        customerBills
+        billsData || []
       );
 
       setStatement(generatedStatement);
