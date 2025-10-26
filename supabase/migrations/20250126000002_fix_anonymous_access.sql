@@ -63,6 +63,14 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
+  -- Validate token first
+  IF NOT EXISTS (
+    SELECT 1 FROM public_access_tokens 
+    WHERE token = p_token AND expires_at > NOW() AND NOT revoked
+  ) THEN
+    RETURN; -- Return empty result if token is invalid
+  END IF;
+  
   RETURN QUERY
   SELECT 
     bli.id,
@@ -100,6 +108,14 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
+  -- Validate token first
+  IF NOT EXISTS (
+    SELECT 1 FROM public_access_tokens 
+    WHERE token = p_token AND expires_at > NOW() AND NOT revoked
+  ) THEN
+    RETURN; -- Return empty result if token is invalid
+  END IF;
+  
   RETURN QUERY
   SELECT 
     tr.id,
@@ -135,6 +151,14 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
+  -- Validate token first
+  IF NOT EXISTS (
+    SELECT 1 FROM public_access_tokens 
+    WHERE token = p_token AND expires_at > NOW() AND NOT revoked
+  ) THEN
+    RETURN; -- Return empty result if token is invalid
+  END IF;
+  
   RETURN QUERY
   SELECT 
     b.id,
