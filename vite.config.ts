@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  base: '/',
+  base: './',
   server: {
     host: true,
     port: 5175,
@@ -18,9 +18,18 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true, // Remove all console statements in production
+        drop_debugger: true, // Remove debugger statements
+      },
+    },
   },
   define: {
-    // Set the public URL for QR code generation - always use production URL for QR codes
-    'import.meta.env.VITE_PUBLIC_URL': JSON.stringify(process.env.VITE_PUBLIC_URL || 'https://souq-trablous.com'),
+    // Set the public URL for QR code generation
+    'import.meta.env.VITE_PUBLIC_URL': JSON.stringify(process.env.VITE_PUBLIC_URL || (process.env.NODE_ENV === 'production' ? 'https://souq-trablous.netlify.app' : 'http://localhost:5175')),
+    // Define production mode flag
+    'import.meta.env.PROD': JSON.stringify(process.env.NODE_ENV === 'production'),
   },
 });

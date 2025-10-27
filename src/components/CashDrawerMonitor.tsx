@@ -97,7 +97,6 @@ export default function CashDrawerMonitor() {
     if (!Array.isArray(transactionHistory)) return [];
     const now = new Date();
     if (range === 'today') {
-      console.log('💰 Today transactions:', transactionHistory);
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const end = new Date(start);
       end.setHours(23, 59, 59, 999); // Include the entire day until 23:59:59.999

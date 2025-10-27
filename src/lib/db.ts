@@ -369,48 +369,35 @@ class POSDatabase extends Dexie {
       const sessionStartTime = new Date(session.opened_at);
       const sessionEndTime = session.closed_at ? new Date(session.closed_at) : new Date();
       
-      // Get cash sales during this session period
-      const cashSales = await this.bill_line_items
-        .filter(item => 
-          item.payment_method === 'cash' &&
-          new Date(item.created_at) >= sessionStartTime &&
-          new Date(item.created_at) <= sessionEndTime
-        )
-        .toArray();
-      
-      // Get cash payments during this session period
-      const cashPayments = await this.transactions
+      // Get all cash drawer transactions during this session period
+      // These transactions are created by the cash drawer update service
+      // and represent the actual cash flow affecting the physical drawer
+      const cashDrawerTransactions = await this.transactions
         .filter(trans => 
-          trans.type === 'income' && 
-          trans.category === 'Cash Payment' &&
+          trans.category?.startsWith('cash_drawer_') &&
           new Date(trans.created_at) >= sessionStartTime &&
           new Date(trans.created_at) <= sessionEndTime
         )
         .toArray();
       
-      // Get cash expenses during this session period
-      const cashExpenses = await this.transactions
-        .filter(trans => 
-          trans.type === 'expense' && 
-          trans.category === 'cash_expense' &&
-          new Date(trans.created_at) >= sessionStartTime &&
-          new Date(trans.created_at) <= sessionEndTime
-        )
-        .toArray();
+      console.log(`Found ${cashDrawerTransactions.length} cash drawer transactions during session`);
 
-      // Calculate totals
-      const totalSales = cashSales.reduce((sum, item) => sum + (item.received_value || 0), 0);
-      const totalPayments = cashPayments.reduce((sum, trans) => sum + trans.amount, 0);
-      const totalExpenses = cashExpenses.reduce((sum, trans) => sum + trans.amount, 0);
+      // Calculate expected amount by applying all cash drawer transactions to the opening amount
+      // Income transactions (sales, payments) increase the balance
+      // Expense transactions decrease the balance
+      let expectedAmount = openingAmount;
       
-      // Expected amount = Opening + Sales + Payments - Expenses
-      const expectedAmount = openingAmount + totalSales + totalPayments - totalExpenses;
+      for (const trans of cashDrawerTransactions) {
+        if (trans.type === 'income') {
+          expectedAmount += trans.amount || 0;
+        } else if (trans.type === 'expense') {
+          expectedAmount -= trans.amount || 0;
+        }
+      }
       
       console.log(`Cash flow calculation:`, {
         openingAmount,
-        totalSales,
-        totalPayments,
-        totalExpenses,
+        cashDrawerTransactions: cashDrawerTransactions.length,
         expectedAmount
       });
       
@@ -482,38 +469,60 @@ class POSDatabase extends Dexie {
         throw new Error('Session not found');
       }
 
-      // Get all cash transactions for this session
-      const cashSales = await this.bill_line_items
-        .where('created_by')
-        .equals(sessionId)
-        .filter(item => item.payment_method === 'cash')
-        .toArray();
-      
-      const cashPayments = await this.transactions
+      const sessionStartTime = new Date(session.opened_at);
+      const sessionEndTime = session.closed_at ? new Date(session.closed_at) : new Date();
+
+      // Get all cash drawer transactions during this session period
+      // These represent the actual cash flow affecting the physical drawer
+      const cashDrawerTransactions = await this.transactions
         .filter(trans => 
-          trans.type === 'income' && 
-          trans.category === 'Cash Payment' &&
-          trans.created_by === sessionId
+          trans.category?.startsWith('cash_drawer_') &&
+          new Date(trans.created_at) >= sessionStartTime &&
+          new Date(trans.created_at) <= sessionEndTime
         )
         .toArray();
+
+      // Group transactions by type for display
+      const cashSales = cashDrawerTransactions.filter(trans => 
+        trans.category === 'cash_drawer_sale' && trans.type === 'income'
+      );
       
-      const cashExpenses = await this.transactions
-        .filter(trans => 
-          trans.type === 'expense' && 
-          trans.category === 'cash_expense' &&
-          trans.created_by === sessionId
-        )
-        .toArray();
+      const cashPayments = cashDrawerTransactions.filter(trans => 
+        (trans.category === 'cash_drawer_payment' || trans.category === 'cash_drawer_customer_payment') && trans.type === 'income'
+      );
+      
+      const cashExpenses = cashDrawerTransactions.filter(trans => 
+        trans.category === 'cash_drawer_expense' && trans.type === 'expense'
+      );
 
       return {
         session,
         transactions: {
-          sales: cashSales,
-          payments: cashPayments,
-          expenses: cashExpenses
+          sales: cashSales.map(trans => ({
+            id: trans.id,
+            product_name: trans.description?.split(' -')[0] || 'Sale',
+            quantity: 1, // Transaction-based, so quantity is 1
+            unit_price: trans.amount,
+            received_value: trans.amount,
+            created_at: trans.created_at
+          })),
+          payments: cashPayments.map(trans => ({
+            id: trans.id,
+            description: trans.description,
+            amount: trans.amount,
+            reference: trans.reference,
+            created_at: trans.created_at
+          })),
+          expenses: cashExpenses.map(trans => ({
+            id: trans.id,
+            description: trans.description,
+            amount: trans.amount,
+            category: trans.category?.replace('cash_drawer_', ''),
+            created_at: trans.created_at
+          }))
         },
         totals: {
-          sales: cashSales.reduce((sum, item) => sum + item.received_value, 0),
+          sales: cashSales.reduce((sum, trans) => sum + trans.amount, 0),
           payments: cashPayments.reduce((sum, trans) => sum + trans.amount, 0),
           expenses: cashExpenses.reduce((sum, trans) => sum + trans.amount, 0)
         }

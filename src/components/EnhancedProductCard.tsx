@@ -123,7 +123,7 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
                   </span>
                   {item.sellingPrice && item.sellingPrice > 0 && (
                     <span className="text-[8px] text-yellow-600 bg-yellow-100 px-1 py-0.5 rounded-full">
-                      {t('common.labels.price')}
+                      {t('pos.price')}
                     </span>
                   )}
                 </div>

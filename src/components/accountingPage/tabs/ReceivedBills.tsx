@@ -681,13 +681,13 @@ export default function ReceivedBills({
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('receivedBills.status')}</label>
             <select value={receivedBillsStatusFilter} onChange={(e) => setReceivedBillsStatusFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
-              <option value="all">{t('receivedBills.allStatus')}</option>
-              <option value="pending">{t('receivedBills.pending')}</option>
-              <option value="in-progress">{t('receivedBills.inProgress')}</option>
-              <option value="halfway">{t('receivedBills.halfway')}</option>
-              <option value="nearly-complete">{t('receivedBills.nearlyComplete')}</option>
-              <option value="completed">{t('receivedBills.completed')}</option>
-              <option value="closed">{t('receivedBills.closed')}</option>
+              <option value="all">{t('receivedBills.statusAllStatus')}</option>
+              <option value="pending">{t('receivedBills.statusPending')}</option>
+              <option value="in-progress">{t('receivedBills.statusInProgress')}</option>
+              <option value="halfway">{t('receivedBills.statusHalfway')}</option>
+              <option value="nearly-complete">{t('receivedBills.statusNearlyComplete')}</option>
+              <option value="completed">{t('receivedBills.statusCompleted')}</option>
+              <option value="closed">{t('receivedBills.statusClosed')}</option>
             </select>
           </div>
           <div>
@@ -696,6 +696,7 @@ export default function ReceivedBills({
               <option value="all">{t('receivedBills.allTypes')}</option>
               <option value="commission">{t('receivedBills.commission')}</option>
               <option value="cash">{t('receivedBills.cash')}</option>
+              <option value="cash">{t('receivedBills.credit')}</option>
             </select>
           </div>
         </div>
@@ -887,7 +888,7 @@ export default function ReceivedBills({
                         <div className="border rounded-lg overflow-hidden">
                           <div className="bg-gray-100 px-4 py-2 text-sm text-gray-700 flex items-center justify-between rtl:flex-row-reverse">
                             <div className="rtl:text-right">
-                              {t('receivedBills.itemsInBatch', { count: group.items.length, type: group.isBatch ? t('receivedBills.batch') : t('receivedBills.bill') })}
+                              {group.items.length} {group.items.length === 1 ? t('receivedBills.item') : t('receivedBills.items')} {t('receivedBills.inThis')} {group.isBatch ? t('receivedBills.batch') : t('receivedBills.bill')}
                             </div>
                           </div>
                           <div className="overflow-x-auto">

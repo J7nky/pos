@@ -43,7 +43,14 @@ export class CRUDHelperService {
     id: string,
     updates: Tables[T]['Update']
   ): Promise<void> {
-    await (db as any)[tableName].update(id, { ...updates, _synced: false });
+    console.log(`🔧 CRUDHelper: Updating ${tableName} with ID ${id}`, updates);
+    const result = await (db as any)[tableName].update(id, { ...updates, _synced: false });
+    console.log(`🔧 CRUDHelper: Update result for ${tableName}:`, result);
+    
+    // Verify the update
+    const entity = await (db as any)[tableName].get(id);
+    console.log(`🔧 CRUDHelper: Entity after update:`, entity);
+    
     await this.triggerPostOperationCallbacks();
   }
 

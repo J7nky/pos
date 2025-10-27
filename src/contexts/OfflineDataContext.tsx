@@ -2168,30 +2168,50 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       const isCustomer = entityType === 'customer';
 
-      // For supplier payments, check cash drawer balance
+      // Calculate amount in LBP for cash drawer (cash drawer always works in LBP)
+      let amountInLBP = numAmount;
+      if (currency === 'USD') {
+        amountInLBP = numAmount * exchangeRate;
+      }
+
+      // For supplier payments, check cash drawer balance (compare in LBP)
       if (!isCustomer) {
         const currentBalance = await getCurrentCashDrawerBalance(storeId);
-        if (numAmount > currentBalance) {
+        if (amountInLBP > currentBalance) {
           return { 
             success: false, 
-            error: `Insufficient cash drawer balance. Payment amount: ${currency} ${numAmount.toLocaleString()}, Available balance: ${currentBalance.toLocaleString()}` 
+            error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP` 
           };
         }
       }
 
-      // Update entity balance
+      // Update entity balance in the SELECTED currency
+      // Balance represents DEBT: positive = they owe us, negative = we owe them (credit)
       const currentLbBalance = entity.lb_balance || 0;
       const currentUsdBalance = entity.usd_balance || 0;
 
+      console.log(`💳 Payment Processing - Entity: ${entity.name}, Type: ${isCustomer ? 'Customer' : 'Supplier'}, Currency: ${currency}`);
+      console.log(`💳 Current Balances - LBP: ${currentLbBalance}, USD: ${currentUsdBalance}`);
+      console.log(`💳 Payment Amount: ${numAmount}`);
+
       if (currency === 'LBP') {
-        const updateData = { lb_balance: Math.max(0, currentLbBalance - numAmount) };
+        // Customer pays OR we pay supplier → DECREASE debt (subtract)
+        // Allow negative balance for overpayments (credit)
+        const newBalance = currentLbBalance - numAmount;
+        const updateData = { lb_balance: newBalance };
+        console.log(`💳 ${isCustomer ? 'Customer payment' : 'Supplier payment'}: LBP balance ${currentLbBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
         if (isCustomer) {
           await updateCustomer(entityId, updateData);
         } else {
           await updateSupplier(entityId, updateData);
         }
       } else {
-        const updateData = { usd_balance: Math.max(0, currentUsdBalance - numAmount) };
+        // USD payment - update USD balance
+        // Customer pays OR we pay supplier → DECREASE debt (subtract)
+        // Allow negative balance for overpayments (credit)
+        const newBalance = currentUsdBalance - numAmount;
+        const updateData = { usd_balance: newBalance };
+        console.log(`💳 ${isCustomer ? 'Customer payment' : 'Supplier payment'}: USD balance ${currentUsdBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
         if (isCustomer) {
           await updateCustomer(entityId, updateData);
         } else {
@@ -2199,13 +2219,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Process cash drawer transaction
+      // Verify the update happened
+      const updatedEntity = isCustomer 
+        ? customers.find(c => c.id === entityId)
+        : suppliers.find(s => s.id === entityId);
+      console.log(`💳 After update - LBP: ${updatedEntity?.lb_balance}, USD: ${updatedEntity?.usd_balance}`);
+
+      // Process cash drawer transaction in LBP (cash drawer storage is always LBP)
       const cashDrawerType = isCustomer ? 'payment' : 'expense';
       const cashDrawerResult = await processCashDrawerTransaction({
         type: cashDrawerType,
-        amount: numAmount,
-        currency,
-        description: `${isCustomer ? 'Payment from' : 'Payment to'} ${entity.name}${description ? ': ' + description : ''}`,
+        amount: amountInLBP, // Always in LBP for cash drawer
+        currency: 'LBP', // Cash drawer always uses LBP
+        description: `${isCustomer ? 'Payment from' : 'Payment to'} ${entity.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`,
         reference: reference || `PAY-${Date.now()}`,
         customerId: isCustomer ? entityId : undefined,
         supplierId: isCustomer ? undefined : entityId,
@@ -2464,13 +2490,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       await db.closeCashDrawerSession(cashDrawer.id, actualAmount, closedBy, notes);
 
-      // Update local state
-      setCashDrawer({
-        ...cashDrawer,
-        status: 'closed',
-        currentBalance: 0,
-        lastUpdated: new Date().toISOString()
-      });
+      // Update local state to null since there's no active session
+      setCashDrawer(null);
 
       // Store undo data
       pushUndo({
@@ -2502,6 +2523,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       resetAutoSyncTimer();
 
       debouncedSync();
+
+      // Notify all components about the cash drawer being closed
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
+          detail: { 
+            storeId, 
+            event: 'closed',
+            sessionId: cashDrawer.id 
+          } 
+        }));
+      }
     } catch (error) {
       console.error('Error closing cash drawer:', error);
     }
@@ -2563,8 +2595,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         closedSessions.sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime());
         const lastSession = closedSessions[0];
         
+        // Get the actual amount from last session (stored in LBP)
+        let recommendedAmount = lastSession.actual_amount || 0;
+        
+        // Convert to preferred currency if USD is selected
+        if (currency === 'USD' && exchangeRate > 0) {
+          recommendedAmount = recommendedAmount / exchangeRate;
+        }
+        
         return {
-          amount: lastSession.actual_amount || 0,
+          amount: recommendedAmount,
           source: 'previous_session' as const,
           previousSessionId: lastSession.id,
           previousEmployee: lastSession.closed_by

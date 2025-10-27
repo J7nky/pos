@@ -927,8 +927,15 @@ ${dashSeparator}`;
     setIsProcessing(true);
     
     try {
-      // Open cash drawer with the entered amount
-      await raw.openCashDrawer(openingAmount, userProfile.id);
+      // Convert the entered amount to LBP for storage
+      // User enters in preferred currency, we store in LBP
+      let amountInLBP = openingAmount;
+      if (raw.currency === 'USD' && raw.exchangeRate > 0) {
+        amountInLBP = openingAmount * raw.exchangeRate;
+      }
+      
+      // Open cash drawer with the converted amount
+      await raw.openCashDrawer(amountInLBP, userProfile.id);
       
       // Close modal
       setShowCashDrawerModal(false);

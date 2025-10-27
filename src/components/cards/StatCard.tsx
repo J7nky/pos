@@ -1,4 +1,5 @@
 import React, { memo } from "react";
+import { useI18n } from '../../i18n';
 
 type Stat = {
   title: string;
@@ -29,7 +30,7 @@ const StatCard: React.FC<StatCardProps> = memo(({
     index === 0 &&
     (!cashDrawerStatus || !cashDrawerStatus.openedAt) &&
     typeof handleOpenDrawer === "function";
-
+  const { t } = useI18n();
   return (
     <div className="bg-white rounded-lg shadow-sm p-6">
       <div className="flex items-center justify-between">
@@ -57,7 +58,7 @@ const StatCard: React.FC<StatCardProps> = memo(({
           onClick={handleOpenDrawer}
           className="mt-3 w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm"
         >
-          Open Cash Drawer
+          {t('home.openCashDrawer')}
         </button>
       )}
     </div>

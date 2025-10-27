@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Wallet, X } from 'lucide-react';
 import { useI18n } from '../i18n';
 
@@ -21,20 +21,7 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
   const [sessionDetails, setSessionDetails] = useState<any>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
-  useEffect(() => {
-    // Set default date range on mount
-    if (!startDate && !endDate) {
-      setDefaultDateRange();
-    }
-  }, []);
-
-  useEffect(() => {
-    if (startDate && endDate) {
-      loadBalanceReport();
-    }
-  }, [storeId, startDate, endDate]);
-
-  const loadBalanceReport = async () => {
+  const loadBalanceReport = useCallback(async () => {
     setLoading(true);
     try {
       console.log('📊 Loading balance report with dates:', { startDate, endDate });
@@ -46,7 +33,36 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
     } finally {
       setLoading(false);
     }
-  };
+  }, [startDate, endDate, getBalanceReport]);
+
+  useEffect(() => {
+    // Set default date range on mount
+    if (!startDate && !endDate) {
+      setDefaultDateRange();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (startDate && endDate) {
+      loadBalanceReport();
+    }
+  }, [storeId, startDate, endDate, loadBalanceReport]);
+
+  // Listen for cash drawer updates to refresh the report
+  useEffect(() => {
+    const handleCashDrawerUpdated = (e: any) => {
+      if (e?.detail?.storeId === storeId) {
+        console.log('Balance report: Cash drawer updated, refreshing report');
+        loadBalanceReport();
+      }
+    };
+
+    window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated);
+    
+    return () => {
+      window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated);
+    };
+  }, [storeId, loadBalanceReport]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {

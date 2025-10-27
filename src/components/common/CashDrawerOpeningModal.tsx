@@ -3,6 +3,7 @@ import AccessibleModal from './AccessibleModal';
 import MoneyInput from './MoneyInput';
 import AccessibleButton from './AccessibleButton';
 import { useI18n } from '../../i18n';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
 
 interface CashDrawerOpeningModalProps {
   isOpen: boolean;
@@ -22,9 +23,14 @@ export default function CashDrawerOpeningModal({
   description
 }: CashDrawerOpeningModalProps) {
   const { t } = useI18n();
+  const { currency } = useOfflineData();
   const [amount, setAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Get currency display
+  const currencyDisplay = currency === 'LBP' ? 'ل.ل' : '$';
+  const currencyName = t(`common.currency.${currency}`) || currency;
 
   // Use provided title/description or fallback to translations
   const modalTitle = title || t('pos.openCashDrawer') || 'Open Cash Drawer';
@@ -74,11 +80,11 @@ export default function CashDrawerOpeningModal({
         
         <div>
           <MoneyInput
-            label={t('pos.openingAmount') || 'Opening Amount'}
+            label={`${t('pos.openingAmount') || 'Opening Amount'} (${currencyName})`}
             value={amount}
             onChange={setAmount}
-            placeholder={suggestedAmount > 0 ? suggestedAmount.toString() : "0.00"}
-            step="1000"
+            placeholder={suggestedAmount > 0 ? suggestedAmount.toFixed(currency === 'USD' ? 2 : 0) : "0.00"}
+            step={currency === 'USD' ? '0.01' : '1000'}
             min="0"
             className="focus:ring-2 focus:ring-blue-500"
             tabIndex={1}
@@ -87,11 +93,11 @@ export default function CashDrawerOpeningModal({
           {suggestedAmount > 0 && (
             <button
               type="button"
-              onClick={() => setAmount(suggestedAmount.toString())}
+              onClick={() => setAmount(suggestedAmount.toFixed(currency === 'USD' ? 2 : 0))}
               className="mt-2 text-sm text-blue-600 hover:text-blue-800 hover:underline"
               disabled={isSubmitting}
             >
-              {t('pos.useSuggestedAmount') || 'Use suggested amount:'} {suggestedAmount.toLocaleString()}
+              {t('pos.useSuggestedAmount') || 'Use suggested amount:'} {currency === 'USD' ? `$${suggestedAmount.toFixed(2)}` : `${Math.round(suggestedAmount).toLocaleString()} ل.ل`}
             </button>
           )}
         </div>

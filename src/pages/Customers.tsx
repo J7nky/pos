@@ -18,8 +18,47 @@ export default function Customers() {
   const addCustomer = raw.addCustomer;
   const updateCustomer = raw.updateCustomer;
   const addSupplier = raw.addSupplier;
-  const updateSupplier = raw.updateSupplier;
+  // const updateSupplier = raw.updateSupplier; // Reserved for future use
+  // const exchangeRate = raw.exchangeRate || 89500; // Reserved for future currency conversion features
   const { userProfile } = useSupabaseAuth();
+
+  // Helper function to format balance display
+  const formatBalanceDisplay = (balance: number, currency: 'USD' | 'LBP') => {
+    if (balance > 0) {
+      // They owe us (DEBT)
+      return {
+        text: currency === 'USD' ? `$${balance.toFixed(2)}` : `${Math.round(balance).toLocaleString()} ل.ل`,
+        label: t('customers.owes') || 'Owes',
+        color: 'text-red-700',
+        bgColor: 'bg-red-50',
+        borderColor: 'border-red-200',
+        icon: '💰',
+        type: 'debt' as const
+      };
+    } else if (balance < 0) {
+      // We owe them (CREDIT)
+      return {
+        text: currency === 'USD' ? `$${Math.abs(balance).toFixed(2)}` : `${Math.round(Math.abs(balance)).toLocaleString()} ل.ل`,
+        label: t('customers.credit') || 'Credit',
+        color: 'text-blue-700',
+        bgColor: 'bg-blue-50',
+        borderColor: 'border-blue-200',
+        icon: '💰',
+        type: 'credit' as const
+      };
+    } else {
+      // Paid off
+      return {
+        text: currency === 'USD' ? '$0.00' : '0 ل.ل',
+        label: t('customers.paid') || 'Paid',
+        color: 'text-green-700',
+        bgColor: 'bg-green-50',
+        borderColor: 'border-green-200',
+        icon: '✅',
+        type: 'paid' as const
+      };
+    }
+  };
 
   const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>('customers');
   const [showCustomerForm, setShowCustomerForm] = useState(false);
@@ -55,11 +94,31 @@ export default function Customers() {
   // Account statement modal states
   const [showAccountStatement, setShowAccountStatement] = useState<'customer' | 'supplier' | null>(null);
   const [selectedEntity, setSelectedEntity] = useState<Customer | Supplier | null>(null);
+  
+  // Overpayment warning state
+  const [overpaymentWarning, setOverpaymentWarning] = useState<{ show: boolean; amount: number; currency: string } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type, visible: true });
   };
   const hideToast = () => setToast(t => ({ ...t, visible: false }));
+
+  // Helper function for payment suggestions
+  const getSuggestedPayments = (entity: Customer | Supplier | undefined, currency: 'USD' | 'LBP') => {
+    if (!entity) return [];
+    
+    const balance = currency === 'LBP' ? (entity.lb_balance || 0) : (entity.usd_balance || 0);
+    
+    // Only suggest if there's a debt (positive balance)
+    if (balance <= 0) return [];
+    
+    return [
+      { percentage: 25, amount: balance * 0.25, label: '25%' },
+      { percentage: 50, amount: balance * 0.5, label: '50%' },
+      { percentage: 75, amount: balance * 0.75, label: '75%' },
+      { percentage: 100, amount: balance, label: '100%' }
+    ];
+  };
 
   // Helper functions for payment processing
   const validatePaymentForm = (amount: string, entityId: string, entityType: 'customer' | 'supplier'): { isValid: boolean; entity?: Customer | Supplier } => {
@@ -405,14 +464,35 @@ export default function Customers() {
                         <div className="text-sm text-gray-500">{customer.email}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm rtl:text-right ltr:text-left">
-                        <div>
-                          <span className={`font-medium ${(customer.lb_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            {t('customers.lbp')}: {(customer.lb_balance || 0).toLocaleString()}
-                          </span>
-                          <br />
-                          <span className={`font-medium ${(customer.usd_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            $: {(customer.usd_balance || 0).toLocaleString()}
-                          </span>
+                        <div className="space-y-1">
+                          {(() => {
+                            const lbpBalance = formatBalanceDisplay(customer.lb_balance || 0, 'LBP');
+                            return (
+                              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${lbpBalance.bgColor} ${lbpBalance.borderColor}`}>
+                                <span className="text-base">{lbpBalance.icon}</span>
+                                <span className={`text-xs font-semibold ${lbpBalance.color}`}>
+                                  {lbpBalance.label}:
+                                </span>
+                                <span className={`text-sm font-bold ${lbpBalance.color}`}>
+                                  {lbpBalance.text}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                          {(() => {
+                            const usdBalance = formatBalanceDisplay(customer.usd_balance || 0, 'USD');
+                            return (
+                              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${usdBalance.bgColor} ${usdBalance.borderColor}`}>
+                                <span className="text-base">{usdBalance.icon}</span>
+                                <span className={`text-xs font-semibold ${usdBalance.color}`}>
+                                  {usdBalance.label}:
+                                </span>
+                                <span className={`text-sm font-bold ${usdBalance.color}`}>
+                                  {usdBalance.text}
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
@@ -491,14 +571,35 @@ export default function Customers() {
                         <div className="text-sm text-gray-500">{supplier.email}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm rtl:text-right ltr:text-left">
-                        <div>
-                          <span className={`font-medium ${(supplier.lb_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            LBP: {(supplier.lb_balance || 0).toLocaleString()}
-                          </span>
-                          <br />
-                          <span className={`font-medium ${(supplier.usd_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            USD: {(supplier.usd_balance || 0).toLocaleString()}
-                          </span>
+                        <div className="space-y-2">
+                          {(() => {
+                            const lbpBalance = formatBalanceDisplay(supplier.lb_balance || 0, 'LBP');
+                            return (
+                              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${lbpBalance.bgColor} ${lbpBalance.borderColor}`}>
+                                <span className="text-base">{lbpBalance.icon}</span>
+                                <span className={`text-xs font-semibold ${lbpBalance.color}`}>
+                                  {lbpBalance.label}:
+                                </span>
+                                <span className={`text-sm font-bold ${lbpBalance.color}`}>
+                                  {lbpBalance.text}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                          {(() => {
+                            const usdBalance = formatBalanceDisplay(supplier.usd_balance || 0, 'USD');
+                            return (
+                              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${usdBalance.bgColor} ${usdBalance.borderColor}`}>
+                                <span className="text-base">{usdBalance.icon}</span>
+                                <span className={`text-xs font-semibold ${usdBalance.color}`}>
+                                  {usdBalance.label}:
+                                </span>
+                                <span className={`text-sm font-bold ${usdBalance.color}`}>
+                                  {usdBalance.text}
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </td>
                     
@@ -689,13 +790,85 @@ export default function Customers() {
                     value={paymentForm.amount}
                     onChange={(e) => {
                       const value = e.target.value;
-                   
+                      const selectedCustomer = customers.find(c => c.id === paymentForm.customerId);
+                      const numValue = parseFloat(value);
+                      const currentBalance = paymentForm.currency === 'LBP' 
+                        ? (selectedCustomer?.lb_balance || 0)
+                        : (selectedCustomer?.usd_balance || 0);
+                      
+                      // Show overpayment warning if payment exceeds debt
+                      if (!isNaN(numValue) && numValue > currentBalance && currentBalance > 0) {
+                        setOverpaymentWarning({ 
+                          show: true, 
+                          amount: numValue - currentBalance, 
+                          currency: paymentForm.currency 
+                        });
+                      } else {
+                        setOverpaymentWarning(null);
+                      }
+                      
                       setPaymentForm(prev => ({ ...prev, amount: value }));
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
                     required
                     placeholder="0.00"
                   />
+                  
+                  {/* Quick pay suggestions */}
+                  {paymentForm.customerId && (() => {
+                    const selectedCustomer = customers.find(c => c.id === paymentForm.customerId);
+                    const suggestions = getSuggestedPayments(selectedCustomer, paymentForm.currency);
+                    
+                    if (suggestions.length === 0) return null;
+                    
+                    return (
+                      <div className="mt-3">
+                        <p className="text-xs text-gray-600 mb-2">💡 {t('customers.quickPay') || 'Quick Pay Suggestions'}:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {suggestions.map((suggestion) => (
+                            <button
+                              key={suggestion.percentage}
+                              type="button"
+                              onClick={() => {
+                                const formattedAmount = paymentForm.currency === 'USD' 
+                                  ? suggestion.amount.toFixed(2) 
+                                  : Math.round(suggestion.amount).toString();
+                                setPaymentForm(prev => ({ ...prev, amount: formattedAmount }));
+                                setOverpaymentWarning(null);
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium border-2 border-green-500 text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+                            >
+                              {suggestion.label} ({paymentForm.currency === 'USD' 
+                                ? `$${suggestion.amount.toFixed(2)}` 
+                                : `${Math.round(suggestion.amount).toLocaleString()} ل.ل`})
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
+                  {/* Overpayment warning */}
+                  {overpaymentWarning?.show && (
+                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <span className="text-lg">⚠️</span>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-yellow-800">
+                            {t('customers.overpaymentWarning') || 'Overpayment Alert'}
+                          </p>
+                          <p className="text-xs text-yellow-700 mt-1">
+                            {t('customers.overpaymentMessage') || 'This payment exceeds the current debt. The customer will have a credit of'} {' '}
+                            <span className="font-bold">
+                              {overpaymentWarning.currency === 'USD' 
+                                ? `$${overpaymentWarning.amount.toFixed(2)}` 
+                                : `${Math.round(overpaymentWarning.amount).toLocaleString()} ل.ل`}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
                 <div>
@@ -786,6 +959,22 @@ export default function Customers() {
                     value={paymentForm.amount}
                     onChange={(e) => {
                       const value = e.target.value;
+                      const selectedSupplier = suppliers.find(s => s.id === paymentForm.supplierId);
+                      const numValue = parseFloat(value);
+                      const currentBalance = paymentForm.currency === 'LBP' 
+                        ? (selectedSupplier?.lb_balance || 0)
+                        : (selectedSupplier?.usd_balance || 0);
+                      
+                      // Show overpayment warning if payment exceeds debt
+                      if (!isNaN(numValue) && numValue > currentBalance && currentBalance > 0) {
+                        setOverpaymentWarning({ 
+                          show: true, 
+                          amount: numValue - currentBalance, 
+                          currency: paymentForm.currency 
+                        });
+                      } else {
+                        setOverpaymentWarning(null);
+                      }
               
                       setPaymentForm(prev => ({ ...prev, amount: value }));
                     }}
@@ -793,6 +982,62 @@ export default function Customers() {
                     required
                     placeholder="0.00"
                   />
+                  
+                  {/* Quick pay suggestions */}
+                  {paymentForm.supplierId && (() => {
+                    const selectedSupplier = suppliers.find(s => s.id === paymentForm.supplierId);
+                    const suggestions = getSuggestedPayments(selectedSupplier, paymentForm.currency);
+                    
+                    if (suggestions.length === 0) return null;
+                    
+                    return (
+                      <div className="mt-3">
+                        <p className="text-xs text-gray-600 mb-2">💡 {t('customers.quickPay') || 'Quick Pay Suggestions'}:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {suggestions.map((suggestion) => (
+                            <button
+                              key={suggestion.percentage}
+                              type="button"
+                              onClick={() => {
+                                const formattedAmount = paymentForm.currency === 'USD' 
+                                  ? suggestion.amount.toFixed(2) 
+                                  : Math.round(suggestion.amount).toString();
+                                setPaymentForm(prev => ({ ...prev, amount: formattedAmount }));
+                                setOverpaymentWarning(null);
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium border-2 border-red-500 text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                            >
+                              {suggestion.label} ({paymentForm.currency === 'USD' 
+                                ? `$${suggestion.amount.toFixed(2)}` 
+                                : `${Math.round(suggestion.amount).toLocaleString()} ل.ل`})
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
+                  {/* Overpayment warning */}
+                  {overpaymentWarning?.show && (
+                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <span className="text-lg">⚠️</span>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-yellow-800">
+                            {t('customers.overpaymentWarning') || 'Overpayment Alert'}
+                          </p>
+                          <p className="text-xs text-yellow-700 mt-1">
+                            {t('customers.overpaymentMessage') || 'This payment exceeds the current debt. The supplier will have a credit of'} {' '}
+                            <span className="font-bold">
+                              {overpaymentWarning.currency === 'USD' 
+                                ? `$${overpaymentWarning.amount.toFixed(2)}` 
+                                : `${Math.round(overpaymentWarning.amount).toLocaleString()} ل.ل`}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
                 <div>
