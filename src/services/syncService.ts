@@ -31,8 +31,7 @@ const SYNC_TABLES = [
 'bills',
   'bill_line_items',
   'bill_audit_logs',
-'cash_drawer_sessions',
-'missed_products'
+'cash_drawer_sessions'
 ] as const;
 
 type SyncTable = typeof SYNC_TABLES[number];
@@ -327,6 +326,22 @@ const result = { uploaded: 0, errors: [] as string[] };
                   result.errors.push(`Failed to clear references for inventory item ${record.id}: ${updateError.message}`);
                   continue;
                 }
+              }
+
+              // Delete missed_products references before deletion (FK constraint + NOT NULL constraint)
+              try {
+                const { error: deleteMissedError } = await supabase
+                  .from('missed_products')
+                  .delete()
+                  .eq('inventory_item_id', record.id);
+
+                if (deleteMissedError) {
+                  result.errors.push(`Failed to delete missed_products references: ${deleteMissedError.message}`);
+                  console.warn('Failed to delete missed_products:', deleteMissedError);
+                }
+              } catch (missedProductsError) {
+                // Table might not exist in some schemas - ignore
+                console.warn('missed_products table not accessible:', missedProductsError);
               }
             }
 

@@ -81,6 +81,11 @@ interface OfflineDataContextType {
   deleteProduct: (id: string) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
   updateInventoryItem: (id: string, updates: Tables['inventory_items']['Update']) => Promise<void>;
+  checkInventoryItemReferences: (id: string) => Promise<{
+    salesCount: number;
+    variancesCount: number;
+    hasReferences: boolean;
+  }>;
   deleteInventoryItem: (id: string) => Promise<void>;
   addInventoryBatch: (args: {
     supplier_id: string;
@@ -1388,34 +1393,72 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     crudHelperService.updateEntity('inventory_items', id, updates);
   };
 
-  const deleteInventoryItem = async (id: string): Promise<void> => {
+  const checkInventoryItemReferences = async (id: string): Promise<{
+    salesCount: number;
+    variancesCount: number;
+    hasReferences: boolean;
+  }> => {
     try {
-      // Check if this inventory item is referenced by any bill_line_items
-      const referencingLineItems = await db.bill_line_items
+      const sales = await db.bill_line_items
         .where('inventory_item_id')
         .equals(id)
         .and(item => !item._deleted)
         .toArray();
 
-      if (referencingLineItems.length > 0) {
-        // If there are active references, we need to handle them
-        // Set inventory_item_id to null in referencing line items
-        await db.transaction('rw', [db.bill_line_items, db.inventory_items], async () => {
-          // Clear the inventory_item_id reference in all line items
-          for (const lineItem of referencingLineItems) {
-            await db.bill_line_items.update(lineItem.id, {
-              inventory_item_id: null,
-              _synced: false
-            });
+      const variances = await db.missed_products
+        .where('inventory_item_id')
+        .equals(id)
+        .and(item => !item._deleted)
+        .toArray();
+
+      return {
+        salesCount: sales.length,
+        variancesCount: variances.length,
+        hasReferences: sales.length > 0 || variances.length > 0
+      };
+    } catch (error) {
+      console.error('Error checking inventory item references:', error);
+      return {
+        salesCount: 0,
+        variancesCount: 0,
+        hasReferences: false
+      };
+    }
+  };
+
+  const deleteInventoryItem = async (id: string): Promise<void> => {
+    try {
+      // Get all related records
+      const sales = await db.bill_line_items
+        .where('inventory_item_id')
+        .equals(id)
+        .and(item => !item._deleted)
+        .toArray();
+
+      const missedProducts = await db.missed_products
+        .where('inventory_item_id')
+        .equals(id)
+        .and(item => !item._deleted)
+        .toArray();
+
+      if (sales.length > 0 || missedProducts.length > 0) {
+        await db.transaction('rw', [db.bill_line_items, db.missed_products, db.inventory_items], async () => {
+          // Delete related sales records (bill_line_items)
+          for (const sale of sales) {
+            await crudHelperService.deleteEntity('bill_line_items', sale.id);
+          }
+
+          // Delete missed_products records (inventory_item_id has NOT NULL constraint)
+          for (const missedProduct of missedProducts) {
+            await crudHelperService.deleteEntity('missed_products', missedProduct.id);
           }
           
-          // Now we can safely delete the inventory item
+          // Delete the inventory item
           await crudHelperService.deleteEntity('inventory_items', id);
         });
         
-        console.log(`Cleared ${referencingLineItems.length} references before deleting inventory item ${id}`);
+        console.log(`Deleted ${sales.length} sales records and ${missedProducts.length} variance records before deleting inventory item ${id}`);
       } else {
-        // No references, safe to delete
         await crudHelperService.deleteEntity('inventory_items', id);
       }
     } catch (error) {
@@ -3003,6 +3046,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         deleteProduct: async () => { },
         addInventoryItem: async () => { },
         updateInventoryItem: async () => { },
+        checkInventoryItemReferences: async () => ({ salesCount: 0, variancesCount: 0, hasReferences: false }),
         deleteInventoryItem: async () => { },
         addInventoryBatch: async () => ({ batchId: '', financialResult: null }),
         addSale: async () => { },
@@ -3099,6 +3143,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       deleteProduct,
       addInventoryItem,
       updateInventoryItem,
+      checkInventoryItemReferences,
       deleteInventoryItem,
       addInventoryBatch,
       addSale,

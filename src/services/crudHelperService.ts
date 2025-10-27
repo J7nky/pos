@@ -215,12 +215,30 @@ export class CRUDHelperService {
     const tableNames = [
       'stores', 'products', 'suppliers', 'customers', 'cash_drawer_accounts',
       'inventory_bills', 'inventory_items', 'transactions', 'bills',
-      'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions', 'missed_products'
+      'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions'
     ];
 
-    const counts = await Promise.all(
-      tableNames.map(name => (db as any)[name].filter((item: any) => !item._synced).count())
-    );
+    // Get all table references first
+    const tables = tableNames.map(name => (db as any)[name]).filter(Boolean);
+
+    // Run in a dedicated read transaction that includes all tables
+    // This ensures we're not conflicting with any existing transaction
+    const counts = await db.transaction('r', tables, async () => {
+      return await Promise.all(
+        tableNames.map(async name => {
+          try {
+            const table = (db as any)[name];
+            if (!table) {
+              return 0;
+            }
+            return await table.filter((item: any) => !item._synced).count();
+          } catch (error) {
+            console.warn(`Table ${name} not found, skipping from unsynced count`);
+            return 0;
+          }
+        })
+      );
+    });
 
     const byTable: Record<string, number> = {};
     tableNames.forEach((name, index) => {

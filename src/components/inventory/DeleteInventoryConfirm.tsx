@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, AlertTriangle } from 'lucide-react';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
 
 interface DeleteInventoryConfirmProps {
   item: any;
@@ -8,8 +9,22 @@ interface DeleteInventoryConfirmProps {
 }
 
 const DeleteInventoryConfirm: React.FC<DeleteInventoryConfirmProps> = ({ item, onClose, onDelete }) => {
+  const { checkInventoryItemReferences } = useOfflineData();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [references, setReferences] = useState({ salesCount: 0, variancesCount: 0, hasReferences: false });
+
+  useEffect(() => {
+    const checkReferences = async () => {
+      try {
+        const refs = await checkInventoryItemReferences(item.id);
+        setReferences(refs);
+      } catch (err) {
+        console.error('Error checking references:', err);
+      }
+    };
+    checkReferences();
+  }, [item.id, checkInventoryItemReferences]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -30,9 +45,34 @@ const DeleteInventoryConfirm: React.FC<DeleteInventoryConfirmProps> = ({ item, o
         </div>
         
         <div className="p-6">
-          <p className="text-gray-800 dark:text-slate-200">
+          <p className="text-gray-800 dark:text-slate-200 mb-4">
             Are you sure you want to delete this inventory item?
           </p>
+          
+          {references.hasReferences && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4">
+              <div className="flex items-start">
+                <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 mr-3 flex-shrink-0" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-semibold text-red-800 dark:text-red-200 mb-1">
+                    Warning: Related Records Will Be Deleted
+                  </h3>
+                  <ul className="text-xs text-red-700 dark:text-red-300 space-y-1">
+                    {references.salesCount > 0 && (
+                      <li>• <strong>{references.salesCount}</strong> sale record(s) will be permanently deleted</li>
+                    )}
+                    {references.variancesCount > 0 && (
+                      <li>• <strong>{references.variancesCount}</strong> variance record(s) will be permanently deleted</li>
+                    )}
+                  </ul>
+                  <p className="text-xs font-medium text-red-800 dark:text-red-200 mt-2">
+                    This action cannot be undone!
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
           
           <div className="flex justify-end space-x-3 pt-4">
