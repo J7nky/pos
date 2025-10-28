@@ -315,6 +315,19 @@ export class DataValidationService {
       delete cleanRecord.status; // Remove status field that doesn't exist in Supabase schema
     }
 
+    if (tableName === 'inventory_bills') {
+      // Ensure required fields have default values
+      if (!cleanRecord.status) {
+        cleanRecord.status = 'Created';
+      }
+      if (!cleanRecord.type) {
+        cleanRecord.type = 'commission';
+      }
+      // Remove fields that don't exist in the database schema
+      delete cleanRecord.plastic_count;
+      delete cleanRecord.plastic_price;
+    }
+
     // Remove updated_at for tables without it
     const tablesWithoutUpdatedAt = ['inventory_items', 'transactions', 'inventory_bills', 'bill_line_items', 'bill_audit_logs'];
     if (tablesWithoutUpdatedAt.includes(tableName)) {

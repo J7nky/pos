@@ -77,8 +77,8 @@ export default function POS() {
     };
 
     const date = new Date(billData.bill_date).toLocaleDateString('en-GB');
-    const customerName = customer ? customer.name : 'Walk-in Customer';
-    const customerPhone = customer ? customer.phone : '';
+    const customerName = entity ? entity.name : 'Walk-in Customer';
+    const customerPhone = entity ? entity.phone : '';
     
     // Format bill number with prefix
     const billNumber = `${receiptSettings.billNumberPrefix}${billData.bill_number.split('-')[1] || '12345'}`;
@@ -310,8 +310,8 @@ export default function POS() {
         
         <div class="summary">
             <div class="summary-row">Subtotal: ${formatCurrency(billData.subtotal)} LBP</div>
-            ${receiptSettings.showPreviousBalance && customer && customer.lb_balance > 0 ? 
-              `<div class="summary-row">Previous Balance: ${formatCurrency(customer.lb_balance)} LBP</div>` : ''}
+            ${receiptSettings.showPreviousBalance && entity && entity.lb_balance > 0 ? 
+              `<div class="summary-row">Previous Balance: ${formatCurrency(entity.lb_balance)} LBP</div>` : ''}
         </div>
         
         <div class="total">
@@ -384,7 +384,7 @@ export default function POS() {
 
 
   // Receipt printing function
-  const printReceipt = async (billData: any, lineItemsData: any[], customer: any, qrCodeData?: any) => {
+  const printReceipt = async (billData: any, lineItemsData: any[], entity: any, qrCodeData?: any) => {
     try {
       setIsPrinting(true);
       
@@ -489,8 +489,8 @@ export default function POS() {
     };
 
     const date = new Date(billData.bill_date).toLocaleDateString('en-GB');
-    const customerName = customer ? customer.name : 'Walk-in Customer';
-    const customerPhone = customer ? customer.phone : '';
+    const customerName = entity ? entity.name : 'Walk-in Customer';
+    const customerPhone = entity ? entity.phone : '';
     
     // Format bill number with prefix
     const billNumber = `${receiptSettings.billNumberPrefix}${billData.bill_number.split('-')[1] || '12345'}`;
@@ -547,10 +547,10 @@ Total Items: ${lineItemsData.length}`;
     content += `
 Subtotal:                         ${formatCurrency(billData.subtotal)} LBP`;
 
-    // Show previous balance if enabled and customer has balance
-    if (receiptSettings.showPreviousBalance && customer && customer.lb_balance > 0) {
+    // Show previous balance if enabled and entity has balance
+    if (receiptSettings.showPreviousBalance && entity && entity.lb_balance > 0) {
       content += `
-Previous Balance:                 ${formatCurrency(customer.lb_balance)} LBP`;
+Previous Balance:                 ${formatCurrency(entity.lb_balance)} LBP`;
     }
 
     content += `
@@ -1007,15 +1007,24 @@ ${dashSeparator}`;
         }
       }
 
-      // Prepare customer balance update if needed
+      // Prepare customer/supplier balance update if needed
       let customerBalanceUpdate = null;
       if (activeTab.paymentMethod === 'credit' || amountDue > 0) {
-        const customer = await raw.customers.find(c => c.id === activeTab.selectedCustomer);
-        if (customer) {
+        // First try to find as customer
+        let entity = customers.find(c => c.id === activeTab.selectedCustomer);
+        let entityType = 'customer';
+        
+        // If not found as customer, try as supplier
+        if (!entity) {
+          entity = suppliers.find(s => s.id === activeTab.selectedCustomer);
+          entityType = 'supplier';
+        }
+        
+        if (entity) {
           customerBalanceUpdate = {
-            customerId: customer.id,
+            customerId: entity.id,
             amountDue: amountDue,
-            originalBalance: customer.lb_balance || 0
+            originalBalance: entity.lb_balance || 0
           };
         }
       }
@@ -1027,19 +1036,28 @@ ${dashSeparator}`;
       // No need for separate sale_items creation since bill_line_items now contains all sale data
       // Inventory deductions and cash drawer updates are handled in the createBill function
 
-      // Generate QR code for customer account statement if customer is selected
+      // Generate QR code for customer/supplier account statement if entity is selected
       let qrCodeData = null;
       if (activeTab.selectedCustomer) {
         try {
-          const customer = customers.find(c => c.id === activeTab.selectedCustomer);
-          if (customer) {
+          // First try to find as customer
+          let entity = customers.find(c => c.id === activeTab.selectedCustomer);
+          let entityType = 'customer';
+          
+          // If not found as customer, try as supplier
+          if (!entity) {
+            entity = suppliers.find(s => s.id === activeTab.selectedCustomer);
+            entityType = 'supplier';
+          }
+          
+          if (entity) {
             // Don't pass billId since bill is only local at this point (not synced to Supabase yet)
-            // Token will give customer access to their full statement
+            // Token will give entity access to their full statement
             qrCodeData = await generateQRCodeForReceipt(
-              customer.id,
-              null, // Bill not in Supabase yet - use customer-level token
+              entity.id,
+              null, // Bill not in Supabase yet - use entity-level token
               billData.bill_number,
-              customer.name
+              entity.name
             );
           }
         } catch (qrError) {
@@ -1049,8 +1067,15 @@ ${dashSeparator}`;
       }
 
       // Print receipt after successful bill creation
-      const customer = customers.find(c => c.id === activeTab.selectedCustomer);
-      await printReceipt(billData, lineItemsData, customer, qrCodeData);
+      // First try to find as customer
+      let entity = customers.find(c => c.id === activeTab.selectedCustomer);
+      
+      // If not found as customer, try as supplier
+      if (!entity) {
+        entity = suppliers.find(s => s.id === activeTab.selectedCustomer);
+      }
+      
+      await printReceipt(billData, lineItemsData, entity, qrCodeData);
       
       // Also download receipt for preview/testing
 
@@ -1376,18 +1401,26 @@ ${dashSeparator}`;
               {/* Customer Selection (moved here) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('common.labels.customerName')} {(activeTab.paymentMethod === 'credit' || ((activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && parseFloat(activeTab.amountReceived || '0') < total)) ? <span className="text-red-500">*</span> : null}
+                  Customer/Supplier {(activeTab.paymentMethod === 'credit' || ((activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && parseFloat(activeTab.amountReceived || '0') < total)) ? <span className="text-red-500">*</span> : null}
                 </label>
                 <div ref={customerSelectRef}>
                   <SearchableSelect
                   options={
                     activeTab.paymentMethod === 'credit'
-                      ? customers.filter(c => c.isActive).map(customer => ({
-                          id: customer.id,
-                          label: customer.name,
-                          value: customer.id,
-                          category: 'Customer'
-                        }))
+                      ? [
+                          ...customers.filter(c => c.isActive).map(customer => ({
+                            id: customer.id,
+                            label: customer.name,
+                            value: customer.id,
+                            category: 'Customer'
+                          })),
+                          ...suppliers.map(supplier => ({
+                            id: supplier.id,
+                            label: supplier.name,
+                            value: supplier.id,
+                            category: 'Supplier'
+                          }))
+                        ]
                       : [
                           { id: '', label: `${t('common.labels.walkInCustomer')}`, value: '', category: 'Customer' },
                           ...customers.filter(c => c.isActive).map(customer => ({
@@ -1395,6 +1428,12 @@ ${dashSeparator}`;
                             label: customer.name,
                             value: customer.id,
                             category: 'Customer'
+                          })),
+                          ...suppliers.map(supplier => ({
+                            id: supplier.id,
+                            label: supplier.name,
+                            value: supplier.id,
+                            category: 'Supplier'
                           }))
                         ]
                   }
@@ -1403,13 +1442,13 @@ ${dashSeparator}`;
                     updateActiveTab({ selectedCustomer: value as string });
                     setCustomerError(null);
                   }}
-                  searchPlaceholder={t('common.placeholders.searchCustomers')}
-                  placeholder={activeTab.paymentMethod === 'credit' ? `${t('common.labels.selectCustomer')}` : `${t('common.labels.walkInCustomer')}`}
+                  searchPlaceholder="Search customers and suppliers..."
+                  placeholder={activeTab.paymentMethod === 'credit' ? "Select Customer/Supplier" : "Walk-in Customer"}
 
                   recentSelections={recentCustomers}
                   onRecentUpdate={setRecentCustomers}
                   showAddOption={true}
-                  addOptionText={t('common.labels.addNewCustomer')}
+                  addOptionText="Add New Customer/Supplier"
                   onAddNew={() => setShowAddCustomerForm(true)}
                   className={`w-full ${customerError ? 'border border-red-500' : ''}`}
                   tabIndex={10000}

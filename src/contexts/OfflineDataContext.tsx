@@ -105,7 +105,7 @@ interface OfflineDataContextType {
   updateBillsForSaleItem: (saleItemId: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: any) => Promise<void>;
-  updateInventoryBatch: (id: string, updates: Tables['inventory_bills']['Update']) => Promise<void>;
+  updateInventoryBatch: (id: string, updates: Partial<Tables['inventory_bills']['Update']>) => Promise<void>;
   applyCommissionRateToBatch: (batchId: string, commissionRate: number) => Promise<void>;
 
   // Bill management operations
@@ -598,6 +598,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         missedProductsData,
       } = await crudHelperService.loadAllStoreData(storeId);
 
+      console.log(`🔄 refreshData: Loaded ${customersData.length} customers, ${suppliersData.length} suppliers`);
+      console.log('🔄 refreshData: Latest customers:', customersData.slice(-3));
+      console.log('🔄 refreshData: Latest suppliers:', suppliersData.slice(-3));
+
       debug(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
 
       // Transform data for offline-first structure
@@ -661,7 +665,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           ...item,
           commission_rate: batch ? batch.commission_rate : null,
           batch_type: batch ? batch.type : null,
-          batch_porterage: batch ? batch.porterage : null,
+          batch_porterage: batch ? batch.porterage_fee : null,
           batch_transfer_fee: batch ? batch.transfer_fee : null,
           batch_status: batch ? batch.status : 'Created',
         };
@@ -765,7 +769,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       onDebouncedSync: debouncedSync,
       onResetAutoSyncTimer: resetAutoSyncTimer
     });
-  }, []); // Empty dependency array - only set up callbacks once
+  }, []); // Empty dependency array - callbacks will be updated when functions change
 
   const updateStockLevels = () => {
     const levels = products.map(product => {
@@ -905,7 +909,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
 
     // Use transaction to ensure atomicity for all operations including inventory, cash drawer, and customer balance
-    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.customers, db.transactions], async () => {
+    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.customers, db.suppliers, db.transactions], async () => {
       // Add bill and line items
       await db.bills.add(bill);
       if (mappedLineItems.length > 0) {
@@ -985,15 +989,32 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Update customer balance if needed
+      // Update customer/supplier balance if needed
       if (customerBalanceUpdate) {
-        const customer = await db.customers.get(customerBalanceUpdate.customerId);
-        if (customer) {
+        // First try to find as customer
+        let entity: any = await db.customers.get(customerBalanceUpdate.customerId);
+        let entityType = 'customer';
+        
+        // If not found as customer, try as supplier
+        if (!entity) {
+          entity = await db.suppliers.get(customerBalanceUpdate.customerId);
+          entityType = 'supplier';
+        }
+        
+        if (entity) {
           const newBalance = customerBalanceUpdate.originalBalance + customerBalanceUpdate.amountDue;
-          await db.customers.update(customerBalanceUpdate.customerId, {
-            lb_balance: newBalance,
-            _synced: false
-          });
+          
+          if (entityType === 'customer') {
+            await db.customers.update(customerBalanceUpdate.customerId, {
+              lb_balance: newBalance,
+              _synced: false
+            });
+          } else {
+            await db.suppliers.update(customerBalanceUpdate.customerId, {
+              lb_balance: newBalance,
+              _synced: false
+            });
+          }
 
           // Record the transaction for financial tracking
           const transaction = {
@@ -1005,10 +1026,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             type: 'income', // Credit sale creates accounts receivable (income)
             amount: customerBalanceUpdate.amountDue,
             currency: 'LBP',
-            description: `Credit sale - Bill ${bill.bill_number}`,
+            description: `Credit sale - Bill ${bill.bill_number} (${entityType})`,
             reference: bill.bill_number,
-            customer_id: customerBalanceUpdate.customerId,
-            supplier_id: null,
+            customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
+            supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
             category: "sale",
             created_by: currentUserId,
             status: 'active' as const
@@ -1341,31 +1362,31 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // CRUD Operations - matching exact function signatures
   const addProduct = async (productData: Omit<Tables['products']['Insert'], 'store_id'>): Promise<void> => {
-    crudHelperService.addEntity('products', storeId!, productData);
+    await crudHelperService.addEntity('products', storeId!, productData);
   };
 
   const addSupplier = async (supplierData: Omit<Tables['suppliers']['Insert'], 'store_id'>): Promise<void> => {
-    crudHelperService.addEntity('suppliers', storeId!, supplierData);
+    await crudHelperService.addEntity('suppliers', storeId!, supplierData);
   };
 
   const addCustomer = async (customerData: Omit<Tables['customers']['Insert'], 'store_id'>): Promise<void> => {
-    crudHelperService.addEntity('customers', storeId!, customerData);
+    await crudHelperService.addEntity('customers', storeId!, customerData);
   };
 
   const updateCustomer = async (id: string, updates: Tables['customers']['Update']): Promise<void> => {
-    crudHelperService.updateEntity('customers', id, updates);
+    await crudHelperService.updateEntity('customers', id, updates);
   };
 
   const updateSupplier = async (id: string, updates: Tables['suppliers']['Update']): Promise<void> => {
-    crudHelperService.updateEntity('suppliers', id, updates);
+    await crudHelperService.updateEntity('suppliers', id, updates);
   };
 
   const updateProduct = async (id: string, updates: Tables['products']['Update']): Promise<void> => {
-    crudHelperService.updateEntity('products', id, updates);
+    await crudHelperService.updateEntity('products', id, updates);
   };
 
   const deleteProduct = async (id: string): Promise<void> => {
-    crudHelperService.deleteEntity('products', id);
+    await crudHelperService.deleteEntity('products', id);
   };
 
   const addInventoryItem = async (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> => {
@@ -1390,7 +1411,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateInventoryItem = async (id: string, updates: Tables['inventory_items']['Update']): Promise<void> => {
-    crudHelperService.updateEntity('inventory_items', id, updates);
+    await crudHelperService.updateEntity('inventory_items', id, updates);
   };
 
   const checkInventoryItemReferences = async (id: string): Promise<{
@@ -1428,6 +1449,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const deleteInventoryItem = async (id: string): Promise<void> => {
     try {
+      console.log(`🗑️ Deleting inventory item ${id}`);
+      
       // Get all related records
       const sales = await db.bill_line_items
         .where('inventory_item_id')
@@ -1440,6 +1463,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         .equals(id)
         .and(item => !item._deleted)
         .toArray();
+
+      console.log(`🗑️ Found ${sales.length} sales records and ${missedProducts.length} missed products to delete`);
 
       if (sales.length > 0 || missedProducts.length > 0) {
         await db.transaction('rw', [db.bill_line_items, db.missed_products, db.inventory_items], async () => {
@@ -1457,10 +1482,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           await crudHelperService.deleteEntity('inventory_items', id);
         });
         
-        console.log(`Deleted ${sales.length} sales records and ${missedProducts.length} variance records before deleting inventory item ${id}`);
+        console.log(`🗑️ Deleted ${sales.length} sales records and ${missedProducts.length} variance records before deleting inventory item ${id}`);
       } else {
         await crudHelperService.deleteEntity('inventory_items', id);
       }
+      
+      console.log(`🗑️ Inventory item ${id} deleted successfully`);
+      
+      // Force immediate data refresh to ensure UI updates
+      await refreshData();
+      
     } catch (error) {
       console.error('Error deleting inventory item:', error);
       throw new Error(`Failed to delete inventory item: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1946,15 +1977,64 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return;
   };
 
-  const updateInventoryBatch = async (id: string, updates: Tables['inventory_bills']['Update']): Promise<void> => {
-    // Ensure commission_rate is properly typed as number | null
-    const processedUpdates = {
+  const updateInventoryBatch = async (id: string, updates: Partial<Tables['inventory_bills']['Update']>): Promise<void> => {
+    // Process updates to ensure proper data types
+    const processedUpdates: any = {
       ...updates,
-      commission_rate: updates.commission_rate !== undefined
-        ? (typeof updates.commission_rate === 'string' ? parseFloat(updates.commission_rate) || null : updates.commission_rate)
-        : undefined,
       _synced: false
     };
+
+    // Handle numeric fields
+    if (updates.commission_rate !== undefined) {
+      processedUpdates.commission_rate = typeof updates.commission_rate === 'string' 
+        ? parseFloat(updates.commission_rate) || null 
+        : updates.commission_rate;
+    }
+
+    if (updates.porterage_fee !== undefined) {
+      processedUpdates.porterage_fee = typeof updates.porterage_fee === 'string' 
+        ? parseFloat(updates.porterage_fee) || null 
+        : updates.porterage_fee;
+    }
+
+    if (updates.transfer_fee !== undefined) {
+      processedUpdates.transfer_fee = typeof updates.transfer_fee === 'string' 
+        ? parseFloat(updates.transfer_fee) || null 
+        : updates.transfer_fee;
+    }
+
+    if (updates.plastic_fee !== undefined) {
+      processedUpdates.plastic_fee = typeof updates.plastic_fee === 'string' 
+        ? updates.plastic_fee 
+        : (updates.plastic_fee as any)?.toString() || null;
+    }
+
+    // Handle date fields
+    if (updates.received_at !== undefined) {
+      processedUpdates.received_at = updates.received_at || new Date().toISOString();
+    }
+
+    // Ensure status is never null (database constraint)
+    if (updates.status !== undefined) {
+      processedUpdates.status = updates.status || 'Created';
+    } else {
+      // If status is not being updated, ensure it has a default value
+      processedUpdates.status = 'Created';
+    }
+
+    // Ensure type is never null (database constraint)
+    if (updates.type !== undefined) {
+      processedUpdates.type = updates.type || 'commission';
+    }
+
+    // Ensure supplier_id is never null (database constraint)
+    if (updates.supplier_id !== undefined) {
+      processedUpdates.supplier_id = updates.supplier_id;
+    }
+
+    // Remove fields that don't exist in the database schema
+    delete processedUpdates.plastic_count;
+    delete processedUpdates.plastic_price;
 
     await db.inventory_bills.update(id, processedUpdates);
     await refreshData();

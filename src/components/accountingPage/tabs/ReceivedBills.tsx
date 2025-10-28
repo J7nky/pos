@@ -27,8 +27,7 @@ type ReceivedBillsProps = {
   showToast: (message: string, type?: 'success' | 'error') => void;
   onEditSale: (sale: any) => void;
   onDeleteSale: (sale: any) => void;
-  onUpdateBatch?: (batchId: string, updates: { porterage?: number | null; transfer_fee?: number | null; notes?: string | null }) => Promise<void>;
-  onApplyBatchCommission?: (batchId: string, commissionRate: number) => Promise<void>;
+  onUpdateBatch?: (batchId: string, updates: Partial<{ porterage_fee?: number | null; transfer_fee?: number | null; notes?: string | null; plastic_fee?: string | null; plastic_count?: number | null; plastic_price?: number | null; commission_rate?: number | null; received_at?: string | null; status?: string | null; type?: string | null; supplier_id?: string | null; }>) => Promise<void>;
   onCloseBill?: (bill: any, fees: { commission: number; porterage: number; transfer: number; supplierAmount: number }) => Promise<void>;
   // Additional props for ReceiveFormModal
   defaultCommissionRate: number;
@@ -51,7 +50,6 @@ export default function ReceivedBills({
   onEditSale,
   onDeleteSale,
   onUpdateBatch,
-  onApplyBatchCommission,
   onCloseBill,
   defaultCommissionRate,
   recentSuppliers,
@@ -157,14 +155,18 @@ export default function ReceivedBills({
     try {
       if (editingBatchId && onUpdateBatch) {
         await onUpdateBatch(editingBatchId, {
-          porterage: data.batch?.porterage_fee ? parseFloat(data.batch.porterage_fee) : null,
+          porterage_fee: data.batch?.porterage_fee ? parseFloat(data.batch.porterage_fee) : null,
           transfer_fee: data.batch?.transfer_fee ? parseFloat(data.batch.transfer_fee) : null,
-          notes: data.batch?.status || null
+          notes: data.batch?.status || null,
+          plastic_fee: data.batch?.plastic_fee ? parseFloat(data.batch.plastic_fee) : null,
+          plastic_count: data.batch?.plastic_count ? parseInt(data.batch.plastic_count) : null,
+          plastic_price: data.batch?.plastic_price ? parseFloat(data.batch.plastic_price) : null,
+          commission_rate: data.batch?.commission_rate ? parseFloat(data.batch.commission_rate) : null,
+          received_at: data.batch?.received_at || null,
+          status: data.batch?.status || 'Created',
+          type: data.batch?.type || 'commission',
+          supplier_id: data.batch?.supplier_id || undefined
         });
-      }
-
-      if (editingBatchId && onApplyBatchCommission && data.batch?.commission_rate) {
-        await onApplyBatchCommission(editingBatchId, parseFloat(data.batch.commission_rate));
       }
 
       setShowBatchEdit(false);
@@ -227,7 +229,7 @@ export default function ReceivedBills({
 
         const batchType = (item as any).batch_type || (item as any).type || 'commission';
         const totalCost = batchType === 'commission'
-          ? (((item as any).porterage || 0) + ((item as any).transfer_fee || 0) + (((item as any).batch_porterage || 0) + ((item as any).batch_transfer_fee || 0)))
+          ? (((item as any).batch_porterage || 0) + ((item as any).batch_transfer_fee || 0))
           : (item.price || 0) * validOriginalQuantity;
         const totalProfit = totalRevenue - totalCost;
 
@@ -239,8 +241,8 @@ export default function ReceivedBills({
           supplierId: item.supplier_id,
           supplierName: supplier.name,
           type: batchType,
-          batchPorterage: (item as any).batch_porterage ?? (item as any).porterage ?? null,
-          batchTransferFee: (item as any).batch_transfer_fee ?? (item as any).transfer_fee ?? null,
+          batchPorterage: (item as any).batch_porterage ?? null,
+          batchTransferFee: (item as any).batch_transfer_fee ?? null,
           batchNotes: (item as any).batch_notes ?? null,
           originalQuantity: validOriginalQuantity,
           remainingQuantity: validRemainingQuantity,
@@ -259,8 +261,8 @@ export default function ReceivedBills({
           notes: item.notes,
           unit: item.unit,
           weight: item.weight,
-          porterage: (item as any).porterage,
-          transferFee: (item as any).transfer_fee,
+          porterage: (item as any).batch_porterage,
+          transferFee: (item as any).batch_transfer_fee,
           price: item.price,
           commissionRate: (item as any).commission_rate,
           relatedSales: sortedSales
@@ -1351,7 +1353,7 @@ function ReceivedBillSalesLogsModal({
           const soldQty = relatedSales.reduce((s: number, r: any) => s + (r.quantity || 0), 0);
           const revenue = relatedSales.reduce((s: number, r: any) => s + (r.unit_price || 0) * (r.quantity || 0), 0);
           const origQty = it.received_quantity || it.quantity || 0;
-          const cost = it.type === 'commission' ? ((it.porterage || 0) + (it.transfer_fee || 0)) : (it.price || 0) * origQty;
+          const cost = it.type === 'commission' ? ((it.batch_porterage || 0) + (it.batch_transfer_fee || 0)) : (it.price || 0) * origQty;
           acc.totalItems += 1;
           acc.totalOriginal += origQty;
           acc.totalRemaining += (it.quantity || 0);

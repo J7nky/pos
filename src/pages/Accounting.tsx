@@ -1325,23 +1325,13 @@ export default function Accounting() {
     }
   };
 
-  const handleUpdateBatch = async (batchId: string, updates: { porterage?: number | null; transfer_fee?: number | null; notes?: string | null }) => {
+  const   = async (batchId: string, updates: Partial<{ porterage_fee?: number | null; transfer_fee?: number | null; notes?: string | null; plastic_fee?: string | null; plastic_count?: number | null; plastic_price?: number | null; commission_rate?: number | null; received_at?: string | null; status?: string | null; type?: string | null; supplier_id?: string | null; }>) => {
     try {
       // Update batch information
       await updateInventoryBatch(batchId, updates);
       showToast(t('accounting.batchUpdatedSuccessfully'), 'success');
     } catch (error) {
       showToast(t('accounting.errorUpdatingBatch'), 'error');
-    }
-  };
-
-  const handleApplyBatchCommission = async (batchId: string, commissionRate: number) => {
-    try {
-      // Apply commission rate to batch
-      await updateInventoryBatch(batchId, { commission_rate: commissionRate });
-      showToast(t('accounting.commissionRateApplied'), 'success');
-    } catch (error) {
-      showToast(t('accounting.errorApplyingCommissionRate'), 'error');
     }
   };
 
@@ -2026,7 +2016,6 @@ export default function Accounting() {
           onDeleteSale={handleDeleteSale}
           onCloseBill={handleCloseReceivedBill}
           onUpdateBatch={handleUpdateBatch}
-          onApplyBatchCommission={handleApplyBatchCommission}
           defaultCommissionRate={defaultCommissionRate}
           recentSuppliers={recentSuppliers}
           setRecentSuppliers={setRecentSuppliers}

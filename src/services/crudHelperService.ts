@@ -31,8 +31,13 @@ export class CRUDHelperService {
       ...entityData
     };
 
+    console.log(`🔧 CRUDHelper: Adding ${tableName} entity:`, entity);
     await (db as any)[tableName].add(entity);
+    console.log(`🔧 CRUDHelper: Successfully added ${tableName} entity to IndexedDB`);
+    
+    console.log(`🔧 CRUDHelper: Triggering post-operation callbacks for ${tableName}`);
     await this.triggerPostOperationCallbacks();
+    console.log(`🔧 CRUDHelper: Post-operation callbacks completed for ${tableName}`);
   }
 
   /**
@@ -61,7 +66,14 @@ export class CRUDHelperService {
     tableName: T,
     id: string
   ): Promise<void> {
-    await (db as any)[tableName].update(id, { _deleted: true, _synced: false });
+    console.log(`🗑️ CRUDHelper: Soft deleting ${tableName} with ID ${id}`);
+    const result = await (db as any)[tableName].update(id, { _deleted: true, _synced: false });
+    console.log(`🗑️ CRUDHelper: Delete result for ${tableName}:`, result);
+    
+    // Verify the deletion
+    const entity = await (db as any)[tableName].get(id);
+    console.log(`🗑️ CRUDHelper: Entity after deletion:`, entity);
+    
     await this.triggerPostOperationCallbacks();
   }
 
@@ -150,18 +162,35 @@ export class CRUDHelperService {
    * Trigger all post-operation callbacks
    */
   private async triggerPostOperationCallbacks(): Promise<void> {
+    console.log('🔧 CRUDHelper: Starting post-operation callbacks');
+    
     if (this.callbacks.onRefreshData) {
+      console.log('🔧 CRUDHelper: Calling onRefreshData callback');
       await this.callbacks.onRefreshData();
+      console.log('🔧 CRUDHelper: onRefreshData callback completed');
+    } else {
+      console.log('🔧 CRUDHelper: No onRefreshData callback set');
     }
+    
     if (this.callbacks.onUpdateUnsyncedCount) {
+      console.log('🔧 CRUDHelper: Calling onUpdateUnsyncedCount callback');
       await this.callbacks.onUpdateUnsyncedCount();
+      console.log('🔧 CRUDHelper: onUpdateUnsyncedCount callback completed');
     }
+    
     if (this.callbacks.onResetAutoSyncTimer) {
+      console.log('🔧 CRUDHelper: Calling onResetAutoSyncTimer callback');
       this.callbacks.onResetAutoSyncTimer();
+      console.log('🔧 CRUDHelper: onResetAutoSyncTimer callback completed');
     }
+    
     if (this.callbacks.onDebouncedSync) {
+      console.log('🔧 CRUDHelper: Calling onDebouncedSync callback');
       this.callbacks.onDebouncedSync();
+      console.log('🔧 CRUDHelper: onDebouncedSync callback completed');
     }
+    
+    console.log('🔧 CRUDHelper: All post-operation callbacks completed');
   }
 
   /**

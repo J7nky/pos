@@ -11,10 +11,9 @@ import AccountStatementModal from '../components/AccountStatementModal';
 
 export default function Customers() {
   const raw = useOfflineData();
-  const { pushUndo, getStore } = raw;
   const { t } = useI18n();
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0, email: c.email || '', address: c.address || ''})) : [];
-  const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at || 'commission', email: s.email || '', address: s.address || ''})) : [];
+  const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at || 'commission', email: s.email || '', address: s.address || '', lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0})) : [];
   const addCustomer = raw.addCustomer;
   const updateCustomer = raw.updateCustomer;
   const addSupplier = raw.addSupplier;
@@ -310,7 +309,7 @@ export default function Customers() {
     }));
   };
 
-  const handleCustomerFormSubmit = (e: React.FormEvent) => {
+  const handleCustomerFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerForm.name || !customerForm.phone) {
       setCustomerFormError(t('customers.nameRequired'));
@@ -325,14 +324,14 @@ export default function Customers() {
     }
     setCustomerFormError(null);
     if (editingCustomer) {
-      updateCustomer(editingCustomer.id, {
+      await updateCustomer(editingCustomer.id, {
         ...customerForm,
         lb_balance: editingCustomer.lb_balance || 0,
         usd_balance: editingCustomer.usd_balance || 0,
       } as Customer);
       showToast('Customer updated successfully!', 'success');
     } else {
-      addCustomer({
+      await addCustomer({
         name: customerForm.name!,
         phone: customerForm.phone!,
         email: customerForm.email || '',
@@ -341,6 +340,8 @@ export default function Customers() {
         lb_balance: 0,
         usd_balance: 0,
       });
+      // Force immediate refresh to ensure UI updates
+      await raw.refreshData();
       showToast('Customer added successfully!', 'success');
     }
     setShowCustomerForm(false);
@@ -736,12 +737,16 @@ export default function Customers() {
             // Note: We'll need to add updateSupplier to the context later
             showToast('Supplier update functionality coming soon!', 'error');
           } else {
-            addSupplier({
+            await addSupplier({
               name: supplierData.name!,
               phone: supplierData.phone!,
               email: supplierData.email || '',
               address: supplierData.address || '',
+              lb_balance: 0,
+              usd_balance: 0,
             });
+            // Force immediate refresh to ensure UI updates
+            await raw.refreshData();
             showToast('Supplier added successfully!', 'success');
           }
           setShowSupplierForm(false);
