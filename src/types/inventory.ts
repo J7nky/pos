@@ -21,7 +21,7 @@ export interface Supplier {
 export interface InventoryItem {
   id: string;
   product_id: string;
-  supplier_id: string;
+  // supplier_id removed - get it from inventory_bills via batch_id
   quantity: number;
   received_quantity: number;
   unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen';
@@ -31,6 +31,7 @@ export interface InventoryItem {
   batch_type: 'commission' | 'cash';
   created_at: string;
   createdAt: string;
+  batch_id?: string | null;
 }
 
 export interface StockLevel {

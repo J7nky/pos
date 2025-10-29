@@ -4,6 +4,7 @@ interface RecentReceivesTableProps {
   recentReceives: any[];
   products: any[];
   suppliers: any[];
+  inventoryBills?: any[]; // Add inventoryBills prop for supplier lookup
   onEdit: (item: any) => void;
   onDelete: (item: any) => void;
 }
@@ -11,11 +12,15 @@ interface RecentReceivesTableProps {
 const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({ 
   recentReceives, 
   products, 
-  suppliers, 
+  suppliers,
+  inventoryBills = [],
   onEdit, 
   onDelete 
 }) => {
   const { t } = useI18n();
+  
+  // Create batch map for supplier lookup
+  const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
 
   // Function to translate batch type
   const translateBatchType = (batchType: string) => {
@@ -85,7 +90,10 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
           <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
             {recentReceives.map((item: any) => {
               const product = products.find((p: any) => p.id === item.product_id);
-              const supplier = suppliers.find((s: any) => s.id === item.supplier_id);
+              // Get supplier_id from batch
+              const batch = item.batch_id ? batchMap.get(item.batch_id) : null;
+              const supplierId = batch?.supplier_id || (item.supplier_id || null); // Fallback for legacy items
+              const supplier = supplierId ? suppliers.find((s: any) => s.id === supplierId) : null;
 
               return (
                 <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">

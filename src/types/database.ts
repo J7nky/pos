@@ -270,7 +270,6 @@ export interface Database {
         Row: {
           id: string;
   product_id: string;
-  supplier_id: string;
   quantity: number;
   selling_price: number | null;
   unit: string;
@@ -284,7 +283,6 @@ export interface Database {
         Insert:{
         id: string;
         product_id?: string;
-        supplier_id?: string;
         quantity?: number;
         selling_price?: number | null;
         unit?: string;
@@ -298,7 +296,6 @@ export interface Database {
         Update: {
           id: string;
           product_id?: string;
-          supplier_id?: string;
           quantity?: number;
           selling_price?: number | null;
           unit?: string;

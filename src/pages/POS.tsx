@@ -51,6 +51,7 @@ export default function POS() {
   const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
+  const inventoryBills = (raw.inventoryBills || []) as Array<any>;
   const addCustomer = raw.addCustomer;
 
   const { userProfile } = useSupabaseAuth();
@@ -714,13 +715,19 @@ ${dashSeparator}`;
       }, 0);
     };
 
+    // Create batch map for supplier lookup
+    const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
+
     return productInventoryItems.map(inventoryItem => {
-      const supplier = suppliers.find(s => s.id === inventoryItem.supplier_id);
+      // Get supplier_id from batch
+      const batch = inventoryItem.batch_id ? batchMap.get(inventoryItem.batch_id) : null;
+      const supplierId = batch?.supplier_id || null;
+      const supplier = supplierId ? suppliers.find(s => s.id === supplierId) : null;
       const reserved = getReservedForInventoryItem(inventoryItem.id);
       const available = Math.max(0, (inventoryItem.quantity || 0) - reserved);
       return {
         inventoryItemId: inventoryItem.id,
-        supplierId: inventoryItem.supplier_id,
+        supplierId: supplierId,
         supplierName: supplier?.name || 'Unknown Supplier',
         // Reflect temporary reservations in the UI
         quantity: available,
@@ -758,8 +765,11 @@ ${dashSeparator}`;
     const inventoryItem = inventory.find(item => item.id === inventoryItemId);
     if (!product || !inventoryItem) return;
 
-    const supplier = suppliers.find(s => s.id === inventoryItem.supplier_id);
-    if (!supplier) return;
+    // Get supplier_id from batch
+    const batch = inventoryItem.batch_id ? inventoryBills.find(b => b.id === inventoryItem.batch_id) : null;
+    const supplierId = batch?.supplier_id || null;
+    const supplier = supplierId ? suppliers.find(s => s.id === supplierId) : null;
+    if (!supplier || !supplierId) return;
 
     // Compute available considering what's already reserved across all tabs for this inventory item
     const reserved = activeTabs.reduce((sum, tab) => {
@@ -798,7 +808,7 @@ ${dashSeparator}`;
         lineTotal: 0.00,
         receivedValue: 0.00,
         productId,
-        supplierId: inventoryItem.supplier_id,
+        supplierId: supplierId,
         quantity: 1,
         weight: undefined, // Weight will be entered manually during sale
         unitPrice:0.00, // Use price from this specific inventory item

@@ -51,7 +51,7 @@ export interface Supplier {
 export interface InventoryItem {
   id: string;
   productId: string;
-  supplierId: string;
+  // supplierId removed - get it from inventory_bills via batchId
   quantity: number;
   receivedQuantity: number;
   unit: 'kg' | 'piece' | 'box' | 'bag';

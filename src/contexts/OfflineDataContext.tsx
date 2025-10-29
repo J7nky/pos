@@ -1392,19 +1392,20 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addInventoryItem = async (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
-    // Prepare item with defaults - crudHelperService will add base entity fields (id, store_id, created_at, _synced)
-    const preparedData = {
-      ...(itemData.id && { id: itemData.id }), // Only include id if provided
-      product_id: itemData.product_id ?? '',
-      supplier_id: itemData.supplier_id ?? '',
-      quantity: itemData.quantity ?? 0,
-      unit: itemData.unit ?? '',
-      received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
-      weight: itemData.weight ?? null,
-      price: itemData.price ?? null,
-      selling_price: (itemData as any).selling_price ?? null,
-      batch_id: itemData.batch_id ?? null
-    } as Omit<Tables['inventory_items']['Insert'], 'store_id'>;
+      // Prepare item with defaults - crudHelperService will add base entity fields (id, store_id, created_at, _synced)
+      // Note: supplier_id removed - items must have batch_id to get supplier from inventory_bills
+      const preparedData = {
+        ...(itemData.id && { id: itemData.id }), // Only include id if provided
+        product_id: itemData.product_id ?? '',
+        // supplier_id removed - get it from inventory_bills via batch_id
+        quantity: itemData.quantity ?? 0,
+        unit: itemData.unit ?? '',
+        received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
+        weight: itemData.weight ?? null,
+        price: itemData.price ?? null,
+        selling_price: (itemData as any).selling_price ?? null,
+        batch_id: itemData.batch_id ?? null
+      } as Omit<Tables['inventory_items']['Insert'], 'store_id'>;
 
     // Use crudHelperService - it will handle all callbacks automatically
     await crudHelperService.addEntity('inventory_items', storeId, preparedData);
@@ -1585,7 +1586,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         store_id: storeId,
         created_at: now,
         _synced: false,
-        supplier_id: actualSupplierId,
+        // supplier_id removed - now comes from inventory_bills via batch_id
         weight: it.weight ?? null,
         price: it.price ?? null,
         selling_price: it.selling_price ?? null,
@@ -1978,11 +1979,32 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateInventoryBatch = async (id: string, updates: Partial<Tables['inventory_bills']['Update']>): Promise<void> => {
+    console.log('[OfflineDataContext] updateInventoryBatch - Called with:', { id, updates });
+    
+    // Get current batch state before update
+    const currentBatch = await db.inventory_bills.get(id);
+    console.log('[OfflineDataContext] updateInventoryBatch - Current batch state:', {
+      id,
+      currentSupplierId: currentBatch?.supplier_id,
+      currentStatus: currentBatch?.status,
+      currentType: currentBatch?.type
+    });
+
     // Process updates to ensure proper data types
     const processedUpdates: any = {
       ...updates,
       _synced: false
     };
+
+    console.log('[OfflineDataContext] updateInventoryBatch - Initial processedUpdates:', processedUpdates);
+    console.log('[OfflineDataContext] updateInventoryBatch - Supplier ID in updates:', {
+      inUpdates: 'supplier_id' in updates,
+      value: updates.supplier_id,
+      isUndefined: updates.supplier_id === undefined,
+      isNull: updates.supplier_id === null,
+      isEmptyString: updates.supplier_id === '',
+      type: typeof updates.supplier_id
+    });
 
     // Handle numeric fields
     if (updates.commission_rate !== undefined) {
@@ -2015,12 +2037,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
 
     // Ensure status is never null (database constraint)
+    // Only update status if explicitly provided in updates
     if (updates.status !== undefined) {
       processedUpdates.status = updates.status || 'Created';
-    } else {
-      // If status is not being updated, ensure it has a default value
-      processedUpdates.status = 'Created';
     }
+    // Don't overwrite existing status if not being updated
 
     // Ensure type is never null (database constraint)
     if (updates.type !== undefined) {
@@ -2030,13 +2051,37 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Ensure supplier_id is never null (database constraint)
     if (updates.supplier_id !== undefined) {
       processedUpdates.supplier_id = updates.supplier_id;
+      console.log('[OfflineDataContext] updateInventoryBatch - Supplier ID processed:', {
+        original: updates.supplier_id,
+        processed: processedUpdates.supplier_id,
+        willUpdate: true
+      });
+    } else {
+      console.log('[OfflineDataContext] updateInventoryBatch - Supplier ID not in updates, will not change');
     }
 
     // Remove fields that don't exist in the database schema
     delete processedUpdates.plastic_count;
     delete processedUpdates.plastic_price;
 
-    await db.inventory_bills.update(id, processedUpdates);
+    console.log('[OfflineDataContext] updateInventoryBatch - Final processedUpdates before DB update:', processedUpdates);
+    console.log('[OfflineDataContext] updateInventoryBatch - Supplier ID in final updates:', {
+      included: 'supplier_id' in processedUpdates,
+      value: processedUpdates.supplier_id
+    });
+
+    const updateResult = await db.inventory_bills.update(id, processedUpdates);
+    console.log('[OfflineDataContext] updateInventoryBatch - DB update result:', updateResult);
+    
+    // Verify the update
+    const updatedBatch = await db.inventory_bills.get(id);
+    console.log('[OfflineDataContext] updateInventoryBatch - Batch after update:', {
+      id,
+      newSupplierId: updatedBatch?.supplier_id,
+      newStatus: updatedBatch?.status,
+      newType: updatedBatch?.type,
+      supplierIdChanged: currentBatch?.supplier_id !== updatedBatch?.supplier_id
+    });
     await refreshData();
     await updateUnsyncedCount();
 
@@ -2966,11 +3011,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return;
 
     try {
-      const inventoryRecords = await db.inventory_items
+      // Get all items for this product, then filter by batch supplier_id
+      const allItems = await db.inventory_items
         .where('product_id')
         .equals(productId)
-        .and(inv => inv.supplier_id === supplierId && inv.quantity > 0)
-        .sortBy('received_at');
+        .and(inv => inv.quantity > 0 && inv.store_id === storeId)
+        .toArray();
+
+      // Get batches for all items
+      const batchIds = [...new Set(allItems.map(item => item.batch_id).filter(Boolean))];
+      const batches = await db.inventory_bills.where('id').anyOf(batchIds).toArray();
+      const batchMap = new Map(batches.map(b => [b.id, b]));
+
+      // Filter items by supplier_id from batch
+      const inventoryRecords = allItems
+        .filter(inv => {
+          if (!inv.batch_id) return false;
+          const batch = batchMap.get(inv.batch_id);
+          return batch?.supplier_id === supplierId;
+        })
+        .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime());
 
       let qtyToDeduct = quantity;
       for (const inv of inventoryRecords) {
@@ -3013,12 +3073,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return;
 
     try {
-      // Find existing inventory items for this product/supplier
-      const existingInventory = await db.inventory_items
+      // Get all items for this product, then filter by batch supplier_id
+      const allItems = await db.inventory_items
         .where('product_id')
         .equals(productId)
-        .and(inv => inv.supplier_id === supplierId)
-        .sortBy('received_at');
+        .and(inv => inv.store_id === storeId)
+        .toArray();
+
+      // Get batches for all items
+      const batchIds = [...new Set(allItems.map(item => item.batch_id).filter(Boolean))];
+      const batches = await db.inventory_bills.where('id').anyOf(batchIds).toArray();
+      const batchMap = new Map(batches.map(b => [b.id, b]));
+
+      // Filter items by supplier_id from batch
+      const existingInventory = allItems
+        .filter(inv => {
+          if (!inv.batch_id) return false;
+          const batch = batchMap.get(inv.batch_id);
+          return batch?.supplier_id === supplierId;
+        })
+        .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime());
 
       if (existingInventory.length > 0) {
         // Add to the most recent inventory item (LIFO for restoration)
@@ -3030,25 +3104,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           _synced: false
         });
       } else {
-        // Create new inventory item if none exists
-        const newInventoryItem: InventoryItem = {
-
-          id: createId(),
-          store_id: storeId,
-          product_id: productId,
-          supplier_id: supplierId,
-          quantity: quantity,
-          _synced: false,
-          unit: 'box',
-          weight: null,
-          price: null,
-          selling_price: null,
-          received_quantity: quantity,
-          created_at: new Date().toISOString(),
-          batch_id: null
-        };
-
-        await db.inventory_items.add(newInventoryItem);
+        // Cannot create new inventory item without batch_id
+        // Find or create a batch for this supplier first
+        // For now, log a warning - items should always be created through addInventoryBatch
+        console.warn('Cannot restore inventory: No existing items found and cannot create item without batch_id. Supplier:', supplierId, 'Product:', productId);
+        throw new Error('Cannot restore inventory: Items must have a batch_id. Use addInventoryBatch to create new inventory.');
       }
 
       // Refresh data to update stock levels

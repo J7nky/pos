@@ -58,6 +58,7 @@ export default function Accounting() {
   const sales = raw.sales || [];
   const products = raw.products || [];
   const bills = raw.bills || [];
+  const inventoryBills = raw.inventoryBills || [];
 
   let userProfile;
   try {
@@ -712,11 +713,16 @@ export default function Accounting() {
     window.URL.revokeObjectURL(url);
   };
 
-  // Enhanced nonPricedItems for display: filter, sort, and resolve customer name
+      // Enhanced nonPricedItems for display: filter, sort, and resolve customer name
+  // Create batch map for supplier lookup
+  const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
+  
   const filteredNonPricedItems = nonPricedItems
     .map(item => {
       const product = products.find(p => p.id === item.product_id);
       const customer = customers.find(c => c.id === item.customer_id);
+      // For bill_line_items, supplier_id is stored directly (not in inventory_items)
+      // So we can use item.supplier_id here since it comes from bill_line_items
       const supplier = suppliers.find(s => s.id === item.supplier_id);
 
       // Get staged changes for this item
@@ -764,10 +770,16 @@ export default function Accounting() {
   const getInventoryTransactionLogs = useMemo(() => {
     const logs: any[] = [];
 
+    // Create batch map for supplier lookup
+    const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
+
     // Add inventory receiving logs
     inventory.forEach(item => {
       const product = products.find(p => p.id === item.product_id);
-      const supplier = suppliers.find(s => s.id === item.supplier_id);
+      // Get supplier_id from batch
+      const batch = item.batch_id ? batchMap.get(item.batch_id) : null;
+      const supplierId = batch?.supplier_id || null;
+      const supplier = supplierId ? suppliers.find(s => s.id === supplierId) : null;
 
       logs.push({
         id: `inventory-${item.id}`,
@@ -775,7 +787,7 @@ export default function Accounting() {
         date: item.received_at || item.created_at,
         productId: item.product_id,
         productName: product?.name || 'Unknown Product',
-        supplierId: item.supplier_id,
+        supplierId: supplierId,
         supplierName: supplier?.name || 'Unknown Supplier',
         quantity: item.quantity,
         weight: item.weight,
@@ -1014,20 +1026,27 @@ export default function Accounting() {
     const bills: any[] = [];
 
     try {
+      // Create batch map for supplier lookup
+      const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
+
       // Group commission inventory items by supplier and product
+      // Filter items that have batch_id (required to get supplier_id)
       const receivedItems = inventory.filter(item =>  
         item.product_id && 
-        item.supplier_id
+        item.batch_id
       );
 
       console.log('Debug - Commission items found:', receivedItems.length);
 
       receivedItems.forEach(item => {
         const product = products.find(p => p.id === item.product_id);
-        const supplier = suppliers.find(s => s.id === item.supplier_id);
+        // Get supplier_id from batch
+        const batch = item.batch_id ? batchMap.get(item.batch_id) : null;
+        const supplierId = batch?.supplier_id || null;
+        const supplier = supplierId ? suppliers.find(s => s.id === supplierId) : null;
 
-        if (!product || !supplier) {
-          console.warn('Missing product or supplier for item:', item.id);
+        if (!product || !supplier || !supplierId) {
+          console.warn('Missing product, supplier, or batch for item:', item.id, { product, supplier, batch, batchId: item.batch_id });
           return;
         }
 
@@ -1036,7 +1055,7 @@ export default function Accounting() {
           sale && Array.isArray(sale) && 
           sale.some((saleItem: any) => 
             saleItem.productId === item.product_id && 
-            saleItem.supplierId === item.supplier_id &&
+            saleItem.supplierId === supplierId &&
             // Check if this sale happened after this inventory item was received
             new Date(sale.created_at || sale.created_at).getTime() >= new Date(item.received_at || item.created_at).getTime()
           )
@@ -1060,7 +1079,7 @@ export default function Accounting() {
           if (sale && Array.isArray(sale)) {
             for (const saleItem of sale) {
               if (saleItem.productId === item.product_id && 
-                  saleItem.supplierId === item.supplier_id &&
+                  saleItem.supplierId === supplierId &&
                   typeof saleItem.quantity === 'number' &&
                   typeof saleItem.totalPrice === 'number') {
 
@@ -1097,7 +1116,7 @@ export default function Accounting() {
           const bill = {
             id: `bill-${item.id}`,
             // inventoryItemId: item.id,
-            supplierId: item.supplier_id,
+            supplierId: supplierId,
             supplierName: supplier.name,
             productId: item.product_id,
             productName: product.name,
@@ -1128,7 +1147,7 @@ export default function Accounting() {
       showToast(t('accounting.errorProcessingPendingBills'), 'error');
       return [];
     }
-  }, [inventory, sales, products, suppliers]);
+  }, [inventory, sales, products, suppliers, inventoryBills, showToast, t]);
 
   const filteredPendingBills = useMemo(() => {
     let filtered = getPendingBills;
@@ -1325,12 +1344,16 @@ export default function Accounting() {
     }
   };
 
-  const   = async (batchId: string, updates: Partial<{ porterage_fee?: number | null; transfer_fee?: number | null; notes?: string | null; plastic_fee?: string | null; plastic_count?: number | null; plastic_price?: number | null; commission_rate?: number | null; received_at?: string | null; status?: string | null; type?: string | null; supplier_id?: string | null; }>) => {
+  const handleUpdateBatch  = async (batchId: string, updates: Partial<{ porterage_fee?: number | null; transfer_fee?: number | null; notes?: string | null; plastic_fee?: string | null; plastic_count?: number | null; plastic_price?: number | null; commission_rate?: number | null; received_at?: string | null; status?: string | null; type?: string | null; supplier_id?: string | null; }>) => {
+    console.log('[Accounting] handleUpdateBatch - Called with:', { batchId, updates });
     try {
       // Update batch information
+      console.log('[Accounting] handleUpdateBatch - Calling updateInventoryBatch...');
       await updateInventoryBatch(batchId, updates);
+      console.log('[Accounting] handleUpdateBatch - updateInventoryBatch completed successfully');
       showToast(t('accounting.batchUpdatedSuccessfully'), 'success');
     } catch (error) {
+      console.error('[Accounting] handleUpdateBatch - Error:', error);
       showToast(t('accounting.errorUpdatingBatch'), 'error');
     }
   };
@@ -1505,10 +1528,14 @@ export default function Accounting() {
     const bills: any[] = [];
 
     try {
+      // Create batch map for supplier lookup
+      const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
+
       // Get all inventory items (both commission and cash) - including items with quantity = 0 for review purposes
+      // Filter items that have batch_id (required to get supplier_id)
       const allInventoryItems = inventory.filter(item => 
         item.product_id && 
-        item.supplier_id
+        item.batch_id
         // Note: We include items with quantity = 0 for received bills review
         // These items are kept in the database instead of being deleted when quantity reaches 0
       );
@@ -1517,10 +1544,13 @@ export default function Accounting() {
 
       allInventoryItems.forEach(item => {
         const product = products.find(p => p.id === item.product_id);
-        const supplier = suppliers.find(s => s.id === item.supplier_id);
+        // Get supplier_id from batch
+        const batch = item.batch_id ? batchMap.get(item.batch_id) : null;
+        const supplierId = batch?.supplier_id || null;
+        const supplier = supplierId ? suppliers.find(s => s.id === supplierId) : null;
 
-        if (!product || !supplier) {
-          console.warn('Missing product or supplier for item:', item.id);
+        if (!product || !supplier || !supplierId) {
+          console.warn('Missing product, supplier, or batch for item:', item.id, { product, supplier, batch, batchId: item.batch_id });
           return;
         }
 
@@ -1529,7 +1559,7 @@ export default function Accounting() {
           sale && Array.isArray(sale) && 
           sale.some((saleItem: any) => 
             saleItem.productId === item.product_id && 
-            saleItem.supplierId === item.supplier_id &&
+            saleItem.supplierId === supplierId &&
             // Check if this sale happened after this inventory item was received
             new Date(sale.created_at || sale.created_at).getTime() >= new Date(item.received_at || item.created_at).getTime()
           )
@@ -1649,7 +1679,7 @@ export default function Accounting() {
           id: item.id,
           productId: item.product_id,
           productName: product.name,
-          supplierId: item.supplier_id,
+          supplierId: supplierId,
           supplierName: supplier.name,
           type: item.type,
           originalQuantity: validOriginalQuantity,
@@ -1682,7 +1712,7 @@ export default function Accounting() {
     }
 
     return bills;
-  }, [inventory, products, suppliers, sales]);
+  }, [inventory, products, suppliers, sales, inventoryBills, showToast, t]);
 
   const filteredReceivedBills = useMemo(() => {
     try {
@@ -2005,6 +2035,7 @@ export default function Accounting() {
       {activeTab === 'received-bills' && (
         <ReceivedBills
           inventory={inventory}
+          inventoryBills={inventoryBills}
           bills={bills}
           products={products}
           suppliers={suppliers}

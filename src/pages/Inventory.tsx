@@ -21,13 +21,25 @@ const Inventory: React.FC = () => {
   const raw = useOfflineData();
   const products = raw.products.map(p => ({ ...p, createdAt: p.created_at })) as Product[];
   const suppliers = raw.suppliers.map(s => ({ ...s, createdAt: s.created_at, type: 'commission' as const })) as Supplier[];
-  const inventory = raw.inventory.map(i => ({ 
-    ...i, 
-    createdAt: i.created_at, 
-    product_id: i.product_id, 
-    supplier_id: i.supplier_id, 
-    created_at: i.created_at 
-  })) as InventoryItem[];
+  const inventoryBills = raw.inventoryBills || [];
+  // Create batch map for supplier lookup
+  const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
+  
+  const inventory = raw.inventory.map(i => {
+    // Get supplier_id from batch instead of from item
+    const batch = i.batch_id ? batchMap.get(i.batch_id) : null;
+    const supplierId = batch?.supplier_id || null;
+    
+    return { 
+      ...i, 
+      createdAt: i.created_at, 
+      product_id: i.product_id, 
+      // supplier_id removed from inventory_items - get it from inventory_bills via batch_id
+      // Adding supplier_id here for backward compatibility with InventoryItem interface
+      supplier_id: supplierId || '',
+      created_at: i.created_at 
+    };
+  }) as InventoryItem[];
   const { 
     addSupplier, 
     addProduct, 
@@ -244,7 +256,8 @@ const Inventory: React.FC = () => {
           <RecentReceivesTable 
             recentReceives={recentReceives} 
             products={products} 
-            suppliers={suppliers} 
+            suppliers={suppliers}
+            inventoryBills={inventoryBills}
             onEdit={openEditInventory} 
             onDelete={openDeleteInventory} 
           />

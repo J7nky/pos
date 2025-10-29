@@ -66,6 +66,204 @@ export class SyncService {
 private isRunning = false;
 private lastSyncAttempt: Date | null = null;
 
+  /**
+   * Classifies errors to determine if they are unrecoverable.
+   * Returns true if the error should result in record deletion.
+   */
+  private isUnrecoverableError(error: any, tableName: string, record: any): boolean {
+    // PostgreSQL error codes for constraint violations and data validation errors
+    const unrecoverableCodes = [
+      '23503', // Foreign key constraint violation
+      '23502', // Not null constraint violation
+      '23514', // Check constraint violation
+      '22003', // Numeric value out of range / numeric field overflow
+      '42P01', // Undefined table
+      '22P02', // Invalid text representation (bad data format)
+      '23505', // Unique violation (for certain cases where we can't resolve)
+    ];
+
+    // Check error code
+    if (error?.code && unrecoverableCodes.includes(error.code)) {
+      return true;
+    }
+
+    // Check error message for constraint violations and validation errors
+    const errorMessage = (error?.message || '').toLowerCase();
+    const errorDetails = (error?.details || '').toLowerCase();
+    const constraintKeywords = [
+      'foreign key',
+      'not null',
+      'constraint',
+      'violates',
+      'does not exist',
+      'undefined table',
+      'numeric field overflow',
+      'numeric value out of range',
+      'value too large',
+      'overflow',
+      'invalid input',
+      'bad value',
+    ];
+
+    if (constraintKeywords.some(keyword => 
+      errorMessage.includes(keyword) || errorDetails.includes(keyword)
+    )) {
+      return true;
+    }
+
+    // 409 Conflict errors that aren't resolvable
+    if (error?.code === '409' && errorMessage.includes('constraint')) {
+      return true;
+    }
+
+    // 400 Bad Request errors that indicate data validation issues
+    if (error?.code === '400' && (
+      errorMessage.includes('overflow') || 
+      errorMessage.includes('out of range') ||
+      errorDetails.includes('precision') ||
+      errorDetails.includes('scale')
+    )) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Attempts to fix a record by correcting data issues.
+   * Returns the fixed record if fixable, null otherwise.
+   */
+  private tryFixRecord(tableName: string, record: any, error: any): any | null {
+    const errorMessage = (error?.message || '').toLowerCase();
+    const errorDetails = (error?.details || '').toLowerCase();
+    
+    // Fix foreign key violations by nullifying optional foreign keys
+    if (error?.code === '23503' || errorMessage.includes('foreign key')) {
+      // For bill_line_items, inventory_item_id is nullable, so we can nullify it
+      if (tableName === 'bill_line_items' && record.inventory_item_id) {
+        console.warn(`🔧 Attempting to fix ${tableName} record ${record.id} by nullifying inventory_item_id`);
+        return {
+          ...record,
+          inventory_item_id: null,
+        };
+      }
+    }
+
+    // Fix numeric overflow by clamping values to valid ranges
+    if (error?.code === '22003' || errorMessage.includes('overflow') || errorDetails.includes('precision')) {
+      const fixedRecord = { ...record };
+      let wasFixed = false;
+
+      // For numeric(13,2) fields, max value is 9999999999999.99 (supports up to 10^13)
+      const maxNumericValue = 10000000000000; // 10 trillion (10^13)
+      const numericFields = ['unit_price', 'line_total', 'received_value', 'quantity', 'amount', 'balance'];
+
+      for (const field of numericFields) {
+        if (record[field] !== undefined && record[field] !== null) {
+          const numValue = Number(record[field]);
+          if (!isNaN(numValue) && Math.abs(numValue) > maxNumericValue) {
+            const clamped = Math.sign(numValue) * Math.min(Math.abs(numValue), maxNumericValue);
+            fixedRecord[field] = Math.round(clamped * 100) / 100; // Round to 2 decimal places
+            wasFixed = true;
+            console.warn(`🔧 Clamping ${field} from ${numValue} to ${fixedRecord[field]} for ${tableName} record ${record.id}`);
+          }
+        }
+      }
+
+      if (wasFixed) {
+        return fixedRecord;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Undoes the effects of a record before deletion (restores inventory, recalculates totals, etc.)
+   */
+  private async undoRecordEffects(tableName: string, record: any): Promise<void> {
+    try {
+      if (tableName === 'bill_line_items') {
+        // Use the existing removeBillLineItem logic to properly undo effects
+        // This will restore inventory, recalculate bill totals, and create audit log
+        const systemUserId = '00000000-0000-0000-0000-000000000000'; // System user for auto-deletions
+        await db.removeBillLineItem(record.id, systemUserId);
+        console.log(`🔄 Undone effects for bill_line_item ${record.id}: inventory restored, bill totals recalculated`);
+      } else if (tableName === 'transactions') {
+        // For transactions, we might need to reverse balance changes
+        // This would require more context about which balances were affected
+        console.warn(`⚠️ Transaction ${record.id} deleted - manual balance verification may be needed`);
+      }
+      // Add more undo handlers for other record types as needed
+    } catch (undoError) {
+      console.error(`❌ Failed to undo effects for ${tableName} record ${record.id}:`, undoError);
+      // Continue with deletion even if undo fails
+    }
+  }
+
+  /**
+   * Deletes a problematic record from IndexedDB and undoes its effects.
+   */
+  private async deleteProblematicRecord(tableName: string, recordId: string, error: any): Promise<void> {
+    try {
+      const table = (db as any)[tableName];
+      if (!table) {
+        console.error(`❌ Table ${tableName} not found in database`);
+        return;
+      }
+
+      const record = await table.get(recordId);
+      if (!record) {
+        console.log(`ℹ️ Record ${recordId} not found in local database, may already be deleted`);
+        return;
+      }
+
+      // Log the error with full details
+      console.error(`❌ UNRECOVERABLE ERROR - Deleting ${tableName} record ${recordId}:`, {
+        code: error?.code,
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+        record: {
+          id: record.id,
+          // Include relevant fields for debugging
+          ...(tableName === 'bill_line_items' ? {
+            bill_id: record.bill_id,
+            product_name: record.product_name,
+            quantity: record.quantity,
+            unit_price: record.unit_price,
+            line_total: record.line_total,
+          } : {}),
+        },
+      });
+
+      // Undo any side effects (restore inventory, recalc totals, etc.)
+      await this.undoRecordEffects(tableName, record);
+
+      // Delete the record from IndexedDB
+      // For bill_line_items, removeBillLineItem already deleted it, so check first
+      const stillExists = await table.get(recordId);
+      if (stillExists) {
+        await table.delete(recordId);
+      }
+
+      // Also remove from pending syncs if it exists
+      const allPendingSyncs = await db.pending_syncs
+        .where('table_name')
+        .equals(tableName)
+        .toArray();
+      
+      const matchingSyncs = allPendingSyncs.filter((sync: any) => sync.record_id === recordId);
+      for (const pendingSync of matchingSyncs) {
+        await db.removePendingSync(pendingSync.id);
+      }
+
+      console.warn(`✅ Successfully deleted and undone problematic record ${recordId} from ${tableName}`);
+    } catch (deleteError) {
+      console.error(`❌ Failed to delete problematic record ${recordId} from ${tableName}:`, deleteError);
+    }
+  }
+
 async sync(storeId: string): Promise<SyncResult> {
 if (this.isRunning) {
 throw new Error('Sync already in progress');
@@ -284,8 +482,16 @@ const result = { uploaded: 0, errors: [] as string[] };
             console.error(`❌ Upload failed for ${tableName}:`, error);
             result.errors.push(`Upload failed for ${tableName}: ${error.message}`);
             
-            // Try individual uploads for FK errors
-            if (error.code === '23503' || error.message.includes('foreign key')) {
+            // Check if this is an unrecoverable error
+            const hasUnrecoverableError = cleanedBatch.some((record, idx) => 
+              this.isUnrecoverableError(error, tableName, record)
+            );
+            
+            // Try individual uploads for constraint/FK errors or batch errors
+            if (error.code === '23503' || error.message.includes('foreign key') || hasUnrecoverableError) {
+              await this.handleFailedBatch(tableName, cleanedBatch, batch);
+            } else {
+              // For other errors, try individual uploads to identify the problematic records
               await this.handleFailedBatch(tableName, cleanedBatch, batch);
             }
           } else {
@@ -381,13 +587,50 @@ return result;
           .upsert([record], { onConflict: 'id' });
         
         if (individualError) {
-          console.error(`❌ Individual record failed:`, record, individualError);
-          await db.addPendingSync(tableName, record.id, 'update', record);
+          // Check if error is unrecoverable
+          if (this.isUnrecoverableError(individualError, tableName, record)) {
+            // Try to fix the record once by nullifying optional foreign keys
+            const fixedRecord = this.tryFixRecord(tableName, record, individualError);
+            
+            if (fixedRecord) {
+              // Try once more with the fixed record
+              const { error: retryError } = await supabase
+                .from(tableName as any)
+                .upsert([fixedRecord], { onConflict: 'id' });
+              
+              if (!retryError) {
+                // Success! Update local record and mark as synced
+                await (db as any)[tableName].update(original.id, {
+                  ...fixedRecord,
+                  _synced: true,
+                  _lastSyncedAt: new Date().toISOString(),
+                });
+                console.log(`✅ Fixed and synced ${tableName} record ${original.id}`);
+                continue;
+              }
+              
+              // Fix didn't work, delete the record
+              await this.deleteProblematicRecord(tableName, original.id, retryError || individualError);
+            } else {
+              // Can't fix, delete the record
+              await this.deleteProblematicRecord(tableName, original.id, individualError);
+            }
+          } else {
+            // Recoverable error - add to pending syncs for retry
+            console.error(`❌ Individual record failed (will retry):`, record.id, individualError.message);
+            await db.addPendingSync(tableName, record.id, 'update', record);
+          }
         } else {
           await db.markAsSynced(tableName, original.id);
         }
       } catch (e) {
         console.error(`❌ Critical error with record:`, record, e);
+        // For unexpected errors, check if they're unrecoverable
+        if (this.isUnrecoverableError(e, tableName, record)) {
+          await this.deleteProblematicRecord(tableName, original.id, e);
+        } else {
+          await db.addPendingSync(tableName, record.id, 'update', record);
+        }
       }
     }
   }
@@ -625,11 +868,26 @@ for (const pendingSync of pendingSyncs) {
 try {
 if (pendingSync.retry_count >= SYNC_CONFIG.maxRetries) {
 console.error(`Max retries reached for pending sync: ${pendingSync.id}`);
+// Check if it's an unrecoverable error, if so, delete the record
+// Note: last_error might not be in the type definition but is added during updates
+const lastError = (pendingSync as any).last_error || '';
+const isUnrecoverable = lastError.includes('23503') || 
+                         lastError.includes('foreign key') ||
+                         lastError.includes('constraint') ||
+                         lastError.includes('violates');
+if (isUnrecoverable && pendingSync.operation !== 'delete') {
+  await this.deleteProblematicRecord(
+    pendingSync.table_name, 
+    pendingSync.record_id, 
+    { message: lastError, code: '23503' }
+  );
+}
 await db.removePendingSync(pendingSync.id);
 continue;
 }
 
 let success = false;
+let error: any = null;
 
 switch (pendingSync.operation) {
 case 'create':
@@ -639,11 +897,19 @@ case 'update':
               pendingSync.table_name
             );
             if (cleanedPayload) {
-const { error } = await supabase
+const { error: upsertError } = await supabase
 .from(pendingSync.table_name as any)
 .upsert(cleanedPayload)
 .select();
-success = !error;
+error = upsertError;
+success = !upsertError;
+              
+              // If error is unrecoverable, delete the record
+              if (upsertError && this.isUnrecoverableError(upsertError, pendingSync.table_name, cleanedPayload)) {
+                await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, upsertError);
+                await db.removePendingSync(pendingSync.id);
+                continue;
+              }
 }
 break;
 
@@ -652,6 +918,7 @@ const { error: deleteError } = await supabase
 .from(pendingSync.table_name as any)
 .delete()
 .eq('id', pendingSync.record_id);
+error = deleteError;
 success = !deleteError;
 break;
 }
@@ -659,17 +926,34 @@ break;
 if (success) {
 await db.removePendingSync(pendingSync.id);
 } else {
-await db.pending_syncs.update(pendingSync.id, {
-retry_count: pendingSync.retry_count + 1,
-last_error: 'Retry failed'
-});
+// Check if error is unrecoverable
+if (error && this.isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
+  // Delete the record instead of retrying
+  if (pendingSync.operation !== 'delete') {
+    await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
+  }
+  await db.removePendingSync(pendingSync.id);
+} else {
+  await db.pending_syncs.update(pendingSync.id, {
+    retry_count: pendingSync.retry_count + 1,
+    last_error: error instanceof Error ? error.message : (error?.message || 'Retry failed')
+  });
+}
 }
 
 } catch (error) {
-await db.pending_syncs.update(pendingSync.id, {
-retry_count: pendingSync.retry_count + 1,
-last_error: error instanceof Error ? error.message : 'Unknown error'
-});
+// Check if it's an unrecoverable error
+if (this.isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
+  if (pendingSync.operation !== 'delete') {
+    await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
+  }
+  await db.removePendingSync(pendingSync.id);
+} else {
+  await db.pending_syncs.update(pendingSync.id, {
+    retry_count: pendingSync.retry_count + 1,
+    last_error: error instanceof Error ? error.message : 'Unknown error'
+  });
+}
 }
 }
 }

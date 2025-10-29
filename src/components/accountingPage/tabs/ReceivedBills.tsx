@@ -18,6 +18,7 @@ import { useI18n } from '../../../i18n';
 
 type ReceivedBillsProps = {
   inventory: any[];
+  inventoryBills: any[];
   bills: Bill[];
   products: any[];
   suppliers: any[];
@@ -40,6 +41,7 @@ type ReceivedBillsProps = {
 
 export default function ReceivedBills({
   inventory,
+  inventoryBills,
   bills: _bills,
   products,
   suppliers,
@@ -86,6 +88,7 @@ export default function ReceivedBills({
   }>({});
   const [batchEditErrors, setBatchEditErrors] = useState<any>({});
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
+  const [editingBatchStatus, setEditingBatchStatus] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [closedBillIds, setClosedBillIds] = useState<Set<string>>(new Set());
   const [showWeightComparison, setShowWeightComparison] = useState(false);
@@ -123,27 +126,46 @@ export default function ReceivedBills({
   }, [flashingItemId]);
 
   // Initialize batch edit form with current batch data
-  const initializeBatchEdit = (group: any) => {
+  const initializeBatchEdit = async (group: any) => {
     const first = group.items[0];
     const batchId = group.batchId || first?.batch_id;
-    console.log('first 1123', first);
+    console.log('[ReceivedBills] initializeBatchEdit - Starting', { batchId, firstItem: first, group });
     if (!batchId || batchId === null) {
+      console.warn('[ReceivedBills] initializeBatchEdit - No batchId found');
       return;
     }
 
+    // Get the actual batch status from the database
+    // Access db instance to get batch status
+    const { db } = await import('../../../lib/db');
+    const batch = await db.inventory_bills.get(batchId);
+    console.log('[ReceivedBills] initializeBatchEdit - Batch from DB:', { batch, batchId });
+    const currentBatchStatus = batch?.status || 'Created';
+    const currentSupplierId = batch?.supplier_id || first?.supplierId || '';
+    console.log('[ReceivedBills] initializeBatchEdit - Current values:', { 
+      currentBatchStatus, 
+      currentSupplierId,
+      batchSupplierId: batch?.supplier_id,
+      firstSupplierId: first?.supplierId 
+    });
+    setEditingBatchStatus(currentBatchStatus);
+
     // Initialize form with current batch data for ReceiveFormModal
-    setBatchEditForm({
-      supplier_id: first?.supplierId || '',
-      type: first?.type || 'commission',
-      porterage_fee: (group.batchPorterage ?? '').toString(),
-      transfer_fee: (group.batchTransferFee ?? '').toString(),
-      commission_rate: (first?.commissionRate ?? '').toString(),
-      status: group.batchNotes ?? '',
-      empty_plastic: !!group.batchPlasticFee,
+    // Note: form.status is used for notes/comments in ReceiveFormModal, not actual status
+    const formData = {
+      supplier_id: currentSupplierId,
+      type: batch?.type || first?.type || 'commission',
+      porterage_fee: (batch?.porterage_fee ?? group.batchPorterage ?? '').toString(),
+      transfer_fee: (batch?.transfer_fee ?? group.batchTransferFee ?? '').toString(),
+      commission_rate: (batch?.commission_rate ?? first?.commissionRate ?? '').toString(),
+      status: (batch?.notes ?? group.batchNotes ?? ''), // This is notes, stored in form.status because ReceiveFormModal uses status field for notes
+      empty_plastic: !!batch?.plastic_fee || !!group.batchPlasticFee,
       plastic_count: (group.batchPlasticCount ?? '').toString(),
       plastic_price: (group.batchPlasticPrice ?? '').toString(),
-      received_at: first?.received_at || new Date().toISOString().split('T')[0]
-    });
+      received_at: batch?.received_at || first?.received_at || new Date().toISOString().split('T')[0]
+    };
+    console.log('[ReceivedBills] initializeBatchEdit - Setting form data:', formData);
+    setBatchEditForm(formData);
 
     setBatchEditErrors({});
     setEditingBatchId(batchId);
@@ -152,27 +174,66 @@ export default function ReceivedBills({
 
   // Handle batch edit success
   const handleBatchEditSuccess = async (data: any) => {
+    console.log('[ReceivedBills] handleBatchEditSuccess - Received data:', { 
+      data, 
+      editingBatchId, 
+      editingBatchStatus,
+      batchData: data.batch,
+      supplierIdFromForm: data.batch?.supplier_id,
+      hasOnUpdateBatch: !!onUpdateBatch
+    });
+    
     try {
       if (editingBatchId && onUpdateBatch) {
-        await onUpdateBatch(editingBatchId, {
-          porterage_fee: data.batch?.porterage_fee ? parseFloat(data.batch.porterage_fee) : null,
-          transfer_fee: data.batch?.transfer_fee ? parseFloat(data.batch.transfer_fee) : null,
-          notes: data.batch?.status || null,
-          plastic_fee: data.batch?.plastic_fee ? parseFloat(data.batch.plastic_fee) : null,
-          plastic_count: data.batch?.plastic_count ? parseInt(data.batch.plastic_count) : null,
-          plastic_price: data.batch?.plastic_price ? parseFloat(data.batch.plastic_price) : null,
-          commission_rate: data.batch?.commission_rate ? parseFloat(data.batch.commission_rate) : null,
-          received_at: data.batch?.received_at || null,
-          status: data.batch?.status || 'Created',
-          type: data.batch?.type || 'commission',
-          supplier_id: data.batch?.supplier_id || undefined
+        // Build updates object - only include fields that should be updated
+        const updates: any = {
+          porterage_fee: data.batch?.porterage_fee !== undefined ? (data.batch.porterage_fee ? parseFloat(data.batch.porterage_fee) : null) : undefined,
+          transfer_fee: data.batch?.transfer_fee !== undefined ? (data.batch.transfer_fee ? parseFloat(data.batch.transfer_fee) : null) : undefined,
+          notes: data.batch?.status !== undefined ? (data.batch.status || null) : undefined, // form.status is actually notes/comments
+          plastic_fee: data.batch?.plastic_fee !== undefined ? (data.batch.plastic_fee ? parseFloat(data.batch.plastic_fee) : null) : undefined,
+          commission_rate: data.batch?.commission_rate !== undefined ? (data.batch.commission_rate ? parseFloat(data.batch.commission_rate) : null) : undefined,
+          received_at: data.batch?.received_at || undefined,
+          type: data.batch?.type || undefined,
+          supplier_id: data.batch?.supplier_id || undefined,
+          // Preserve the existing batch status - don't overwrite it unless explicitly changed
+          status: editingBatchStatus || 'Created'
+        };
+
+        console.log('[ReceivedBills] handleBatchEditSuccess - Updates before cleanup:', updates);
+        console.log('[ReceivedBills] handleBatchEditSuccess - Supplier ID processing:', {
+          rawSupplierId: data.batch?.supplier_id,
+          processedSupplierId: updates.supplier_id,
+          isUndefined: updates.supplier_id === undefined,
+          isEmptyString: updates.supplier_id === ''
         });
+
+        // Remove undefined values to avoid unnecessary updates
+        const beforeCleanup = { ...updates };
+        Object.keys(updates).forEach(key => {
+          if (updates[key] === undefined) {
+            delete updates[key];
+          }
+        });
+        console.log('[ReceivedBills] handleBatchEditSuccess - Updates after cleanup:', {
+          before: beforeCleanup,
+          after: updates,
+          supplierIdIncluded: 'supplier_id' in updates
+        });
+
+        console.log('[ReceivedBills] handleBatchEditSuccess - Calling onUpdateBatch with:', {
+          batchId: editingBatchId,
+          updates
+        });
+        await onUpdateBatch(editingBatchId, updates);
+        console.log('[ReceivedBills] handleBatchEditSuccess - onUpdateBatch completed successfully');
       }
 
       setShowBatchEdit(false);
       setEditingBatchId(null);
+      setEditingBatchStatus(null);
       showToast('Batch updated successfully', 'success');
     } catch (e) {
+      console.error('[ReceivedBills] handleBatchEditSuccess - Error updating batch:', e);
       showToast('Failed to update batch', 'error');
     }
   };
@@ -181,10 +242,29 @@ export default function ReceivedBills({
   const getReceivedBills = useMemo(() => {
     const bills: any[] = [];
     try {
-      const allInventoryItems = inventory.filter(item => item && item.product_id && item.supplier_id);
+      // Create a map of batch_id -> inventory_bill for quick lookup
+      const batchMap = new Map<string, any>();
+      inventoryBills.forEach((bill: any) => {
+        if (bill && bill.id) {
+          batchMap.set(bill.id, bill);
+        }
+      });
+
+      // Filter inventory items - if they have a batch_id, we'll get supplier_id from the batch
+      // If they don't have a batch_id, they might be standalone items (legacy support)
+      const allInventoryItems = inventory.filter(item => item && item.product_id);
       for (const item of allInventoryItems) {
+        // Get supplier_id from batch - items without batch_id are invalid and should not exist
+        const batch = item.batch_id ? batchMap.get(item.batch_id) : null;
+        const supplierId = batch?.supplier_id || null;
+        
+        if (!supplierId) {
+          console.warn('[ReceivedBills] Item missing supplier_id (no batch or batch missing supplier_id):', { itemId: item.id, batchId: item.batch_id });
+          continue;
+        }
+
         const product = products.find(p => p.id === item.product_id);
-        const supplier = suppliers.find(s => s.id === item.supplier_id);
+        const supplier = suppliers.find(s => s.id === supplierId);
         if (!product || !supplier) continue;
 
         // Link sales by inventory_item_id, then infer the bill (batch) via item's batch_id
@@ -227,9 +307,15 @@ export default function ReceivedBills({
         const isClosed = closedBillIds.has(item.id) || (item as any).status === 'closed' || (item as any).is_closed === true;
         if (isClosed) status = 'closed';
 
-        const batchType = (item as any).batch_type || (item as any).type || 'commission';
+        // Get batch-related fields from inventory_bills if batch exists
+        const batchType = batch?.type || (item as any).batch_type || (item as any).type || 'commission';
+        const batchPorterage = batch?.porterage_fee ?? (item as any).batch_porterage ?? null;
+        const batchTransferFee = batch?.transfer_fee ?? (item as any).batch_transfer_fee ?? null;
+        const batchNotes = batch?.notes ?? (item as any).batch_notes ?? null;
+        const commissionRate = batch?.commission_rate ?? (item as any).commission_rate ?? null;
+        
         const totalCost = batchType === 'commission'
-          ? (((item as any).batch_porterage || 0) + ((item as any).batch_transfer_fee || 0))
+          ? ((batchPorterage || 0) + (batchTransferFee || 0))
           : (item.price || 0) * validOriginalQuantity;
         const totalProfit = totalRevenue - totalCost;
 
@@ -238,12 +324,12 @@ export default function ReceivedBills({
           batchId: item.batch_id || null,
           productId: item.product_id,
           productName: product.name,
-          supplierId: item.supplier_id,
+          supplierId: supplierId, // Now from batch if available, otherwise from item
           supplierName: supplier.name,
           type: batchType,
-          batchPorterage: (item as any).batch_porterage ?? null,
-          batchTransferFee: (item as any).batch_transfer_fee ?? null,
-          batchNotes: (item as any).batch_notes ?? null,
+          batchPorterage: batchPorterage,
+          batchTransferFee: batchTransferFee,
+          batchNotes: batchNotes,
           originalQuantity: validOriginalQuantity,
           remainingQuantity: validRemainingQuantity,
           totalSoldQuantity: validSoldQuantity,
@@ -261,10 +347,10 @@ export default function ReceivedBills({
           notes: item.notes,
           unit: item.unit,
           weight: item.weight,
-          porterage: (item as any).batch_porterage,
-          transferFee: (item as any).batch_transfer_fee,
+          porterage: batchPorterage,
+          transferFee: batchTransferFee,
           price: item.price,
-          commissionRate: (item as any).commission_rate,
+          commissionRate: commissionRate,
           relatedSales: sortedSales
         });
       }
@@ -273,7 +359,7 @@ export default function ReceivedBills({
       showToast('Error processing received bills data', 'error');
     }
     return bills;
-  }, [inventory, products, suppliers, sales, showToast, closedBillIds]);
+  }, [inventory, inventoryBills, products, suppliers, sales, showToast, closedBillIds]);
 
   const filteredReceivedBills = useMemo(() => {
     try {
@@ -1146,6 +1232,7 @@ export default function ReceivedBills({
         onClose={() => {
           setShowBatchEdit(false);
           setEditingBatchId(null);
+          setEditingBatchStatus(null);
         }}
         onSuccess={handleBatchEditSuccess}
         products={products}

@@ -289,11 +289,26 @@ export class CRUDHelperService {
     quantity: number,
     storeId: string
   ): Promise<void> {
-    const inventoryRecords = await db.inventory_items
+    // Get all items for this product, then filter by batch supplier_id
+    const allItems = await db.inventory_items
       .where('product_id')
       .equals(productId)
-      .and(inv => inv.supplier_id === supplierId && inv.quantity > 0 && inv.store_id === storeId)
-      .sortBy('created_at');
+      .and(inv => inv.quantity > 0 && inv.store_id === storeId)
+      .toArray();
+
+    // Get batches for all items
+    const batchIds = [...new Set(allItems.map(item => item.batch_id).filter(Boolean))];
+    const batches = await db.inventory_bills.where('id').anyOf(batchIds).toArray();
+    const batchMap = new Map(batches.map(b => [b.id, b]));
+
+    // Filter items by supplier_id from batch
+    const inventoryRecords = allItems
+      .filter(inv => {
+        if (!inv.batch_id) return false;
+        const batch = batchMap.get(inv.batch_id);
+        return batch?.supplier_id === supplierId;
+      })
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
     let qtyToDeduct = quantity;
     for (const inv of inventoryRecords) {
@@ -322,11 +337,26 @@ export class CRUDHelperService {
     quantity: number,
     storeId: string
   ): Promise<void> {
-    const existingInventory = await db.inventory_items
+    // Get all items for this product, then filter by batch supplier_id
+    const allItems = await db.inventory_items
       .where('product_id')
       .equals(productId)
-      .and(inv => inv.supplier_id === supplierId && inv.store_id === storeId)
-      .sortBy('created_at');
+      .and(inv => inv.store_id === storeId)
+      .toArray();
+
+    // Get batches for all items
+    const batchIds = [...new Set(allItems.map(item => item.batch_id).filter(Boolean))];
+    const batches = await db.inventory_bills.where('id').anyOf(batchIds).toArray();
+    const batchMap = new Map(batches.map(b => [b.id, b]));
+
+    // Filter items by supplier_id from batch
+    const existingInventory = allItems
+      .filter(inv => {
+        if (!inv.batch_id) return false;
+        const batch = batchMap.get(inv.batch_id);
+        return batch?.supplier_id === supplierId;
+      })
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
     if (existingInventory.length > 0) {
       const mostRecent = existingInventory[existingInventory.length - 1];
@@ -335,21 +365,8 @@ export class CRUDHelperService {
         _synced: false
       });
     } else {
-      await db.inventory_items.add({
-        id: createId(),
-        store_id: storeId,
-        product_id: productId,
-        supplier_id: supplierId,
-        quantity: quantity,
-        unit: 'box',
-        weight: null,
-        price: null,
-        selling_price: null,
-        received_quantity: quantity,
-        created_at: new Date().toISOString(),
-        batch_id: null,
-        _synced: false
-      });
+      // Cannot create new inventory item without batch_id
+      throw new Error('Cannot restore inventory: Items must have a batch_id. Use addInventoryBatch to create new inventory.');
     }
 
     await this.triggerPostOperationCallbacks();
