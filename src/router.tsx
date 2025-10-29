@@ -9,6 +9,7 @@ import Reports from './pages/Reports';
 import Customers from './pages/Customers';
 import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
+import Employees from './pages/Employees';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
 import ErrorPage from './components/ErrorPage';
 
@@ -59,6 +60,11 @@ export const router = createRouter([
           {
             path: "settings",
             element: <Settings />,
+            errorElement: <ErrorPage />,
+          },
+          {
+            path: "employees",
+            element: <Employees />,
             errorElement: <ErrorPage />,
           },
         ],

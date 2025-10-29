@@ -16,7 +16,8 @@ import {
   Store,
   BillAuditLog,
   SyncMetadata,
-  PendingSync
+  PendingSync,
+  Employee
 } from '../types';
 
 type Tables = Database['public']['Tables'];
@@ -70,6 +71,7 @@ class POSDatabase extends Dexie {
   inventory_items!: Table<InventoryItem, string>;
   transactions!: Table<Transaction, string>;
   inventory_bills!: Table<inventory_bills, string>;
+  users!: Table<Employee, string>;
 
   // Bill management tables
   bills!: Table<Bill, string>;
@@ -86,7 +88,7 @@ class POSDatabase extends Dexie {
   constructor() {
     super('POSDatabase');
     
-    this.version(16).stores({
+    this.version(17).stores({
       // Store configuration
       stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
       
@@ -95,10 +97,11 @@ class POSDatabase extends Dexie {
       cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
       
       // Core tables with comprehensive indexing for performance
-      // Tables WITH updated_at: products, suppliers, customers
+      // Tables WITH updated_at: products, suppliers, customers, users
       products: 'id, store_id, name, category, updated_at, _synced, _deleted',
       suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, _synced, _deleted',
       customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, _synced, _deleted',
 
       // Tables WITHOUT updated_at: inventory_items, transactions
       // Note: supplier_id removed from inventory_items - get it from inventory_bills via batch_id
@@ -201,10 +204,11 @@ class POSDatabase extends Dexie {
     this.missed_products.hook('updating', this.addUpdateFields);
 
     // Add hooks for automatic timestamping and ID generation
-    // Tables WITH updated_at: products, suppliers, customers
+    // Tables WITH updated_at: products, suppliers, customers, users
     this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    this.users.hook('creating', this.addCreateFieldsWithUpdatedAt);
 
     // Tables WITHOUT updated_at: inventory_items, inventory_bills
     this.inventory_items.hook('creating', this.addCreateFields);
@@ -217,6 +221,7 @@ class POSDatabase extends Dexie {
     this.products.hook('updating', this.addUpdateFields);
     this.suppliers.hook('updating', this.addUpdateFields);
     this.customers.hook('updating', this.addUpdateFields);
+    this.users.hook('updating', this.addUpdateFields);
 
     // Bill management hooks
     this.bills.hook('creating', this.addCreateFieldsWithUpdatedAt);

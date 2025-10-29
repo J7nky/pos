@@ -1,7 +1,20 @@
 /**
- * Account Balance Management - Usage Examples
+ * Account Balance Management - Usage Examples (DEPRECATED)
  * 
- * This file demonstrates how to use the hybrid account balance approach:
+ * ⚠️  NOTE: Payment examples in this file are outdated.
+ * 
+ * For payments, use the unified `processPayment` function from OfflineDataContext:
+ * - Single unified function for all payment operations
+ * - Automatically handles balance updates (increases on payment received, decreases on payment sent)
+ * - Handles cash drawer transactions
+ * - Works for both customers and suppliers
+ * 
+ * This file is kept for reference on balance calculation and reconciliation utilities,
+ * but payment creation should use the unified approach instead.
+ * 
+ * See: src/contexts/OfflineDataContext.tsx - processPayment function
+ * 
+ * Original documentation:
  * - Cached balances for fast POS operations
  * - Dynamic calculation for accuracy and audit
  * - Immutable transactions with reversal support
@@ -52,10 +65,38 @@ export async function getCustomerBalanceAccurate(customerId: string) {
   return result.currentBalance;
 }
 
-// Example 3: Create a New Transaction (with validation)
+/**
+ * Example 3: Create a Customer Payment (DEPRECATED - Use Unified Function)
+ * 
+ * ⚠️  DEPRECATED: This function uses the old approach.
+ * 
+ * Use the unified `processPayment` function from OfflineDataContext instead:
+ * 
+ * ```typescript
+ * const result = await raw.processPayment({
+ *   entityType: 'customer',
+ *   entityId: customerId,
+ *   amount: amount.toString(),
+ *   currency: currency,
+ *   description: 'Payment received from customer',
+ *   reference: `PAY-${Date.now()}`,
+ *   storeId: 'store_123',
+ *   createdBy: 'user_123',
+ *   paymentDirection: 'receive' // they pay us → balance increases
+ * });
+ * ```
+ * 
+ * The unified function:
+ * - Handles balance updates automatically (increases on 'receive', decreases on 'pay')
+ * - Processes cash drawer transactions
+ * - Works for both customers and suppliers
+ * - Single point of truth for all payment logic
+ */
 export async function createCustomerPayment(customerId: string, amount: number, currency: 'USD' | 'LBP') {
-  console.log('=== Example 3: Create Customer Payment ===');
+  console.warn('⚠️  DEPRECATED: createCustomerPayment is outdated. Use processPayment from OfflineDataContext instead.');
+  console.log('=== Example 3: Create Customer Payment (OLD APPROACH - DO NOT USE) ===');
   
+  // OLD APPROACH - kept for reference only
   const newTransaction = {
     store_id: 'store_123',
     type: 'income' as const,

@@ -16,7 +16,8 @@ import {
   LogOut,
   Wifi,
   WifiOff,
-  Calculator
+  Calculator,
+  UserCog
 } from 'lucide-react';
 
 export default function Layout() {
@@ -45,7 +46,8 @@ export default function Layout() {
     { id: 'customers', label: t('nav.customers'), icon: Users, path: '/customers' },
     { id: 'accounting', label: t('nav.accounting'), icon: Calculator, path: '/accounting' },
     { id: 'reports', label: t('nav.reports'), icon: FileText, path: '/reports' },
-    { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' }
+    { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' },
+    ...(userProfile?.role === 'admin' ? [{ id: 'employees', label: 'Employees', icon: UserCog, path: '/employees' }] : [])
   ];
 
   // Define shortcuts based on current page

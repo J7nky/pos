@@ -202,6 +202,7 @@ interface OfflineDataContextType {
     reference: string;
     storeId: string;
     createdBy: string;
+    paymentDirection: 'receive' | 'pay'; // 'receive' = they pay us, 'pay' = we pay them
   }) => Promise<{
     success: boolean;
     error?: string;
@@ -1392,20 +1393,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addInventoryItem = async (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
-      // Prepare item with defaults - crudHelperService will add base entity fields (id, store_id, created_at, _synced)
-      // Note: supplier_id removed - items must have batch_id to get supplier from inventory_bills
-      const preparedData = {
-        ...(itemData.id && { id: itemData.id }), // Only include id if provided
-        product_id: itemData.product_id ?? '',
-        // supplier_id removed - get it from inventory_bills via batch_id
-        quantity: itemData.quantity ?? 0,
-        unit: itemData.unit ?? '',
-        received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
-        weight: itemData.weight ?? null,
-        price: itemData.price ?? null,
-        selling_price: (itemData as any).selling_price ?? null,
-        batch_id: itemData.batch_id ?? null
-      } as Omit<Tables['inventory_items']['Insert'], 'store_id'>;
+    // Prepare item with defaults - crudHelperService will add base entity fields (id, store_id, created_at, _synced)
+    const preparedData = {
+      ...(itemData.id && { id: itemData.id }), // Only include id if provided
+      product_id: itemData.product_id ?? '',
+      supplier_id: itemData.supplier_id ?? '',
+      quantity: itemData.quantity ?? 0,
+      unit: itemData.unit ?? '',
+      received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
+      weight: itemData.weight ?? null,
+      price: itemData.price ?? null,
+      selling_price: (itemData as any).selling_price ?? null,
+      batch_id: itemData.batch_id ?? null
+    } as Omit<Tables['inventory_items']['Insert'], 'store_id'>;
 
     // Use crudHelperService - it will handle all callbacks automatically
     await crudHelperService.addEntity('inventory_items', storeId, preparedData);
@@ -1586,7 +1586,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         store_id: storeId,
         created_at: now,
         _synced: false,
-        // supplier_id removed - now comes from inventory_bills via batch_id
+        supplier_id: actualSupplierId,
         weight: it.weight ?? null,
         price: it.price ?? null,
         selling_price: it.selling_price ?? null,
@@ -1979,32 +1979,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateInventoryBatch = async (id: string, updates: Partial<Tables['inventory_bills']['Update']>): Promise<void> => {
-    console.log('[OfflineDataContext] updateInventoryBatch - Called with:', { id, updates });
-    
-    // Get current batch state before update
-    const currentBatch = await db.inventory_bills.get(id);
-    console.log('[OfflineDataContext] updateInventoryBatch - Current batch state:', {
-      id,
-      currentSupplierId: currentBatch?.supplier_id,
-      currentStatus: currentBatch?.status,
-      currentType: currentBatch?.type
-    });
-
     // Process updates to ensure proper data types
     const processedUpdates: any = {
       ...updates,
       _synced: false
     };
-
-    console.log('[OfflineDataContext] updateInventoryBatch - Initial processedUpdates:', processedUpdates);
-    console.log('[OfflineDataContext] updateInventoryBatch - Supplier ID in updates:', {
-      inUpdates: 'supplier_id' in updates,
-      value: updates.supplier_id,
-      isUndefined: updates.supplier_id === undefined,
-      isNull: updates.supplier_id === null,
-      isEmptyString: updates.supplier_id === '',
-      type: typeof updates.supplier_id
-    });
 
     // Handle numeric fields
     if (updates.commission_rate !== undefined) {
@@ -2037,11 +2016,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
 
     // Ensure status is never null (database constraint)
-    // Only update status if explicitly provided in updates
     if (updates.status !== undefined) {
       processedUpdates.status = updates.status || 'Created';
+    } else {
+      // If status is not being updated, ensure it has a default value
+      processedUpdates.status = 'Created';
     }
-    // Don't overwrite existing status if not being updated
 
     // Ensure type is never null (database constraint)
     if (updates.type !== undefined) {
@@ -2051,37 +2031,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Ensure supplier_id is never null (database constraint)
     if (updates.supplier_id !== undefined) {
       processedUpdates.supplier_id = updates.supplier_id;
-      console.log('[OfflineDataContext] updateInventoryBatch - Supplier ID processed:', {
-        original: updates.supplier_id,
-        processed: processedUpdates.supplier_id,
-        willUpdate: true
-      });
-    } else {
-      console.log('[OfflineDataContext] updateInventoryBatch - Supplier ID not in updates, will not change');
     }
 
     // Remove fields that don't exist in the database schema
     delete processedUpdates.plastic_count;
     delete processedUpdates.plastic_price;
 
-    console.log('[OfflineDataContext] updateInventoryBatch - Final processedUpdates before DB update:', processedUpdates);
-    console.log('[OfflineDataContext] updateInventoryBatch - Supplier ID in final updates:', {
-      included: 'supplier_id' in processedUpdates,
-      value: processedUpdates.supplier_id
-    });
-
-    const updateResult = await db.inventory_bills.update(id, processedUpdates);
-    console.log('[OfflineDataContext] updateInventoryBatch - DB update result:', updateResult);
-    
-    // Verify the update
-    const updatedBatch = await db.inventory_bills.get(id);
-    console.log('[OfflineDataContext] updateInventoryBatch - Batch after update:', {
-      id,
-      newSupplierId: updatedBatch?.supplier_id,
-      newStatus: updatedBatch?.status,
-      newType: updatedBatch?.type,
-      supplierIdChanged: currentBatch?.supplier_id !== updatedBatch?.supplier_id
-    });
+    await db.inventory_bills.update(id, processedUpdates);
     await refreshData();
     await updateUnsyncedCount();
 
@@ -2293,7 +2249,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         .and(account => account.is_active)
         .first();
 
-      return currentAccount?.balance || 0;
+      return currentAccount?.current_balance || 0;
     } catch (error) {
       console.error('Error getting cash drawer balance:', error);
       return 0;
@@ -2315,9 +2271,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     reference: string;
     storeId: string;
     createdBy: string;
+    paymentDirection: 'receive' | 'pay'; // 'receive' = they pay us, 'pay' = we pay them
   }): Promise<{ success: boolean; error?: string }> => {
     try {
-      const { entityType, entityId, amount, currency, description, reference, storeId, createdBy } = params;
+      const { entityType, entityId, amount, currency, description, reference, storeId, createdBy, paymentDirection } = params;
       
       // Validate amount
       const numAmount = parseFloat(amount);
@@ -2343,31 +2300,44 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
 
       // For supplier payments, check cash drawer balance (compare in LBP)
-      if (!isCustomer) {
+
         const currentBalance = await getCurrentCashDrawerBalance(storeId);
         if (amountInLBP > currentBalance) {
           return { 
             success: false, 
             error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP` 
           };
-        }
+        
       }
 
       // Update entity balance in the SELECTED currency
-      // Balance represents DEBT: positive = they owe us, negative = we owe them (credit)
+      // CORRECTED LOGIC:
+      // Balance represents what they owe us:
+      //   - Positive balance = they owe us (debt) - e.g., $500 = "Owes US $500"
+      //   - Negative balance = we owe them (credit) - e.g., -$500 = "Owes Them $500"
+      // 
+      // Payment received (they pay us) → balance DECREASES (they're paying off their debt)
+      // Payment sent (we pay them) → balance INCREASES (we're giving them money, increasing their debt or reducing credit we owe them)
+      // 
+      // Examples:
+      // - Ahmed purchases $500 credit → balance = +$500 (Owes US $500)
+      // - Ahmed pays $200 → balance = +$300 (still Owes US $300)
+      // - If Ahmed has -$500 (we owe him) and we pay $200 → balance = -$300 (we still owe $300)
       const currentLbBalance = entity.lb_balance || 0;
       const currentUsdBalance = entity.usd_balance || 0;
 
-      console.log(`💳 Payment Processing - Entity: ${entity.name}, Type: ${isCustomer ? 'Customer' : 'Supplier'}, Currency: ${currency}`);
+      console.log(`💳 Payment Processing - Entity: ${entity.name}, Type: ${isCustomer ? 'Customer' : 'Supplier'}, Direction: ${paymentDirection}, Currency: ${currency}`);
       console.log(`💳 Current Balances - LBP: ${currentLbBalance}, USD: ${currentUsdBalance}`);
       console.log(`💳 Payment Amount: ${numAmount}`);
 
       if (currency === 'LBP') {
-        // Customer pays OR we pay supplier → DECREASE debt (subtract)
-        // Allow negative balance for overpayments (credit)
-        const newBalance = currentLbBalance - numAmount;
+        // CORRECTED: Payment received (they pay us) → DECREASE balance (they pay off debt)
+        // Payment sent (we pay them) → INCREASE balance (increases their debt or reduces our credit)
+        const newBalance = paymentDirection === 'receive' 
+          ? currentLbBalance - numAmount  // They pay us → balance decreases (paying off debt)
+          : currentLbBalance + numAmount; // We pay them → balance increases (more debt or less credit)
         const updateData = { lb_balance: newBalance };
-        console.log(`💳 ${isCustomer ? 'Customer payment' : 'Supplier payment'}: LBP balance ${currentLbBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
+        console.log(`💳 ${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${isCustomer ? 'customer' : 'supplier'}: LBP balance ${currentLbBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
         if (isCustomer) {
           await updateCustomer(entityId, updateData);
         } else {
@@ -2375,11 +2345,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       } else {
         // USD payment - update USD balance
-        // Customer pays OR we pay supplier → DECREASE debt (subtract)
-        // Allow negative balance for overpayments (credit)
-        const newBalance = currentUsdBalance - numAmount;
+        // CORRECTED: Payment received (they pay us) → DECREASE balance (they pay off debt)
+        // Payment sent (we pay them) → INCREASE balance (increases their debt or reduces our credit)
+        const newBalance = paymentDirection === 'receive'
+          ? currentUsdBalance - numAmount  // They pay us → balance decreases (paying off debt)
+          : currentUsdBalance + numAmount; // We pay them → balance increases (more debt or less credit)
         const updateData = { usd_balance: newBalance };
-        console.log(`💳 ${isCustomer ? 'Customer payment' : 'Supplier payment'}: USD balance ${currentUsdBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
+        console.log(`💳 ${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${isCustomer ? 'customer' : 'supplier'}: USD balance ${currentUsdBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
         if (isCustomer) {
           await updateCustomer(entityId, updateData);
         } else {
@@ -2394,21 +2366,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.log(`💳 After update - LBP: ${updatedEntity?.lb_balance}, USD: ${updatedEntity?.usd_balance}`);
 
       // Process cash drawer transaction in LBP (cash drawer storage is always LBP)
-      const cashDrawerType = isCustomer ? 'payment' : 'expense';
+      // Payment received (they pay us) → cash drawer INCREASES (income)
+      // Payment sent (we pay them) → cash drawer DECREASES (expense)
+      const cashDrawerType = paymentDirection === 'receive' ? 'payment' : 'expense';
       const cashDrawerResult = await processCashDrawerTransaction({
         type: cashDrawerType,
         amount: amountInLBP, // Always in LBP for cash drawer
         currency: 'LBP', // Cash drawer always uses LBP
-        description: `${isCustomer ? 'Payment from' : 'Payment to'} ${entity.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`,
+        description: `${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${entity.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`,
         reference: reference || `PAY-${Date.now()}`,
         customerId: isCustomer ? entityId : undefined,
-        supplierId: isCustomer ? undefined : entityId,
-        storeId,
-        createdBy
+        supplierId: isCustomer ? undefined : entityId
       });
 
       if (!cashDrawerResult.success) {
-        return { success: false, error: cashDrawerResult.error || 'Failed to process cash drawer transaction' };
+        return { success: false, error: 'Failed to process cash drawer transaction' };
       }
 
       // Create undo data
@@ -3011,26 +2983,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return;
 
     try {
-      // Get all items for this product, then filter by batch supplier_id
-      const allItems = await db.inventory_items
+      const inventoryRecords = await db.inventory_items
         .where('product_id')
         .equals(productId)
-        .and(inv => inv.quantity > 0 && inv.store_id === storeId)
-        .toArray();
-
-      // Get batches for all items
-      const batchIds = [...new Set(allItems.map(item => item.batch_id).filter(Boolean))];
-      const batches = await db.inventory_bills.where('id').anyOf(batchIds).toArray();
-      const batchMap = new Map(batches.map(b => [b.id, b]));
-
-      // Filter items by supplier_id from batch
-      const inventoryRecords = allItems
-        .filter(inv => {
-          if (!inv.batch_id) return false;
-          const batch = batchMap.get(inv.batch_id);
-          return batch?.supplier_id === supplierId;
-        })
-        .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime());
+        .and(inv => inv.supplier_id === supplierId && inv.quantity > 0)
+        .sortBy('received_at');
 
       let qtyToDeduct = quantity;
       for (const inv of inventoryRecords) {
@@ -3073,26 +3030,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return;
 
     try {
-      // Get all items for this product, then filter by batch supplier_id
-      const allItems = await db.inventory_items
+      // Find existing inventory items for this product/supplier
+      const existingInventory = await db.inventory_items
         .where('product_id')
         .equals(productId)
-        .and(inv => inv.store_id === storeId)
-        .toArray();
-
-      // Get batches for all items
-      const batchIds = [...new Set(allItems.map(item => item.batch_id).filter(Boolean))];
-      const batches = await db.inventory_bills.where('id').anyOf(batchIds).toArray();
-      const batchMap = new Map(batches.map(b => [b.id, b]));
-
-      // Filter items by supplier_id from batch
-      const existingInventory = allItems
-        .filter(inv => {
-          if (!inv.batch_id) return false;
-          const batch = batchMap.get(inv.batch_id);
-          return batch?.supplier_id === supplierId;
-        })
-        .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime());
+        .and(inv => inv.supplier_id === supplierId)
+        .sortBy('received_at');
 
       if (existingInventory.length > 0) {
         // Add to the most recent inventory item (LIFO for restoration)
@@ -3104,11 +3047,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           _synced: false
         });
       } else {
-        // Cannot create new inventory item without batch_id
-        // Find or create a batch for this supplier first
-        // For now, log a warning - items should always be created through addInventoryBatch
-        console.warn('Cannot restore inventory: No existing items found and cannot create item without batch_id. Supplier:', supplierId, 'Product:', productId);
-        throw new Error('Cannot restore inventory: Items must have a batch_id. Use addInventoryBatch to create new inventory.');
+        // Create new inventory item if none exists
+        const newInventoryItem: InventoryItem = {
+
+          id: createId(),
+          store_id: storeId,
+          product_id: productId,
+          supplier_id: supplierId,
+          quantity: quantity,
+          _synced: false,
+          unit: 'box',
+          weight: null,
+          price: null,
+          selling_price: null,
+          received_quantity: quantity,
+          created_at: new Date().toISOString(),
+          batch_id: null
+        };
+
+        await db.inventory_items.add(newInventoryItem);
       }
 
       // Refresh data to update stock levels
@@ -3228,7 +3185,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         createId: () => crypto.randomUUID(),
         getCurrentCashDrawerBalance: async () => 0,
         refreshCashDrawerBalance: async () => 0,
-        processPayment: async () => ({ success: false, error: 'No store ID available' })
+        processPayment: async (params: any) => ({ success: false, error: 'No store ID available' })
       }}>
         {children}
       </OfflineDataContext.Provider>

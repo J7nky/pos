@@ -24,9 +24,12 @@ export default function Customers() {
   // Helper function to format balance display
   const formatBalanceDisplay = (balance: number, currency: 'USD' | 'LBP') => {
     if (balance > 0) {
-      // They owe us (DEBT)
+      // They owe us (DEBT) - show with + sign
+      const amountText = currency === 'USD' 
+        ? `$${balance.toFixed(2)}` 
+        : `${Math.round(balance).toLocaleString()} ل.ل`;
       return {
-        text: currency === 'USD' ? `$${balance.toFixed(2)}` : `${Math.round(balance).toLocaleString()} ل.ل`,
+        text: `+${amountText}`,
         label: t('customers.owes') || 'Owes',
         color: 'text-red-700',
         bgColor: 'bg-red-50',
@@ -35,9 +38,12 @@ export default function Customers() {
         type: 'debt' as const
       };
     } else if (balance < 0) {
-      // We owe them (CREDIT)
+      // We owe them (CREDIT) - show with - sign
+      const amountText = currency === 'USD' 
+        ? `$${Math.abs(balance).toFixed(2)}` 
+        : `${Math.round(Math.abs(balance)).toLocaleString()} ل.ل`;
       return {
-        text: currency === 'USD' ? `$${Math.abs(balance).toFixed(2)}` : `${Math.round(Math.abs(balance)).toLocaleString()} ل.ل`,
+        text: `-${amountText}`,
         label: t('customers.credit') || 'Credit',
         color: 'text-blue-700',
         bgColor: 'bg-blue-50',
@@ -46,7 +52,7 @@ export default function Customers() {
         type: 'credit' as const
       };
     } else {
-      // Paid off
+      // Paid off - show 0 without sign
       return {
         text: currency === 'USD' ? '$0.00' : '0 ل.ل',
         label: t('customers.paid') || 'Paid',
@@ -103,20 +109,29 @@ export default function Customers() {
   const hideToast = () => setToast(t => ({ ...t, visible: false }));
 
   // Helper function for payment suggestions
+  // Shows suggestions only when entity owes us money (positive balance > 0)
+  // Works for both USD and LBP currencies
   const getSuggestedPayments = (entity: Customer | Supplier | undefined, currency: 'USD' | 'LBP') => {
     if (!entity) return [];
     
+    // Get balance for the selected currency
     const balance = currency === 'LBP' ? (entity.lb_balance || 0) : (entity.usd_balance || 0);
     
-    // Only suggest if there's a debt (positive balance)
+    // Only show suggestions if they owe us money (positive balance = debt)
+    // If balance is 0 or negative (credit), don't show suggestions
     if (balance <= 0) return [];
     
-    return [
-      { percentage: 25, amount: balance * 0.25, label: '25%' },
-      { percentage: 50, amount: balance * 0.5, label: '50%' },
-      { percentage: 75, amount: balance * 0.75, label: '75%' },
-      { percentage: 100, amount: balance, label: '100%' }
-    ];
+    // Only return suggestions if there's a positive debt (they owe us)
+    if (balance > 0) {
+      return [
+        { percentage: 25, amount: balance * 0.25, label: '25%' },
+        { percentage: 50, amount: balance * 0.5, label: '50%' },
+        { percentage: 75, amount: balance * 0.75, label: '75%' },
+        { percentage: 100, amount: balance, label: '100%' }
+      ];
+    }
+    
+    return [];
   };
 
   // Helper functions for payment processing
@@ -182,6 +197,7 @@ export default function Customers() {
     description: string,
     reference: string
   ) => {
+
     // Validate payment form
     const validation = validatePaymentForm(amount, entityId, entityType);
     if (!validation.isValid || !validation.entity) return false;
@@ -190,6 +206,8 @@ export default function Customers() {
 
     try {
       // Use the unified payment processing function from context
+      // Customer payments: 'receive' (they pay us)
+      // Supplier payments: 'pay' (we pay them)
       const result = await raw.processPayment?.({
         entityType,
         entityId,
@@ -198,7 +216,8 @@ export default function Customers() {
         description,
         reference,
         storeId: userProfile?.store_id || '',
-        createdBy: userProfile?.id || ''
+        createdBy: userProfile?.id || '',
+        paymentDirection: entityType === 'customer' ? 'receive' : 'pay'
       });
 
       if (result.success) {
@@ -217,30 +236,14 @@ export default function Customers() {
     }
   };
 
-  // Payment handlers
-  const handleCustomerPaymentSubmit = async (e: React.FormEvent) => {
+  // Unified payment handler for both customers and suppliers
+  const handlePaymentSubmit = async (e: React.FormEvent, entityType: 'customer' | 'supplier') => {
     e.preventDefault();
 
+    const entityId = entityType === 'customer' ? paymentForm.customerId : paymentForm.supplierId;
     const success = await processPaymentLocal(
-      'customer',
-      paymentForm.customerId,
-      paymentForm.amount,
-      paymentForm.currency,
-      paymentForm.description,
-      paymentForm.reference
-    );
-
-    if (success) {
-      resetPaymentForm();
-    }
-  };
-
-  const handleSupplierPaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const success = await processPaymentLocal(
-      'supplier',
-      paymentForm.supplierId,
+      entityType,
+      entityId,
       paymentForm.amount,
       paymentForm.currency,
       paymentForm.description,
@@ -762,7 +765,7 @@ export default function Customers() {
             <div className="p-6 border-b">
               <h2 className="text-xl font-semibold text-gray-900">Add Payment Received</h2>
             </div>
-            <form onSubmit={handleCustomerPaymentSubmit} className="p-6 space-y-6">
+            <form onSubmit={(e) => handlePaymentSubmit(e, 'customer')} className="p-6 space-y-6">
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
                 <div className="flex items-center">
                   <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
@@ -928,7 +931,7 @@ export default function Customers() {
             <div className="p-6 border-b">
               <h2 className="text-xl font-semibold text-gray-900">Add Payment Sent</h2>
             </div>
-            <form onSubmit={handleSupplierPaymentSubmit} className="p-6 space-y-6">
+            <form onSubmit={(e) => handlePaymentSubmit(e, 'supplier')} className="p-6 space-y-6">
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
                 <div className="flex items-center">
                   <TrendingDown className="w-5 h-5 text-red-600 mr-2" />

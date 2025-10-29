@@ -7,6 +7,27 @@ export interface User {
   storeId: string;
   createdAt: string;
 }
+
+// Employee interface for admin management (extends User with additional employee fields)
+export interface Employee {
+  id: string;
+  store_id: string;
+  email: string;
+  name: string;
+  role: 'manager' | 'cashier';
+  phone?: string;
+  address?: string;
+  monthly_salary?: string; // Stored as string to match database schema
+  working_hours_start?: string; // Format: "HH:mm" (e.g., "09:00")
+  working_hours_end?: string; // Format: "HH:mm" (e.g., "17:00")
+  working_days?: string; // Comma-separated days (e.g., "Monday,Tuesday,Wednesday,Thursday,Friday")
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
 export interface Sale {
   id: string;
   storeId: string;

@@ -338,21 +338,34 @@ export default function Accounting() {
 
 
   // Form handlers
-  const handleReceiveSubmit = async (e: React.FormEvent) => { 
+  // Unified payment handler for receive and pay operations
+  const handlePaymentSubmit = async (
+    e: React.FormEvent, 
+    formType: 'receive' | 'pay'
+  ) => { 
     e.preventDefault();
 
+    const form = formType === 'receive' ? receiveForm : payForm;
+    const successMessageKey = formType === 'receive' ? 'paymentReceived' : 'paymentSent';
+    const resetForm = formType === 'receive' 
+      ? setReceiveForm 
+      : setPayForm;
+    const defaultEntityType = formType === 'receive' ? 'customer' : 'supplier';
+
     // Validate required fields
-    if (!receiveForm.amount || parseFloat(receiveForm.amount) <= 0) {
+    if (!form.amount || parseFloat(form.amount) <= 0) {
       showToast(t('accounting.pleaseEnterValidAmount'), 'error');
       return;
     }
 
-    if (!receiveForm.entityId) {
+    if (!form.entityId) {
       showToast(t('accounting.pleaseSelectEntity'), 'error');
       return;
     }
 
-    const entity = receiveForm.entityType === 'customer' ? customers.find(c => c.id === receiveForm.entityId) : suppliers.find(s => s.id === receiveForm.entityId);
+    const entity = form.entityType === 'customer' 
+      ? customers.find(c => c.id === form.entityId) 
+      : suppliers.find(s => s.id === form.entityId);
     if (!entity) {
       showToast(t('accounting.entityNotFound'), 'error');
       return;
@@ -361,20 +374,21 @@ export default function Accounting() {
     try {
       // Use the unified payment processing function from context
       const result = await raw.processPayment?.({
-        entityType: receiveForm.entityType,
-        entityId: receiveForm.entityId,
-        amount: receiveForm.amount,
-        currency: receiveForm.currency as 'USD' | 'LBP',
-        description: receiveForm.description,
-        reference: receiveForm.reference || `PAY-${Date.now()}`,
+        entityType: form.entityType,
+        entityId: form.entityId,
+        amount: form.amount,
+        currency: form.currency as 'USD' | 'LBP',
+        description: form.description,
+        reference: form.reference || `PAY-${Date.now()}`,
         storeId: userProfile?.store_id || '',
-        createdBy: userProfile?.id || ''
+        createdBy: userProfile?.id || '',
+        paymentDirection: formType // 'receive' = they pay us, 'pay' = we pay them
       });
 
       if (result.success) {
         await refreshCashDrawerBalance();
-        showToast(t('accounting.paymentReceived', { 
-          amount: formatCurrencyWithSymbol(parseFloat(receiveForm.amount), receiveForm.currency),
+        showToast(t(`accounting.${successMessageKey}`, { 
+          amount: formatCurrencyWithSymbol(parseFloat(form.amount), form.currency),
           entityName: entity.name 
         }), 'success');
       } else {
@@ -385,8 +399,8 @@ export default function Accounting() {
       showToast(t('accounting.failedToRecordPayment'), 'error');
     }
 
-    setReceiveForm({
-      entityType: 'customer' as 'customer' | 'supplier',
+    resetForm({
+      entityType: defaultEntityType as 'customer' | 'supplier',
       entityId: '',
       amount: '',
       currency: currency,
@@ -396,63 +410,9 @@ export default function Accounting() {
     setShowForm(null);
   };
 
-  const handlePaySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log('Paying to:', payForm.entityType);
-    // Validate required fields
-    if (!payForm.amount || parseFloat(payForm.amount) <= 0) {
-      showToast(t('accounting.pleaseEnterValidAmount'), 'error');
-      return;
-    }
-
-    if (!payForm.entityId) {
-      showToast(t('accounting.pleaseSelectEntity'), 'error');
-      return;
-    }
-
-    const entity = payForm.entityType === 'customer' ? customers.find(c => c.id === payForm.entityId) : suppliers.find(s => s.id === payForm.entityId);
-    if (!entity) {
-      showToast(t('accounting.entityNotFound'), 'error');
-      return;
-    }
-
-    try {
-      // Use the unified payment processing function from context
-      const result = await raw.processPayment?.({
-        entityType: payForm.entityType,
-        entityId: payForm.entityId,
-        amount: payForm.amount,
-        currency: payForm.currency as 'USD' | 'LBP',
-        description: payForm.description,
-        reference: payForm.reference || `PAY-${Date.now()}`,
-        storeId: userProfile?.store_id || '',
-        createdBy: userProfile?.id || ''
-      });
-
-      if (result.success) {
-        await refreshCashDrawerBalance();
-        showToast(t('accounting.paymentSent', { 
-          amount: formatCurrencyWithSymbol(parseFloat(payForm.amount), payForm.currency),
-          entityName: entity.name 
-        }), 'success');
-      } else {
-        showToast(result.error || 'Failed to record payment.', 'error');
-      }
-    } catch (err) {
-      console.log(err);
-      showToast(t('accounting.failedToRecordPayment'), 'error');
-    }
-
-    setPayForm({
-      entityType: 'supplier' as 'customer' | 'supplier',
-      entityId: '',
-      amount: '',
-      currency: currency,
-      description: '',
-      reference: ''
-    });
-    setShowForm(null);
-  };
+  // Wrapper functions for backward compatibility with existing form components
+  const handleReceiveSubmit = (e: React.FormEvent) => handlePaymentSubmit(e, 'receive');
+  const handlePaySubmit = (e: React.FormEvent) => handlePaymentSubmit(e, 'pay');
 
   const handleExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

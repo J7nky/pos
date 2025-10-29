@@ -76,11 +76,10 @@ export class TransactionService {
         phone: customerData.phone,
         email: customerData.email || '',
         address: customerData.address || '',
-        lbBalance: customerData.lb_balance || 0,
-        usdBalance: customerData.usd_balance || 0,
-        isActive: customerData.is_active,
-        createdAt: customerData.created_at,
-        balance: customerData.usd_balance || 0,
+        lb_balance: customerData.lb_balance || 0,
+        usd_balance: customerData.usd_balance || 0,
+        isActive: customerData.isActive,
+        createdAt: customerData.createdAt,
       };
 
       const balanceBefore = customer.balance || 0;
