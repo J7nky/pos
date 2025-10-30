@@ -1397,7 +1397,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const preparedData = {
       ...(itemData.id && { id: itemData.id }), // Only include id if provided
       product_id: itemData.product_id ?? '',
-      supplier_id: itemData.supplier_id ?? '',
       quantity: itemData.quantity ?? 0,
       unit: itemData.unit ?? '',
       received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),

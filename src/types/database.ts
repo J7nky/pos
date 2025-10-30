@@ -269,29 +269,29 @@ export interface Database {
       inventory_items: {
         Row: {
           id: string;
-  product_id: string;
-  quantity: number;
-  selling_price: number | null;
-  unit: string;
-  weight: number | null;
-  price: number | null;
-  store_id: string;
-  created_at: string;
-  received_quantity: number;
-  batch_id: string | null;
+          product_id: string;
+          quantity: number;
+          selling_price: number | null;
+          unit: string;
+          weight: number | null;
+          price: number | null;
+          store_id: string;
+          created_at: string;
+          received_quantity: number;
+          batch_id: string | null;
         };
         Insert:{
-        id: string;
-        product_id?: string;
-        quantity?: number;
-        selling_price?: number | null;
-        unit?: string;
-        weight?: number | null;
-        price?: number | null;
-        store_id?: string;
-        created_at?: string;
-        received_quantity?: number;
-        batch_id?: string | null;
+          id: string;
+          product_id?: string;
+          quantity?: number;
+          selling_price?: number | null;
+          unit?: string;
+          weight?: number | null;
+          price?: number | null;
+          store_id?: string;
+          created_at?: string;
+          received_quantity?: number;
+          batch_id?: string | null;
         };
         Update: {
           id: string;

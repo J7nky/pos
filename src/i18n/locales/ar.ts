@@ -912,6 +912,35 @@ const ar = {
     amount: 'المبلغ',
     reference: 'المرجع',
     category: 'الفئة'
+  },
+  receipt: {
+    direction: 'rtl',
+    storeName: 'سوق كيوي للخضار',
+    address: '63-B2-سوق الجملة، طرابلس - لبنان',
+    phone: 'الهاتف',
+    phones: 'الهواتف',
+    phone1Name: 'سمير',
+    phone2Name: 'محمد',
+    thankYouMessage: 'شكراً لكم!',
+    billNumberPrefix: '٠٠٠',
+    showPreviousBalance: true,
+    showItemCount: true,
+    receiptWidth: 32,
+    billNumber: 'رقم الفاتورة',
+    date: 'التاريخ',
+    customer: 'العميل',
+    subtotal: 'المجموع الفرعي',
+    total: 'الإجمالي',
+    totalItems: 'عدد الأصناف',
+    previousBalance: 'الرصيد السابق',
+    unknownProduct: 'منتج غير معروف',
+    itemHeader: 'الصنف        الكمية  الوزن  السعر  المجموع',
+    lineSeparator: '=',
+    dashSeparator: '-',
+    lbp: 'ل.ل',
+    totalBalance: 'الرصيد الإجمالي',
+    scanQRCode: 'امسح الكود الخاص بك للحصول على كشف الحساب',
+    currency: 'ل.ل'
   }
 };
 

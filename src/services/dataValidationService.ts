@@ -32,7 +32,7 @@ const VALIDATION_RULES: Record<string, ValidationRule[]> = {
   inventory_items: [
     { field: 'quantity', required: true, type: 'number', min: 0 },
     { field: 'product_id', required: true, type: 'uuid', foreignKey: { table: 'products', cacheKey: 'products' } },
-    { field: 'supplier_id', required: true, type: 'uuid', foreignKey: { table: 'suppliers', cacheKey: 'suppliers' } },
+    // supplier_id REMOVED: now resolved via inventory_bills -> batch_id
     { field: 'batch_id', type: 'uuid', foreignKey: { table: 'inventory_bills', cacheKey: 'batches' } },
   ],
   bills: [

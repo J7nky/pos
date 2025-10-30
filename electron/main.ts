@@ -154,11 +154,11 @@ ipcMain.handle('print-document', async (_event: any, options: any) => {
 // Helper function: Render Arabic text to bitmap image
 function renderTextToBitmap(text: string, options: any = {}): Buffer {
   const {
-    fontSize = 24,
+    fontSize = 40,
     fontFamily = 'Arial, sans-serif',
     width = 576, // 72mm for 80mm paper (8 dots per mm)
-    align = 'left',
-    bold = false,
+    align = 'right',
+    bold = true,
     padding = 10
   } = options;
   

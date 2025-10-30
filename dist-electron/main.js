@@ -138,8 +138,8 @@ ipcMain.handle('print-document', async (_event, options) => {
 });
 // Helper function: Render Arabic text to bitmap image
 function renderTextToBitmap(text, options = {}) {
-    const { fontSize = 24, fontFamily = 'Arial, sans-serif', width = 576, // 72mm for 80mm paper (8 dots per mm)
-    align = 'left', bold = false, padding = 10 } = options;
+    const { fontSize = 40, fontFamily = 'Arial, sans-serif', width = 576, // 72mm for 80mm paper (8 dots per mm)
+    align = 'right', bold = true, padding = 10 } = options;
     // Create canvas
     const canvas = createCanvas(width, 100); // Height will be adjusted
     const ctx = canvas.getContext('2d');

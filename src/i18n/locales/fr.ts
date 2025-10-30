@@ -354,6 +354,34 @@ const fr = {
     currency: 'Devise',
     dateRange: 'Date',
     amountRange: 'Montant'
+  },
+  receipt: {
+    storeName: 'MARCHE KIWI DE LÉGUMES',
+    address: '63-B2-Marché de gros, Tripoli - Liban',
+    phone: 'Téléphone',
+    phones: 'Téléphones',
+    phone1Name: 'Samir',
+    phone2Name: 'Mohammad',
+    thankYouMessage: 'Merci!',
+    billNumberPrefix: '000',
+    showPreviousBalance: true,
+    showItemCount: true,
+    receiptWidth: 32,
+    billNumber: 'Numéro de facture',
+    date: 'Date',
+    customer: 'Client',
+    subtotal: 'Sous-total',
+    total: 'Total',
+    totalItems: 'Nombre d’articles',
+    previousBalance: 'Solde Précédent',
+    unknownProduct: 'Produit inconnu',
+    itemHeader: 'ARTICLE     QTÉ  POIDS  PRIX  SOUS-TOTAL',
+    totalBalance: 'Solde Total',
+    scanQRCode: 'Scanner le code QR pour le relevé de compte',
+    lineSeparator: '=',
+    dashSeparator: '-',
+    lbp: 'LBP',
+    currency: 'LBP'
   }
 };
 

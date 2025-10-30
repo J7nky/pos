@@ -71,7 +71,8 @@
     "wait-on": "^9.0.1"
   },
   "build": {
-    "appId": "com.example.app",
+    "productName": "Souq POS",
+    "appId": "com.souqtrablous.pos",
     "files": [
       "dist",
       "dist-electron"
@@ -80,7 +81,14 @@
       "buildResources": "assets"
     },
     "win": {
-      "target": "nsis"
-    }
+      "target": ["nsis", "portable"],
+      "icon": "assets/app-icon.ico"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://souq-trablous.com/updates/"
+      }
+    ]
   }
 }

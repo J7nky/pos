@@ -104,8 +104,8 @@ class POSDatabase extends Dexie {
       users: 'id, store_id, email, name, role, updated_at, _synced, _deleted',
 
       // Tables WITHOUT updated_at: inventory_items, transactions
-      // Note: supplier_id removed from inventory_items - get it from inventory_bills via batch_id
-      inventory_items: 'id, store_id, product_id, type, received_at, created_at, received_quantity, batch_id, _synced, _deleted',
+      // Note: supplier_id removed from inventory_items - get from inventory_bills via batch_id
+      inventory_items: 'id, store_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, _synced, _deleted',
       transactions: 'id, store_id, type, category, created_at, created_by, currency, _synced, _deleted',
       inventory_bills: 'id, store_id, supplier_id, received_at, created_by, _synced, _deleted',
   

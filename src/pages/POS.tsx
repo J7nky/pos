@@ -60,278 +60,278 @@ export default function POS() {
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
 
 
-  // Generate HTML preview with actual QR code image
-  const generateReceiptHTML = async (billData: any, lineItemsData: any[], customer: any, products: any[], qrCodeData?: any) => {
-    // Get receipt settings from offline context
-    const receiptSettings = raw.receiptSettings || {
-      storeName: 'KIWI VEGETABLES MARKET',
-      address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
-      phone1: '+961 70 123 456',
-      phone1Name: 'Samir',
-      phone2: '03 123 456',
-      phone2Name: 'Mohammad',
-      thankYouMessage: 'Thank You!',
-      billNumberPrefix: '000',
-      showPreviousBalance: true,
-      showItemCount: true,
-      receiptWidth: 32
-    };
+//   // Generate HTML preview with actual QR code image
+//   const generateReceiptHTML = async (billData: any, lineItemsData: any[], customer: any, products: any[], qrCodeData?: any) => {
+//     // Get receipt settings from offline context
+//     const receiptSettings = raw.receiptSettings || {
+//       storeName: 'KIWI VEGETABLES MARKET',
+//       address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
+//       phone1: '+961 70 123 456',
+//       phone1Name: 'Samir',
+//       phone2: '03 123 456',
+//       phone2Name: 'Mohammad',
+//       thankYouMessage: t('receipt.thankYouMessage'),
+//       billNumberPrefix: '000',
+//       showPreviousBalance: true,
+//       showItemCount: true,
+//       receiptWidth: 32
+//     };
 
-    const date = new Date(billData.bill_date).toLocaleDateString('en-GB');
-    const customerName = entity ? entity.name : 'Walk-in Customer';
-    const customerPhone = entity ? entity.phone : '';
+//     const date = new Date(billData.bill_date).toLocaleDateString('en-GB');
+//     const customerName = customer ? customer.name : t('common.labels.walkInCustomer');
+//     const customerPhone = customer ? customer.phone : '';
     
-    // Format bill number with prefix
-    const billNumber = `${receiptSettings.billNumberPrefix}${billData.bill_number.split('-')[1] || '12345'}`;
+//     // Format bill number with prefix
+//     const billNumber = `${receiptSettings.billNumberPrefix}${billData.bill_number.split('-')[1] || '12345'}`;
     
-    // Generate items HTML
-    let itemsHTML = '';
-    lineItemsData.forEach((item) => {
-      const product = products.find(p => p.id === item.product_id);
-      const productName = product ? product.name : 'Unknown Product';
-      const quantity = item.quantity || 0;
-      const weight = item.weight || 0;
-      const price = item.unit_price || 0;
-      const subtotal = item.line_total || 0;
+//     // Generate items HTML
+//     let itemsHTML = '';
+//     lineItemsData.forEach((item) => {
+//       const product = products.find(p => p.id === item.product_id);
+//       const productName = product ? product.name : 'Unknown Product';
+//       const quantity = item.quantity || 0;
+//       const weight = item.weight || 0;
+//       const price = item.unit_price || 0;
+//       const subtotal = item.line_total || 0;
       
-      itemsHTML += `
-        <tr>
-          <td>${productName}</td>
-          <td>${quantity}</td>
-          <td>${weight > 0 ? weight.toFixed(1) + ' kg' : '-'}</td>
-          <td>${formatCurrency(price)}</td>
-          <td>${formatCurrency(subtotal)}</td>
-        </tr>`;
-    });
+//       itemsHTML += `
+//         <tr>
+//           <td>${productName}</td>
+//           <td>${quantity}</td>
+//           <td>${weight > 0 ? weight.toFixed(1) + ' kg' : '-'}</td>
+//           <td>${formatCurrency(price)}</td>
+//           <td>${formatCurrency(subtotal)}</td>
+//         </tr>`;
+//     });
 
-    // Generate QR code section
-    let qrCodeSection = '';
-    if (qrCodeData && customer) {
-      if (qrCodeData.qrCodeDataUrl) {
-        qrCodeSection = `
-          <div class="qr-section">
-            <h3>📱 Scan QR code for account statement</h3>
-            <div class="qr-code-container">
-              <img src="${qrCodeData.qrCodeDataUrl}" alt="QR Code" class="qr-code-image" />
-              <p class="qr-info">Customer: ${customer.name}</p>
-              <p class="qr-info">Bill: ${billData.bill_number}</p>
-              ${qrCodeData.qrCodeUrl ? `<p class="qr-url">URL: ${qrCodeData.qrCodeUrl}</p>` : ''}
-            </div>
-          </div>`;
-      } else {
-        qrCodeSection = `
-          <div class="qr-section">
-            <h3>📱 QR Code for account statement</h3>
-            <div class="qr-code-container">
-              <p class="qr-placeholder">QR Code will be printed here</p>
-              <p class="qr-info">Customer: ${customer.name}</p>
-              <p class="qr-info">Bill: ${billData.bill_number}</p>
-            </div>
-          </div>`;
-      }
-    }
+//     // Generate QR code section
+//     let qrCodeSection = '';
+//     if (qrCodeData && customer) {
+//       if (qrCodeData.qrCodeDataUrl) {
+//         qrCodeSection = `
+//           <div class="qr-section">
+//             <h3>📱 Scan QR code for account statement</h3>
+//             <div class="qr-code-container">
+//               <img src="${qrCodeData.qrCodeDataUrl}" alt="QR Code" class="qr-code-image" />
+//               <p class="qr-info">Customer: ${customer.name}</p>
+//               <p class="qr-info">Bill: ${billData.bill_number}</p>
+//               ${qrCodeData.qrCodeUrl ? `<p class="qr-url">URL: ${qrCodeData.qrCodeUrl}</p>` : ''}
+//             </div>
+//           </div>`;
+//       } else {
+//         qrCodeSection = `
+//           <div class="qr-section">
+//             <h3>📱 QR Code for account statement</h3>
+//             <div class="qr-code-container">
+//               <p class="qr-placeholder">QR Code will be printed here</p>
+//               <p class="qr-info">Customer: ${customer.name}</p>
+//               <p class="qr-info">Bill: ${billData.bill_number}</p>
+//             </div>
+//           </div>`;
+//       }
+//     }
 
-    const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Receipt Preview - ${billNumber}</title>
-    <style>
-        body {
-            font-family: 'Courier New', monospace;
-            max-width: 400px;
-            margin: 0 auto;
-            padding: 20px;
-            background: #f5f5f5;
-        }
-        .receipt {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            border: 1px solid #ddd;
-        }
-        .header {
-            text-align: center;
-            border-bottom: 2px solid #333;
-            padding-bottom: 10px;
-            margin-bottom: 15px;
-        }
-        .store-name {
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-        .address {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 5px;
-        }
-        .phones {
-            font-size: 11px;
-            color: #666;
-        }
-        .bill-info {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 15px;
-            font-size: 14px;
-        }
-        .customer-info {
-            margin-bottom: 15px;
-            font-size: 14px;
-        }
-        .items-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 15px;
-        }
-        .items-table th {
-            background: #f0f0f0;
-            padding: 8px 4px;
-            text-align: left;
-            font-size: 12px;
-            border-bottom: 1px solid #ccc;
-        }
-        .items-table td {
-            padding: 6px 4px;
-            font-size: 12px;
-            border-bottom: 1px solid #eee;
-        }
-        .summary {
-            border-top: 1px solid #333;
-            padding-top: 10px;
-            margin-top: 15px;
-        }
-        .summary-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 5px;
-            font-size: 14px;
-        }
-        .total {
-            font-weight: bold;
-            font-size: 16px;
-            border-top: 2px solid #333;
-            padding-top: 10px;
-            margin-top: 10px;
-        }
-        .thank-you {
-            text-align: center;
-            margin: 15px 0;
-            font-style: italic;
-        }
-        .qr-section {
-            border-top: 1px solid #333;
-            padding-top: 15px;
-            margin-top: 15px;
-            text-align: center;
-        }
-        .qr-section h3 {
-            margin: 0 0 15px 0;
-            font-size: 14px;
-        }
-        .qr-code-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-        }
-        .qr-code-image {
-            max-width: 200px;
-            height: auto;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        .qr-placeholder {
-            background: #f0f0f0;
-            border: 2px dashed #ccc;
-            padding: 40px;
-            border-radius: 8px;
-            color: #666;
-            font-style: italic;
-        }
-        .qr-info {
-            margin: 5px 0;
-            font-size: 12px;
-            color: #666;
-        }
-        .qr-url {
-            font-size: 10px;
-            color: #999;
-            word-break: break-all;
-        }
-        .note {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            padding: 10px;
-            border-radius: 4px;
-            margin-top: 20px;
-            font-size: 12px;
-            color: #856404;
-        }
-    </style>
-</head>
-<body>
-    <div class="receipt">
-        <div class="header">
-            <div class="store-name">${receiptSettings.storeName}</div>
-            <div class="address">${receiptSettings.address}</div>
-            <div class="phones">Phones: ${receiptSettings.phone1Name}: ${receiptSettings.phone1} / ${receiptSettings.phone2Name}: ${receiptSettings.phone2}</div>
-        </div>
+//     const html = `
+// <!DOCTYPE html>
+// <html lang="en">
+// <head>
+//     <meta charset="UTF-8">
+//     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+//     <title>Receipt Preview - ${billNumber}</title>
+//     <style>
+//         body {
+//             font-family: 'Courier New', monospace;
+//             max-width: 400px;
+//             margin: 0 auto;
+//             padding: 20px;
+//             background: #f5f5f5;
+//         }
+//         .receipt {
+//             background: white;
+//             padding: 20px;
+//             border-radius: 8px;
+//             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+//             border: 1px solid #ddd;
+//         }
+//         .header {
+//             text-align: center;
+//             border-bottom: 2px solid #333;
+//             padding-bottom: 10px;
+//             margin-bottom: 15px;
+//         }
+//         .store-name {
+//             font-size: 18px;
+//             font-weight: bold;
+//             margin-bottom: 5px;
+//         }
+//         .address {
+//             font-size: 12px;
+//             color: #666;
+//             margin-bottom: 5px;
+//         }
+//         .phones {
+//             font-size: 11px;
+//             color: #666;
+//         }
+//         .bill-info {
+//             display: flex;
+//             justify-content: space-between;
+//             margin-bottom: 15px;
+//             font-size: 14px;
+//         }
+//         .customer-info {
+//             margin-bottom: 15px;
+//             font-size: 14px;
+//         }
+//         .items-table {
+//             width: 100%;
+//             border-collapse: collapse;
+//             margin-bottom: 15px;
+//         }
+//         .items-table th {
+//             background: #f0f0f0;
+//             padding: 8px 4px;
+//             text-align: left;
+//             font-size: 12px;
+//             border-bottom: 1px solid #ccc;
+//         }
+//         .items-table td {
+//             padding: 6px 4px;
+//             font-size: 12px;
+//             border-bottom: 1px solid #eee;
+//         }
+//         .summary {
+//             border-top: 1px solid #333;
+//             padding-top: 10px;
+//             margin-top: 15px;
+//         }
+//         .summary-row {
+//             display: flex;
+//             justify-content: space-between;
+//             margin-bottom: 5px;
+//             font-size: 14px;
+//         }
+//         .total {
+//             font-weight: bold;
+//             font-size: 16px;
+//             border-top: 2px solid #333;
+//             padding-top: 10px;
+//             margin-top: 10px;
+//         }
+//         .thank-you {
+//             text-align: center;
+//             margin: 15px 0;
+//             font-style: italic;
+//         }
+//         .qr-section {
+//             border-top: 1px solid #333;
+//             padding-top: 15px;
+//             margin-top: 15px;
+//             text-align: center;
+//         }
+//         .qr-section h3 {
+//             margin: 0 0 15px 0;
+//             font-size: 14px;
+//         }
+//         .qr-code-container {
+//             display: flex;
+//             flex-direction: column;
+//             align-items: center;
+//             gap: 10px;
+//         }
+//         .qr-code-image {
+//             max-width: 200px;
+//             height: auto;
+//             border: 1px solid #ddd;
+//             border-radius: 4px;
+//         }
+//         .qr-placeholder {
+//             background: #f0f0f0;
+//             border: 2px dashed #ccc;
+//             padding: 40px;
+//             border-radius: 8px;
+//             color: #666;
+//             font-style: italic;
+//         }
+//         .qr-info {
+//             margin: 5px 0;
+//             font-size: 12px;
+//             color: #666;
+//         }
+//         .qr-url {
+//             font-size: 10px;
+//             color: #999;
+//             word-break: break-all;
+//         }
+//         .note {
+//             background: #fff3cd;
+//             border: 1px solid #ffeaa7;
+//             padding: 10px;
+//             border-radius: 4px;
+//             margin-top: 20px;
+//             font-size: 12px;
+//             color: #856404;
+//         }
+//     </style>
+// </head>
+// <body>
+//     <div class="receipt">
+//         <div class="header">
+//             <div class="store-name">${receiptSettings.storeName}</div>
+//             <div class="address">${receiptSettings.address}</div>
+//             <div class="phones">Phones: ${receiptSettings.phone1Name}: ${receiptSettings.phone1} / ${receiptSettings.phone2Name}: ${receiptSettings.phone2}</div>
+//         </div>
         
-        <div class="bill-info">
-            <span>Bill No: ${billNumber}</span>
-            <span>Date: ${date}</span>
-        </div>
+//         <div class="bill-info">
+//             <span>Bill No: ${billNumber}</span>
+//             <span>Date: ${date}</span>
+//         </div>
         
-        <div class="customer-info">
-            <div>Customer: ${customerName}</div>
-            ${customerPhone ? `<div>Phone: ${customerPhone}</div>` : ''}
-        </div>
+//         <div class="customer-info">
+//             <div>Customer: ${customerName}</div>
+//             ${customerPhone ? `<div>Phone: ${customerPhone}</div>` : ''}
+//         </div>
         
-        <table class="items-table">
-            <thead>
-                <tr>
-                    <th>ITEM</th>
-                    <th>QTY</th>
-                    <th>WT(kg)</th>
-                    <th>PRICE</th>
-                    <th>SUBT</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${itemsHTML}
-            </tbody>
-        </table>
+//         <table class="items-table">
+//             <thead>
+//                 <tr>
+//                     <th>ITEM</th>
+//                     <th>QTY</th>
+//                     <th>WT(kg)</th>
+//                     <th>PRICE</th>
+//                     <th>SUBT</th>
+//                 </tr>
+//             </thead>
+//             <tbody>
+//                 ${itemsHTML}
+//             </tbody>
+//         </table>
         
-        ${receiptSettings.showItemCount ? `<div class="summary-row">Total Items: ${lineItemsData.length}</div>` : ''}
+//         ${receiptSettings.showItemCount ? `<div class="summary-row">Total Items: ${lineItemsData.length}</div>` : ''}
         
-        <div class="summary">
-            <div class="summary-row">Subtotal: ${formatCurrency(billData.subtotal)} LBP</div>
-            ${receiptSettings.showPreviousBalance && entity && entity.lb_balance > 0 ? 
-              `<div class="summary-row">Previous Balance: ${formatCurrency(entity.lb_balance)} LBP</div>` : ''}
-        </div>
+//         <div class="summary">
+//             <div class="summary-row">Subtotal: ${formatCurrency(billData.subtotal)} LBP</div>
+//             ${receiptSettings.showPreviousBalance && entity && entity.lb_balance > 0 ? 
+//               `<div class="summary-row">Previous Balance: ${formatCurrency(entity.lb_balance)} LBP</div>` : ''}
+//         </div>
         
-        <div class="total">
-            <div class="summary-row">TOTAL BALANCE: ${formatCurrency(billData.total_amount)} LBP</div>
-        </div>
+//         <div class="total">
+//             <div class="summary-row">TOTAL BALANCE: ${formatCurrency(billData.total_amount)} LBP</div>
+//         </div>
         
-        <div class="thank-you">💬 ${receiptSettings.thankYouMessage}</div>
+//         <div class="thank-you">💬 ${receiptSettings.thankYouMessage}</div>
         
-        ${qrCodeSection}
-    </div>
+//         ${qrCodeSection}
+//     </div>
     
-    <div class="note">
-        <strong>Note:</strong> This is a preview of how the receipt will look. The QR code shown above is the actual scannable code that will be printed on the thermal printer. You can test scanning it with your phone camera or QR scanner app.
-    </div>
-</body>
-</html>`;
+//     <div class="note">
+//         <strong>Note:</strong> This is a preview of how the receipt will look. The QR code shown above is the actual scannable code that will be printed on the thermal printer. You can test scanning it with your phone camera or QR scanner app.
+//     </div>
+// </body>
+// </html>`;
 
-    return html;
-  };
+//     return html;
+//   };
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
   const [activeTabs, setActiveTabs] = useLocalStorage<BillTab[]>('pos_active_tabs', []);
   const [activeTabId, setActiveTabId] = useLocalStorage<string>('pos_active_tab_id', '');
@@ -370,7 +370,7 @@ export default function POS() {
         } catch (error) {
           console.error('Error fetching recommended amount:', error);
           // Fallback to sale amount if available
-          const fallbackAmount = activeTab.amountReceived ? parseFloat(activeTab.amountReceived) : total;
+          const fallbackAmount = activeTab?.amountReceived ? parseFloat(activeTab?.amountReceived) : total;
           setRecommendedDrawerAmount(fallbackAmount);
         }
       };
@@ -396,7 +396,7 @@ export default function POS() {
       });
       
       // Generate receipt content
-      const receiptContent = await generateReceiptContent(billData, lineItemsData, customer, products, qrCodeData);
+      const receiptContent = await generateReceiptContent(billData, lineItemsData, entity, products, qrCodeData);
       
       // Print using Electron API
       if ((window as any).electronAPI?.printDocument) {
@@ -441,7 +441,7 @@ export default function POS() {
           printerName: printerName,
           qrCodeData: qrCodeData?.qrCodeDataUrl, // Pass QR code image data for HTML printing
           qrCodeUrl: qrCodeData?.qrCodeUrl, // Pass QR code URL for HTML display
-          options: {
+          printOptions: {
             margins: {
               top: 0,
               bottom: 0,
@@ -449,7 +449,8 @@ export default function POS() {
               right: 0
             },
             printBackground: false,
-            landscape: false
+            landscape: false,
+            receiptWidth: raw.receiptSettings?.receiptWidth || 32 // ADD THIS LINE
           }
         });
 
@@ -473,7 +474,7 @@ export default function POS() {
   };
 
   // Generate receipt content
-  const generateReceiptContent = async (billData: any, lineItemsData: any[], customer: any, products: any[], qrCodeData?: any) => {
+  const generateReceiptContent = async (billData: any, lineItemsData: any[], entity: any, products: any[], qrCodeData?: any) => {
     // Get receipt settings from offline context
     const receiptSettings = raw.receiptSettings || {
       storeName: 'KIWI VEGETABLES MARKET',
@@ -486,37 +487,53 @@ export default function POS() {
       billNumberPrefix: '000',
       showPreviousBalance: true,
       showItemCount: true,
-      receiptWidth: 32
+      receiptWidth: 150
     };
 
     const date = new Date(billData.bill_date).toLocaleDateString('en-GB');
-    const customerName = entity ? entity.name : 'Walk-in Customer';
+    const customerName = entity ? entity.name : t('common.labels.walkInCustomer');
     const customerPhone = entity ? entity.phone : '';
     
     // Format bill number with prefix
     const billNumber = `${receiptSettings.billNumberPrefix}${billData.bill_number.split('-')[1] || '12345'}`;
     
-    // Create separator line based on receipt width
-    const separator = '='.repeat(receiptSettings.receiptWidth || 32);
-    const dashSeparator = '-'.repeat(receiptSettings.receiptWidth || 32);
-    
+    // Create separator line based on receipt width from settings
+    const receiptWidth = Math.max(10, Number(receiptSettings.receiptWidth) || 32);
+    const separator = '====================================================================================================';
+    const dashSeparator = '----------------------------------------------------------------------------------------------------';
+    console.log(separator.length, 'separator 123');
     let content = `${separator}
          ${receiptSettings.storeName}
     ${receiptSettings.address}
-      Phones: ${receiptSettings.phone1Name}: ${receiptSettings.phone1} / ${receiptSettings.phone2Name}: ${receiptSettings.phone2}
+      ${t('receipt.phones')}: ${receiptSettings.phone1Name}: ${receiptSettings.phone1} / ${receiptSettings.phone2Name}: ${receiptSettings.phone2}
 ${separator}
-Bill No: ${billNumber}         Date: ${date}
-Customer: ${customerName}`;
+${t('receipt.billNumber')}: ${billNumber}         ${t('receipt.date')}: ${date}
+${t('receipt.customer')}: ${customerName}`;
 
     if (customerPhone) {
       content += `
-Phone: ${customerPhone}`;
+${t('receipt.phone')}: ${customerPhone}`;
     }
 
     content += `
 ${dashSeparator}
-ITEM          QTY WT(kg) PRICE  SUBT
+${t('receipt.itemHeader')}
 ${dashSeparator}`;
+
+    // Compute dynamic column widths based on total receipt width
+    const spacingBetweenColumns = 1; // single space between columns
+    const numGaps = 4; // between 5 columns
+    const availableColumnWidth = Math.max(0, receiptWidth - (spacingBetweenColumns * numGaps));
+    // Minimum sensible widths for columns
+    const minName = 8, minQty = 3, minWeight = 5, minPrice = 7, minSubtotal = 7;
+    const baseTotalMin = minName + minQty + minWeight + minPrice + minSubtotal;
+    const extra = Math.max(0, availableColumnWidth - baseTotalMin);
+    // Distribute extra width with bias towards name and subtotal
+    const nameWidth = minName + Math.floor(extra * 0.55);
+    const qtyWidth = minQty + Math.floor(extra * 0.05);
+    const weightWidth = minWeight + Math.floor(extra * 0.10);
+    const priceWidth = minPrice + Math.floor(extra * 0.10);
+    const subtotalWidth = availableColumnWidth - (nameWidth + qtyWidth + weightWidth + priceWidth);
 
     lineItemsData.forEach((item) => {
       const product = products.find(p => p.id === item.product_id);
@@ -526,12 +543,15 @@ ${dashSeparator}`;
       const price = item.unit_price || 0;
       const subtotal = item.line_total || 0;
       
-      // Format with proper padding for receipt alignment (more compact)
-      const paddedName = productName.padEnd(12).substring(0, 12);
-      const paddedQty = quantity.toString().padStart(3);
-      const paddedWeight = weight > 0 ? weight.toFixed(1).padStart(5) : '     ';
-      const paddedPrice = formatCurrency(price).padStart(7);
-      const paddedSubtotal = formatCurrency(subtotal).padStart(7);
+      // Format with proper padding for receipt alignment based on dynamic widths
+      const paddedName = productName.padEnd(nameWidth).substring(0, nameWidth);
+      const paddedQty = quantity.toString().padStart(qtyWidth).substring(0, qtyWidth);
+      const weightStr = weight > 0 ? weight.toFixed(1) : '';
+      const paddedWeight = weightStr.padStart(weightWidth).substring(0, weightWidth);
+      const priceStr = formatCurrency(price);
+      const paddedPrice = priceStr.padStart(priceWidth).substring(0, priceWidth);
+      const subtotalStr = formatCurrency(subtotal);
+      const paddedSubtotal = subtotalStr.padStart(subtotalWidth).substring(0, subtotalWidth);
       
       content += `
 ${paddedName} ${paddedQty} ${paddedWeight} ${paddedPrice} ${paddedSubtotal}`;
@@ -542,33 +562,33 @@ ${dashSeparator}`;
 
     if (receiptSettings.showItemCount) {
       content += `
-Total Items: ${lineItemsData.length}`;
+${t('receipt.totalItems')}: ${lineItemsData.length}`;
     }
 
     content += `
-Subtotal:                         ${formatCurrency(billData.subtotal)} LBP`;
+${t('receipt.subtotal')}:                         ${formatCurrency(billData.subtotal)} ${t('common.currency.LBP')}`;
 
     // Show previous balance if enabled and entity has balance
     if (receiptSettings.showPreviousBalance && entity && entity.lb_balance > 0) {
       content += `
-Previous Balance:                 ${formatCurrency(entity.lb_balance)} LBP`;
+${t('receipt.previousBalance')}:                 ${formatCurrency(entity.lb_balance)} ${t('common.currency.LBP')}`;
     }
 
     content += `
 ${dashSeparator}
-TOTAL BALANCE:                    ${formatCurrency(billData.total_amount)} LBP
+${t('receipt.totalBalance')}:                    ${formatCurrency(billData.total_amount)} ${t('common.currency.LBP')}
 ${dashSeparator}
            💬 ${receiptSettings.thankYouMessage}
 ${dashSeparator}`;
 
     // Add QR code section if available and customer is selected
-    if (qrCodeData && customer) {
+    if (qrCodeData && entity) {
       content += `
-📱 Scan QR code for account statement
+📱 ${t('receipt.scanQRCode')}
 ${dashSeparator}
 [QR_CODE_PLACEHOLDER]
-Customer: ${customer.name}
-Bill: ${billData.bill_number}
+${t('receipt.customer')}: ${entity.name}
+${t('receipt.billNumber')}: ${billData.bill_number}
 ${dashSeparator}`;
     }
 
@@ -874,7 +894,7 @@ ${dashSeparator}`;
   const change = activeTab.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
   // Validation helpers
-  const isWalkInCustomer = activeTab.selectedCustomer === 'Walk-in Customer'; // Empty string represents Walk-in Customer
+  const isWalkInCustomer = activeTab.selectedCustomer === t('common.labels.walkInCustomer'); // Empty string represents Walk-in Customer
   const hasZeroPricedItem = activeTab.cart.some(i => (i.unitPrice ?? 0) === 0);
 
 

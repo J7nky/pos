@@ -27,7 +27,7 @@ const SYNC_TABLES = [
 'users',
 'cash_drawer_accounts',
 'inventory_bills',
-'inventory_items',
+  'inventory_items',
 'transactions',
 'bills',
   'bill_line_items',
@@ -45,7 +45,8 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
 'users': ['stores'],
 'cash_drawer_accounts': [],
 'inventory_bills': ['suppliers'],
-'inventory_items': ['products', 'suppliers', 'inventory_bills'],
+  // supplier_id was removed from inventory_items; depend on batch linkage only
+  'inventory_items': ['products', 'inventory_bills'],
 'transactions': [],
 'bills': ['customers'],
 'bill_line_items': ['bills', 'products', 'suppliers', 'inventory_items'],
@@ -472,9 +473,34 @@ const result = { uploaded: 0, errors: [] as string[] };
         // Upload in batches
         for (let i = 0; i < validRecords.length; i += SYNC_CONFIG.batchSize) {
           const batch = validRecords.slice(i, i + SYNC_CONFIG.batchSize);
-          const cleanedBatch = batch.map((record: any) => 
+          let cleanedBatch = batch.map((record: any) => 
             dataValidationService.cleanRecordForUpload(record, tableName)
           );
+
+          // Preflight: for bill_line_items, nullify inventory_item_id if the referenced item doesn't exist in Supabase
+          if (tableName === 'bill_line_items') {
+            try {
+              const inventoryItemIds = [...new Set((cleanedBatch as any[])
+                .map(r => r.inventory_item_id)
+                .filter((v: string | null) => !!v))] as string[];
+              if (inventoryItemIds.length > 0) {
+                const { data: existingItems, error: invErr } = await supabase
+                  .from('inventory_items')
+                  .select('id')
+                  .in('id', inventoryItemIds);
+                if (!invErr) {
+                  const existingSet = new Set((existingItems || []).map((i: any) => i.id));
+                  cleanedBatch = (cleanedBatch as any[]).map(r => (
+                    r.inventory_item_id && !existingSet.has(r.inventory_item_id)
+                      ? { ...r, inventory_item_id: null }
+                      : r
+                  ));
+                }
+              }
+            } catch (e) {
+              console.warn('Preflight check for bill_line_items inventory_item_id failed:', e);
+            }
+          }
 
           const { error } = await supabase
             .from(tableName as any)

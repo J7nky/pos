@@ -21,7 +21,7 @@ export interface Supplier {
 export interface InventoryItem {
   id: string;
   product_id: string;
-  // supplier_id removed - get it from inventory_bills via batch_id
+  // supplier_id REMOVED - resolve via inventory_bills batch_id
   quantity: number;
   received_quantity: number;
   unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen';

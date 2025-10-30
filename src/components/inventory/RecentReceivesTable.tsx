@@ -90,9 +90,9 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
           <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
             {recentReceives.map((item: any) => {
               const product = products.find((p: any) => p.id === item.product_id);
-              // Get supplier_id from batch
+              // Get supplier_id strictly from batch
               const batch = item.batch_id ? batchMap.get(item.batch_id) : null;
-              const supplierId = batch?.supplier_id || (item.supplier_id || null); // Fallback for legacy items
+              const supplierId = batch?.supplier_id || null;
               const supplier = supplierId ? suppliers.find((s: any) => s.id === supplierId) : null;
 
               return (

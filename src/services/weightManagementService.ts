@@ -118,15 +118,33 @@ export class WeightManagementService {
       let inventoryItems = await db.inventory_items
         .where('product_id')
         .equals(productId)
-        .filter(item => item.supplier_id === supplierId)
+        // supplier_id REMOVED: Must use linked batch for supplier filter
         .toArray();
+
+      // Only include inventory items where the batch's supplier_id matches supplierId
+      const batchIds = [...new Set(inventoryItems.map(item => item.batch_id).filter(Boolean))];
+      const inventoryBills = await db.inventory_bills
+        .where('id')
+        .anyOf(batchIds as string[])
+        .toArray();
+      const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
+      inventoryItems = inventoryItems.filter(item => {
+        if (!item.batch_id) return false; // ignore orphaned/legacy/no-batch items
+        const batch = batchMap.get(item.batch_id);
+        return batch?.supplier_id === supplierId;
+      });
 
       // Get sales items (sold items)
       let salesItems = await db.bill_line_items
         .where('product_id')
         .equals(productId)
-        .filter(item => item.supplier_id === supplierId)
+        // supplier_id removal: must resolve supplier via batch
         .toArray();
+      salesItems = salesItems.filter(item => {
+        if (!item.batch_id) return false;
+        const batch = batchMap.get(item.batch_id);
+        return batch?.supplier_id === supplierId;
+      });
 
       // Apply date range filter if provided
       if (dateRange) {
@@ -145,17 +163,17 @@ export class WeightManagementService {
       }
 
       // Get inventory bills to determine batch types
-      const batchIds = [...new Set(inventoryItems.map(item => item.batch_id).filter(Boolean))];
-      const inventoryBills = await db.inventory_bills
+      const batchIdsForBills = [...new Set(inventoryItems.map(item => item.batch_id).filter(Boolean))];
+      const inventoryBillsForBills = await db.inventory_bills
         .where('id')
-        .anyOf(batchIds as string[])
+        .anyOf(batchIdsForBills as string[])
         .toArray();
 
       // Calculate received weight summary
       const receivedWeight = {
         total: 0,
         byBatch: inventoryItems.map(item => {
-          const bill = inventoryBills.find(b => b.id === item.batch_id);
+          const bill = inventoryBillsForBills.find(b => b.id === item.batch_id);
           const weight = item.weight;
           const isWeightOptional = bill?.type === 'commission' && weight === null;
           
