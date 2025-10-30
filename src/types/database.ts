@@ -236,6 +236,8 @@ export interface Database {
           address: string | null;
           lb_balance: number;
           usd_balance: number;
+          lb_max_balance?: number | null; // Maximum allowed balance in LBP
+          usd_max_balance?: number | null; // Maximum allowed balance in USD
           is_active: boolean;
           store_id: string;
           created_at: string;
@@ -249,6 +251,8 @@ export interface Database {
           address?: string | null;
           lb_balance?: number;
           usd_balance?: number;
+          lb_max_balance?: number | null; // Maximum allowed balance in LBP
+          usd_max_balance?: number | null; // Maximum allowed balance in USD
           is_active?: boolean;
           store_id: string;
           created_at?: string;
@@ -262,6 +266,8 @@ export interface Database {
           address?: string | null;
           lb_balance?: number;
           usd_balance?: number;
+          lb_max_balance?: number | null; // Maximum allowed balance in LBP
+          usd_max_balance?: number | null; // Maximum allowed balance in USD
           is_active?: boolean;
           updated_at?: string;
         };

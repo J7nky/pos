@@ -90,7 +90,9 @@ export interface Customer {
   address?: string ; // Updated to match database schema
   lb_balance: number; // Changed from currentDebt to balance to match Supabase schema
   usd_balance: number; // Changed from currentDebt to balance to match Supabase schema
-  isActive: boolean;
+  lb_max_balance?: number; // Maximum allowed balance in LBP
+  usd_max_balance?: number; // Maximum allowed balance in USD
+  is_active: boolean;
   createdAt: string;
 }
 

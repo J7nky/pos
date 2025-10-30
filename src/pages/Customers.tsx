@@ -12,7 +12,17 @@ import AccountStatementModal from '../components/AccountStatementModal';
 export default function Customers() {
   const raw = useOfflineData();
   const { t } = useI18n();
-  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0, email: c.email || '', address: c.address || ''})) : [];
+  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({
+    ...c, 
+    is_active: c.is_active ?? true, 
+    createdAt: c.created_at, 
+    lb_balance: c.lb_balance || 0, 
+    usd_balance: c.usd_balance || 0, 
+    email: c.email || '', 
+    address: c.address || '',
+    lb_max_balance: c.lb_max_balance ?? undefined,
+    usd_max_balance: c.usd_max_balance ?? undefined
+  })) : [];
   const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at || 'commission', email: s.email || '', address: s.address || '', lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0})) : [];
   const addCustomer = raw.addCustomer;
   const updateCustomer = raw.updateCustomer;
@@ -76,7 +86,9 @@ export default function Customers() {
     phone: '',
     email: '',
     address: '',
-    isActive: true,
+    is_active: true,
+    lb_max_balance: undefined,
+    usd_max_balance: undefined,
   });
   const [customerFormError, setCustomerFormError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
@@ -166,7 +178,7 @@ export default function Customers() {
     }
 
     // Check if entity is active (for customers)
-    if (entityType === 'customer' && !(entity as Customer).isActive) {
+    if (entityType === 'customer' && !(entity as Customer).is_active) {
       showToast('Cannot process payment for inactive customer', 'error');
       return { isValid: false };
     }
@@ -280,7 +292,9 @@ export default function Customers() {
       phone: '',
       email: '',
       address: '',
-      isActive: true,
+      is_active: true,
+      lb_max_balance: undefined,
+      usd_max_balance: undefined,
     });
     setShowCustomerForm(true);
   };
@@ -292,7 +306,9 @@ export default function Customers() {
       phone: customer.phone,
       email: customer.email || '',
       address: customer.address || '',
-      isActive: customer.isActive,
+      is_active: customer.is_active,
+      lb_max_balance: customer.lb_max_balance,
+      usd_max_balance: customer.usd_max_balance,
     });
     setShowCustomerForm(true);
   };
@@ -329,8 +345,7 @@ export default function Customers() {
     if (editingCustomer) {
       await updateCustomer(editingCustomer.id, {
         ...customerForm,
-        lb_balance: editingCustomer.lb_balance || 0,
-        usd_balance: editingCustomer.usd_balance || 0,
+        usd_max_balance: customerForm.usd_max_balance,
       } as Customer);
       showToast('Customer updated successfully!', 'success');
     } else {
@@ -339,9 +354,11 @@ export default function Customers() {
         phone: customerForm.phone!,
         email: customerForm.email || '',
         address: customerForm.address || '',
-        is_active: customerForm.isActive ?? true,
-        lb_balance: 0,
-        usd_balance: 0,
+        is_active: customerForm.is_active ?? true,
+        lb_balance: customerForm.lb_balance || 0,
+        usd_balance: customerForm.usd_balance || 0,
+        lb_max_balance: customerForm.lb_max_balance,
+        usd_max_balance: customerForm.usd_max_balance,
       });
       // Force immediate refresh to ensure UI updates
       await raw.refreshData();
@@ -501,9 +518,9 @@ export default function Customers() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          customer.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          customer.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                         }`}>
-                          {customer.isActive ? t('customers.active') : t('customers.inactive')}
+                          {customer.is_active ? t('customers.active') : t('customers.inactive')}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left text-sm font-medium">
@@ -702,12 +719,81 @@ export default function Customers() {
                   <input
                     type="checkbox"
                     id="isActive"
-                    name="isActive"
-                    checked={customerForm.isActive}
+                    name="is_active"
+                    checked={customerForm.is_active}
                     onChange={handleCustomerCheckboxChange}
                     className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
                   <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">Is Active</label>
+                </div>
+              </div>
+              
+              {/* Balance Fields */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-200">
+                <h3 className="md:col-span-2 text-lg font-semibold text-gray-900">Balance Settings</h3>
+                
+                {/* Initial Balance Fields - Only show when adding new customer */}
+                {!editingCustomer && (
+                  <>
+                    <div>
+                      <label htmlFor="lb_balance" className="block text-sm font-medium text-gray-700">Initial LBP Balance</label>
+                      <input
+                        type="number"
+                        id="lb_balance"
+                        name="lb_balance"
+                        value={customerForm.lb_balance || 0}
+                        onChange={handleCustomerFormChange}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        step="0.01"
+                        min="0"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label htmlFor="usd_balance" className="block text-sm font-medium text-gray-700">Initial USD Balance</label>
+                      <input
+                        type="number"
+                        id="usd_balance"
+                        name="usd_balance"
+                        value={customerForm.usd_balance || 0}
+                        onChange={handleCustomerFormChange}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        step="0.01"
+                        min="0"
+                      />
+                    </div>
+                  </>
+                )}
+                
+                {/* Max Balance Fields - Always show */}
+                <div>
+                  <label htmlFor="lb_max_balance" className="block text-sm font-medium text-gray-700">Max LBP Balance (Optional)</label>
+                  <input
+                    type="number"
+                    id="lb_max_balance"
+                    name="lb_max_balance"
+                    value={customerForm.lb_max_balance || ''}
+                    onChange={handleCustomerFormChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    step="0.01"
+                    min="0"
+                    placeholder="No limit"
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="usd_max_balance" className="block text-sm font-medium text-gray-700">Max USD Balance (Optional)</label>
+                  <input
+                    type="number"
+                    id="usd_max_balance"
+                    name="usd_max_balance"
+                    value={customerForm.usd_max_balance || ''}
+                    onChange={handleCustomerFormChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    step="0.01"
+                    min="0"
+                    placeholder="No limit"
+                  />
                 </div>
               </div>
               {customerFormError && <div className="text-red-600 text-sm font-medium pt-2">{customerFormError}</div>}
@@ -776,7 +862,7 @@ export default function Customers() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2">
                   <SearchableSelect
-                    options={customers.filter(c => c.isActive).map(customer => ({
+                    options={customers.filter(c => c.is_active).map(customer => ({
                       id: customer.id,
                       label: customer.name,
                       value: customer.id,
