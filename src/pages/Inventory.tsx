@@ -134,9 +134,9 @@ const Inventory: React.FC = () => {
   const handleUpdateInventoryItem = async (item: any) => {
     try {
       await updateInventoryItem(item.id, {
+        id: item.id,
         quantity: Number(item.quantity),
         price: item.price ? Number(item.price) : null,
-        status: item.status || null,
       });
       showToast('success', 'Inventory item updated successfully!');
     } catch (error) {

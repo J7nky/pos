@@ -49,12 +49,31 @@ export class CRUDHelperService {
     updates: Tables[T]['Update']
   ): Promise<void> {
     console.log(`🔧 CRUDHelper: Updating ${tableName} with ID ${id}`, updates);
-    const result = await (db as any)[tableName].update(id, { ...updates, _synced: false });
+    
+    // Prepare update payload with sync flag
+    const updatePayload: any = {
+      ...updates,
+      _synced: false
+    };
+    
+    // Add updated_at for tables that have it (customers, suppliers, products, stores)
+    const tablesWithUpdatedAt = ['customers', 'suppliers', 'products', 'stores', 'users'];
+    if (tablesWithUpdatedAt.includes(tableName)) {
+      updatePayload.updated_at = new Date().toISOString();
+    }
+    
+    // Perform the update in IndexedDB
+    const result = await (db as any)[tableName].update(id, updatePayload);
     console.log(`🔧 CRUDHelper: Update result for ${tableName}:`, result);
     
     // Verify the update
     const entity = await (db as any)[tableName].get(id);
     console.log(`🔧 CRUDHelper: Entity after update:`, entity);
+    
+    if (!entity) {
+      console.error(`❌ CRUDHelper: Entity ${id} not found after update in ${tableName}`);
+      throw new Error(`Failed to update ${tableName} with ID ${id}`);
+    }
     
     await this.triggerPostOperationCallbacks();
   }

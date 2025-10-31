@@ -245,18 +245,10 @@ export class DataValidationService {
         }
       }
 
-      // Fix missing supplier - use first available
-      if (!await db.suppliers.get(record.supplier_id)) {
-        const validSupplier = await db.suppliers
-          .where('store_id')
-          .equals(storeId)
-          .filter(s => !s._deleted)
-          .first();
-        if (validSupplier) {
-          record.supplier_id = validSupplier.id;
-        } else {
-          return null; // Cannot fix
-        }
+      // supplier_id REMOVED from inventory_items - now accessed via inventory_bills -> batch_id
+      // Remove supplier_id if present (legacy data cleanup)
+      if (record.supplier_id) {
+        delete record.supplier_id;
       }
 
       // Fix invalid batch reference
@@ -332,6 +324,12 @@ export class DataValidationService {
     const tablesWithoutUpdatedAt = ['inventory_items', 'transactions', 'inventory_bills', 'bill_line_items', 'bill_audit_logs'];
     if (tablesWithoutUpdatedAt.includes(tableName)) {
       delete cleanRecord.updated_at;
+    }
+
+    // CRITICAL: Remove supplier_id from inventory_items - it was removed from schema
+    // Supplier is now accessed via inventory_bills -> batch_id
+    if (tableName === 'inventory_items') {
+      delete cleanRecord.supplier_id;
     }
 
     // Handle cash drawer field mapping (camelCase -> snake_case)

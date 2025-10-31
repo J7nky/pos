@@ -6,7 +6,7 @@ const fr = {
     active: 'actif',
     recentReceives: 'réceptions récentes',
     transactions: 'transactions',
-    actions: { cancel: 'Annuler', save: 'Enregistrer', delete: 'Supprimer', edit: 'Modifier', add: 'Ajouter', view: 'Voir', close: 'Fermer', export: 'Exporter', refresh: 'Rafraîchir', search: 'Rechercher', details: 'Détails' },
+    actions: { cancel: 'Annuler', save: 'Enregistrer', delete: 'Supprimer', edit: 'Modifier', add: 'Ajouter', view: 'Voir', close: 'Fermer', export: 'Exporter', refresh: 'Rafraîchir', search: 'Rechercher', details: 'Détails', syncNow: 'Synchroniser maintenant', syncing: 'Synchronisation...' },
     status: { online: 'En ligne', offline: 'Hors ligne', synced: 'Synchronisé', unsyncedCount: '{{count}} non synchronisé(s)' },
       placeholders: { search: 'Rechercher...', optional: 'Facultatif', searchProducts: 'Rechercher des produits ou fournisseurs...', searchCustomers: 'Rechercher des clients...' },
     labels: {
@@ -36,7 +36,7 @@ const fr = {
     alerts: { connectionRestored: 'Connexion rétablie', autoSyncingChanges: 'Synchronisation automatique de vos modifications...' },
     currency: { USD: 'Dollar américain', LBP: 'Livre libanaise' }
   },
-  nav: { home: 'Accueil', inventory: 'Stock', pos: 'Point de vente', customers: 'Clients', accounting: 'Comptabilité', reports: 'Rapports', settings: 'Paramètres' },
+  nav: { home: 'Accueil', inventory: 'Stock', pos: 'Point de vente', customers: 'Clients', accounting: 'Comptabilité', reports: 'Rapports', unsynced: 'Éléments non synchronisés', settings: 'Paramètres' },
   layout: { title: 'ProducePOS', connection: { online: 'En ligne', offline: 'Hors ligne' }, unsynced: 'non synchronisé', signOut: 'Déconnexion' },
   login: {
     title: 'POS Produits', subtitle: 'ERP du marché de gros', email: 'Adresse e-mail', emailPlaceholder: 'Entrez votre e-mail', password: 'Mot de passe', passwordPlaceholder: 'Entrez votre mot de passe',
@@ -382,6 +382,16 @@ const fr = {
     dashSeparator: '-',
     lbp: 'LBP',
     currency: 'LBP'
+  },
+  unsyncedItems: {
+    title: 'Éléments non synchronisés',
+    subtitle: 'Éléments en attente de synchronisation avec le serveur',
+    totalUnsynced: 'Total non synchronisé',
+    tablesAffected: 'Tableaux affectés',
+    lastRefresh: 'Dernière actualisation',
+    allSynced: 'Tous les éléments sont synchronisés',
+    noPendingItems: 'Il n\'y a pas d\'éléments en attente de synchronisation.',
+    offlineWarning: 'Vous êtes actuellement hors ligne. Les éléments seront synchronisés lorsque la connexion sera rétablie.'
   }
 };
 

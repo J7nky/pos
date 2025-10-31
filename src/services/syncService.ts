@@ -274,6 +274,7 @@ throw new Error('Sync already in progress');
 
 this.isRunning = true;
 this.lastSyncAttempt = new Date();
+const syncStartTime = performance.now();
 
 const result: SyncResult = {
 success: true,
@@ -283,37 +284,60 @@ conflicts: 0
 };
 
 try {
+const setupStart = performance.now();
 await this.ensureStoreExists(storeId);
       await this.initializeSyncMetadata(storeId);
+      const setupTime = performance.now() - setupStart;
+      console.log(`⏱️  Setup time: ${setupTime.toFixed(2)}ms`);
 
       // Check connectivity
+const connectivityStart = performance.now();
 const { error: connectivityError } = await supabase
 .from('products')
 .select('id')
 .limit(1);
+const connectivityTime = performance.now() - connectivityStart;
+console.log(`⏱️  Connectivity check: ${connectivityTime.toFixed(2)}ms`);
 
 if (connectivityError) {
 throw new Error(`Connection failed: ${connectivityError.message}`);
 }
 
       // Refresh validation cache once
+      const cacheStart = performance.now();
       await dataValidationService.refreshCache(storeId, supabase);
+      const cacheTime = performance.now() - cacheStart;
+      console.log(`⏱️  Validation cache refresh: ${cacheTime.toFixed(2)}ms`);
 
       // Upload then download
+      const uploadStart = performance.now();
       const uploadResult = await this.uploadLocalChanges(storeId);
-result.synced.uploaded = uploadResult.uploaded;
-result.errors.push(...uploadResult.errors);
+      const uploadTime = performance.now() - uploadStart;
+      console.log(`⏱️  Upload time: ${uploadTime.toFixed(2)}ms (${uploadResult.uploaded} records)`);
+      result.synced.uploaded = uploadResult.uploaded;
+      result.errors.push(...uploadResult.errors);
 
+const downloadStart = performance.now();
 const downloadResult = await this.downloadRemoteChanges(storeId);
+const downloadTime = performance.now() - downloadStart;
+console.log(`⏱️  Download time: ${downloadTime.toFixed(2)}ms (${downloadResult.downloaded} records)`);
 result.synced.downloaded = downloadResult.downloaded;
 result.conflicts += downloadResult.conflicts;
 result.errors.push(...downloadResult.errors);
 
+const pendingStart = performance.now();
 await this.processPendingSyncs();
+const pendingTime = performance.now() - pendingStart;
+console.log(`⏱️  Pending syncs processing: ${pendingTime.toFixed(2)}ms`);
+
+const totalTime = performance.now() - syncStartTime;
+console.log(`⏱️  Total sync time: ${totalTime.toFixed(2)}ms (${(totalTime / 1000).toFixed(2)}s)`);
 
 result.success = result.errors.length === 0;
 
 } catch (error) {
+const totalTime = performance.now() - syncStartTime;
+console.error(`⏱️  Sync failed after ${totalTime.toFixed(2)}ms:`, error);
 result.success = false;
 result.errors.push(error instanceof Error ? error.message : 'Unknown sync error');
 } finally {
@@ -327,6 +351,7 @@ return result;
 const result = { uploaded: 0, errors: [] as string[] };
 
     for (const tableName of SYNC_TABLES) {
+      const tableStart = performance.now();
       try {
         console.log(`📤 Processing table: ${tableName}`);
         
@@ -342,6 +367,12 @@ const result = { uploaded: 0, errors: [] as string[] };
          if (activeRecords.length === 0 && deletedRecords.length === 0) {
            console.log(`  ⏭️  No unsynced records for ${tableName}`);
            continue;
+         }
+
+         // Process deleted records first if there are any (they don't need dependency validation)
+         // This ensures deletions happen even if active records can't be synced due to dependencies
+         if (deletedRecords.length > 0) {
+           console.log(`  🗑️  Processing ${deletedRecords.length} deleted records for ${tableName}`);
          }
          
         console.log(`  📊 Found ${activeRecords.length} active and ${deletedRecords.length} deleted unsynced records`);
@@ -407,7 +438,8 @@ const result = { uploaded: 0, errors: [] as string[] };
         }
         
         // CRITICAL: For bill_line_items and bill_audit_logs, check if parent bills exist in Supabase
-        if (tableName === 'bill_line_items' || tableName === 'bill_audit_logs') {
+        // NOTE: Only validate activeRecords - deleted records don't need parent bill validation
+        if ((tableName === 'bill_line_items' || tableName === 'bill_audit_logs') && activeRecords.length > 0) {
           const billIds = [...new Set(activeRecords.map((record: any) => record.bill_id))];
            
            try {
@@ -418,10 +450,10 @@ const result = { uploaded: 0, errors: [] as string[] };
              
              if (billsError) {
               console.warn(`Failed to validate bill IDs for ${tableName}:`, billsError);
-              console.log(`⏳ Skipping ${tableName} sync - cannot validate bill dependencies`);
-               continue;
-             }
-             
+              console.log(`⏳ Skipping ${tableName} active records sync - cannot validate bill dependencies (deleted records will still be processed)`);
+              // Don't continue - still process deleted records
+              activeRecords.length = 0; // Clear active records but continue to process deleted records
+             } else {
             const validBillIds = new Set(billsData?.map((b: any) => b.id) || []);
             
             // Filter out records whose parent bills don't exist in Supabase yet
@@ -437,23 +469,19 @@ const result = { uploaded: 0, errors: [] as string[] };
             }
             
             if (recordsWithMissingBills.length > 0) {
-              console.log(`⏳ ${recordsWithMissingBills.length} ${tableName} records skipped - parent bills not yet synced (will retry next sync)`);
+              console.log(`⏳ ${recordsWithMissingBills.length} ${tableName} active records skipped - parent bills not yet synced (will retry next sync)`);
             }
-            
-            // Only process records with valid parent bills
-            if (recordsWithValidBills.length === 0) {
-              console.log(`⏳ No ${tableName} records ready to sync (all waiting for parent bills)`);
-               continue;
-             }
              
             // Update activeRecords to only include those with valid parent bills
+            // Note: We don't continue here even if no valid records - we still want to process deleted records
             activeRecords.length = 0;
             activeRecords.push(...recordsWithValidBills);
-            
+           }
            } catch (error) {
             console.warn(`Failed to validate bill IDs for ${tableName}:`, error);
-            console.log(`⏳ Skipping ${tableName} sync - cannot validate bill dependencies`);
-             continue;
+            console.log(`⏳ Skipping ${tableName} active records sync - cannot validate bill dependencies (deleted records will still be processed)`);
+            // Don't continue - still process deleted records
+            activeRecords.length = 0; // Clear active records but continue to process deleted records
            }
         }
 
@@ -532,6 +560,9 @@ const result = { uploaded: 0, errors: [] as string[] };
 
         await db.updateSyncMetadata(tableName, new Date().toISOString());
 
+        const tableTime = performance.now() - tableStart;
+        console.log(`  ⏱️  ${tableName} upload: ${tableTime.toFixed(2)}ms`);
+
                  // Handle deleted records
         for (const record of deletedRecords as any[]) {
           try {
@@ -585,17 +616,29 @@ const result = { uploaded: 0, errors: [] as string[] };
               .eq('id', record.id);
 
             if (error) {
+              console.error(`❌ Delete failed for ${tableName}/${record.id}:`, error);
               result.errors.push(`Delete failed for ${tableName}/${record.id}: ${error.message}`);
             } else {
+              // Mark as synced and delete from local database
+              await db.markAsSynced(tableName, record.id);
               await table.delete(record.id);
               result.uploaded++;
+              console.log(`✅ Successfully deleted ${tableName} record ${record.id.substring(0, 8)}...`);
             }
           } catch (error) {
+            console.error(`❌ Delete error for ${tableName}/${record.id}:`, error);
             result.errors.push(`Delete error for ${tableName}/${record.id}: ${error}`);
           }
         }
+        
+        if (deletedRecords.length > 0) {
+          const deleteTime = performance.now() - tableStart;
+          console.log(`  🗑️  ${tableName} deletions processed: ${deleteTime.toFixed(2)}ms`);
+        }
 
 } catch (error) {
+        const tableTime = performance.now() - tableStart;
+        console.error(`  ⏱️  ${tableName} upload failed after ${tableTime.toFixed(2)}ms:`, error);
         result.errors.push(`Table ${tableName} upload error: ${error}`);
 }
 }
@@ -667,6 +710,7 @@ private async downloadRemoteChanges(storeId: string) {
 const result = { downloaded: 0, conflicts: 0, errors: [] as string[] };
 
 for (const tableName of SYNC_TABLES) {
+const tableStart = performance.now();
 try {
         if (!await this.validateDependencies(tableName, storeId)) {
 console.log(`⏳ Skipping download for ${tableName} - dependencies not met`);
@@ -713,7 +757,8 @@ continue;
 }
 
 if (!remoteRecords || remoteRecords.length === 0) {
-          console.log(`📊 No records found for ${tableName}`);
+          const tableTime = performance.now() - tableStart;
+          console.log(`📊 No records found for ${tableName} (${tableTime.toFixed(2)}ms)`);
 continue;
 }
 
@@ -747,7 +792,12 @@ const latestRecord = remoteRecords[remoteRecords.length - 1];
 const latestTimestamp = latestRecord?.[timestampField] || new Date().toISOString();
 await db.updateSyncMetadata(tableName, latestTimestamp);
 
+const tableTime = performance.now() - tableStart;
+console.log(`  ⏱️  ${tableName} download: ${tableTime.toFixed(2)}ms (${remoteRecords.length} records)`);
+
 } catch (error) {
+const tableTime = performance.now() - tableStart;
+console.error(`  ⏱️  ${tableName} download failed after ${tableTime.toFixed(2)}ms:`, error);
 result.errors.push(`Table ${tableName} download error: ${error}`);
 }
 }

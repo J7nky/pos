@@ -7,7 +7,7 @@ const en = {
     recentReceives: 'recent receives',
     transactions: 'transactions',
     opened: 'Opened',
-    actions: { cancel: 'Cancel', save: 'Save', delete: 'Delete', edit: 'Edit', add: 'Add', view: 'View', close: 'Close', export: 'Export', refresh: 'Refresh', search: 'Search', details: 'Details' },
+    actions: { cancel: 'Cancel', save: 'Save', delete: 'Delete', edit: 'Edit', add: 'Add', view: 'View', close: 'Close', export: 'Export', refresh: 'Refresh', search: 'Search', details: 'Details', syncNow: 'Sync Now', syncing: 'Syncing...' },
     status: { online: 'Online', offline: 'Offline', synced: 'Synced', unsyncedCount: '{{count}} unsynced' },
     placeholders: { search: 'Search...', optional: 'Optional' ,
       addNotes: 'Add notes...',
@@ -42,7 +42,7 @@ const en = {
     alerts: { connectionRestored: 'Connection Restored', autoSyncingChanges: 'Auto-syncing your changes...' },
     currency: { USD: 'USD', LBP: 'LBP' }
   },
-  nav: { home: 'Home', inventory: 'Inventory', pos: 'Point of Sale', customers: 'Customers', accounting: 'Accounting', reports: 'Reports', settings: 'Settings' },
+  nav: { home: 'Home', inventory: 'Inventory', pos: 'Point of Sale', customers: 'Customers', accounting: 'Accounting', reports: 'Reports', unsynced: 'Unsynced Items', settings: 'Settings' },
   layout: { title: 'ProducePOS', connection: { online: 'Online', offline: 'Offline' }, unsynced: 'unsynced', signOut: 'Sign out' },
   login: {
     title: 'Produce POS', subtitle: 'Wholesale Produce Market ERP', email: 'Email Address', emailPlaceholder: 'Enter your email', password: 'Password', passwordPlaceholder: 'Enter your password',
@@ -808,6 +808,16 @@ const en = {
     totalBalance: 'Total Balance',
     currency: 'LBP',
     scanQRCode: 'Scan QR code for account statement',
+  },
+  unsyncedItems: {
+    title: 'Unsynced Items',
+    subtitle: 'Items pending synchronization with the server',
+    totalUnsynced: 'Total Unsynced',
+    tablesAffected: 'Tables Affected',
+    lastRefresh: 'Last Refresh',
+    allSynced: 'All Items Synced',
+    noPendingItems: 'There are no items waiting to be synchronized.',
+    offlineWarning: 'You are currently offline. Items will sync when connection is restored.',
   }
 };
 

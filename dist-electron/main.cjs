@@ -110,7 +110,6 @@ function getWindowsPrinters() {
 ipcMain.handle('print-document', async (_event, options) => {
     try {
         const { content, printerName, printOptions, qrCodeData, qrCodeUrl } = options;
-        const receiptWidth = (printOptions && printOptions.receiptWidth) || 32;
         console.log('🖨️ Starting print job to:', printerName);
         console.log('📄 Content length:', content.length);
         console.log('📱 QR Code Data:', qrCodeData ? 'Available' : 'Not available');
@@ -122,25 +121,11 @@ ipcMain.handle('print-document', async (_event, options) => {
             printerName.toLowerCase().includes('receipt') ||
             printerName.toLowerCase().includes('pos'))) {
             console.log('🔄 Using ESC/POS thermal printing for:', printerName);
-            return await printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl, receiptWidth);
+            return await printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl);
         }
         // Fallback to Electron's print system for regular printers
         console.log('🔄 Using Electron print system for:', printerName);
-        return await printWithElectron(content, printerName, {
-            margins: {
-                marginType: 'none',
-                top: 0,
-                bottom: 0,
-                left: 0,
-                right: 0
-            },
-            printBackground: false,
-            landscape: false,
-            pageSize: {
-                width: 80000, // 80mm in microns (80mm = 80,000 microns)
-                height: 297000 // 297mm in microns (auto-length for thermal)
-            }
-        });
+        return await printWithElectron(content, printerName, printOptions);
     }
     catch (error) {
         console.error('Error printing document:', error);
@@ -153,8 +138,8 @@ ipcMain.handle('print-document', async (_event, options) => {
 });
 // Helper function: Render Arabic text to bitmap image
 function renderTextToBitmap(text, options = {}) {
-    const { fontSize = 24, fontFamily = 'Arial, sans-serif', width = 576, // 72mm for 80mm paper (8 dots per mm)
-    align = 'left', bold = false, padding = 10 } = options;
+    const { fontSize = 40, fontFamily = 'Arial, sans-serif', width = 576, // 72mm for 80mm paper (8 dots per mm)
+    align = 'right', bold = true, padding = 10 } = options;
     // Create canvas
     const canvas = createCanvas(width, 100); // Height will be adjusted
     const ctx = canvas.getContext('2d');
@@ -336,7 +321,7 @@ async function testAllArabicCodePages(printerName) {
         escposData += `\nCode Page ${cp.num} (${cp.name}):\n`;
         escposData += ESC + 't' + cp.hex; // Set code page
         escposData += testText + '\n';
-        escposData += '----------------------------------------\n';
+        escposData += '--------------------\n';
     }
     escposData += '\n\n\n';
     escposData += CUT_PAPER;
@@ -368,14 +353,14 @@ async function testAllArabicCodePages(printerName) {
     }
 }
 // Direct printing function for thermal printers using ESC/POS
-async function printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl, receiptWidth = 32) {
+async function printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl) {
     try {
         console.log('🔄 Using ESC/POS thermal printing...');
         console.log('🖨️ Printer:', printerName);
         console.log('📱 QR Code available:', !!qrCodeData);
         // Try ESC/POS printing first
         try {
-            return await printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl, receiptWidth);
+            return await printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl);
         }
         catch (escposError) {
             console.log('⚠️ ESC/POS print failed, trying HTML fallback...', escposError);
@@ -416,7 +401,7 @@ async function printDirectToThermalPrinter(content, printerName, qrCodeData, qrC
     }
 }
 // Print using raw ESC/POS commands directly to Windows printer
-async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl, receiptWidth = 32) {
+async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
     return new Promise((resolve, reject) => {
         try {
             console.log('🔧 Building raw ESC/POS commands...');
@@ -488,13 +473,13 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl, r
                 }
                 // Check if line contains Arabic
                 const lineHasArabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(trimmedLine);
-                // Handle separators using dynamic receipt width
+                // Handle separators
                 if (trimmedLine.match(/^=+$/)) {
-                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT + '='.repeat(receiptWidth) + LINE_FEED, 'binary')]);
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT + '================================' + LINE_FEED, 'binary')]);
                     continue;
                 }
                 if (trimmedLine.match(/^-+$/)) {
-                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT + '-'.repeat(receiptWidth) + LINE_FEED, 'binary')]);
+                    escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT + '--------------------------------' + LINE_FEED, 'binary')]);
                     continue;
                 }
                 // If line contains Arabic, render as image
@@ -503,15 +488,16 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl, r
                     // Determine styling
                     const isCentered = trimmedLine.includes('MARKET') || trimmedLine.includes('VEGETABLES') || trimmedLine.includes('Scan QR code');
                     const isBold = trimmedLine.includes('Bill No:') || trimmedLine.includes('Date:') || trimmedLine.includes('TOTAL') || trimmedLine.includes('Thank You');
-                    const isLarge = trimmedLine.includes('TOTAL BALANCE');
+                    const isLarge = trimmedLine.includes('TOTAL BALANCE')||trimmedLine.includes('الرصيد الاجمالي');
                     // Render as image
+                    console.log('123 isLarge:', isLarge);
                     const bitmapData = renderTextToBitmap(trimmedLine, {
-                        fontSize: isLarge ? 35 : 28,
+                        fontSize: isLarge ? 40 : 28,
                         width: 576,
                         bold: isBold,
                         align: isCentered ? 'center' : 'left'
                     });
-                    const bitmapHeight = Math.ceil((isLarge ? 28 : 22) * 1.5 + 20);
+                    const bitmapHeight = Math.ceil((isLarge ? 40 : 28) * 1.5 + 20);
                     const bitmapCommand = createBitmapCommand(bitmapData, 576, bitmapHeight);
                     escposData = Buffer.concat([escposData, bitmapCommand]);
                     escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED, 'binary')]);
@@ -612,13 +598,13 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl, r
     });
 }
 // Print using ESC/POS commands for proper thermal printing
-async function printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl, receiptWidth) {
+async function printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
     return new Promise(async (resolve, reject) => {
         try {
             console.log('🔧 Initializing thermal printer with ESC/POS...');
             // Try raw ESC/POS approach first (better Windows compatibility)
             try {
-                const result = await printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl, receiptWidth);
+                const result = await printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl);
                 resolve(result);
                 return;
             }

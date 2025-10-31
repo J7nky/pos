@@ -17,7 +17,8 @@ import {
   Wifi,
   WifiOff,
   Calculator,
-  UserCog
+  UserCog,
+  CloudOff
 } from 'lucide-react';
 
 export default function Layout() {
@@ -46,6 +47,7 @@ export default function Layout() {
     { id: 'customers', label: t('nav.customers'), icon: Users, path: '/customers' },
     { id: 'accounting', label: t('nav.accounting'), icon: Calculator, path: '/accounting' },
     { id: 'reports', label: t('nav.reports'), icon: FileText, path: '/reports' },
+    { id: 'unsynced', label: t('nav.unsynced'), icon: CloudOff, path: '/unsynced' },
     { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' },
     ...(userProfile?.role === 'admin' ? [{ id: 'employees', label: 'Employees', icon: UserCog, path: '/employees' }] : [])
   ];

@@ -324,7 +324,7 @@ export default function Customers() {
   const handleCustomerCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCustomerForm(prev => ({
       ...prev,
-      isActive: e.target.checked,
+      is_active: e.target.checked,
     }));
   };
 
@@ -343,10 +343,19 @@ export default function Customers() {
     }
     setCustomerFormError(null);
     if (editingCustomer) {
+      // Ensure proper field mapping and remove any camelCase fields
       await updateCustomer(editingCustomer.id, {
-        ...customerForm,
+        name: customerForm.name!,
+        phone: customerForm.phone!,
+        email: customerForm.email || '',
+        address: customerForm.address || '',
+        is_active: customerForm.is_active ?? true,
+        lb_max_balance: customerForm.lb_max_balance,
         usd_max_balance: customerForm.usd_max_balance,
-      } as Customer);
+        updated_at: new Date().toISOString(),
+      });
+      // Force immediate refresh to ensure UI updates
+      await raw.refreshData();
       showToast('Customer updated successfully!', 'success');
     } else {
       await addCustomer({

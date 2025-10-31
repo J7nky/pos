@@ -6,6 +6,7 @@ const { ThermalPrinter, PrinterTypes } = require("node-thermal-printer");
 const fs = require("fs");
 const iconv = require("iconv-lite");
 const { createCanvas } = require("canvas");
+const { autoUpdater } = require("electron-updater");
 // Enable hot reloading in development
 if (process.env.NODE_ENV === 'development') {
     try {
@@ -53,9 +54,42 @@ console.log('🔧 Registering IPC handlers immediately...');
 // Removed duplicate get-printers handler - using the improved version below
 console.log('✅ IPC handlers registered immediately');
 app.on("ready", () => {
+    // Ensure correct Windows toast notifications/taskbar identity
+    try {
+        if (process.platform === 'win32') {
+            app.setAppUserModelId('com.souqtrablous.pos');
+        }
+    }
+    catch { }
     console.log('🚀 Electron app is ready, creating window...');
     createWindow();
     console.log('✅ Window created');
+    // Initialize auto-updater in production builds only
+    try {
+        if (process.env.NODE_ENV !== 'development') {
+            autoUpdater.autoDownload = true;
+            autoUpdater.autoInstallOnAppQuit = true;
+            autoUpdater.logger = {
+                info: (msg) => console.log('[autoUpdater]', msg),
+                warn: (msg) => console.warn('[autoUpdater]', msg),
+                error: (msg) => console.error('[autoUpdater]', msg),
+                debug: (msg) => console.debug('[autoUpdater]', msg),
+                silly: () => { }
+            };
+            autoUpdater.on('checking-for-update', () => console.log('[autoUpdater] checking-for-update'));
+            autoUpdater.on('update-available', (info) => console.log('[autoUpdater] update-available', info && info.version));
+            autoUpdater.on('update-not-available', () => console.log('[autoUpdater] update-not-available'));
+            autoUpdater.on('error', (err) => console.error('[autoUpdater] error', err && err.message));
+            autoUpdater.on('download-progress', (p) => console.log('[autoUpdater] download-progress', Math.round(p.percent) + '%'));
+            autoUpdater.on('update-downloaded', () => {
+                console.log('[autoUpdater] update-downloaded, will install on quit');
+            });
+            autoUpdater.checkForUpdatesAndNotify();
+        }
+    }
+    catch (e) {
+        console.warn('[autoUpdater] init failed', e && e.message);
+    }
 });
 app.on("window-all-closed", () => {
     if (process.platform !== "darwin")

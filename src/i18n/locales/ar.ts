@@ -22,7 +22,9 @@ const ar = {
       export: 'تصدير',
       refresh: 'تحديث',
       search: 'بحث',
-      details: 'تفاصيل'
+      details: 'تفاصيل',
+      syncNow: 'مزامنة الآن',
+      syncing: 'جاري المزامنة...'
     },
     status: {
       online: 'متصل',
@@ -91,6 +93,7 @@ const ar = {
     customers: 'العملاء',
     accounting: 'المحاسبة',
     reports: 'التقارير',
+    unsynced: 'العناصر غير المتزامنة',
     settings: 'الإعدادات'
   },
   layout: {
@@ -941,6 +944,16 @@ const ar = {
     totalBalance: 'الرصيد الإجمالي',
     scanQRCode: 'امسح الكود الخاص بك للحصول على كشف الحساب',
     currency: 'ل.ل'
+  },
+  unsyncedItems: {
+    title: 'العناصر غير المتزامنة',
+    subtitle: 'عناصر في انتظار المزامنة مع الخادم',
+    totalUnsynced: 'إجمالي غير المتزامنة',
+    tablesAffected: 'الجداول المتأثرة',
+    lastRefresh: 'آخر تحديث',
+    allSynced: 'جميع العناصر متزامنة',
+    noPendingItems: 'لا توجد عناصر في انتظار المزامنة.',
+    offlineWarning: 'أنت غير متصل حاليًا. سيتم مزامنة العناصر عند استعادة الاتصال.'
   }
 };
 

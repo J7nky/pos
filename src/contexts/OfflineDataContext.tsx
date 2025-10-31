@@ -1585,7 +1585,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         store_id: storeId,
         created_at: now,
         _synced: false,
-        supplier_id: actualSupplierId,
+        // supplier_id REMOVED: accessed via inventory_bills -> batch_id
         weight: it.weight ?? null,
         price: it.price ?? null,
         selling_price: it.selling_price ?? null,

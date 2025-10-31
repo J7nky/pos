@@ -10,6 +10,7 @@ import Customers from './pages/Customers';
 import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
 import Employees from './pages/Employees';
+import UnsyncedItems from './pages/UnsyncedItems';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
 import ErrorPage from './components/ErrorPage';
 
@@ -65,6 +66,11 @@ export const router = createRouter([
           {
             path: "employees",
             element: <Employees />,
+            errorElement: <ErrorPage />,
+          },
+          {
+            path: "unsynced",
+            element: <UnsyncedItems />,
             errorElement: <ErrorPage />,
           },
         ],
