@@ -101,9 +101,8 @@ export default function Settings() {
         return;
       }
 
-      // Update the currency service
-      const { currencyService } = await import('../services/currencyService');
-      await currencyService.updateExchangeRate(exchangeRate);
+      // Update exchange rate through offline context
+      await updateExchangeRate(newExchangeRate);
       
       setShowSaveMessage(true);
       setSaveError(null);

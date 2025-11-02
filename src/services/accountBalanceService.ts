@@ -1,5 +1,6 @@
 import { db } from '../lib/db';
 import { Customer, Supplier, Transaction, LocalSaleItem } from '../lib/db';
+import { generateReversalReference } from '../utils/referenceGenerator';
 
 export interface RunningBalance {
   USD: number;
@@ -443,7 +444,7 @@ export class AccountBalanceService {
         amount: originalTransaction.amount,
         currency: originalTransaction.currency,
         description: `Reversal of ${originalTransaction.description} - Reason: ${reason}`,
-        reference: `REV-${originalTransaction.id}`,
+        reference: generateReversalReference(),
         created_by: createdBy,
         created_at: new Date().toISOString(),
         customer_id: originalTransaction.customer_id,

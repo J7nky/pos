@@ -303,6 +303,312 @@ export class RealTimeSyncService {
   }
 
   /**
+   * Subscribe to inventory changes for real-time stock updates
+   */
+  private async subscribeToInventoryUpdates(storeId: string): Promise<void> {
+    const channelName = `inventory_items_${storeId}`;
+    
+    if (this.subscriptions.has(channelName)) {
+      return; // Already subscribed
+    }
+
+    const subscription = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'inventory_items',
+          filter: `store_id=eq.${storeId}`
+        },
+        async (payload) => {
+          console.log('📦 Real-time inventory update:', payload);
+          await this.handleInventoryUpdate(payload, storeId);
+        }
+      )
+      .subscribe((status) => {
+        console.log(`📡 Inventory subscription status: ${status}`);
+        if (status === 'SUBSCRIBED') {
+          this.subscriptions.set(channelName, subscription);
+        }
+      });
+
+    this.subscriptions.set(channelName, subscription);
+  }
+
+  /**
+   * Subscribe to bill changes for real-time sales updates
+   */
+  private async subscribeToBillUpdates(storeId: string): Promise<void> {
+    const channelName = `bills_${storeId}`;
+    
+    if (this.subscriptions.has(channelName)) {
+      return; // Already subscribed
+    }
+
+    const subscription = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bills',
+          filter: `store_id=eq.${storeId}`
+        },
+        async (payload) => {
+          console.log('🧾 Real-time bill update:', payload);
+          await this.handleBillUpdate(payload, storeId);
+        }
+      )
+      .subscribe((status) => {
+        console.log(`📡 Bill subscription status: ${status}`);
+        if (status === 'SUBSCRIBED') {
+          this.subscriptions.set(channelName, subscription);
+        }
+      });
+
+    this.subscriptions.set(channelName, subscription);
+  }
+
+  /**
+   * Subscribe to product changes for real-time product updates
+   */
+  private async subscribeToProductUpdates(storeId: string): Promise<void> {
+    const channelName = `products_${storeId}`;
+    
+    if (this.subscriptions.has(channelName)) {
+      return; // Already subscribed
+    }
+
+    const subscription = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'products',
+          filter: `store_id=eq.${storeId}`
+        },
+        async (payload) => {
+          console.log('🛍️ Real-time product update:', payload);
+          await this.handleProductUpdate(payload, storeId);
+        }
+      )
+      .subscribe((status) => {
+        console.log(`📡 Product subscription status: ${status}`);
+        if (status === 'SUBSCRIBED') {
+          this.subscriptions.set(channelName, subscription);
+        }
+      });
+
+    this.subscriptions.set(channelName, subscription);
+  }
+
+  /**
+   * Handle inventory updates from other devices
+   */
+  private async handleInventoryUpdate(payload: any, storeId: string): Promise<void> {
+    try {
+      const { eventType, new: newRecord, old: oldRecord } = payload;
+
+      if (eventType === 'INSERT' && newRecord) {
+        // Check if record already exists (may have been created locally)
+        const existing = await db.inventory_items.get(newRecord.id);
+        if (existing) {
+          // Update existing record
+          await db.inventory_items.update(newRecord.id, {
+            ...newRecord,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        } else {
+          // Add new inventory item to local database
+          await db.inventory_items.add({
+            ...newRecord,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        }
+      } else if (eventType === 'UPDATE' && newRecord) {
+        // Update existing inventory item
+        await db.inventory_items.update(newRecord.id, {
+          ...newRecord,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      } else if (eventType === 'DELETE' && oldRecord) {
+        // Mark as deleted in local database
+        await db.inventory_items.update(oldRecord.id, {
+          _deleted: true,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      }
+
+      // Notify UI components
+      this.notifyInventoryUpdate(storeId);
+    } catch (error) {
+      console.error('Error handling inventory update:', error);
+    }
+  }
+
+  /**
+   * Handle bill updates from other devices
+   */
+  private async handleBillUpdate(payload: any, storeId: string): Promise<void> {
+    try {
+      const { eventType, new: newRecord, old: oldRecord } = payload;
+
+      if (eventType === 'INSERT' && newRecord) {
+        // Check if record already exists (may have been created locally)
+        const existing = await db.bills.get(newRecord.id);
+        if (existing) {
+          // Update existing record
+          await db.bills.update(newRecord.id, {
+            ...newRecord,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        } else {
+          // Add new bill to local database
+          await db.bills.add({
+            ...newRecord,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        }
+      } else if (eventType === 'UPDATE' && newRecord) {
+        // Update existing bill
+        await db.bills.update(newRecord.id, {
+          ...newRecord,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      } else if (eventType === 'DELETE' && oldRecord) {
+        // Mark as deleted in local database
+        await db.bills.update(oldRecord.id, {
+          _deleted: true,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      }
+
+      // Notify UI components
+      this.notifyBillUpdate(storeId);
+    } catch (error) {
+      console.error('Error handling bill update:', error);
+    }
+  }
+
+  /**
+   * Handle product updates from other devices
+   */
+  private async handleProductUpdate(payload: any, storeId: string): Promise<void> {
+    try {
+      const { eventType, new: newRecord, old: oldRecord } = payload;
+
+      if (eventType === 'INSERT' && newRecord) {
+        // Check if record already exists (may have been created locally)
+        const existing = await db.products.get(newRecord.id);
+        if (existing) {
+          // Update existing record
+          await db.products.update(newRecord.id, {
+            ...newRecord,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        } else {
+          // Add new product to local database
+          await db.products.add({
+            ...newRecord,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        }
+      } else if (eventType === 'UPDATE' && newRecord) {
+        // Update existing product
+        await db.products.update(newRecord.id, {
+          ...newRecord,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      } else if (eventType === 'DELETE' && oldRecord) {
+        // Mark as deleted in local database
+        await db.products.update(oldRecord.id, {
+          _deleted: true,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      }
+
+      // Notify UI components
+      this.notifyProductUpdate(storeId);
+    } catch (error) {
+      console.error('Error handling product update:', error);
+    }
+  }
+
+  /**
+   * Notify UI components about inventory updates
+   */
+  private notifyInventoryUpdate(storeId: string): void {
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('inventory-realtime-update', {
+          detail: {
+            storeId,
+            timestamp: new Date().toISOString(),
+            source: 'realtime'
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('Error notifying inventory update:', error);
+    }
+  }
+
+  /**
+   * Notify UI components about bill updates
+   */
+  private notifyBillUpdate(storeId: string): void {
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('bills-realtime-update', {
+          detail: {
+            storeId,
+            timestamp: new Date().toISOString(),
+            source: 'realtime'
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('Error notifying bill update:', error);
+    }
+  }
+
+  /**
+   * Notify UI components about product updates
+   */
+  private notifyProductUpdate(storeId: string): void {
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('products-realtime-update', {
+          detail: {
+            storeId,
+            timestamp: new Date().toISOString(),
+            source: 'realtime'
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('Error notifying product update:', error);
+    }
+  }
+
+  /**
    * Notify local UI components about real-time updates
    */
   private notifyLocalComponents(storeId: string, newBalance: number, eventType: string): void {

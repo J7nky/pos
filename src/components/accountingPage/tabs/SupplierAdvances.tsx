@@ -317,7 +317,7 @@ export default function SupplierAdvances({
   return (
     <div className="space-y-6">
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -348,15 +348,6 @@ export default function SupplierAdvances({
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">{t('customers.totalTransactions')}</p>
-              <p className="text-2xl font-bold text-gray-900">{advanceStats.totalTransactions}</p>
-            </div>
-            <Calendar className="w-10 h-10 text-purple-600" />
-          </div>
-        </div>
       </div>
 
       {/* Action Buttons */}

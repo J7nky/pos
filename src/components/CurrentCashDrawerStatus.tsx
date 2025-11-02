@@ -6,6 +6,8 @@ import { InventoryVerificationModal } from './accountingPage/modals/InventoryVer
 import { MissedProductsSummary } from './MissedProductsSummary';
 import { missedProductsService } from '../services/missedProductsService';
 import { useI18n } from '../i18n';
+import { EmployeeService } from '../services/employeeService';
+import { Employee } from '../types';
 
 interface CurrentCashDrawerStatusProps {
   storeId: string;
@@ -146,6 +148,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
   const [closingLoading, setClosingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inventoryVerificationData, setInventoryVerificationData] = useState<any>(null);
+  const [openedByEmployee, setOpenedByEmployee] = useState<Employee | null>(null);
   const { userProfile } = useSupabaseAuth();
   const { closeCashDrawer: contextCloseCashDrawer } = useOfflineData();
 
@@ -159,9 +162,31 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
       const currentStatus = await getCurrentStatus();
       console.log(currentStatus,12312312);
       setStatus(currentStatus);
+      
+      // Fetch employee information if session is active and openedBy exists
+      if (currentStatus?.status === 'active' && currentStatus?.openedBy) {
+        try {
+          const employee = await EmployeeService.getEmployee(currentStatus.openedBy);
+          if (employee) {
+            // Handle legacy data structure where 'cashier' field contains the role
+            // Some old records might have 'cashier' instead of 'role'
+            if (!employee.role && (employee as any).cashier) {
+              (employee as any).role = (employee as any).cashier;
+              console.log('Fixed employee role from cashier field:', employee);
+            }
+          }
+          setOpenedByEmployee(employee || null);
+        } catch (error) {
+          console.error('Error loading employee info:', error);
+          setOpenedByEmployee(null);
+        }
+      } else {
+        setOpenedByEmployee(null);
+      }
     } catch (error) {
       console.error('Error loading cash drawer status:', error);
       setStatus({ status: 'error', message: 'Error loading status' });
+      setOpenedByEmployee(null);
     } finally {
       setLoading(false);
     }
@@ -259,6 +284,16 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
     return `${hours}h ${minutes}m`;
   };
 
+  const getRoleDisplayName = (role: string | undefined | null): string => {
+    if (!role) return 'Employee'; // Default fallback
+    const roleMap: Record<string, string> = {
+      'admin': 'Admin',
+      'manager': 'Manager',
+      'cashier': 'Employee'
+    };
+    return roleMap[role] || 'Employee';
+  };
+
   if (loading) {
     return (
       <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
@@ -298,9 +333,11 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
                   <span className="text-sm font-medium text-blue-800 rtl:text-right">{t('cashDrawer.openedBy')}</span>
                 </div>
                 <div className="mt-2 text-lg font-semibold text-blue-900 rtl:text-right">
-                  {status.openedBy}
+                  {openedByEmployee 
+                    ? `${openedByEmployee.name}`
+                    : status.openedBy}
                 </div>
-                <div className="text-sm text-blue-600 rtl:text-right">{t('cashDrawer.employee')}</div>
+                <div className="text-sm text-blue-600 rtl:text-right">{`${getRoleDisplayName(openedByEmployee?.role || (openedByEmployee as any)?.cashier)}`}</div>
               </div>
               
               <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">

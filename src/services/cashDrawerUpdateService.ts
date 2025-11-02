@@ -2,6 +2,7 @@ import { db } from '../lib/db';
 import { createId } from '../lib/db';
 // Removed React hook import to avoid invalid hook usage in a service context
 import { currencyService } from './currencyService';
+import { generatePaymentReference, generateSaleReference, generateExpenseReference, generateRefundReference } from '../utils/referenceGenerator';
 
 export interface CashTransactionData {
   type: 'sale' | 'payment' | 'expense' | 'refund';
@@ -289,7 +290,7 @@ export class CashDrawerUpdateService {
               amount: Math.abs(balanceChange),
               currency: storeCurrency,
               description: `${transactionData.description} - Cash Drawer Update`,
-              reference: `${transactionData.reference}_SESSION_${session?.id || 'N/A'}`,
+              reference: transactionData.reference,
               store_id: transactionData.storeId,
               created_by: transactionData.createdBy,
               created_at: new Date().toISOString(),
@@ -355,7 +356,7 @@ export class CashDrawerUpdateService {
       amount: saleData.amount,
       currency: saleData.currency,
       description: `Cash sale${saleData.customerId ? ' to customer' : ''}`,
-      reference: saleData.billNumber || `SALE-${Date.now()}`,
+      reference: saleData.billNumber || generateSaleReference(),
       storeId: saleData.storeId,
       createdBy: saleData.createdBy,
       customerId: saleData.customerId
@@ -381,7 +382,7 @@ export class CashDrawerUpdateService {
       amount: paymentData.amount,
       currency: paymentData.currency,
       description: paymentData.description || `Customer payment`,
-      reference: `PAY-${Date.now()}`,
+      reference: generatePaymentReference(),
       storeId: paymentData.storeId,
       createdBy: paymentData.createdBy,
       customerId: paymentData.customerId,
@@ -408,7 +409,7 @@ export class CashDrawerUpdateService {
       amount: expenseData.amount,
       currency: expenseData.currency,
       description: `${expenseData.category}: ${expenseData.description}`,
-      reference: `EXP-${Date.now()}`,
+      reference: generateExpenseReference(),
       storeId: expenseData.storeId,
       createdBy: expenseData.createdBy,
       allowAutoSessionOpen: expenseData.allowAutoSessionOpen
@@ -434,7 +435,7 @@ export class CashDrawerUpdateService {
       amount: refundData.amount,
       currency: refundData.currency,
       description: `Refund: ${refundData.description}`,
-      reference: refundData.originalTransactionId || `REFUND-${Date.now()}`,
+      reference: refundData.originalTransactionId || generateRefundReference(),
       storeId: refundData.storeId,
       createdBy: refundData.createdBy
     });
@@ -504,8 +505,7 @@ export class CashDrawerUpdateService {
         .equals(storeId)
         .filter(trans => 
           trans.category.startsWith('cash_drawer_') &&
-          (trans.reference?.includes(`_SESSION_${currentSession.id}`) || 
-           new Date(trans.created_at) >= new Date(currentSession.opened_at))
+          new Date(trans.created_at) >= new Date(currentSession.opened_at)
         )
         .toArray();
         // console.log('DEBUG: Cash transactions', cashTransactions);

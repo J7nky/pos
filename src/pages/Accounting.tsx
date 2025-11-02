@@ -5,6 +5,15 @@ import { useI18n } from '../i18n';
 import { useCurrency } from '../hooks/useCurrency';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { 
+  generatePaymentReference, 
+  generateSaleReference, 
+  generateExpenseReference,
+  generateInventoryReference,
+  generateCommissionReference,
+  generatePorterageReference,
+  generateTransferReference
+} from '../utils/referenceGenerator';
+import { 
   TrendingUp,
   AlertCircle,
   CheckCircle,
@@ -92,11 +101,11 @@ export default function Accounting() {
 
   const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'expenses' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer'>('accounting_active_tab', 'dashboard');
   const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
-  const [showForm, setShowForm] = useState<string | null>(null);
-  const [dashboardPeriod, setDashboardPeriod] = useLocalStorage<'today' | 'week' | 'month' | 'quarter' | 'year'>('accounting_dashboard_period', 'today');
-  const [showAdvancedFilters, setShowAdvancedFilters] = useLocalStorage<boolean>('accounting_show_advanced_filters', false);
+  const [showForm, setShowForm] = useState<"receive" | "pay" | "expense" | null>(null);
+  const [dashboardPeriod] = useLocalStorage<'today' | 'week' | 'month' | 'quarter' | 'year'>('accounting_dashboard_period', 'today');
   const [flashingItemId, setFlashingItemId] = useState<string | null>(null);
   const [autoExpandGroupId, setAutoExpandGroupId] = useState<string | null>(null);
+  const [currentCashDrawerSession, setCurrentCashDrawerSession] = useState<any>(null);
 
   // Add loading state to prevent rendering before data is ready
   const [isDataReady, setIsDataReady] = useState(false);
@@ -179,6 +188,22 @@ export default function Accounting() {
     }
   };
 
+  // Fetch current cash drawer session for payment filtering
+  useEffect(() => {
+    const fetchCurrentSession = async () => {
+      try {
+        if (userProfile?.store_id && raw.getCurrentCashDrawerStatus) {
+          const status = await raw.getCurrentCashDrawerStatus();
+          setCurrentCashDrawerSession(status);
+        }
+      } catch (e) {
+        console.error('Error fetching current cash drawer session:', e);
+        setCurrentCashDrawerSession(null);
+      }
+    };
+    fetchCurrentSession();
+  }, [userProfile?.store_id, raw, activeTab]);
+
   // Inventory logs state
   const [inventoryLogsSearchTerm, setInventoryLogsSearchTerm] = useState('');
   const [inventoryLogsProductFilter, setInventoryLogsProductFilter] = useState('');
@@ -195,7 +220,7 @@ export default function Accounting() {
   const [showEditSaleModal, setShowEditSaleModal] = useState(false);
   const [showDeleteSaleModal, setShowDeleteSaleModal] = useState(false);
   const [saleToDelete, setSaleToDelete] = useState<any>(null);
-  const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus, getCashDrawerSessionDetails } = raw;
+  const { getCashDrawerBalanceReport, getCurrentCashDrawerStatus, getCashDrawerSessionDetails, refreshData } = raw;
   const storeId = userProfile?.store_id;
 
   // Form states
@@ -380,7 +405,7 @@ export default function Accounting() {
         amount: form.amount,
         currency: form.currency as 'USD' | 'LBP',
         description: form.description,
-        reference: form.reference || `PAY-${Date.now()}`,
+        reference: form.reference || generatePaymentReference(),
         storeId: userProfile?.store_id || '',
         createdBy: userProfile?.id || '',
         paymentDirection: formType // 'receive' = they pay us, 'pay' = we pay them
@@ -427,7 +452,7 @@ export default function Accounting() {
         amount: parseFloat(expenseForm.amount),
         currency: expenseForm.currency as 'USD' | 'LBP',
         description: `Expense: ${category.name} - ${expenseForm.description}`,
-        reference: expenseForm.reference || `EXP-${Date.now()}`,
+        reference: expenseForm.reference || generateExpenseReference(),
         storeId: userProfile?.store_id || '',
         createdBy: userProfile?.id || ''
       });
@@ -758,7 +783,7 @@ export default function Accounting() {
         amount: item.price ? (item.price * (item.weight || item.quantity)) : 0,
         currency: 'USD',
         description: `Received ${item.quantity} ${item.unit}${item.weight ? ` (${item.weight} kg)` : ''} of ${product?.name || 'Unknown Product'} from ${supplier?.name || 'Unknown Supplier'}`,
-        reference: `INV-${item.id.slice(-8)}`,
+        reference: generateInventoryReference(),
         status: item.status,
         transactionType: 'inventory'
       });
@@ -788,7 +813,7 @@ export default function Accounting() {
           totalPrice: sale.received_value,
           currency: 'USD',
           description: `Sold ${inventoryItem?.quantity||''} ${sale.weight ? `(${sale.weight} kg)` : ''} of ${product?.name || product?.name || 'Unknown Product'} to ${customer?.name || 'Walk-in Customer'}`,
-          reference: `SALE-${sale.id.slice(-8)}`,
+          reference: generateSaleReference(),
           notes: sale.notes,
           transactionType: 'sale',
           paymentMethod: sale.payment_method,
@@ -1225,7 +1250,7 @@ export default function Accounting() {
           amount: safeCommissionAmount.amount,
           currency: safeCommissionAmount.currency,
           description: `Commission fee for ${bill.productName} sold on behalf of ${bill.supplierName}${safeCommissionAmount.wasConverted ? ` (Originally ${fees.commission} USD)` : ''}`,
-          reference: `COMM-${bill.id.slice(-8)}`,
+          reference: generateCommissionReference(),
           created_by: userProfile?.id || ''
         });
       }
@@ -1241,7 +1266,7 @@ export default function Accounting() {
           amount: safePorterageAmount.amount,
           currency: safePorterageAmount.currency,
           description: `Porterage fee for ${bill.productName} from ${bill.supplierName}${safePorterageAmount.wasConverted ? ` (Originally ${fees.porterage} USD)` : ''}`,
-          reference: `PORT-${bill.id.slice(-8)}`,
+          reference: generatePorterageReference(),
           created_by: userProfile?.id || ''
         });
       }
@@ -1257,7 +1282,7 @@ export default function Accounting() {
           amount: safeTransferAmount.amount,
           currency: safeTransferAmount.currency,
           description: `Transfer fee for ${bill.productName} from ${bill.supplierName}${safeTransferAmount.wasConverted ? ` (Originally ${fees.transfer} USD)` : ''}`,
-          reference: `TRANS-${bill.id.slice(-8)}`,
+          reference: generateTransferReference(),
           created_by: userProfile?.id || ''
         });
       }
@@ -1273,7 +1298,7 @@ export default function Accounting() {
           amount: safeSupplierAmount.amount,
           currency: safeSupplierAmount.currency,
           description: `Payment to ${bill.supplierName} for ${bill.productName} sales${safeSupplierAmount.wasConverted ? ` (Originally ${fees.supplierAmount} USD)` : ''}`,
-          reference: `PAY-${bill.id.slice(-8)}`,
+          reference: generatePaymentReference(),
           created_by: userProfile?.id || ''
         });
         console.log('supplier', bill.supplier_id, 'fees.supplierAmount', fees.supplierAmount);
@@ -1342,7 +1367,7 @@ export default function Accounting() {
         amount: safeCommissionAmount.amount,
         currency: safeCommissionAmount.currency,
         description: `Commission fee for ${closingBill.productName} sold on behalf of ${closingBill.supplierName}${safeCommissionAmount.wasConverted ? ` (Originally ${commissionAmount} USD)` : ''}`,
-        reference: `COMM-${closingBill.inventoryItemId.slice(-8)}`,
+        reference: generateCommissionReference(),
         created_by: userProfile?.id || ''
       });
 
@@ -1355,7 +1380,7 @@ export default function Accounting() {
         amount: safeSupplierPayment.amount,
         currency: safeSupplierPayment.currency,
         description: `Payment to ${closingBill.supplierName} for ${closingBill.productName} sales${safeSupplierPayment.wasConverted ? ` (Originally ${supplierPayment} USD)` : ''}`,
-        reference: `PAY-${closingBill.inventoryItemId.slice(-8)}`,
+        reference: generatePaymentReference(),
         created_by: userProfile?.id || ''
       });
 
@@ -1873,6 +1898,22 @@ export default function Accounting() {
     }
   };
 
+  // Filter transactions by current cash drawer session
+  const sessionFilteredTransactions = useMemo(() => {
+    // If no active session or session info, return empty array for payments
+    if (!currentCashDrawerSession || currentCashDrawerSession.status !== 'active') {
+      return [];
+    }
+
+    // Filter transactions to only those within the current session time window
+    const sessionStartTime = new Date(currentCashDrawerSession.openedAt).getTime();
+    
+    return transactions.filter(t => {
+      const transactionTime = new Date(t.created_at).getTime();
+      return transactionTime >= sessionStartTime;
+    });
+  }, [transactions, currentCashDrawerSession]);
+
   // Show loading screen if data is not ready
   if (!isDataReady) {
     return (
@@ -1892,11 +1933,6 @@ export default function Accounting() {
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
       {/* Quick Action Bar */}
       <ActionTabsBar
-        dashboardPeriod={dashboardPeriod}
-        setDashboardPeriod={setDashboardPeriod}
-        showAdvancedFilters={showAdvancedFilters}
-        setShowAdvancedFilters={setShowAdvancedFilters}
-        setShowForm={setShowForm}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         filteredNonPricedItems={filteredNonPricedItems}
@@ -1924,13 +1960,17 @@ export default function Accounting() {
         <div className="space-y-6">
           <ExpenseManagement
             expenseCategories={expenseCategories}
-            transactions={transactions}
+            transactions={sessionFilteredTransactions}
             today={today}
             currency="USD"
-            setShowForm={setShowForm}
+            setShowForm={(formType) => setShowForm(formType)}
             formatCurrency={formatCurrency}
             formatCurrencyWithSymbol={formatCurrencyWithSymbol}
             getConvertedAmount={getConvertedAmount}
+            customers={customers}
+            suppliers={suppliers}
+            onRefresh={refreshData}
+            showToast={showToast}
           />
         </div>
       )}

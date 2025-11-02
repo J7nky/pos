@@ -429,6 +429,8 @@ const en = {
     title: 'Payment Management',
     subtitle: 'Track and manage all payment transactions',
     addPayment: 'Add Payment',
+    totalPayments: 'Total Payments',
+    
     paymentsReceived: 'Payments Received',
     paymentsMade: 'Payments Made',
     netAmount: 'Net Amount',
@@ -527,7 +529,13 @@ const en = {
     cashPayment: 'Cash Payment',
     cashSale: 'Cash Sale',
     paymentSent: 'Payment Sent',
-    expensePayment: 'Expense Payment'
+    expensePayment: 'Expense Payment',
+    // Undo functionality
+    undo: 'Undo',
+    undoLastAction: 'Undo last action',
+    undoSuccessful: 'Action undone successfully',
+    undoFailed: 'Cannot undo: action has been synced or records no longer exist',
+    undoError: 'Failed to undo action: {{error}}'
   },
   nonPriced: {
     title: 'Non Priced Items',

@@ -3,6 +3,7 @@ import { auditLogService } from './auditLogService';
 import { transactionService, TransactionResult } from './transactionService';
 // Remove dataAccessService import - use direct IndexedDB access
 import { db } from '../lib/db';
+import { generateARReference, generateAPReference } from '../utils/referenceGenerator';
 import { 
   AccountsReceivable, 
   AccountsPayable, 
@@ -429,7 +430,7 @@ export class EnhancedTransactionService {
               amount: saleData.amountDue,
               currency: 'USD',
               description: `Receivable update for customer ${saleData.customerId}`,
-              reference: `AR-${saleData.customerId}`,
+              reference: generateARReference(),
               created_at: new Date().toISOString(),
               created_by: saleData.createdBy,
               _synced: false
@@ -632,7 +633,7 @@ export class EnhancedTransactionService {
       amount: amountInUSD,
       currency: 'USD',
       description: `Receivable update for customer ${customerId}`,
-      reference: `AR-${customerId}`,
+      reference: generateARReference(),
       created_at: new Date().toISOString(),
       created_by: context.userId,
       _synced: false
@@ -670,7 +671,7 @@ export class EnhancedTransactionService {
       amount: amountInUSD,
       currency: 'USD',
       description: `Payable update for supplier ${supplierId}`,
-      reference: `AP-${supplierId}`,
+      reference: generateAPReference(),
       created_at: new Date().toISOString(),
       created_by: context.userId,
       _synced: false

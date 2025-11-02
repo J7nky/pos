@@ -3,6 +3,7 @@ import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable } 
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
 import { paymentService, PaymentFilter, PaymentTransaction } from './paymentService';
 import { PAYMENT_CATEGORIES, PAYMENT_TYPES } from '../constants/paymentCategories';
+import { generatePaymentReference, generateExpenseReference, generateARReference, generateAPReference } from '../utils/referenceGenerator';
 // Remove dataAccessService import - use direct IndexedDB access
 
 export interface TransactionResult {
@@ -107,7 +108,7 @@ export class TransactionService {
           customer_id: customerId,
           supplier_id: null,
           description: `Receivable update for customer ${customerId}`,
-          reference: `AR-${customerId}`,
+          reference: generateARReference(),
           created_at: new Date().toISOString(),
           created_by: createdBy,
           _synced: false
@@ -122,7 +123,7 @@ export class TransactionService {
         amount: amountInUSD,
         currency: 'USD',
         description: `${description} (Originally ${currency} ${amount})`,
-        reference: `PAY-${Date.now()}`,
+        reference: generatePaymentReference(),
         created_at: new Date().toISOString(),
         created_by: createdBy,
         store_id: storeId
@@ -248,7 +249,7 @@ export class TransactionService {
           supplier_id: supplierId,
           customer_id: null,
           description: `Payable update for supplier ${supplierId}`,
-          reference: `AP-${supplierId}`,
+          reference: generateAPReference(),
           created_at: new Date().toISOString(),
           created_by: createdBy,
           _synced: false
@@ -263,7 +264,7 @@ export class TransactionService {
         amount: amountInUSD,
         currency: 'USD',
         description: `${description} (Originally ${currency} ${amount})`,
-        reference: `PAY-${Date.now()}`,
+        reference: generatePaymentReference(),
         created_at: new Date().toISOString(),
         created_by: createdBy,
         store_id: storeId
@@ -324,7 +325,7 @@ export class TransactionService {
         amount: amountInUSD,
         currency: 'USD',
         description: `${description} (Originally ${currency} ${amount})`,
-        reference: `EXP-${Date.now()}`,
+        reference: generateExpenseReference(),
         created_at: new Date().toISOString(),
         created_by: createdBy,
         store_id: storeId

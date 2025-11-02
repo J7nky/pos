@@ -13,6 +13,12 @@ import { syncService, SyncResult } from '../services/syncService';
 import { crudHelperService } from '../services/crudHelperService';
 import { realTimeSyncService } from '../services/realTimeSyncService';
 import { notificationService } from '../services/notificationService';
+import { 
+  generatePaymentReference, 
+  generateSaleReference, 
+  generateAdvanceReference,
+  generateReversalReference
+} from '../utils/referenceGenerator';
 // Removed SupabaseService import - using offline-first approach only
 
 type Tables = Database['public']['Tables'];
@@ -435,6 +441,148 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [storeId, isOnline]);
+ // Helper functions defined before they're used
+ const refreshCashDrawerStatus = useCallback(async () => {
+  if (!storeId) return;
+
+  try {
+    const status = await db.getCurrentCashDrawerStatus(storeId);
+    if (status && status.status === 'active') {
+      // Update local state with current session info
+      setCashDrawer({
+        id: status.sessionId,
+        accountId: status.accountId,
+        status: 'open',
+        currentBalance: status.currentBalance,
+        currency: currency,
+        lastUpdated: new Date().toISOString()
+      });
+
+    } else {
+      // No active session
+      setCashDrawer(null);
+    }
+  } catch (error) {
+    console.error('Error refreshing cash drawer status:', error);
+  }
+}, [storeId, currency]);
+  const refreshData = useCallback(async () => {
+    if (!storeId) return;
+
+    debug('🔄 Refreshing data for store:', storeId);
+
+    try {
+      // Load all data from IndexedDB using optimized batch loading
+      const {
+        productsData,
+        suppliersData,
+        customersData,
+        employeesData,
+        inventoryData,
+        transactionsData,
+        batchesData,
+        billsData,
+        billLineItemsData,
+        billAuditLogsData,
+        cashDrawerAccountsData,
+        cashDrawerSessionsData,
+        missedProductsData,
+      } = await crudHelperService.loadAllStoreData(storeId);
+
+      console.log(`🔄 refreshData: Loaded ${customersData.length} customers, ${suppliersData.length} suppliers, ${employeesData.length} employees`);
+      console.log('🔄 refreshData: Latest customers:', customersData.slice(-3));
+      console.log('🔄 refreshData: Latest suppliers:', suppliersData.slice(-3));
+      console.log(`🔄 refreshData: Loaded ${inventoryData.length} inventory_items, ${batchesData.length} inventory_bills`);
+
+      debug(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${employeesData.length} employees, ${inventoryData.length} inventory items, ${batchesData.length} inventory bills, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
+
+      // Transform data for offline-first structure
+      setProducts(productsData as Tables['products']['Row'][]);
+      setSuppliers(suppliersData.map((s: any) => ({ ...s, lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0 })) as Tables['suppliers']['Row'][]);
+      setCustomers(customersData.map((c: any) => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
+      setEmployees(employeesData.map((e: any) => ({ ...e, lbp_balance: e.lbp_balance || 0, usd_balance: e.usd_balance || 0 })) as Tables['users']['Row'][]);
+      setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
+
+      // Store raw data
+      setInventoryItems(inventoryData);
+      setInventoryBills(batchesData);
+
+      // Transform bill line items to unified SaleItem interface for backward compatibility
+      const transformedSaleItems: BillLineItem[] = await Promise.all(
+        billLineItemsData.map(async (item: any) => {
+          // Get product and supplier names
+
+
+          return BillLineItemTransforms.fromDbRow(
+            {
+              id: item.id,
+              store_id: item.store_id,
+              inventory_item_id: item.inventory_item_id || '',
+              product_id: item.product_id,
+              supplier_id: item.supplier_id,
+              customer_id: item.customer_id,
+              quantity: item.quantity,
+              weight: item.weight,
+              unit_price: item.unit_price,
+              received_value: item.received_value,
+              payment_method: item.payment_method as 'cash' | 'card' | 'credit',
+              notes: item.notes,
+              created_at: item.created_at,
+              created_by: item.created_by,
+              bill_id: item.bill_id,
+              product_name: item.product_name,
+              supplier_name: item.supplier_name,
+              line_total: item.line_total,
+              line_order: item.line_order,
+              updated_at: item.updated_at,
+            }
+          );
+        })
+      );
+
+      setSales(transformedSaleItems); // Update the main sales state
+      setBills(billsData);
+      setBillLineItems(billLineItemsData);
+      setBillAuditLogs(billAuditLogsData);
+      setMissedProducts(missedProductsData);
+
+      // Load notifications and preferences
+      const notificationsData = await notificationService.getNotifications(storeId, { limit: 100 });
+      setNotifications(notificationsData);
+      
+      const preferencesData = await notificationService.getPreferences(storeId);
+      setNotificationPreferences(preferencesData);
+
+      // Transform inventory to match expected structure and attach batch info for grouping/export
+      const batchById = (batchesData || []).reduce((acc: any, b: any) => {
+        acc[b.id] = b;
+        return acc;
+      }, {});
+
+      setInventory(inventoryData.map((item: any) => {
+        const batch = item.batch_id ? batchById[item.batch_id] : null;
+        return {
+          ...item,
+          commission_rate: batch ? batch.commission_rate : null,
+          batch_type: batch ? batch.type : null,
+          batch_porterage: batch ? batch.porterage_fee : null,
+          batch_transfer_fee: batch ? batch.transfer_fee : null,
+          batch_status: batch ? batch.status : 'Created',
+        };
+      }));
+
+      // Refresh cash drawer status
+      await refreshCashDrawerStatus();
+
+      // Clean up expired notifications
+      await notificationService.deleteExpiredNotifications(storeId);
+
+      debug('✅ Data refresh completed successfully');
+
+    } catch (error) {
+      console.error('❌ Error loading data from Dexie:', error);
+    }
+  }, [storeId, refreshCashDrawerStatus]);
 
   // Setup real-time update listeners (separate effect to avoid refreshData dependency issue)
   useEffect(() => {
@@ -665,31 +813,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     updateStockLevels();
   }, [inventoryItems, products, suppliers, lowStockAlertsEnabled, lowStockThreshold]);
 
-  // Helper functions defined before they're used
-  const refreshCashDrawerStatus = useCallback(async () => {
-    if (!storeId) return;
-
-    try {
-      const status = await db.getCurrentCashDrawerStatus(storeId);
-      if (status && status.status === 'active') {
-        // Update local state with current session info
-        setCashDrawer({
-          id: status.sessionId,
-          accountId: status.accountId,
-          status: 'open',
-          currentBalance: status.currentBalance,
-          currency: currency,
-          lastUpdated: new Date().toISOString()
-        });
-
-      } else {
-        // No active session
-        setCashDrawer(null);
-      }
-    } catch (error) {
-      console.error('Error refreshing cash drawer status:', error);
-    }
-  }, [storeId, currency]);
+ 
 
   const checkUndoValidity = useCallback(async () => {
     const undoData = localStorage.getItem('last_undo_action');
@@ -720,124 +844,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setCanUndo(false);
     }
   }, []);
-
-  const refreshData = useCallback(async () => {
-    if (!storeId) return;
-
-    debug('🔄 Refreshing data for store:', storeId);
-
-    try {
-      // Load all data from IndexedDB using optimized batch loading
-      const {
-        productsData,
-        suppliersData,
-        customersData,
-        employeesData,
-        inventoryData,
-        transactionsData,
-        batchesData,
-        billsData,
-        billLineItemsData,
-        billAuditLogsData,
-        cashDrawerAccountsData,
-        cashDrawerSessionsData,
-        missedProductsData,
-      } = await crudHelperService.loadAllStoreData(storeId);
-
-      console.log(`🔄 refreshData: Loaded ${customersData.length} customers, ${suppliersData.length} suppliers, ${employeesData.length} employees`);
-      console.log('🔄 refreshData: Latest customers:', customersData.slice(-3));
-      console.log('🔄 refreshData: Latest suppliers:', suppliersData.slice(-3));
-      console.log(`🔄 refreshData: Loaded ${inventoryData.length} inventory_items, ${batchesData.length} inventory_bills`);
-
-      debug(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${employeesData.length} employees, ${inventoryData.length} inventory items, ${batchesData.length} inventory bills, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
-
-      // Transform data for offline-first structure
-      setProducts(productsData as Tables['products']['Row'][]);
-      setSuppliers(suppliersData.map((s: any) => ({ ...s, lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0 })) as Tables['suppliers']['Row'][]);
-      setCustomers(customersData.map((c: any) => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
-      setEmployees(employeesData.map((e: any) => ({ ...e, lbp_balance: e.lbp_balance || 0, usd_balance: e.usd_balance || 0 })) as Tables['users']['Row'][]);
-      setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
-
-      // Store raw data
-      setInventoryItems(inventoryData);
-      setInventoryBills(batchesData);
-
-      // Transform bill line items to unified SaleItem interface for backward compatibility
-      const transformedSaleItems: BillLineItem[] = await Promise.all(
-        billLineItemsData.map(async (item: any) => {
-          // Get product and supplier names
-
-
-          return BillLineItemTransforms.fromDbRow(
-            {
-              id: item.id,
-              store_id: item.store_id,
-              inventory_item_id: item.inventory_item_id || '',
-              product_id: item.product_id,
-              supplier_id: item.supplier_id,
-              customer_id: item.customer_id,
-              quantity: item.quantity,
-              weight: item.weight,
-              unit_price: item.unit_price,
-              received_value: item.received_value,
-              payment_method: item.payment_method as 'cash' | 'card' | 'credit',
-              notes: item.notes,
-              created_at: item.created_at,
-              created_by: item.created_by,
-              bill_id: item.bill_id,
-              product_name: item.product_name,
-              supplier_name: item.supplier_name,
-              line_total: item.line_total,
-              line_order: item.line_order,
-              updated_at: item.updated_at,
-            }
-          );
-        })
-      );
-
-      setSales(transformedSaleItems); // Update the main sales state
-      setBills(billsData);
-      setBillLineItems(billLineItemsData);
-      setBillAuditLogs(billAuditLogsData);
-      setMissedProducts(missedProductsData);
-
-      // Load notifications and preferences
-      const notificationsData = await notificationService.getNotifications(storeId, { limit: 100 });
-      setNotifications(notificationsData);
-      
-      const preferencesData = await notificationService.getPreferences(storeId);
-      setNotificationPreferences(preferencesData);
-
-      // Transform inventory to match expected structure and attach batch info for grouping/export
-      const batchById = (batchesData || []).reduce((acc: any, b: any) => {
-        acc[b.id] = b;
-        return acc;
-      }, {});
-
-      setInventory(inventoryData.map((item: any) => {
-        const batch = item.batch_id ? batchById[item.batch_id] : null;
-        return {
-          ...item,
-          commission_rate: batch ? batch.commission_rate : null,
-          batch_type: batch ? batch.type : null,
-          batch_porterage: batch ? batch.porterage_fee : null,
-          batch_transfer_fee: batch ? batch.transfer_fee : null,
-          batch_status: batch ? batch.status : 'Created',
-        };
-      }));
-
-      // Refresh cash drawer status
-      await refreshCashDrawerStatus();
-
-      // Clean up expired notifications
-      await notificationService.deleteExpiredNotifications(storeId);
-
-      debug('✅ Data refresh completed successfully');
-
-    } catch (error) {
-      console.error('❌ Error loading data from Dexie:', error);
-    }
-  }, [storeId, refreshCashDrawerStatus]);
 
   // Simplified using crudHelperService
   const updateUnsyncedCount = useCallback(async () => {
@@ -1212,7 +1218,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           amount: totalCashAmount,
           currency: 'LBP', // Assuming LBP for now, could be made dynamic
           description: `Cash sale - ${cashSaleItems.length} items`,
-          reference: `SALE-${Date.now()}`,
+          reference: generateSaleReference(),
           customerId: cashSaleItems[0]?.customer_id || undefined
         });
 
@@ -1468,7 +1474,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Pure offline-first approach - read only from local database
     let query = db.bills.where('store_id').equals(storeId).filter(bill => !bill._deleted);
 
-    // Apply filters if provided
+    // Apply filters that can be done at the query level
     if (filters) {
       if (filters.status) {
         query = query.and(bill => bill.status === filters.status);
@@ -1481,15 +1487,39 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           .primaryKeys();
         query = query.and(bill => billIdsWithSupplier.includes(bill.id));
       }
-      if (filters.date_from) {
-        query = query.and(bill => bill.created_at >= filters.date_from);
+      // Handle both dateFrom/dateTo and date_from/date_to naming
+      const dateFrom = filters.dateFrom || filters.date_from;
+      const dateTo = filters.dateTo || filters.date_to;
+      if (dateFrom) {
+        query = query.and(bill => bill.bill_date >= dateFrom);
       }
-      if (filters.date_to) {
-        query = query.and(bill => bill.created_at <= filters.date_to);
+      if (dateTo) {
+        query = query.and(bill => bill.bill_date <= dateTo);
+      }
+      if (filters.paymentStatus) {
+        query = query.and(bill => bill.payment_status === filters.paymentStatus);
       }
     }
 
-    const billsData = await query.toArray();
+    let billsData = await query.toArray();
+
+    // Apply search term filter if provided (needs customer lookup, so done in memory)
+    if (filters?.searchTerm) {
+      const searchLower = filters.searchTerm.toLowerCase();
+      // Get customers for name lookup
+      const customersMap = new Map<string, string>();
+      const allCustomers = await db.customers.where('store_id').equals(storeId).toArray();
+      allCustomers.forEach(c => customersMap.set(c.id, c.name.toLowerCase()));
+
+      billsData = billsData.filter(bill => {
+        const billNumberMatch = bill.bill_number?.toLowerCase().includes(searchLower);
+        const notesMatch = bill.notes?.toLowerCase().includes(searchLower);
+        const customerName = bill.customer_id ? customersMap.get(bill.customer_id) : '';
+        const customerMatch = customerName?.includes(searchLower);
+        
+        return billNumberMatch || notesMatch || customerMatch;
+      });
+    }
 
     // Attach line items to each bill
     const billsWithLineItems = await Promise.all(
@@ -2306,7 +2336,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           amount: totalCashAmount,
           currency: 'LBP', // Assuming LBP for now, could be made dynamic
           description: `Cash sale - ${cashSaleItemsForDrawer.length} items`,
-          reference: `SALE-${Date.now()}`,
+          reference: generateSaleReference(),
           storeId: storeId,
           createdBy: currentUserId,
           customerId: cashSaleItemsForDrawer[0]?.customer_id || undefined,
@@ -2918,7 +2948,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         amount: amountInLBP, // Always in LBP for cash drawer
         currency: 'LBP', // Cash drawer always uses LBP
         description: `${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${entity.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`,
-        reference: reference || `PAY-${Date.now()}`,
+        reference: reference || generatePaymentReference(),
         customerId: isCustomer ? entityId : undefined,
         supplierId: isCustomer ? undefined : entityId
       });
@@ -3047,7 +3077,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         amount: amount,
         currency: currency,
         description: `${description || `Supplier advance ${type === 'give' ? 'payment' : 'deduction'} - ${supplier.name}`}${reviewDateNote}`,
-        reference: `ADV-${Date.now()}`,
+        reference: generateAdvanceReference(),
         store_id: userProfile?.store_id || '',
         created_by: userProfile?.id || '',
         created_at: date,
@@ -3083,7 +3113,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           amount: amountInLBP,
           currency: 'LBP',
           description: `Advance payment to ${supplier.name}${currency === 'USD' ? ` ($${amount.toFixed(2)} USD)` : ''}`,
-          reference: `ADV-${Date.now()}`,
+          reference: generateAdvanceReference(),
           supplierId: supplierId,
           storeId: userProfile?.store_id || '',
           createdBy: userProfile?.id || '',
@@ -3227,7 +3257,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           amount: amountInLBP,
           currency: 'LBP',
           description: `Reversal: Deleted advance payment to ${supplier.name}`,
-          reference: `REV-${transaction.reference || Date.now()}`,
+          reference: generateReversalReference(),
           supplierId: transaction.supplier_id,
           storeId: userProfile?.store_id || '',
           createdBy: userProfile?.id || '',
@@ -3423,7 +3453,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           amount: oldAmountInLBP,
           currency: 'LBP',
           description: `Reversal: Updated advance payment to ${oldSupplier.name}`,
-          reference: `REV-UPD-${oldTransaction.reference || Date.now()}`,
+          reference: generateReversalReference(),
           supplierId: oldTransaction.supplier_id,
           storeId: userProfile?.store_id || '',
           createdBy: userProfile?.id || '',
@@ -3494,7 +3524,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           amount: newAmountInLBP,
           currency: 'LBP',
           description: `Advance payment to ${newSupplier.name}${updates.currency === 'USD' ? ` ($${updates.amount.toFixed(2)} USD)` : ''}`,
-          reference: `ADV-UPD-${Date.now()}`,
+          reference: generateAdvanceReference(),
           supplierId: updates.supplierId,
           storeId: userProfile?.store_id || '',
           createdBy: userProfile?.id || '',
@@ -3654,7 +3684,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const undoLastAction = async (): Promise<boolean> => {
     try {
       const undoData = localStorage.getItem('last_undo_action');
-      if (!undoData) return false;
+      if (!undoData) {
+        return false;
+      }
 
       const action = JSON.parse(undoData);
 
@@ -3662,6 +3694,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Exception: cash_drawer_accounts can be synced and still allow undo (only balance changes)
       for (const item of action.affected || []) {
         const record = await (db as any)[item.table].get(item.id);
+        
         if (!record) {
           localStorage.removeItem('last_undo_action');
           setCanUndo(false);
@@ -3700,7 +3733,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       });
 
-      console.log('✅ Undo completed successfully');
       localStorage.removeItem('last_undo_action');
       setCanUndo(false);
       await refreshData();
@@ -3724,7 +3756,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       return true;
     } catch (error) {
-      console.error('❌ Undo failed:', error);
+      console.error('Undo failed:', error);
       return false;
     }
   };

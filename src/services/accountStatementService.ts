@@ -2,6 +2,13 @@ import { LocalSaleItem, Bill, BillLineItem } from '../lib/db';
 import { Customer, Supplier, Transaction, BillLineItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
+import { 
+  generatePaymentReference, 
+  generateSaleReference, 
+  generateBillReference,
+  generateCreditReference,
+  generateCommissionReference
+} from '../utils/referenceGenerator';
 
 export interface AccountStatement {
   entityId: string;
@@ -302,7 +309,7 @@ export class AccountStatementService {
           balanceAfter: runningLBP,
           paymentMethod: 'credit',
           productDetails,
-          reference: viewMode === 'summary' && ev.unit === 'bill' ? `B-${ev.id.slice(-8)}` : 'S-' + ev.id.slice(-8)
+          reference: viewMode === 'summary' && ev.unit === 'bill' ? generateBillReference() : generateSaleReference()
         });
       } else {
         statementTransactions.push({
@@ -316,7 +323,7 @@ export class AccountStatementService {
           amount: ev.amount,
           currency: ev.currency,
           balanceAfter: ev.currency === 'USD' ? runningUSD : runningLBP,
-          reference: 'P-' + ev.id.slice(-8),
+          reference: generatePaymentReference(),
           paymentMethod: 'Payment Received'
         });
       }
@@ -576,7 +583,7 @@ export class AccountStatementService {
               amount: totalPrice,
               currency: ev.currency,
               balanceAfter: ev.currency === 'USD' ? itemRunningUSD : itemRunningLBP,
-              reference: `CREDIT-${ev.id.slice(-8)}`,
+              reference: generateCreditReference(),
               paymentMethod: 'Received Bill',
               productDetails
             });
@@ -644,7 +651,7 @@ export class AccountStatementService {
               amount: itemCommission,
               currency: 'LBP',
               balanceAfter: itemRunningLBP,
-              reference: `COMM-${ev.id.slice(-8)}`,
+              reference: generateCommissionReference(),
               productDetails
             });
           });
@@ -681,7 +688,7 @@ export class AccountStatementService {
           amount: ev.amount,
           currency: ev.currency,
           balanceAfter: ev.currency === 'USD' ? runningUSD : runningLBP,
-          reference: `PAY-${ev.id.slice(-8)}`,
+          reference: generatePaymentReference(),
           paymentMethod: 'Payment'
         });
       }

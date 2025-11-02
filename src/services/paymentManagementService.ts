@@ -3,6 +3,7 @@ import { cashDrawerUpdateService } from './cashDrawerUpdateService';
 import { enhancedTransactionService, TransactionContext } from './enhancedTransactionService';
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
+import { generateReference, generateReversalReference } from '../utils/referenceGenerator';
 
 export interface PaymentUpdateData {
   amount?: number;
@@ -28,6 +29,11 @@ export interface PaymentManagementResult {
       previousBalance: number;
       newBalance: number;
     };
+  };
+  undoData?: {
+    type: string;
+    affected: Array<{ table: string; id: string }>;
+    steps: Array<{ op: string; table: string; id: string; changes?: any }>;
   };
 }
 
@@ -58,6 +64,28 @@ export class PaymentManagementService {
         return { success: false, error: 'Transaction not found' };
       }
 
+      // Store original data for undo
+      const undoAffected: Array<{ table: string; id: string }> = [
+        { table: 'transactions', id: transactionId }
+      ];
+      const undoSteps: Array<{ op: string; table: string; id: string; changes?: any }> = [
+        { 
+          op: 'update', 
+          table: 'transactions', 
+          id: transactionId, 
+          changes: {
+            amount: originalTransaction.amount,
+            currency: originalTransaction.currency,
+            description: originalTransaction.description,
+            reference: originalTransaction.reference,
+            customer_id: originalTransaction.customer_id,
+            supplier_id: originalTransaction.supplier_id,
+            category: originalTransaction.category,
+            _synced: false
+          }
+        }
+      ];
+
       // Calculate balance adjustments needed
       const amountChanged = updates.amount !== undefined && updates.amount !== originalTransaction.amount;
       const currencyChanged = updates.currency !== undefined && updates.currency !== originalTransaction.currency;
@@ -65,11 +93,61 @@ export class PaymentManagementService {
                            (updates.supplier_id !== undefined && updates.supplier_id !== originalTransaction.supplier_id);
 
       let balanceUpdates: PaymentManagementResult['balanceUpdates'] = {};
+      const reversalTransactionIds: string[] = [];
+      const newTransactionIds: string[] = [];
 
       // If amount, currency, or entity changed, we need to revert the original impact and apply the new one
       if (amountChanged || currencyChanged || entityChanged) {
+        // Get original entity balances before changes
+        let originalCustomerBalance = null;
+        let originalSupplierBalance = null;
+        
+        if (originalTransaction.customer_id) {
+          const customer = await db.customers.get(originalTransaction.customer_id);
+          if (customer) {
+            originalCustomerBalance = { id: customer.id, usd_balance: customer.usd_balance, lb_balance: customer.lb_balance };
+            undoAffected.push({ table: 'customers', id: customer.id });
+          }
+        }
+        
+        if (originalTransaction.supplier_id) {
+          const supplier = await db.suppliers.get(originalTransaction.supplier_id);
+          if (supplier) {
+            originalSupplierBalance = { id: supplier.id, usd_balance: supplier.usd_balance, lb_balance: supplier.lb_balance };
+            undoAffected.push({ table: 'suppliers', id: supplier.id });
+          }
+        }
+
+        // Track reversal transactions created during revert
+        // Get recent transactions before the revert
+        const now = Date.now();
+        const recentCutoff = new Date(now - 1000).toISOString(); // 1 second ago
+        
+        const transactionsBefore = await db.transactions
+          .where('created_at')
+          .above(recentCutoff)
+          .and(t => !t._deleted && t.description?.startsWith('Reversal:'))
+          .primaryKeys();
+
         // Revert original transaction impact
         await this.revertTransactionImpact(originalTransaction, context);
+
+        // Find any new reversal transactions created after the revert
+        const transactionsAfter = await db.transactions
+          .where('created_at')
+          .above(recentCutoff)
+          .and(t => !t._deleted && t.description?.startsWith('Reversal:'))
+          .toArray();
+        
+        // Track new reversal transactions for undo (delete them during undo)
+        const newReversalTransactions = transactionsAfter.filter(
+          t => !transactionsBefore.includes(t.id)
+        );
+        
+        newReversalTransactions.forEach(revTxn => {
+          undoAffected.push({ table: 'transactions', id: revTxn.id });
+          undoSteps.unshift({ op: 'delete', table: 'transactions', id: revTxn.id });
+        });
 
         // Create updated transaction data
         const updatedTransaction = {
@@ -82,6 +160,33 @@ export class PaymentManagementService {
         // Apply new transaction impact
         const newImpact = await this.applyTransactionImpact(updatedTransaction, context);
         balanceUpdates = newImpact.balanceUpdates;
+
+        // Add balance restoration to undo steps
+        if (originalCustomerBalance) {
+          undoSteps.push({
+            op: 'update',
+            table: 'customers',
+            id: originalCustomerBalance.id,
+            changes: { 
+              usd_balance: originalCustomerBalance.usd_balance, 
+              lb_balance: originalCustomerBalance.lb_balance,
+              _synced: false 
+            }
+          });
+        }
+        
+        if (originalSupplierBalance) {
+          undoSteps.push({
+            op: 'update',
+            table: 'suppliers',
+            id: originalSupplierBalance.id,
+            changes: { 
+              usd_balance: originalSupplierBalance.usd_balance, 
+              lb_balance: originalSupplierBalance.lb_balance,
+              _synced: false 
+            }
+          });
+        }
       }
 
       // Update the transaction in the database
@@ -90,6 +195,13 @@ export class PaymentManagementService {
         updated_at: new Date().toISOString(),
         _synced: false
       });
+
+      // Prepare undo data to return
+      const undoData = {
+        type: 'update_payment',
+        affected: undoAffected,
+        steps: undoSteps
+      };
 
       // Log the update
       auditLogService.log({
@@ -109,7 +221,8 @@ export class PaymentManagementService {
 
       return {
         success: true,
-        balanceUpdates
+        balanceUpdates,
+        undoData
       };
 
     } catch (error) {
@@ -135,8 +248,95 @@ export class PaymentManagementService {
         return { success: false, error: 'Transaction not found' };
       }
 
+      // Store original data for undo
+      const undoAffected: Array<{ table: string; id: string }> = [
+        { table: 'transactions', id: transactionId }
+      ];
+      const undoSteps: Array<{ op: string; table: string; id: string; changes?: any }> = [
+        { 
+          op: 'update', 
+          table: 'transactions', 
+          id: transactionId, 
+          changes: { _deleted: false, _synced: false }
+        }
+      ];
+
+      // Get original entity balances before changes
+      let originalCustomerBalance = null;
+      let originalSupplierBalance = null;
+      
+      if (transaction.customer_id) {
+        const customer = await db.customers.get(transaction.customer_id);
+        if (customer) {
+          originalCustomerBalance = { id: customer.id, usd_balance: customer.usd_balance, lb_balance: customer.lb_balance };
+          undoAffected.push({ table: 'customers', id: customer.id });
+        }
+      }
+      
+      if (transaction.supplier_id) {
+        const supplier = await db.suppliers.get(transaction.supplier_id);
+        if (supplier) {
+          originalSupplierBalance = { id: supplier.id, usd_balance: supplier.usd_balance, lb_balance: supplier.lb_balance };
+          undoAffected.push({ table: 'suppliers', id: supplier.id });
+        }
+      }
+
       // Revert the transaction's impact on balances
+      // Track any reversal transactions created during revert
+      const now = Date.now();
+      const recentCutoff = new Date(now - 1000).toISOString(); // 1 second ago
+      
+      const transactionsBefore = await db.transactions
+        .where('created_at')
+        .above(recentCutoff)
+        .and(t => !t._deleted && t.description?.startsWith('Reversal:'))
+        .primaryKeys();
+      
       const balanceUpdates = await this.revertTransactionImpact(transaction, context);
+      
+      // Find any new reversal transactions created after the revert
+      const transactionsAfter = await db.transactions
+        .where('created_at')
+        .above(recentCutoff)
+        .and(t => !t._deleted && t.description?.startsWith('Reversal:'))
+        .toArray();
+      
+      // Track new reversal transactions for undo (delete them during undo)
+      const newReversalTransactions = transactionsAfter.filter(
+        t => !transactionsBefore.includes(t.id)
+      );
+      
+      newReversalTransactions.forEach(revTxn => {
+        undoAffected.push({ table: 'transactions', id: revTxn.id });
+        undoSteps.unshift({ op: 'delete', table: 'transactions', id: revTxn.id });
+      });
+
+      // Add balance restoration to undo steps
+      if (originalCustomerBalance) {
+        undoSteps.push({
+          op: 'update',
+          table: 'customers',
+          id: originalCustomerBalance.id,
+          changes: { 
+            usd_balance: originalCustomerBalance.usd_balance, 
+            lb_balance: originalCustomerBalance.lb_balance,
+            _synced: false 
+          }
+        });
+      }
+      
+      if (originalSupplierBalance) {
+        undoSteps.push({
+          op: 'update',
+          table: 'suppliers',
+          id: originalSupplierBalance.id,
+          changes: { 
+            usd_balance: originalSupplierBalance.usd_balance, 
+            lb_balance: originalSupplierBalance.lb_balance,
+            _synced: false 
+          }
+        });
+      }
 
       // Mark transaction as deleted (soft delete for audit trail)
       await db.transactions.update(transactionId, {
@@ -144,6 +344,13 @@ export class PaymentManagementService {
         updated_at: new Date().toISOString(),
         _synced: false
       });
+
+      // Prepare undo data to return
+      const undoData = {
+        type: 'delete_payment',
+        affected: undoAffected,
+        steps: undoSteps
+      };
 
       // Log the deletion
       auditLogService.log({
@@ -161,7 +368,8 @@ export class PaymentManagementService {
 
       return {
         success: true,
-        balanceUpdates: balanceUpdates.balanceUpdates
+        balanceUpdates: balanceUpdates.balanceUpdates,
+        undoData
       };
 
     } catch (error) {
@@ -190,7 +398,7 @@ export class PaymentManagementService {
           amount: transaction.amount,
           currency: transaction.currency,
           description: transaction.description,
-          reference: transaction.reference || `TXN-${transaction.id}`,
+          reference: transaction.reference || generateReference('TXN'),
           storeId: transaction.store_id,
           createdBy: transaction.created_by,
           customerId: transaction.customer_id,
@@ -247,7 +455,7 @@ export class PaymentManagementService {
           amount: transaction.amount,
           currency: transaction.currency,
           description: `Reversal: ${transaction.description}`,
-          reference: `REV-${transaction.id}`,
+          reference: generateReversalReference(),
           storeId: transaction.store_id,
           createdBy: context.userId,
           customerId: transaction.customer_id,

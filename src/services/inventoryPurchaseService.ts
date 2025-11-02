@@ -1,5 +1,6 @@
 import { createId, db } from '../lib/db';
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
+import { generateCreditReference } from '../utils/referenceGenerator';
 
 export interface InventoryPurchaseItem {
   product_id: string;
@@ -184,7 +185,7 @@ export class InventoryPurchaseService {
         amount: totalAmount,
         currency: 'LBP' as const,
         description: `Credit purchase - ${items.length} items from ${supplier?.name || 'Supplier'}`,
-        reference: `CREDIT-${Date.now()}`,
+        reference: generateCreditReference(),
         store_id: data.store_id,
         created_by: data.created_by,
         created_at: new Date().toISOString(),

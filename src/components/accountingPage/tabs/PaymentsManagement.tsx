@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import {
-  Plus,
+  ArrowDownRight,
+  ArrowUpRight,
   Search,
   Filter,
   DollarSign,
@@ -8,16 +9,17 @@ import {
   Edit3,
   Trash2,
   X,
-  ChevronDown,
   ArrowUpDown,
   Eye,
   Download,
-  RefreshCw
+  RefreshCw,
+  Receipt
 } from "lucide-react";
-import { paymentService, PaymentTransaction } from "../../../services/paymentService";
-import { isPaymentCategory, PAYMENT_CATEGORIES, getPaymentDirection, getPaymentEntityType } from "../../../constants/paymentCategories";
+import { PaymentTransaction } from "../../../services/paymentService";
+import { PAYMENT_CATEGORIES, getPaymentDirection, getPaymentEntityType } from "../../../constants/paymentCategories";
 import { paymentManagementService, PaymentUpdateData } from "../../../services/paymentManagementService";
 import { useI18n } from "../../../i18n";
+import { useOfflineData } from "../../../contexts/OfflineDataContext";
 
 type Currency = "USD" | "LBP";
 
@@ -48,7 +50,7 @@ type PaymentsManagementProps = {
   transactions: Transaction[];
   today: string;
   currency: Currency;
-  setShowForm: (formType: "expense" | null) => void;
+  setShowForm: (formType: "receive" | "pay" | "expense") => void;
   formatCurrency: (value: number) => string;
   formatCurrencyWithSymbol: (value: number, currency: Currency) => string;
   getConvertedAmount: (amount: number, targetCurrency: Currency) => number;
@@ -57,6 +59,7 @@ type PaymentsManagementProps = {
   onUpdateTransaction?: (transactionId: string, updates: Partial<Transaction>) => Promise<void>;
   onDeleteTransaction?: (transactionId: string) => Promise<void>;
   showToast?: (message: string, type?: 'success' | 'error') => void;
+  onRefresh?: () => Promise<void>;
 };
 
 interface PaymentEditModal {
@@ -108,7 +111,7 @@ const PaymentsSummaryCards: React.FC<{
           <div className="rtl:text-right">
             <p className="text-sm font-medium text-green-700">{t('payments.paymentsReceived')}</p>
             <p className="text-2xl font-bold text-green-900 mt-1">{formatCurrency(summary.totalReceived)}</p>
-            <p className="text-xs text-green-600 mt-1">{summary.receivedCount} {t('common.transactions')}</p>
+            <p className="text-xs text-green-600 mt-1">{summary.receivedCount} {t('customers.payments')}</p>
           </div>
           <div className="p-3 bg-green-200 rounded-lg rtl:ml-3 ltr:mr-3">
             <TrendingUp className="w-6 h-6 text-green-700" />
@@ -121,7 +124,7 @@ const PaymentsSummaryCards: React.FC<{
           <div className="rtl:text-right">
             <p className="text-sm font-medium text-red-700">{t('payments.paymentsMade')}</p>
             <p className="text-2xl font-bold text-red-900 mt-1">{formatCurrency(summary.totalPaid)}</p>
-            <p className="text-xs text-red-600 mt-1">{summary.paidCount} {t('common.transactions')}</p>
+            <p className="text-xs text-red-600 mt-1">{summary.paidCount} {t('customers.payments')}</p>
           </div>
           <div className="p-3 bg-red-200 rounded-lg rtl:ml-3 ltr:mr-3">
             <DollarSign className="w-6 h-6 text-red-700" />
@@ -151,7 +154,7 @@ const PaymentsSummaryCards: React.FC<{
       <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200">
         <div className="flex items-center justify-between rtl:flex-row-reverse">
           <div className="rtl:text-right">
-            <p className="text-sm font-medium text-purple-700">{t('payments.totalTransactions')}</p>
+            <p className="text-sm font-medium text-purple-700">{t('payments.totalPayments')}</p>
             <p className="text-2xl font-bold text-purple-900 mt-1">{payments.length}</p>
             <p className="text-xs text-purple-600 mt-1">{t('payments.allPaymentActivities')}</p>
           </div>
@@ -170,71 +173,188 @@ const PaymentFiltersPanel: React.FC<{
   customers: Array<{ id: string; name: string }>;
   suppliers: Array<{ id: string; name: string }>;
   categories: string[];
-}> = ({ filters, onFiltersChange, customers, suppliers, categories }) => {
+  translatePaymentCategory: (category: string) => string;
+}> = ({ filters, onFiltersChange, customers, suppliers, categories, translatePaymentCategory }) => {
   const { t } = useI18n();
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
+  const [fastDateFilter, setFastDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
 
   const updateFilters = (updates: Partial<PaymentFilters>) => {
     onFiltersChange({ ...filters, ...updates });
   };
 
+  const formatDate = (date: Date) => date.toISOString().split('T')[0];
+
+  const handleFastDateFilter = (filter: 'all' | 'today' | 'week' | 'month') => {
+    setFastDateFilter(filter);
+
+    const now = new Date();
+    let startDate = '';
+    let endDate = '';
+
+    switch (filter) {
+      case 'today':
+        startDate = formatDate(now);
+        endDate = formatDate(now);
+        break;
+      case 'week': {
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay());
+        startOfWeek.setHours(0, 0, 0, 0);
+        startDate = formatDate(startOfWeek);
+        endDate = formatDate(now);
+        break;
+      }
+      case 'month': {
+        const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        startDate = formatDate(firstDayOfMonth);
+        endDate = formatDate(now);
+        break;
+      }
+      default:
+        startDate = '';
+        endDate = '';
+    }
+
+    updateFilters({ dateRange: { start: startDate, end: endDate } });
+  };
+
+  React.useEffect(() => {
+    if (!filters.dateRange.start && !filters.dateRange.end && fastDateFilter !== 'all') {
+      setFastDateFilter('all');
+    }
+  }, [filters.dateRange.start, filters.dateRange.end, fastDateFilter]);
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
-      <div className="p-4 border-b border-gray-100">
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="flex items-center justify-between w-full text-left rtl:flex-row-reverse"
-        >
-          <div className="flex items-center space-x-2 rtl:space-x-reverse">
-            <Filter className="w-5 h-5 text-gray-500" />
-            <h3 className="text-lg font-medium text-gray-900">{t('payments.filtersAndSearch')}</h3>
+     
+     <div className="p-4">
+        <p className="text-sm text-gray-600 mb-3 rtl:text-right">{t('payments.filtersAndSearch')}</p>
+        <div className="flex items-center space-x-3 rtl:space-x-reverse">
+          <div className="flex-1 relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 rtl:left-auto rtl:right-3" />
+            <input
+              type="text"
+              placeholder={t('payments.searchPlaceholder')}
+              value={filters.search}
+              onChange={(e) => updateFilters({ search: e.target.value })}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent rtl:pl-4 rtl:pr-10"
+            />
           </div>
-          <ChevronDown className={`w-5 h-5 text-gray-500 transition-transform ${
-            isExpanded ? 'rotate-180' : ''
-          }`} />
-        </button>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`p-2 rounded-lg transition-colors ${
+              showFilters ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            <Filter className="w-4 h-4" />
+          </button>
+        </div>
       </div>
-
-      {isExpanded && (
-        <div className="p-6 space-y-4">
-          {/* Search */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.search')}</label>
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 rtl:left-auto rtl:right-3" />
-              <input
-                type="text"
-                placeholder={t('payments.searchPlaceholder')}
-                value={filters.search}
-                onChange={(e) => updateFilters({ search: e.target.value })}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent rtl:pl-4 rtl:pr-10"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Date Range */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.dateRange')}</label>
-              <div className="space-y-2">
-                <input
-                  type="date"
-                  value={filters.dateRange.start}
-                  onChange={(e) => updateFilters({ dateRange: { ...filters.dateRange, start: e.target.value } })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                />
-                <input
-                  type="date"
-                  value={filters.dateRange.end}
-                  onChange={(e) => updateFilters({ dateRange: { ...filters.dateRange, end: e.target.value } })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                />
+      {showFilters && (
+        <div className="px-4 pb-6 space-y-6 border-t border-gray-100 pt-4">
+          <div className="rounded-lg">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
+                  {t('dashboard.filters') || 'Filters'}
+                </label>
+                <div className="flex flex-wrap gap-2 rtl:flex-row-reverse">
+                  <button
+                    type="button"
+                    onClick={() => handleFastDateFilter('all')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      fastDateFilter === 'all'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    {t('customers.allTime') || 'All Time'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFastDateFilter('today')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      fastDateFilter === 'today'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    {t('customers.today') || 'Today'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFastDateFilter('week')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      fastDateFilter === 'week'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    {t('customers.thisWeek') || 'This Week'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFastDateFilter('month')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      fastDateFilter === 'month'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    {t('customers.thisMonth') || 'This Month'}
+                  </button>
+                </div>
+              </div>
+              <div className="md:self-center">
+                <button
+                  onClick={() => {
+                    setFastDateFilter('all');
+                    onFiltersChange({
+                      search: '',
+                      dateRange: { start: '', end: '' },
+                      category: '',
+                      entityType: 'all',
+                      entityId: '',
+                      direction: 'all',
+                      currency: 'all',
+                      amountRange: { min: '', max: '' }
+                    });
+                  }}
+                  className="px-4 py-2 text-sm text-gray-600 border border-gray-200 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  {t('payments.clearAllFilters')}
+                </button>
               </div>
             </div>
-
-            {/* Category */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.category')}</label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('dashboard.startDate') || t('payments.dateRange')}</label>
+              <input
+                type="date"
+                value={filters.dateRange.start}
+                onChange={(e) => {
+                  setFastDateFilter('all');
+                  updateFilters({ dateRange: { ...filters.dateRange, start: e.target.value } });
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('dashboard.endDate') || t('payments.dateRange')}</label>
+              <input
+                type="date"
+                value={filters.dateRange.end}
+                onChange={(e) => {
+                  setFastDateFilter('all');
+                  updateFilters({ dateRange: { ...filters.dateRange, end: e.target.value } });
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('payments.category')}</label>
               <select
                 value={filters.category}
                 onChange={(e) => updateFilters({ category: e.target.value })}
@@ -246,10 +366,8 @@ const PaymentFiltersPanel: React.FC<{
                 ))}
               </select>
             </div>
-
-            {/* Entity Type */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.entityType')}</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('payments.entityType')}</label>
               <select
                 value={filters.entityType}
                 onChange={(e) => updateFilters({ entityType: e.target.value as any, entityId: '' })}
@@ -260,11 +378,12 @@ const PaymentFiltersPanel: React.FC<{
                 <option value="supplier">{t('payments.suppliers')}</option>
               </select>
             </div>
+          </div>
 
-            {/* Entity Selection */}
-            {filters.entityType !== 'all' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
+          {filters.entityType !== 'all' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="flex flex-col gap-2 lg:col-span-2 xl:col-span-1">
+                <label className="text-sm font-medium text-gray-700 rtl:text-right">
                   {filters.entityType === 'customer' ? t('payments.customer') : t('payments.supplier')}
                 </label>
                 <select
@@ -278,13 +397,12 @@ const PaymentFiltersPanel: React.FC<{
                   ))}
                 </select>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Direction */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.direction')}</label>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('payments.direction')}</label>
               <select
                 value={filters.direction}
                 onChange={(e) => updateFilters({ direction: e.target.value as any })}
@@ -295,10 +413,8 @@ const PaymentFiltersPanel: React.FC<{
                 <option value="paid">{t('payments.paid')}</option>
               </select>
             </div>
-
-            {/* Currency */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.currency')}</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('payments.currency')}</label>
               <select
                 value={filters.currency}
                 onChange={(e) => updateFilters({ currency: e.target.value as any })}
@@ -309,47 +425,29 @@ const PaymentFiltersPanel: React.FC<{
                 <option value="LBP">LBP</option>
               </select>
             </div>
-
-            {/* Amount Range */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('payments.amountRange')}</label>
-              <div className="flex space-x-2 rtl:space-x-reverse">
-                <input
-                  type="number"
-                  placeholder={t('payments.min')}
-                  value={filters.amountRange.min}
-                  onChange={(e) => updateFilters({ amountRange: { ...filters.amountRange, min: e.target.value } })}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                />
-                <input
-                  type="number"
-                  placeholder={t('payments.max')}
-                  value={filters.amountRange.max}
-                  onChange={(e) => updateFilters({ amountRange: { ...filters.amountRange, max: e.target.value } })}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                />
-              </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('dashboard.minAmount') || t('payments.min')}</label>
+              <input
+                type="number"
+                placeholder={t('payments.min')}
+                value={filters.amountRange.min}
+                onChange={(e) => updateFilters({ amountRange: { ...filters.amountRange, min: e.target.value } })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('dashboard.maxAmount') || t('payments.max')}</label>
+              <input
+                type="number"
+                placeholder={t('payments.max')}
+                value={filters.amountRange.max}
+                onChange={(e) => updateFilters({ amountRange: { ...filters.amountRange, max: e.target.value } })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              />
             </div>
           </div>
 
-          {/* Clear Filters */}
-          <div className="flex justify-end pt-4 border-t border-gray-100 rtl:justify-start">
-            <button
-              onClick={() => onFiltersChange({
-                search: '',
-                dateRange: { start: '', end: '' },
-                category: '',
-                entityType: 'all',
-                entityId: '',
-                direction: 'all',
-                currency: 'all',
-                amountRange: { min: '', max: '' }
-              })}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              {t('payments.clearAllFilters')}
-            </button>
-          </div>
+        
         </div>
       )}
     </div>
@@ -1000,9 +1098,11 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
   suppliers = [],
   onUpdateTransaction,
   onDeleteTransaction,
-  showToast
+  showToast,
+  onRefresh
 }) => {
   const { t } = useI18n();
+  const { pushUndo } = useOfflineData();
   
   // Helper function to translate payment categories
   const translatePaymentCategory = (category: string): string => {
@@ -1049,14 +1149,61 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
 
   // Get all payment transactions with enhanced data
   const allPayments = useMemo(() => {
-    const paymentTransactions = transactions.filter(t => isPaymentCategory(t.category));
-    return paymentService.filterPaymentTransactions(paymentTransactions, {});
+    // Define payment category strings directly
+    const paymentCategories = [
+      'Customer Payment',
+      'Customer Credit Sale',
+      'Supplier Payment',
+      'Supplier Commission',
+      'Cash Payment',
+      'Cash Sale',
+      'Payment Received',
+      'Payment Sent',
+      'Expense Payment'
+    ];
+    
+    // Filter transactions locally by checking if category matches payment categories
+    const paymentTransactions = transactions.filter(t => {
+      // Check if category matches any payment category
+      if (t.category && paymentCategories.includes(t.category)) {
+        return true;
+      }
+      
+      // Also check for transactions with payment-related types that have customer/supplier
+      if ((t.type === 'income' || t.type === 'expense') && (t.customer_id || t.supplier_id)) {
+        return true;
+      }
+      
+      return false;
+    });
+    
+    // Map transactions to include _synced property if missing and enhance with payment data
+    const enhancedPayments = paymentTransactions.map(t => {
+      const transactionWithSync = {
+        ...t,
+        _synced: (t as any)._synced ?? true,
+        _lastSyncedAt: (t as any)._lastSyncedAt,
+        _deleted: (t as any)._deleted ?? false
+      };
+      
+      // Add payment direction and entity type
+      const direction: 'received' | 'paid' = t.type === 'income' ? 'received' : 'paid';
+      const entityType: 'customer' | 'supplier' | 'unknown' = t.customer_id ? 'customer' : t.supplier_id ? 'supplier' : 'unknown';
+      
+      return {
+        ...transactionWithSync,
+        paymentDirection: direction,
+        entityType: entityType
+      } as PaymentTransaction;
+    });
+    
+    return enhancedPayments;
   }, [transactions]);
 
   // Apply filters
   const filteredPayments = useMemo(() => {
     let filtered = allPayments;
-
+    
     // Search filter
     if (filters.search) {
       const searchLower = filters.search.toLowerCase();
@@ -1151,29 +1298,45 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
       );
 
       if (result.success) {
+        // Store undo data if provided
+        if (result.undoData) {
+          pushUndo(result.undoData);
+        }
+
         // Call the parent callback if provided for UI updates
         if (onUpdateTransaction) {
           await onUpdateTransaction(editModal.payment.id, updates);
         }
         
+        // Close the modal
+        setEditModal({ isOpen: false, payment: null });
+        
         let successMessage = t('payments.paymentUpdatedSuccessfully');
         if (result.balanceUpdates) {
-          const updates = [];
+          const updateMessages = [];
           if (result.balanceUpdates.cashDrawer) {
-            updates.push(t('payments.cashDrawerUpdated', { 
+            updateMessages.push(t('payments.cashDrawerUpdated', { 
               previous: result.balanceUpdates.cashDrawer.previousBalance.toFixed(2), 
               new: result.balanceUpdates.cashDrawer.newBalance.toFixed(2) 
             }));
           }
           if (result.balanceUpdates.entity) {
-            updates.push(t('payments.entityBalanceUpdated', { entityType: result.balanceUpdates.entity.entityType }));
+            updateMessages.push(t('payments.entityBalanceUpdated', { entityType: result.balanceUpdates.entity.entityType }));
           }
-          if (updates.length > 0) {
-            successMessage += `. ${updates.join(', ')}`;
+          if (updateMessages.length > 0) {
+            successMessage += `. ${updateMessages.join(', ')}`;
           }
         }
         
         showToast?.(successMessage, 'success');
+        
+        // Refresh the data without full page reload
+        if (onRefresh) {
+          await onRefresh();
+        } else {
+          // Fallback to page reload if no refresh callback provided
+          window.location.reload();
+        }
       } else {
         throw new Error(result.error || 'Update failed');
       }
@@ -1199,6 +1362,11 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
       );
 
       if (result.success) {
+        // Store undo data if provided
+        if (result.undoData) {
+          pushUndo(result.undoData);
+        }
+
         // Call the parent callback if provided for UI updates
         if (onDeleteTransaction) {
           await onDeleteTransaction(deleteConfirm.payment.id);
@@ -1208,22 +1376,30 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
         
         let successMessage = t('payments.paymentDeletedSuccessfully');
         if (result.balanceUpdates) {
-          const updates = [];
+          const updateMessages = [];
           if (result.balanceUpdates.cashDrawer) {
-            updates.push(t('payments.cashDrawerUpdated', { 
+            updateMessages.push(t('payments.cashDrawerUpdated', { 
               previous: result.balanceUpdates.cashDrawer.previousBalance.toFixed(2), 
               new: result.balanceUpdates.cashDrawer.newBalance.toFixed(2) 
             }));
           }
           if (result.balanceUpdates.entity) {
-            updates.push(t('payments.entityBalanceUpdated', { entityType: result.balanceUpdates.entity.entityType }));
+            updateMessages.push(t('payments.entityBalanceUpdated', { entityType: result.balanceUpdates.entity.entityType }));
           }
-          if (updates.length > 0) {
-            successMessage += `. ${updates.join(', ')}`;
+          if (updateMessages.length > 0) {
+            successMessage += `. ${updateMessages.join(', ')}`;
           }
         }
         
         showToast?.(successMessage, 'success');
+        
+        // Refresh the data without full page reload
+        if (onRefresh) {
+          await onRefresh();
+        } else {
+          // Fallback to page reload if no refresh callback provided
+          window.location.reload();
+        }
       } else {
         throw new Error(result.error || 'Delete failed');
       }
@@ -1236,17 +1412,32 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center rtl:flex-row-reverse">
-        <div className="rtl:text-right">
-          <h2 className="text-2xl font-bold text-gray-900">{t('payments.title')}</h2>
-          <p className="text-gray-600 mt-1">{t('payments.subtitle')}</p>
-        </div>
+      <div className="rtl:text-right">
+        <h2 className="text-2xl font-bold text-gray-900">{t('payments.title')}</h2>
+        <p className="text-gray-600 mt-1">{t('payments.subtitle')}</p>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm border p-4 flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => setShowForm("receive")}
+          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center shadow-sm"
+        >
+          <ArrowDownRight className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
+          Receive
+        </button>
+        <button
+          onClick={() => setShowForm("pay")}
+          className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center shadow-sm"
+        >
+          <ArrowUpRight className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
+          Pay
+        </button>
         <button
           onClick={() => setShowForm("expense")}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center shadow-sm"
+          className="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors flex items-center shadow-sm"
         >
-          <Plus className="w-5 h-5 rtl:ml-2 ltr:mr-2" />
-          {t('payments.addPayment')}
+          <Receipt className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
+          Expense
         </button>
       </div>
 
@@ -1264,6 +1455,7 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
         customers={customers}
         suppliers={suppliers}
         categories={categories}
+        translatePaymentCategory={translatePaymentCategory}
       />
 
       {/* Payments Table */}

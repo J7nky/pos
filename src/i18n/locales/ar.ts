@@ -568,6 +568,7 @@ const ar = {
     addPayment: 'إضافة دفعة',
     paymentsReceived: 'المدفوعات المستلمة',
     paymentsMade: 'المدفوعات المدفوعة',
+    totalPayments: 'إجمالي المدفوعات',
     netAmount: 'المبلغ الصافي',
     netPositive: 'صافي موجب',
     netNegative: 'صافي سالب',
@@ -664,7 +665,13 @@ const ar = {
     cashPayment: 'دفعة نقدية',
     cashSale: 'بيع نقدي',
     paymentSent: 'دفعة مرسلة',
-    expensePayment: 'دفعة مصروف'
+    expensePayment: 'دفعة مصروف',
+    // Undo functionality
+    undo: 'تراجع',
+    undoLastAction: 'التراجع عن آخر إجراء',
+    undoSuccessful: 'تم التراجع عن الإجراء بنجاح',
+    undoFailed: 'لا يمكن التراجع: تم مزامنة الإجراء أو لم تعد السجلات موجودة',
+    undoError: 'فشل التراجع عن الإجراء: {{error}}'
   },
   nonPriced: {
     title: 'العناصر غير المسعرة',

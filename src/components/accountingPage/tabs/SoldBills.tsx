@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useCurrency } from '../../../hooks/useCurrency';
@@ -108,15 +108,77 @@ export default function InventoryLogs() {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [showFilters, setShowFilters] = useState(true);
+  const [fastDateFilter, setFastDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Initialize with previous month by default (only once)
+  useEffect(() => {
+    if (!storeId || isInitialized) return;
+    
+    const now = new Date();
+    const firstDayOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const firstDayOfPreviousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastDayOfPreviousMonth = new Date(firstDayOfCurrentMonth.getTime() - 1);
+    
+    // Set to previous month
+    setDateFrom(firstDayOfPreviousMonth.toISOString().split('T')[0]);
+    setDateTo(lastDayOfPreviousMonth.toISOString().split('T')[0]);
+    setIsInitialized(true);
+  }, [storeId, isInitialized]);
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
+
+  // Debounce search term to avoid reloading on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300); // 300ms delay
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Handle fast date filter selection
+  const handleFastDateFilter = (filter: 'all' | 'today' | 'week' | 'month') => {
+    setFastDateFilter(filter);
+    
+    const now = new Date();
+    let fromDate = '';
+    let toDate = '';
+
+    switch (filter) {
+      case 'today':
+        fromDate = now.toISOString().split('T')[0];
+        toDate = now.toISOString().split('T')[0];
+        break;
+      case 'week':
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday
+        startOfWeek.setHours(0, 0, 0, 0);
+        fromDate = startOfWeek.toISOString().split('T')[0];
+        toDate = now.toISOString().split('T')[0];
+        break;
+      case 'month':
+        const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        fromDate = firstDayOfMonth.toISOString().split('T')[0];
+        toDate = now.toISOString().split('T')[0];
+        break;
+      case 'all':
+        fromDate = '';
+        toDate = '';
+        break;
+    }
+
+    setDateFrom(fromDate);
+    setDateTo(toDate);
+  };
 
   // Edit form state
   const [editForm, setEditForm] = useState<Partial<Bill>>({});
@@ -136,7 +198,7 @@ export default function InventoryLogs() {
       loadBills();
       setCurrentPage(1); // Reset to first page when filters change
     }
-  }, [storeId, searchTerm, dateFrom, dateTo, paymentStatusFilter, statusFilter]);
+  }, [storeId, debouncedSearchTerm, dateFrom, dateTo, paymentStatusFilter, statusFilter]);
 
   const loadBills = async () => {
     if (!storeId) return;
@@ -146,7 +208,7 @@ export default function InventoryLogs() {
     
     try {
       const filters = {
-        searchTerm: searchTerm || undefined,
+        searchTerm: debouncedSearchTerm || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
         paymentStatus: paymentStatusFilter || undefined,
@@ -361,28 +423,6 @@ export default function InventoryLogs() {
   //   }
   // };
 
-  const exportBills = () => {
-    const csvContent = [
-      ['Bill Number', 'Date', 'Customer', 'Total', 'Payment Status', 'Status'].join(','),
-      ...bills.map(bill => [
-        bill.bill_number,
-        new Date(bill.bill_date).toLocaleDateString(),
-        getCustomerName(bill.customer_id),
-        bill.total_amount.toFixed(2),
-        bill.payment_status,
-        bill.status
-      ].join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bills-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
-
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active': return 'bg-green-100 text-green-800';
@@ -475,41 +515,7 @@ export default function InventoryLogs() {
           >
             <Filter className="w-4 h-4" />
           </button>
-          <button
-            onClick={exportBills}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
-          >
-            <Download className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
-            {t('soldBills.export')}
-          </button>
-          <button
-            onClick={loadBills}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
-          >
-            <RefreshCw className="w-4 h-4 rtl:ml-2 ltr:mr-2" />
-            {t('soldBills.refresh')}
-          </button>
-          <button
-            onClick={async () => {
-              setSyncStatus('syncing');
-              try {
-                await raw.sync();
-                setSyncStatus('synced');
-                setTimeout(() => setSyncStatus('idle'), 3000);
-                showToast(t('soldBills.syncCompletedSuccessfully'), 'success');
-              } catch (error) {
-                console.error('Sync failed:', error);
-                setSyncStatus('error');
-                setTimeout(() => setSyncStatus('idle'), 5000);
-                showToast(t('soldBills.syncFailed'), 'error');
-              }
-            }}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center"
-            disabled={syncStatus === 'syncing'}
-          >
-            <RefreshCw className={`w-4 h-4 rtl:ml-2 ltr:mr-2 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-            {syncStatus === 'syncing' ? t('soldBills.syncing') : t('soldBills.sync')}
-          </button>
+         
         </div>
       </div>
 
@@ -532,50 +538,110 @@ export default function InventoryLogs() {
           </div>
 
           {showFilters && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-gray-200">
+            <div className="space-y-4 pt-4 border-t border-gray-200">
+              {/* Fast Date Filters */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.dateFrom')}</label>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+                <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('dashboard.filters') || 'Quick Filters'}</label>
+                <div className="flex flex-wrap gap-2 rtl:flex-row-reverse">
+                  <button
+                    type="button"
+                    onClick={() => handleFastDateFilter('all')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      fastDateFilter === 'all'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {t('customers.allTime') || 'All Time'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFastDateFilter('today')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      fastDateFilter === 'today'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {t('customers.today') || 'Today'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFastDateFilter('week')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      fastDateFilter === 'week'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {t('customers.thisWeek') || 'This Week'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFastDateFilter('month')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      fastDateFilter === 'month'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {t('customers.thisMonth') || 'This Month'}
+                  </button>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.dateTo')}</label>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.paymentStatus')}</label>
-                <select
-                  value={paymentStatusFilter}
-                  onChange={(e) => setPaymentStatusFilter(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">{t('soldBills.allPaymentStatus')}</option>
-                  <option value="paid">{t('soldBills.paid')}</option>
-                  <option value="partial">{t('soldBills.partial')}</option>
-                  <option value="pending">{t('soldBills.pending')}</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.billStatus')}</label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">{t('soldBills.allStatus')}</option>
-                  <option value="active">{t('soldBills.active')}</option>
-                  <option value="cancelled">{t('soldBills.cancelled')}</option>
-                  <option value="refunded">{t('soldBills.refunded')}</option>
-                </select>
+
+              {/* Date Range Filters */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.dateFrom')}</label>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => {
+                      setDateFrom(e.target.value);
+                      setFastDateFilter('all'); // Reset fast filter when manually changing dates
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.dateTo')}</label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => {
+                      setDateTo(e.target.value);
+                      setFastDateFilter('all'); // Reset fast filter when manually changing dates
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.paymentStatus')}</label>
+                  <select
+                    value={paymentStatusFilter}
+                    onChange={(e) => setPaymentStatusFilter(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">{t('soldBills.allPaymentStatus')}</option>
+                    <option value="paid">{t('soldBills.paid')}</option>
+                    <option value="partial">{t('soldBills.partial')}</option>
+                    <option value="pending">{t('soldBills.pending')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1 rtl:text-right">{t('soldBills.billStatus')}</label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">{t('soldBills.allStatus')}</option>
+                    <option value="active">{t('soldBills.active')}</option>
+                    <option value="cancelled">{t('soldBills.cancelled')}</option>
+                    <option value="refunded">{t('soldBills.refunded')}</option>
+                  </select>
+                </div>
               </div>
             </div>
           )}

@@ -3,6 +3,7 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import MoneyInput from './common/MoneyInput';
+import { generateReference } from '../utils/referenceGenerator';
 import { 
   DollarSign, 
   User, 
@@ -132,7 +133,7 @@ export default function FinancialProcessor() {
         amount: amount,
         currency: transactionForm.currency,
         description: transactionForm.description,
-        reference: transactionForm.reference || `${transactionForm.type.toUpperCase()}-${Date.now()}`,
+        reference: transactionForm.reference || generateReference(transactionForm.type.toUpperCase()),
         customer_id: transactionForm.type === 'customer_payment' ? transactionForm.entityId : null,
         supplier_id: transactionForm.type === 'supplier_payment' ? transactionForm.entityId : null,
         created_by: userProfile.id
