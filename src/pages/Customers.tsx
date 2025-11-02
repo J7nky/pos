@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
-import { Plus, Search, Edit, CheckCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText } from 'lucide-react';
+import { Plus, Search, Edit, CheckCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText, Banknote } from 'lucide-react';
 import { Customer, Supplier } from '../types';
 import Toast from '../components/common/Toast';
 import SearchableSelect from '../components/common/SearchableSelect';
 import SupplierFormModal from '../components/common/SupplierFormModal';
 import AccountStatementModal from '../components/AccountStatementModal';
+import SupplierAdvances from '../components/accountingPage/tabs/SupplierAdvances';
+import { useCurrency } from '../hooks/useCurrency';
 
 export default function Customers() {
   const raw = useOfflineData();
@@ -30,6 +32,7 @@ export default function Customers() {
   // const updateSupplier = raw.updateSupplier; // Reserved for future use
   // const exchangeRate = raw.exchangeRate || 89500; // Reserved for future currency conversion features
   const { userProfile } = useSupabaseAuth();
+  const { formatCurrency, formatCurrencyWithSymbol } = useCurrency();
 
   // Helper function to format balance display
   const formatBalanceDisplay = (balance: number, currency: 'USD' | 'LBP') => {
@@ -75,7 +78,7 @@ export default function Customers() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>('customers');
+  const [activeTab, setActiveTab] = useState<'customers' | 'suppliers' | 'supplier-advances'>('customers');
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [showSupplierForm, setShowSupplierForm] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -405,13 +408,15 @@ export default function Customers() {
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('customers.title')}</h1>
-        <button
-          onClick={activeTab === 'customers' ? handleAddCustomerClick : handleAddSupplierClick}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          {activeTab === 'customers' ? t('customers.addCustomer') : t('customers.addSupplier')}
-        </button>
+        {activeTab !== 'supplier-advances' && (
+          <button
+            onClick={activeTab === 'customers' ? handleAddCustomerClick : handleAddSupplierClick}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            {activeTab === 'customers' ? t('customers.addCustomer') : t('customers.addSupplier')}
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -440,23 +445,36 @@ export default function Customers() {
               <Truck className="w-5 h-5 inline mr-2" />
               {t('customers.suppliers')}
             </button>
+            <button
+              onClick={() => setActiveTab('supplier-advances')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'supplier-advances'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <Banknote className="w-5 h-5 inline mr-2" />
+              {t('customers.supplierAdvances') || 'Supplier Advances'}
+            </button>
           </nav>
         </div>
       </div>
 
       {/* Search */}
-      <div className="bg-white p-4 rounded-lg shadow-sm mb-6">
-        <div className="relative">
-          <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder={t('customers.searchPlaceholder', { type: activeTab === 'customers' ? t('customers.clients') : t('customers.suppliers') })}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-          />
+      {activeTab !== 'supplier-advances' && (
+        <div className="bg-white p-4 rounded-lg shadow-sm mb-6">
+          <div className="relative">
+            <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder={t('customers.searchPlaceholder', { type: activeTab === 'customers' ? t('customers.clients') : t('customers.suppliers') })}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Customer List Table */}
       {activeTab === 'customers' && (
@@ -1185,6 +1203,28 @@ export default function Customers() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Supplier Advances Tab */}
+      {activeTab === 'supplier-advances' && (
+        <SupplierAdvances
+          suppliers={suppliers}
+          transactions={raw.transactions || []}
+          formatCurrency={formatCurrency}
+          formatCurrencyWithSymbol={formatCurrencyWithSymbol}
+          showToast={showToast}
+          onProcessAdvance={async (data) => {
+            await raw.processSupplierAdvance(data);
+          }}
+          onEditAdvance={async (transactionId, updates) => {
+            await raw.updateSupplierAdvance(transactionId, updates);
+          }}
+          onDeleteAdvance={async (transactionId) => {
+            await raw.deleteSupplierAdvance(transactionId);
+          }}
+          addSupplier={addSupplier}
+          refreshData={raw.refreshData}
+        />
       )}
 
       {/* Account Statement Modal */}

@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import KeyboardShortcutsHelp from '../components/common/KeyboardShortcutsHelp';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import UndoToastManager from '../components/common/UndoToastManager';
+import { NotificationCenter } from '../components/NotificationCenter';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useI18n } from '../i18n';
@@ -111,17 +112,20 @@ export default function Layout() {
       <div className="w-64 bg-white shadow-lg">
         <div className="p-6 border-b">
           <h1 className="text-xl font-bold text-gray-800">{t('layout.title')}</h1>
-          <div className="flex items-center mt-2 text-sm text-gray-600">
-            {isOnline ? (
-              <><Wifi className="w-4 h-4 mr-2 text-green-500" /> {t('layout.connection.online')}</>
-            ) : (
-              <><WifiOff className="w-4 h-4 mr-2 text-red-500" /> {t('layout.connection.offline')}</>
-            )}
-            {unsyncedCount > 0 && (
-              <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
-                {t('common.status.unsyncedCount', { count: unsyncedCount })}
-              </span>
-            )}
+          <div className="flex items-center justify-between mt-2">
+            <div className="flex items-center text-sm text-gray-600">
+              {isOnline ? (
+                <><Wifi className="w-4 h-4 mr-2 text-green-500" /> {t('layout.connection.online')}</>
+              ) : (
+                <><WifiOff className="w-4 h-4 mr-2 text-red-500" /> {t('layout.connection.offline')}</>
+              )}
+              {unsyncedCount > 0 && (
+                <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
+                  {t('common.status.unsyncedCount', { count: unsyncedCount })}
+                </span>
+              )}
+            </div>
+            <NotificationCenter />
           </div>
           <div className="mt-2">
             <KeyboardShortcutsHelp shortcuts={getShortcutsForPage()} />

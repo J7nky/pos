@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useCurrency } from '../../../hooks/useCurrency';
 import { useI18n } from '../../../i18n';
+import { Pagination } from '../../common/Pagination';
 
 import { 
   FileText, 
@@ -112,6 +113,10 @@ export default function InventoryLogs() {
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [showFilters, setShowFilters] = useState(true);
+  
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   // Edit form state
   const [editForm, setEditForm] = useState<Partial<Bill>>({});
@@ -129,6 +134,7 @@ export default function InventoryLogs() {
   useEffect(() => {
     if (storeId) {
       loadBills();
+      setCurrentPage(1); // Reset to first page when filters change
     }
   }, [storeId, searchTerm, dateFrom, dateTo, paymentStatusFilter, statusFilter]);
 
@@ -613,9 +619,11 @@ export default function InventoryLogs() {
                     </td>
                   </tr>
                 ) : (
-                  bills
-                  .sort((a, b) => new Date(b.bill_date).getTime() - new Date(a.bill_date).getTime()). // newest first
-                  map((bill) => (
+                  (() => {
+                    const sortedBills = [...bills].sort((a, b) => new Date(b.bill_date).getTime() - new Date(a.bill_date).getTime());
+                    const startIndex = (currentPage - 1) * itemsPerPage;
+                    const paginatedBills = sortedBills.slice(startIndex, startIndex + itemsPerPage);
+                    return paginatedBills.map((bill) => (
                     <tr key={bill.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="rtl:text-right">
@@ -715,11 +723,25 @@ export default function InventoryLogs() {
                         </div>
                       </td>
                     </tr>
-                  ))
+                  ));
+                  })()
                 )}
               </tbody>
             </table>
           </div>
+          {bills.length > itemsPerPage && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={Math.ceil(bills.length / itemsPerPage)}
+              onPageChange={(page) => {
+                setCurrentPage(page);
+                // Scroll to top of table when page changes
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              itemsPerPage={itemsPerPage}
+              totalItems={bills.length}
+            />
+          )}
         </div>
       )}
 

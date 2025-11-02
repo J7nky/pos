@@ -1,10 +1,11 @@
 import { db } from '../lib/db';
 import { Employee } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { supabase } from '../lib/supabase';
 
 /**
  * EmployeeService - Following offline-first architecture pattern
- * All operations save to IndexedDB first, then sync via syncService
+ * Creates auth users in Supabase, then stores profile in IndexedDB for sync
  */
 export class EmployeeService {
   /**
@@ -28,7 +29,7 @@ export class EmployeeService {
   /**
    * Get employees by role for a store (for quota checking)
    */
-  static async getEmployeesByRole(storeId: string, role: 'manager' | 'cashier'): Promise<Employee[]> {
+  static async getEmployeesByRole(storeId: string, role: 'admin' | 'manager' | 'cashier'): Promise<Employee[]> {
     return await db.users
       .where('store_id')
       .equals(storeId)
@@ -37,8 +38,116 @@ export class EmployeeService {
   }
 
   /**
-   * Create a new employee
+   * Create a new employee with Supabase authentication
+   * Creates auth user first, then stores profile in IndexedDB
+   */
+  static async createEmployeeWithAuth(
+    storeId: string, 
+    employeeData: Omit<Employee, 'id' | 'store_id' | 'created_at' | 'updated_at' | '_synced' | '_deleted'>,
+    password: string
+  ): Promise<Employee> {
+    // Validate role limits
+    const existingEmployees = await this.getEmployeesByRole(storeId, employeeData.role);
+    const maxAllowed = employeeData.role === 'cashier' ? 2 : 1;
+    
+    if (existingEmployees.length >= maxAllowed) {
+      throw new Error(`Cannot add more ${employeeData.role}s. Maximum allowed: ${maxAllowed}`);
+    }
+
+    // Check if email already exists
+    const existingByEmail = await db.users
+      .where('store_id')
+      .equals(storeId)
+      .filter(emp => emp.email === employeeData.email && !emp._deleted)
+      .first();
+    
+    if (existingByEmail) {
+      throw new Error('An employee with this email already exists');
+    }
+
+    // Store current session to check if it changes
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    let sessionChanged = false;
+    
+    // Create Supabase auth user
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: employeeData.email,
+      password: password,
+      options: {
+        data: {
+          name: employeeData.name,
+          role: employeeData.role,
+          store_id: storeId
+        }
+      }
+    });
+
+    if (authError || !authData.user) {
+      throw new Error(`Failed to create auth user: ${authError?.message || 'No user returned'}`);
+    }
+
+    // Check if signUp auto-logged in the new user
+    const { data: { session: afterSignUpSession } } = await supabase.auth.getSession();
+    if (afterSignUpSession && afterSignUpSession.user.id !== currentSession?.user?.id) {
+      sessionChanged = true;
+    }
+
+    // Create employee record with auth user ID
+    const now = new Date().toISOString();
+    const employee: Employee = {
+      id: authData.user.id, // Use auth user ID
+      store_id: storeId,
+      ...employeeData,
+      created_at: now,
+      updated_at: now,
+      _synced: true, // Will be synced immediately
+      _deleted: false
+    };
+
+    // Insert directly to Supabase users table (don't wait for sync)
+    // Remove sync-specific fields before inserting
+    const { _synced, _deleted, _lastSyncedAt, ...supabaseRecord } = employee;
+    
+    const { error: insertError } = await supabase
+      .from('users')
+      .insert(supabaseRecord as any);
+
+    if (insertError) {
+      // Rollback: delete the auth user if we can't create the profile
+      console.error('Failed to create employee profile in Supabase:', insertError);
+      throw new Error(`Failed to create employee profile: ${insertError.message}`);
+    }
+
+    // Store in IndexedDB first (already synced)
+    await db.users.add(employee);
+
+    // Restore admin session if it was changed (do this AFTER storing to avoid race conditions)
+    if (sessionChanged && currentSession) {
+      console.log('🔄 Restoring admin session after employee creation');
+      
+      // Use replaceState to avoid triggering full auth state change
+      // This minimizes disruption to sync and other services
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: currentSession.access_token,
+        refresh_token: currentSession.refresh_token
+      });
+      
+      if (sessionError) {
+        console.error('Failed to restore admin session:', sessionError);
+        // Not critical - admin can refresh page if needed
+      }
+      
+      // Small delay to let auth state stabilize before returning
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    return employee;
+  }
+
+  /**
+   * Create a new employee (legacy method - local only, no auth)
    * Validates role limits (max 2 cashiers, max 1 manager)
+   * @deprecated Use createEmployeeWithAuth for employees who need system access
    */
   static async createEmployee(storeId: string, employeeData: Omit<Employee, 'id' | 'store_id' | 'created_at' | 'updated_at' | '_synced' | '_deleted'>): Promise<Employee> {
     // Validate role limits
@@ -108,11 +217,40 @@ export class EmployeeService {
       }
     }
 
-    await db.users.update(employeeId, {
-      ...updates,
-      updated_at: new Date().toISOString(),
-      _synced: false
-    });
+    // Clean updates: remove undefined values and handle empty strings for optional fields
+    const cleanedUpdates: any = {};
+    for (const [key, value] of Object.entries(updates)) {
+      // Include defined values (including null for balance fields)
+      if (value !== undefined) {
+        // Convert empty strings to null for optional text fields (but keep required fields)
+        if (typeof value === 'string' && value === '' && key !== 'name' && key !== 'email' && key !== 'role') {
+          cleanedUpdates[key] = null;
+        } else {
+          cleanedUpdates[key] = value;
+        }
+      }
+    }
+
+    // Always update these fields
+    cleanedUpdates.updated_at = new Date().toISOString();
+    cleanedUpdates._synced = false;
+
+    console.log(`🔄 Updating employee ${employeeId} with:`, cleanedUpdates);
+
+    const updateCount = await db.users.update(employeeId, cleanedUpdates);
+
+    if (updateCount === 0) {
+      console.error(`❌ Failed to update employee ${employeeId}. Update count: ${updateCount}`);
+      throw new Error('Failed to update employee. Record may not exist or no changes were made.');
+    }
+
+    console.log(`✅ Employee updated successfully: ${employeeId}, records updated: ${updateCount}`);
+    
+    // Verify the update was applied
+    const updated = await db.users.get(employeeId);
+    if (updated) {
+      console.log(`✅ Verified employee after update:`, updated);
+    }
   }
 
   /**

@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { useI18n } from '../../i18n';
+import { Pagination } from '../common/Pagination';
+
 interface RecentReceivesTableProps {
   recentReceives: any[];
   products: any[];
@@ -18,6 +20,15 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
   onDelete 
 }) => {
   const { t } = useI18n();
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+
+  const paginatedReceives = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return recentReceives.slice(startIndex, startIndex + itemsPerPage);
+  }, [recentReceives, currentPage]);
+
+  const totalPages = Math.ceil(recentReceives.length / itemsPerPage);
   
   // Create batch map for supplier lookup
   const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
@@ -88,7 +99,7 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-            {recentReceives.map((item: any) => {
+            {paginatedReceives.map((item: any) => {
               const product = products.find((p: any) => p.id === item.product_id);
               // Get supplier_id strictly from batch
               const batch = item.batch_id ? batchMap.get(item.batch_id) : null;
@@ -149,6 +160,15 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
           </tbody>
         </table>
       </div>
+      {totalPages > 1 && (
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          itemsPerPage={itemsPerPage}
+          totalItems={recentReceives.length}
+        />
+      )}
     </div>
   );
 };

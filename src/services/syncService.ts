@@ -16,6 +16,11 @@ const SYNC_CONFIG = {
   maxRecordsPerSync: 1000,
   incrementalSyncThreshold: 50,
   validationCacheExpiry: 900000,
+  // Real-time refresh optimization
+  debounceDelay: 500, // Debounce rapid sync requests
+  maxConcurrentBatches: 3, // Limit concurrent batch operations
+  connectionTimeout: 10000, // Connection timeout in ms
+  idleSyncInterval: 60000, // Sync interval when idle (1 minute)
 };
 
 // Table sync order (respects foreign key dependencies)
@@ -24,7 +29,7 @@ const SYNC_TABLES = [
 'products',
 'suppliers', 
 'customers',
-'users',
+'users', // Employees with auth accounts - synced to Supabase
 'cash_drawer_accounts',
 'inventory_bills',
   'inventory_items',
@@ -353,7 +358,7 @@ const result = { uploaded: 0, errors: [] as string[] };
     for (const tableName of SYNC_TABLES) {
       const tableStart = performance.now();
       try {
-        console.log(`📤 Processing table: ${tableName}`);
+        // console.log(`📤 Processing table: ${tableName}`);
         
         if (!await this.validateDependencies(tableName, storeId)) {
           console.log(`⏳ Skipping ${tableName} - dependencies not met`);
@@ -717,50 +722,64 @@ console.log(`⏳ Skipping download for ${tableName} - dependencies not met`);
 continue;
 }
 
-const syncMetadata = await db.getSyncMetadata(tableName);
-let lastSyncAt = syncMetadata?.last_synced_at || '1970-01-01T00:00:00.000Z';
+        const syncMetadata = await db.getSyncMetadata(tableName);
+        let lastSyncAt = syncMetadata?.last_synced_at || '1970-01-01T00:00:00.000Z';
 
-if (lastSyncAt && isNaN(Date.parse(lastSyncAt))) {
-console.warn(`Invalid lastSyncAt for ${tableName}: ${lastSyncAt}, using default`);
-lastSyncAt = '1970-01-01T00:00:00.000Z';
-}
+        if (lastSyncAt && isNaN(Date.parse(lastSyncAt))) {
+          console.warn(`Invalid lastSyncAt for ${tableName}: ${lastSyncAt}, using default`);
+          lastSyncAt = '1970-01-01T00:00:00.000Z';
+        }
 
-const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
-const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
+        const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
+        const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
 
-let query = supabase.from(tableName as any).select('*');
+        let query = supabase.from(tableName as any).select('*');
 
-if (tableName !== 'transactions' && tableName !== 'stores') {
-query = query.eq('store_id', storeId);
-} else if (tableName === 'stores') {
-query = query.eq('id', storeId);
-}
+        if (tableName !== 'transactions' && tableName !== 'stores') {
+          query = query.eq('store_id', storeId);
+        } else if (tableName === 'stores') {
+          query = query.eq('id', storeId);
+        }
 
-const isFirstSync = !lastSyncAt || lastSyncAt === '1970-01-01T00:00:00.000Z';
+        const isFirstSync = !lastSyncAt || lastSyncAt === '1970-01-01T00:00:00.000Z';
 
-if (!isFirstSync) {
-query = query.gte(timestampField, lastSyncAt);
-console.log(`📊 Incremental sync for ${tableName} since ${lastSyncAt}`);
-} else {
-          console.log(`📊 Full sync for ${tableName} (first sync)`);
-}
+        // Check if we have any non-deleted local records - if not, do a full sync to catch existing records
+        // This prevents the issue where sync metadata exists but local database is empty (manually cleared, migration, etc.)
+        const table = (db as any)[tableName];
+        const localRecordCount = await table.filter((record: any) => !record._deleted).count();
+        const shouldDoFullSync = isFirstSync || localRecordCount === 0;
 
-query = query
-.order(timestampField, { ascending: true })
-.limit(SYNC_CONFIG.maxRecordsPerSync);
+        if (!shouldDoFullSync) {
+          query = query.gte(timestampField, lastSyncAt);
+          console.log(`📊 Incremental sync for ${tableName} since ${lastSyncAt} (${localRecordCount} local records)`);
+        } else {
+          console.log(`📊 Full sync for ${tableName} (${isFirstSync ? 'first sync' : 'no local records found'}, ${localRecordCount} local)`);
+        }
 
-const { data: remoteRecords, error } = await query;
+        query = query
+          .order(timestampField, { ascending: true })
+          .limit(SYNC_CONFIG.maxRecordsPerSync);
 
-if (error) {
-result.errors.push(`Download failed for ${tableName}: ${error.message}`);
-continue;
-}
+        const { data: remoteRecords, error } = await query;
 
-if (!remoteRecords || remoteRecords.length === 0) {
+        if (error) {
+          result.errors.push(`Download failed for ${tableName}: ${error.message}`);
+          console.error(`❌ Query error for ${tableName}:`, error);
+          continue;
+        }
+
+        if (!remoteRecords || remoteRecords.length === 0) {
           const tableTime = performance.now() - tableStart;
-          console.log(`📊 No records found for ${tableName} (${tableTime.toFixed(2)}ms)`);
-continue;
-}
+          console.log(`📊 No records found for ${tableName} (${tableTime.toFixed(2)}ms) - query: store_id=${storeId}, ${!shouldDoFullSync ? `${timestampField}>=${lastSyncAt}` : 'full sync'}`);
+          
+          // For inventory_items specifically, log diagnostic info
+          if (tableName === 'inventory_items') {
+            const allRemoteQuery = supabase.from('inventory_items').select('id, store_id, created_at').eq('store_id', storeId).limit(5);
+            const { data: sampleRecords } = await allRemoteQuery;
+            console.log(`🔍 Diagnostic: Found ${sampleRecords?.length || 0} total inventory_items in Supabase for this store (sample check)`);
+          }
+          continue;
+        }
 
 console.log(`📊 Found ${remoteRecords.length} records for ${tableName}`);
 

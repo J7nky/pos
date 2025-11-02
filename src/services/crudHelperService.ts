@@ -19,6 +19,23 @@ export class CRUDHelperService {
   }
 
   /**
+   * Clean entity data - convert empty strings to null for optional fields
+   * This prevents "invalid input syntax for type numeric" errors in Supabase
+   */
+  private cleanEntityData(data: any): any {
+    const cleaned: any = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value === '' && key !== 'name' && key !== 'email' && key !== 'role') {
+        // Convert empty strings to null for optional fields
+        cleaned[key] = null;
+      } else {
+        cleaned[key] = value;
+      }
+    }
+    return cleaned;
+  }
+
+  /**
    * Generic add operation for any entity
    */
   async addEntity<T extends keyof Tables>(
@@ -26,9 +43,12 @@ export class CRUDHelperService {
     storeId: string,
     entityData: Omit<Tables[T]['Insert'], 'store_id'>
   ): Promise<void> {
+    // Clean entity data - convert empty strings to null for numeric fields
+    const cleanedEntityData = this.cleanEntityData(entityData);
+    
     const entity = {
       ...createBaseEntity(storeId),
-      ...entityData
+      ...cleanedEntityData
     };
 
     console.log(`🔧 CRUDHelper: Adding ${tableName} entity:`, entity);
@@ -50,9 +70,12 @@ export class CRUDHelperService {
   ): Promise<void> {
     console.log(`🔧 CRUDHelper: Updating ${tableName} with ID ${id}`, updates);
     
+    // Clean update data - convert empty strings to null for numeric fields
+    const cleanedUpdates = this.cleanEntityData(updates);
+    
     // Prepare update payload with sync flag
     const updatePayload: any = {
-      ...updates,
+      ...cleanedUpdates,
       _synced: false
     };
     
@@ -125,15 +148,27 @@ export class CRUDHelperService {
     storeId: string,
     includeDeleted = false
   ): Promise<any[]> {
-    let query = (db as any)[tableName]
-      .where('store_id')
-      .equals(storeId);
+    try {
+      const table = (db as any)[tableName];
+      if (!table) {
+        console.error(`❌ Table ${tableName} does not exist in IndexedDB`);
+        return [];
+      }
 
-    if (!includeDeleted) {
-      query = query.filter((item: any) => !item._deleted);
+      let query = table.where('store_id').equals(storeId);
+
+      if (!includeDeleted) {
+        query = query.filter((item: any) => !item._deleted);
+      }
+
+      const results = await query.toArray();
+      console.log(`📦 getEntitiesByStore: ${tableName} - found ${results.length} records for store ${storeId}`);
+      
+      return results;
+    } catch (error) {
+      console.error(`❌ Error fetching ${tableName} for store ${storeId}:`, error);
+      return [];
     }
-
-    return await query.toArray();
   }
 
   /**
@@ -220,6 +255,7 @@ export class CRUDHelperService {
       () => this.getEntitiesByStore('products', storeId),
       () => this.getEntitiesByStore('suppliers', storeId),
       () => this.getEntitiesByStore('customers', storeId),
+      () => this.getEntitiesByStore('users', storeId),
       () => this.getEntitiesByStore('inventory_items', storeId),
       () => this.getEntitiesByStore('transactions', storeId),
       () => this.getEntitiesByStore('inventory_bills', storeId),
@@ -244,15 +280,16 @@ export class CRUDHelperService {
       productsData: results[0],
       suppliersData: results[1],
       customersData: results[2],
-      inventoryData: results[3],
-      transactionsData: results[4],
-      batchesData: results[5],
-      billsData: results[6],
-      billLineItemsData: results[7],
-      billAuditLogsData: results[8],
-      cashDrawerAccountsData: results[9],
-      cashDrawerSessionsData: results[10],
-      missedProductsData: results[11],
+      employeesData: results[3],
+      inventoryData: results[4],
+      transactionsData: results[5],
+      batchesData: results[6],
+      billsData: results[7],
+      billLineItemsData: results[8],
+      billAuditLogsData: results[9],
+      cashDrawerAccountsData: results[10],
+      cashDrawerSessionsData: results[11],
+      missedProductsData: results[12],
     };
   }
 
@@ -261,7 +298,8 @@ export class CRUDHelperService {
    */
   async getUnsyncedCount(): Promise<{ total: number; byTable: Record<string, number> }> {
     const tableNames = [
-      'stores', 'products', 'suppliers', 'customers', 'cash_drawer_accounts',
+      'stores', 'products', 'suppliers', 'customers', 'users',
+      'cash_drawer_accounts',
       'inventory_bills', 'inventory_items', 'transactions', 'bills',
       'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions'
     ];

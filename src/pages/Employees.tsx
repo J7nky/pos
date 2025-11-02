@@ -1,18 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { useI18n } from '../i18n';
-import { Plus, Search, Edit, Trash2, Users as UsersIcon, Clock, DollarSign, Mail, Phone, MapPin, User } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Users as UsersIcon, Clock, DollarSign, Phone, MapPin, User } from 'lucide-react';
 import { Employee } from '../types';
 import { EmployeeService } from '../services/employeeService';
 import Toast from '../components/common/Toast';
 
 export default function Employees() {
   const { userProfile } = useSupabaseAuth();
-  const { storeId } = useOfflineData();
-  const { t } = useI18n();
-  
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  const { storeId, employees, updateEmployee, deleteEmployee } = useOfflineData();
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
@@ -34,34 +30,36 @@ export default function Employees() {
     working_hours_end: '',
     working_days: '',
   });
+  const [password, setPassword] = useState<string>('');
+  const [salaryCurrency, setSalaryCurrency] = useState<'LBP' | 'USD'>('LBP');
+  const [salaryValue, setSalaryValue] = useState<string>('');
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [roleCounts, setRoleCounts] = useState({ cashier: 0, manager: 0 });
 
   // Check if user is admin
   const isAdmin = userProfile?.role === 'admin';
-
+console.log(userProfile,123123123);
   useEffect(() => {
     if (!isAdmin) {
       setToast({ message: 'Access denied. Admin role required.', type: 'error', visible: true });
       return;
     }
     loadEmployees();
-  }, [storeId, isAdmin]);
+  }, [storeId, isAdmin, employees]);
 
   const loadEmployees = async () => {
     if (!storeId || !isAdmin) return;
     
     try {
       setLoading(true);
-      const [employeesList, counts] = await Promise.all([
-        EmployeeService.getEmployees(storeId),
-        EmployeeService.getRoleCounts(storeId)
-      ]);
-      setEmployees(employeesList);
+      console.log('🔄 Loading employees for store:', storeId);
+      // Employees are now loaded from context, just calculate role counts
+      const counts = await EmployeeService.getRoleCounts(storeId);
+      console.log('✅ Loaded employees:', employees.length, 'employees');
       setRoleCounts(counts);
     } catch (error) {
-      console.error('Error loading employees:', error);
+      console.error('❌ Error loading employees:', error);
       setToast({ 
         message: error instanceof Error ? error.message : 'Failed to load employees', 
         type: 'error', 
@@ -83,13 +81,16 @@ export default function Employees() {
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       errors.email = 'Invalid email format';
     }
+    if (!editingEmployee && (!password || password.length < 6)) {
+      errors.password = 'Password must be at least 6 characters';
+    }
     if (!formData.role) {
       errors.role = 'Role is required';
     }
     if (formData.phone && !/^[\d\s\-\+\(\)]+$/.test(formData.phone)) {
       errors.phone = 'Invalid phone number format';
     }
-    if (formData.monthly_salary && isNaN(parseFloat(formData.monthly_salary))) {
+    if (salaryValue && isNaN(parseFloat(salaryValue))) {
       errors.monthly_salary = 'Salary must be a valid number';
     }
     if (formData.working_hours_start && !/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(formData.working_hours_start)) {
@@ -109,17 +110,81 @@ export default function Employees() {
     if (!validateForm() || !storeId) return;
 
     try {
+      // Prepare balance fields based on selected currency
+      const balanceValue = salaryValue && salaryValue.trim() !== '' ? parseFloat(salaryValue) : null;
+      const balanceData = {
+        lbp_balance: salaryCurrency === 'LBP' ? balanceValue : null,
+        usd_balance: salaryCurrency === 'USD' ? balanceValue : null,
+      };
+
+      // Clean formData - convert empty strings to null for optional fields
+      const cleanedFormData: any = {};
+      for (const [key, value] of Object.entries(formData)) {
+        if (key === 'name' || key === 'email' || key === 'role') {
+          // Required fields - keep as is
+          cleanedFormData[key] = value;
+        } else if (typeof value === 'string' && value.trim() === '') {
+          // Optional fields - convert empty strings to null
+          cleanedFormData[key] = null;
+        } else {
+          cleanedFormData[key] = value;
+        }
+      }
+
+      const employeeData = {
+        ...cleanedFormData,
+        ...balanceData,
+      };
+
+      console.log('📝 Submitting employee data:', {
+        isEdit: !!editingEmployee,
+        employeeId: editingEmployee?.id,
+        employeeData
+      });
+
       if (editingEmployee) {
-        await EmployeeService.updateEmployee(editingEmployee.id, formData);
+        // Validate role limits if role is being changed
+        if (employeeData.role && employeeData.role !== editingEmployee.role) {
+          const existingEmployees = employees.filter(emp => emp.role === employeeData.role && emp.id !== editingEmployee.id);
+          const maxAllowed = employeeData.role === 'cashier' ? 2 : 1;
+          if (existingEmployees.length >= maxAllowed) {
+            throw new Error(`Cannot change role to ${employeeData.role}. Maximum allowed: ${maxAllowed}`);
+          }
+        }
+        
+        // Check email uniqueness if email is being changed
+        if (employeeData.email && employeeData.email !== editingEmployee.email) {
+          const existingByEmail = employees.find(emp => emp.email === employeeData.email && emp.id !== editingEmployee.id);
+          if (existingByEmail) {
+            throw new Error('An employee with this email already exists');
+          }
+        }
+        
+        await updateEmployee(editingEmployee.id, employeeData);
         setToast({ message: 'Employee updated successfully', type: 'success', visible: true });
       } else {
-        await EmployeeService.createEmployee(storeId, formData as Omit<Employee, 'id' | 'store_id' | 'created_at' | 'updated_at' | '_synced' | '_deleted'>);
-        setToast({ message: 'Employee created successfully', type: 'success', visible: true });
+        // Validate role limits for new employee
+        const existingEmployees = employees.filter(emp => emp.role === employeeData.role);
+        const maxAllowed = (employeeData.role as 'cashier' | 'manager') === 'cashier' ? 2 : 1;
+        if (existingEmployees.length >= maxAllowed) {
+          throw new Error(`Cannot add more ${employeeData.role}s. Maximum allowed: ${maxAllowed}`);
+        }
+        
+        // Check email uniqueness
+        const existingByEmail = employees.find(emp => emp.email === employeeData.email);
+        if (existingByEmail) {
+          throw new Error('An employee with this email already exists');
+        }
+        
+        // Create employee with auth user using the service
+        await EmployeeService.createEmployeeWithAuth(storeId, employeeData as any, password);
+        setToast({ message: 'Employee created successfully with login credentials', type: 'success', visible: true });
       }
       
       resetForm();
-      await loadEmployees();
+      // No need to reload, context will auto-update
     } catch (error) {
+      console.error('❌ Error saving employee:', error);
       setToast({ 
         message: error instanceof Error ? error.message : 'Failed to save employee', 
         type: 'error', 
@@ -129,11 +194,15 @@ export default function Employees() {
   };
 
   const handleEdit = (employee: Employee) => {
+    console.log('✏️ Editing employee:', employee);
     setEditingEmployee(employee);
+    // Clear any existing errors
+    setFormErrors({});
+    
     setFormData({
       name: employee.name,
       email: employee.email,
-      role: employee.role,
+      role: employee.role || 'cashier', // Fallback to cashier if role is undefined
       phone: employee.phone || '',
       address: employee.address || '',
       monthly_salary: employee.monthly_salary || '',
@@ -141,6 +210,19 @@ export default function Employees() {
       working_hours_end: employee.working_hours_end || '',
       working_days: employee.working_days || '',
     });
+    
+    // Set currency and value based on existing balance
+    if (employee.lbp_balance !== null && employee.lbp_balance !== undefined) {
+      setSalaryCurrency('LBP');
+      setSalaryValue(employee.lbp_balance.toString());
+    } else if (employee.usd_balance !== null && employee.usd_balance !== undefined) {
+      setSalaryCurrency('USD');
+      setSalaryValue(employee.usd_balance.toString());
+    } else {
+      setSalaryCurrency('LBP');
+      setSalaryValue('');
+    }
+    
     setShowForm(true);
   };
 
@@ -148,9 +230,9 @@ export default function Employees() {
     if (!confirm('Are you sure you want to delete this employee?')) return;
 
     try {
-      await EmployeeService.deleteEmployee(employeeId);
+      await deleteEmployee(employeeId);
       setToast({ message: 'Employee deleted successfully', type: 'success', visible: true });
-      await loadEmployees();
+      // No need to reload, context will auto-update
     } catch (error) {
       setToast({ 
         message: error instanceof Error ? error.message : 'Failed to delete employee', 
@@ -172,6 +254,9 @@ export default function Employees() {
       working_hours_end: '',
       working_days: '',
     });
+    setPassword('');
+    setSalaryCurrency('LBP');
+    setSalaryValue('');
     setEditingEmployee(null);
     setShowForm(false);
     setFormErrors({});
@@ -300,9 +385,30 @@ export default function Employees() {
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     className={`w-full px-3 py-2 border rounded-lg ${formErrors.email ? 'border-red-500' : 'border-gray-300'}`}
                     required
+                    disabled={!!editingEmployee}
                   />
                   {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
+                  {editingEmployee && <p className="text-xs text-gray-500 mt-1">Email cannot be changed</p>}
                 </div>
+
+                {!editingEmployee && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Password <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className={`w-full px-3 py-2 border rounded-lg ${formErrors.password ? 'border-red-500' : 'border-gray-300'}`}
+                      required
+                      minLength={6}
+                      placeholder="Minimum 6 characters"
+                    />
+                    {formErrors.password && <p className="text-red-500 text-xs mt-1">{formErrors.password}</p>}
+                    <p className="text-xs text-gray-500 mt-1">Employee will use this password to log in</p>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -310,7 +416,15 @@ export default function Employees() {
                   </label>
                   <select
                     value={formData.role || 'cashier'}
-                    onChange={(e) => setFormData({ ...formData, role: e.target.value as 'cashier' | 'manager' })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, role: e.target.value as 'cashier' | 'manager' });
+                      // Clear role error if it exists
+                      if (formErrors.role) {
+                        const newErrors = { ...formErrors };
+                        delete newErrors.role;
+                        setFormErrors(newErrors);
+                      }
+                    }}
                     className={`w-full px-3 py-2 border rounded-lg ${formErrors.role ? 'border-red-500' : 'border-gray-300'}`}
                     required
                   >
@@ -339,12 +453,45 @@ export default function Employees() {
                   </label>
                   <input
                     type="text"
-                    value={formData.monthly_salary || ''}
-                    onChange={(e) => setFormData({ ...formData, monthly_salary: e.target.value })}
+                    value={salaryValue}
+                    onChange={(e) => {
+                      setSalaryValue(e.target.value);
+                      if (formErrors.monthly_salary) {
+                        const newErrors = { ...formErrors };
+                        delete newErrors.monthly_salary;
+                        setFormErrors(newErrors);
+                      }
+                    }}
                     placeholder="e.g., 500.00"
                     className={`w-full px-3 py-2 border rounded-lg ${formErrors.monthly_salary ? 'border-red-500' : 'border-gray-300'}`}
                   />
                   {formErrors.monthly_salary && <p className="text-red-500 text-xs mt-1">{formErrors.monthly_salary}</p>}
+                  
+                  {/* Currency Toggle Switch */}
+                  <div className="mt-3 flex items-center justify-center gap-3 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                    <button
+                      type="button"
+                      onClick={() => setSalaryCurrency('LBP')}
+                      className={`flex-1 py-2 px-4 rounded-md font-medium text-sm transition-all duration-200 ${
+                        salaryCurrency === 'LBP'
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'bg-white text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      LBP
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSalaryCurrency('USD')}
+                      className={`flex-1 py-2 px-4 rounded-md font-medium text-sm transition-all duration-200 ${
+                        salaryCurrency === 'USD'
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'bg-white text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      USD
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -471,7 +618,7 @@ export default function Employees() {
                         ? 'bg-purple-100 text-purple-800' 
                         : 'bg-green-100 text-green-800'
                     }`}>
-                      {employee.role.charAt(0).toUpperCase() + employee.role.slice(1)}
+                      {employee.role ? employee.role.charAt(0).toUpperCase() + employee.role.slice(1) : 'N/A'}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -491,10 +638,15 @@ export default function Employees() {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {employee.monthly_salary ? (
+                    {employee.lbp_balance !== null && employee.lbp_balance !== undefined ? (
                       <div className="flex items-center text-sm text-gray-900">
-                        <DollarSign className="w-4 h-4 mr-1 text-gray-400" />
-                        {employee.monthly_salary}
+                        <DollarSign className="w-4 h-4  text-gray-400" />
+                        {employee.lbp_balance.toLocaleString()} LBP
+                      </div>
+                    ) : employee.usd_balance !== null && employee.usd_balance !== undefined ? (
+                      <div className="flex items-center text-sm text-gray-900">
+                        <DollarSign className="w-4 h-4  text-gray-400" />
+                        {employee.usd_balance.toLocaleString()} USD
                       </div>
                     ) : (
                       <span className="text-sm text-gray-400">Not set</span>
@@ -516,7 +668,7 @@ export default function Employees() {
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex space-x-2">
                       <button
-                        onClick={() => handleEdit(employee)}
+                        onClick={() => handleEdit(employee as Employee)}
                         className="text-blue-600 hover:text-blue-900"
                       >
                         <Edit className="w-5 h-5" />

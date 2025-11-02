@@ -508,7 +508,7 @@ export class CashDrawerUpdateService {
            new Date(trans.created_at) >= new Date(currentSession.opened_at))
         )
         .toArray();
-        console.log('DEBUG: Cash transactions', cashTransactions);
+        // console.log('DEBUG: Cash transactions', cashTransactions);
 
       // console.log(`💰 Found ${cashTransactions.length} cash drawer transactions since session start`);
 

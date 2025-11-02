@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { useI18n } from '../../i18n';
+import { Pagination } from '../common/Pagination';
 
 interface ProductTableProps {
   products: any[];
@@ -10,6 +11,15 @@ interface ProductTableProps {
 
 const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete, loading = false }) => {
   const { t } = useI18n();
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+
+  const paginatedProducts = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return products.slice(startIndex, startIndex + itemsPerPage);
+  }, [products, currentPage]);
+
+  const totalPages = Math.ceil(products.length / itemsPerPage);
   
   if (loading) {
     return (
@@ -68,7 +78,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete,
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-            {products.map((product: any) => (
+            {paginatedProducts.map((product: any) => (
               <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
                 <td className="px-6 py-4 rtl:text-right ltr:text-left">
                   <img
@@ -105,6 +115,15 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete,
           </tbody>
         </table>
       </div>
+      {totalPages > 1 && (
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          itemsPerPage={itemsPerPage}
+          totalItems={products.length}
+        />
+      )}
     </div>
   );
 };

@@ -17,7 +17,9 @@ import {
   BillAuditLog,
   SyncMetadata,
   PendingSync,
-  Employee
+  Employee,
+  NotificationRecord,
+  NotificationPreferences
 } from '../types';
 
 type Tables = Database['public']['Tables'];
@@ -85,10 +87,12 @@ class POSDatabase extends Dexie {
   cash_drawer_accounts!: Table<CashDrawerAccount, string>;
   cash_drawer_sessions!: Table<CashDrawerSession, string>;
   missed_products!: Table<MissedProduct, string>;
+  notifications!: Table<NotificationRecord, string>;
+  notification_preferences!: Table<NotificationPreferences, string>;
   constructor() {
     super('POSDatabase');
     
-    this.version(17).stores({
+    this.version(19).stores({
       // Store configuration
       stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
       
@@ -99,9 +103,9 @@ class POSDatabase extends Dexie {
       // Core tables with comprehensive indexing for performance
       // Tables WITH updated_at: products, suppliers, customers, users
       products: 'id, store_id, name, category, updated_at, _synced, _deleted',
-      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
       customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
-      users: 'id, store_id, email, name, role, updated_at, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
 
       // Tables WITHOUT updated_at: inventory_items, transactions
       // Note: supplier_id removed from inventory_items - get from inventory_bills via batch_id
@@ -122,6 +126,96 @@ class POSDatabase extends Dexie {
       
       // Cash drawer management
       missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted'
+    });
+
+    // Migration for version 20 - add supplier advance balance fields
+    this.version(20).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
+      
+      // Core tables with comprehensive indexing for performance
+      // Tables WITH updated_at: products, suppliers, customers, users
+      products: 'id, store_id, name, category, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Tables WITHOUT updated_at: inventory_items, transactions
+      // Note: supplier_id removed from inventory_items - get from inventory_bills via batch_id
+      inventory_items: 'id, store_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, _synced, _deleted',
+  
+      // Bill management tables (now includes sale functionality)
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, customer_id, payment_method, created_by, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Currency management
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Cash drawer management
+      missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted'
+    }).upgrade(trans => {
+      console.log('🔄 Running migration v20: Adding supplier advance balance fields');
+      
+      // Update suppliers to initialize advance balance fields
+      return trans.table('suppliers').toCollection().modify((supplier: any) => {
+        if (supplier.advance_lb_balance === undefined || supplier.advance_lb_balance === null) {
+          supplier.advance_lb_balance = 0;
+        }
+        if (supplier.advance_usd_balance === undefined || supplier.advance_usd_balance === null) {
+          supplier.advance_usd_balance = 0;
+        }
+      });
+    });
+
+    // Migration for version 21 - add notifications tables
+    this.version(21).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
+      
+      // Core tables with comprehensive indexing for performance
+      // Tables WITH updated_at: products, suppliers, customers, users
+      products: 'id, store_id, name, category, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Tables WITHOUT updated_at: inventory_items, transactions
+      // Note: supplier_id removed from inventory_items - get from inventory_bills via batch_id
+      inventory_items: 'id, store_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, _synced, _deleted',
+  
+      // Bill management tables (now includes sale functionality)
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, customer_id, payment_method, created_by, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Currency management
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Cash drawer management
+      missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification management
+      notifications: 'id, store_id, type, read, created_at, priority',
+      notification_preferences: 'store_id'
     });
 
     // Migration for version 5 - update existing records to match new schema
@@ -290,10 +384,10 @@ class POSDatabase extends Dexie {
   async getCurrentCashDrawerSession(storeId: string): Promise<CashDrawerSession | null> {
     // Fetch all sessions for the store
     const all = await this.cash_drawer_sessions.where('store_id').equals(storeId).toArray();
-    console.log('DEBUG: All sessions for store', storeId, all);
+    // console.log('DEBUG: All sessions for store', storeId, all);
     // Find open sessions, robust to whitespace/case issues
     const open = all.filter(sess => String(sess.status).trim().toLowerCase() === 'open');
-    console.log('DEBUG: Open sessions for store', storeId, open);
+    // console.log('DEBUG: Open sessions for store', storeId, open);
     return open[0] || null;
   }
 

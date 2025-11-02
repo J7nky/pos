@@ -14,16 +14,18 @@ export interface Employee {
   store_id: string;
   email: string;
   name: string;
-  role: 'manager' | 'cashier';
-  phone?: string;
-  address?: string;
-  monthly_salary?: string; // Stored as string to match database schema
-  working_hours_start?: string; // Format: "HH:mm" (e.g., "09:00")
-  working_hours_end?: string; // Format: "HH:mm" (e.g., "17:00")
-  working_days?: string; // Comma-separated days (e.g., "Monday,Tuesday,Wednesday,Thursday,Friday")
+  role: 'admin' | 'manager' | 'cashier';
+  phone?: string | null;
+  address?: string | null;
+  monthly_salary?: string | null; // Stored as string to match database schema
+  lbp_balance?: number | null; // Monthly salary in LBP
+  usd_balance?: number | null; // Monthly salary in USD
+  working_hours_start?: string | null; // Format: "HH:mm" (e.g., "09:00")
+  working_hours_end?: string | null; // Format: "HH:mm" (e.g., "17:00")
+  working_days?: string | null; // Comma-separated days (e.g., "Monday,Tuesday,Wednesday,Thursday,Friday")
   created_at: string;
   updated_at: string;
-  _synced: boolean;
+  _synced?: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
 }
@@ -66,6 +68,8 @@ export interface Supplier {
   address: string;
   lb_balance?: number ; // Updated to match database schema
   usd_balance?: number ; // Updated to match database schema
+  advance_lb_balance?: number ; // Advance payments in LBP
+  advance_usd_balance?: number ; // Advance payments in USD
   createdAt: string;
 }
 
@@ -514,4 +518,44 @@ export interface PendingSync {
   operation: 'create' | 'update' | 'delete';
   created_at: string;
   retry_count: number;
+}
+
+// Notification types
+export type NotificationType = 
+  | 'low_stock'
+  | 'bill_due'
+  | 'payment_due'
+  | 'payment_reminder'
+  | 'sync_complete'
+  | 'sync_error'
+  | 'inventory_alert'
+  | 'cash_drawer_discrepancy'
+  | 'info'
+  | 'warning'
+  | 'error'
+  | 'success';
+
+export interface NotificationRecord {
+  id: string;
+  store_id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  read: boolean;
+  priority: 'low' | 'medium' | 'high';
+  action_url?: string;
+  action_label?: string;
+  metadata?: Record<string, any>;
+  created_at: string;
+  expires_at?: string;
+}
+
+export interface NotificationPreferences {
+  store_id: string;
+  enabled: boolean;
+  enabled_types: NotificationType[];
+  sound_enabled: boolean;
+  show_in_app: boolean;
+  auto_dismiss_seconds?: number;
+  max_notifications_in_history: number;
 }

@@ -24,6 +24,7 @@ const ar = {
       search: 'بحث',
       details: 'تفاصيل',
       syncNow: 'مزامنة الآن',
+      submit: 'اضافة',
       syncing: 'جاري المزامنة...'
     },
     status: {
@@ -83,7 +84,13 @@ const ar = {
       connectionRestored: 'تم استعادة الاتصال',
       autoSyncingChanges: 'جاري مزامنة تغييراتك تلقائيًا...'
     },
-    currency: { USD: 'دولار أمريكي', LBP: 'ليرة لبنانية' }
+    currency: { USD: 'دولار أمريكي', LBP: 'ليرة لبنانية' },
+    previous: 'السابق',
+    next: 'التالي',
+    showing: 'عرض',
+    to: 'إلى',
+    of: 'من',
+    results: 'نتائج'
   },
   nav: {
     home: 'الرئيسية',
@@ -383,6 +390,33 @@ const ar = {
     generatedOn: 'تم إنشاؤه في'
   },
   customers: {
+    noActiveAdvances: 'لا توجد سلفات مدفوعة للموردين',
+    advanceUSD: 'سلفة بالدولار',
+    advanceLBP: 'سلفة بالليرة اللبنانية',
+    reviewDate: 'تاريخ المراجعة',
+    reviewDateHint: 'ضبط تاريخ لمراجعة السلفة',
+    allTime: 'كل الاوقات',
+    today: 'اليوم',
+    thisWeek: 'هذا الأسبوع',
+    thisMonth: 'هذا الشهر',
+    given: 'مدفوع',
+    deducted: 'مخصوم',
+    allCurrencies: 'جميع العملات',
+    noAdvancesRecorded: 'لم يتم العثور على سلفات مدفوعة للموردين',
+    advanceHistory: 'سجل السلفات',
+    recordAdvancePayment: 'تسجيل سلفة',
+    supplierAdvances: 'الموردين المسلفين',
+    supplierAdvancesDesc: 'تتبع وإدارة السلفة للموردين',
+    supplierAdvancesTitle: 'الموردين المسلفين',
+    giveAdvance: 'إعطاء سلفة',
+    deductAdvance: 'خصم سلفة',
+    totalAdvancesUSD: 'إجمالي السلف بالدولار',
+    totalAdvancesLBP: 'إجمالي السلف بالليرة اللبنانية',
+    supplierRecordAdvance: 'تسجيل سلفة',
+    suppliersWithAdvances: 'الموردين المسلفين',
+    totalTransactions: 'إجمالي المعاملات',
+    supplierTotalAdvancesDesc: 'إجمالي السلف للموردين',
+    supplierTotalAdvancesTitle: 'إجمالي السلف',
     title: 'إدارة العملاء والموردين',
     addCustomer: 'إضافة عميل',
     addSupplier: 'إضافة مورد',

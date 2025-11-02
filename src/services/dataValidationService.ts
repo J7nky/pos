@@ -332,6 +332,48 @@ export class DataValidationService {
       delete cleanRecord.supplier_id;
     }
 
+    // Ensure users table balance fields are properly handled
+    // lbp_balance and usd_balance are preserved during sync (not removed)
+    if (tableName === 'users') {
+      // Convert empty strings to null for numeric fields to prevent Supabase errors
+      if (cleanRecord.lbp_balance === undefined || cleanRecord.lbp_balance === '') {
+        cleanRecord.lbp_balance = null;
+      }
+      if (cleanRecord.usd_balance === undefined || cleanRecord.usd_balance === '') {
+        cleanRecord.usd_balance = null;
+      }
+      // Clean other optional text fields
+      if (cleanRecord.phone === '') cleanRecord.phone = null;
+      if (cleanRecord.address === '') cleanRecord.address = null;
+      if (cleanRecord.monthly_salary === '') cleanRecord.monthly_salary = null;
+      if (cleanRecord.working_hours_start === '') cleanRecord.working_hours_start = null;
+      if (cleanRecord.working_hours_end === '') cleanRecord.working_hours_end = null;
+      if (cleanRecord.working_days === '') cleanRecord.working_days = null;
+      
+      // Ensure role is properly set (not using role value as a field)
+      if (!cleanRecord.role || typeof cleanRecord.role !== 'string') {
+        console.error('❌ Invalid role in user record:', cleanRecord);
+        // Try to fix: if there's a 'cashier' or 'manager' or 'admin' field, use it as role
+        if (cleanRecord.cashier !== undefined) {
+          cleanRecord.role = 'cashier';
+          delete cleanRecord.cashier;
+        } else if (cleanRecord.manager !== undefined) {
+          cleanRecord.role = 'manager';
+          delete cleanRecord.manager;
+        } else if (cleanRecord.admin !== undefined) {
+          cleanRecord.role = 'admin';
+          delete cleanRecord.admin;
+        }
+      }
+      
+      // Clean up any role-value fields that shouldn't be there
+      delete cleanRecord.cashier;
+      delete cleanRecord.manager;
+      delete cleanRecord.admin;
+      
+      console.log('🧹 Cleaned user record for upload:', cleanRecord);
+    }
+
     // Handle cash drawer field mapping (camelCase -> snake_case)
     if (tableName === 'cash_drawer_accounts' || tableName === 'cash_drawer_sessions') {
       const fieldMappings: Record<string, string> = {

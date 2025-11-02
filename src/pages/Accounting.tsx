@@ -19,6 +19,7 @@ import InventoryLogs from '../components/accountingPage/tabs/SoldBills';
 import DashboardOverview from '../components/accountingPage/tabs/DashboardOverview';
 import ExpenseManagement from '../components/accountingPage/tabs/PaymentsManagement';
 import NonPricedItems from '../components/accountingPage/tabs/NonPricedItems';
+import SupplierAdvances from '../components/accountingPage/tabs/SupplierAdvances';
 import EditNonPricedModal from '../components/accountingPage/modals/EditNonPricedModal';
 import { PaymentsModal } from '../components/accountingPage/modals/PaymentsModal';
 import ReceivedBillDetailsModal from '../components/accountingPage/modals/ReceivedBillDetailsModal';
@@ -1986,6 +1987,27 @@ export default function Accounting() {
             />
           </div>
         </div>
+      )}
+
+      {activeTab === 'supplier-advances' && (
+        <SupplierAdvances
+          suppliers={suppliers}
+          transactions={transactions}
+          formatCurrency={formatCurrency}
+          formatCurrencyWithSymbol={formatCurrencyWithSymbol}
+          showToast={showToast}
+          onProcessAdvance={async (data) => {
+            await raw.processSupplierAdvance(data);
+          }}
+          onEditAdvance={async (transactionId, updates) => {
+            await raw.updateSupplierAdvance(transactionId, updates);
+          }}
+          onDeleteAdvance={async (transactionId) => {
+            await raw.deleteSupplierAdvance(transactionId);
+          }}
+          addSupplier={addSupplier}
+          refreshData={raw.refreshData}
+        />
       )}
 
       {activeTab === 'bills-management' && (

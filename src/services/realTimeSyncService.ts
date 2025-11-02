@@ -55,6 +55,7 @@ export class RealTimeSyncService {
 
   /**
    * Initialize real-time synchronization for a store
+   * Enhanced to include more tables for better real-time refresh
    */
   public async initializeRealTimeSync(storeId: string): Promise<void> {
     if (!this.config.enabled) {
@@ -73,6 +74,15 @@ export class RealTimeSyncService {
       
       // Subscribe to cash drawer session changes
       await this.subscribeToSessionUpdates(storeId);
+      
+      // Subscribe to inventory changes for real-time stock updates
+      await this.subscribeToInventoryUpdates(storeId);
+      
+      // Subscribe to bill changes for real-time sales updates
+      await this.subscribeToBillUpdates(storeId);
+      
+      // Subscribe to product updates for real-time product changes
+      await this.subscribeToProductUpdates(storeId);
       
       this.isConnected = true;
       this.reconnectAttempts = 0;

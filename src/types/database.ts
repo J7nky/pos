@@ -98,10 +98,26 @@ export interface Database {
           store_id: string;
           created_at: string;
           updated_at: string;
-          monthly_salary: string;
+          phone?: string | null;
+          address?: string | null;
+          monthly_salary?: string | null;
+          lbp_balance?: number | null;
+          usd_balance?: number | null;
+          working_hours_start?: string | null;
+          working_hours_end?: string | null;
+          working_days?: string | null;
+          _synced?: boolean;
+          _deleted?: boolean;
         };
         Insert: {
-          monthly_salary?: string;
+          phone?: string | null;
+          address?: string | null;
+          monthly_salary?: string | null;
+          lbp_balance?: number | null;
+          usd_balance?: number | null;
+          working_hours_start?: string | null;
+          working_hours_end?: string | null;
+          working_days?: string | null;
 
           id: string;
           email: string;
@@ -110,15 +126,26 @@ export interface Database {
           store_id: string;
           created_at?: string;
           updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
         };
         Update: {
           id?: string;
-          monthly_salary?: string;
+          phone?: string | null;
+          address?: string | null;
+          monthly_salary?: string | null;
+          lbp_balance?: number | null;
+          usd_balance?: number | null;
+          working_hours_start?: string | null;
+          working_hours_end?: string | null;
+          working_days?: string | null;
           email?: string;
           name?: string;
           role?: 'admin' | 'manager' | 'cashier';
           store_id?: string;
           updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
         };
       };
       stores: {
@@ -203,6 +230,8 @@ export interface Database {
           updated_at: string;
           lb_balance: number | null;
           usd_balance: number | null;
+          advance_lb_balance: number | null;
+          advance_usd_balance: number | null;
         };
         Insert: {
           id?: string;
@@ -215,6 +244,8 @@ export interface Database {
           updated_at?: string;
           lb_balance?: number | null;
           usd_balance?: number | null;
+          advance_lb_balance?: number | null;
+          advance_usd_balance?: number | null;
         };
         Update: {
           id?: string;
@@ -224,6 +255,8 @@ export interface Database {
           address?: string;
           lb_balance?: number | null;
           usd_balance?: number | null;
+          advance_lb_balance?: number | null;
+          advance_usd_balance?: number | null;
           updated_at?: string;
         };
       };

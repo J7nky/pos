@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback, Re
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
-import { BillLineItem, BillLineItemTransforms } from '../types';
+import { BillLineItem, BillLineItemTransforms, NotificationRecord, NotificationType, NotificationPreferences } from '../types';
 import {
   db,
   InventoryItem,
@@ -12,6 +12,7 @@ import {
 import { syncService, SyncResult } from '../services/syncService';
 import { crudHelperService } from '../services/crudHelperService';
 import { realTimeSyncService } from '../services/realTimeSyncService';
+import { notificationService } from '../services/notificationService';
 // Removed SupabaseService import - using offline-first approach only
 
 type Tables = Database['public']['Tables'];
@@ -23,6 +24,7 @@ interface OfflineDataContextType {
   products: Tables['products']['Row'][];
   suppliers: Tables['suppliers']['Row'][];
   customers: Tables['customers']['Row'][];
+  employees: Tables['users']['Row'][];
   sales: BillLineItem[]; // Unified BillLineItem interface
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
   inventoryBills: any[]; // Inventory bills data
@@ -64,6 +66,7 @@ interface OfflineDataContextType {
     products: boolean;
     suppliers: boolean;
     customers: boolean;
+    employees: boolean;
     sales: boolean;
     inventory: boolean;
     transactions: boolean;
@@ -79,6 +82,9 @@ interface OfflineDataContextType {
   updateSupplier: (id: string, updates: Tables['suppliers']['Update']) => Promise<void>;
   updateProduct: (id: string, updates: Tables['products']['Update']) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
+  addEmployee: (employee: Omit<Tables['users']['Insert'], 'store_id'>) => Promise<void>;
+  updateEmployee: (id: string, updates: Tables['users']['Update']) => Promise<void>;
+  deleteEmployee: (id: string) => Promise<void>;
   addInventoryItem: (item: Omit<Tables['inventory_items']['Insert'], 'store_id'>) => Promise<void>;
   updateInventoryItem: (id: string, updates: Tables['inventory_items']['Update']) => Promise<void>;
   checkInventoryItemReferences: (id: string) => Promise<{
@@ -207,6 +213,52 @@ interface OfflineDataContextType {
     success: boolean;
     error?: string;
   }>;
+
+  // Supplier advance processing
+  processSupplierAdvance: (params: {
+    supplierId: string;
+    amount: number;
+    currency: 'USD' | 'LBP';
+    type: 'give' | 'deduct';
+    description: string;
+    date: string;
+    reviewDate?: string;
+  }) => Promise<void>;
+
+  // Update supplier advance transaction
+  updateSupplierAdvance: (transactionId: string, updates: {
+    supplierId: string;
+    amount: number;
+    currency: 'USD' | 'LBP';
+    type: 'give' | 'deduct';
+    description: string;
+    date: string;
+    reviewDate?: string;
+  }) => Promise<void>;
+
+  // Delete supplier advance transaction
+  deleteSupplierAdvance: (transactionId: string) => Promise<void>;
+
+  // Notification management
+  notifications: NotificationRecord[];
+  unreadCount: number;
+  notificationPreferences: NotificationPreferences;
+  createNotification: (
+    type: NotificationType,
+    title: string,
+    message: string,
+    options?: {
+      priority?: 'low' | 'medium' | 'high';
+      action_url?: string;
+      action_label?: string;
+      metadata?: Record<string, any>;
+      expires_at?: string;
+    }
+  ) => Promise<void>;
+  markAsRead: (id: string) => Promise<void>;
+  markAllAsRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+  updateNotificationPreferences: (prefs: Partial<NotificationPreferences>) => Promise<void>;
 }
 
 const OfflineDataContext = createContext<OfflineDataContextType | undefined>(undefined);
@@ -227,6 +279,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
   const [suppliers, setSuppliers] = useState<Tables['suppliers']['Row'][]>([]);
   const [customers, setCustomers] = useState<Tables['customers']['Row'][]>([]);
+  const [employees, setEmployees] = useState<Tables['users']['Row'][]>([]);
   const [sales, setSales] = useState<BillLineItem[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<Tables['transactions']['Row'][]>([]);
@@ -239,6 +292,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [billLineItems, setBillLineItems] = useState<any[]>([]);
   const [billAuditLogs, setBillAuditLogs] = useState<any[]>([]);
   const [missedProducts, setMissedProducts] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences | null>(null);
 
   // Loading states - exact match
   const [loading, setLoading] = useState({
@@ -246,6 +301,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     products: false,
     suppliers: false,
     customers: false,
+    employees: false,
     sales: false,
     inventory: false,
     transactions: false,
@@ -366,7 +422,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Check undo validity after data is loaded
       setTimeout(() => checkUndoValidity(), 1000);
       
-      // Initialize real-time sync for cash drawer updates
+      // Initialize real-time sync for cash drawer updates and data refresh
       if (isOnline) {
         realTimeSyncService.initializeRealTimeSync(storeId);
       }
@@ -379,6 +435,38 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [storeId, isOnline]);
+
+  // Setup real-time update listeners (separate effect to avoid refreshData dependency issue)
+  useEffect(() => {
+    if (!isOnline || !storeId) return;
+
+    // Listen for real-time updates to refresh data
+    const handleInventoryUpdate = () => {
+      debug('📦 Real-time inventory update received, refreshing data...');
+      refreshData();
+    };
+    
+    const handleBillUpdate = () => {
+      debug('🧾 Real-time bill update received, refreshing data...');
+      refreshData();
+    };
+    
+    const handleProductUpdate = () => {
+      debug('🛍️ Real-time product update received, refreshing data...');
+      refreshData();
+    };
+    
+    window.addEventListener('inventory-realtime-update', handleInventoryUpdate);
+    window.addEventListener('bills-realtime-update', handleBillUpdate);
+    window.addEventListener('products-realtime-update', handleProductUpdate);
+    
+    // Cleanup listeners
+    return () => {
+      window.removeEventListener('inventory-realtime-update', handleInventoryUpdate);
+      window.removeEventListener('bills-realtime-update', handleBillUpdate);
+      window.removeEventListener('products-realtime-update', handleProductUpdate);
+    };
+  }, [storeId, isOnline, refreshData]);
   const initializeData = async () => {
     if (!storeId) return;
 
@@ -577,7 +665,63 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     updateStockLevels();
   }, [inventoryItems, products, suppliers, lowStockAlertsEnabled, lowStockThreshold]);
 
-  const refreshData = async () => {
+  // Helper functions defined before they're used
+  const refreshCashDrawerStatus = useCallback(async () => {
+    if (!storeId) return;
+
+    try {
+      const status = await db.getCurrentCashDrawerStatus(storeId);
+      if (status && status.status === 'active') {
+        // Update local state with current session info
+        setCashDrawer({
+          id: status.sessionId,
+          accountId: status.accountId,
+          status: 'open',
+          currentBalance: status.currentBalance,
+          currency: currency,
+          lastUpdated: new Date().toISOString()
+        });
+
+      } else {
+        // No active session
+        setCashDrawer(null);
+      }
+    } catch (error) {
+      console.error('Error refreshing cash drawer status:', error);
+    }
+  }, [storeId, currency]);
+
+  const checkUndoValidity = useCallback(async () => {
+    const undoData = localStorage.getItem('last_undo_action');
+    if (!undoData) {
+      setCanUndo(false);
+      return;
+    }
+
+    const action = JSON.parse(undoData);
+    let isValid = true;
+
+    for (const item of action.affected || []) {
+      const record = await (db as any)[item.table].get(item.id);
+      if (!record) {
+        isValid = false;
+        break;
+      }
+
+      // Allow undo for cash_drawer_accounts even if synced (only balance changes)
+      if (record._synced && item.table !== 'cash_drawer_accounts') {
+        isValid = false;
+        break;
+      }
+    }
+
+    if (!isValid) {
+      localStorage.removeItem('last_undo_action');
+      setCanUndo(false);
+    }
+  }, []);
+
+  const refreshData = useCallback(async () => {
     if (!storeId) return;
 
     debug('🔄 Refreshing data for store:', storeId);
@@ -588,6 +732,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         productsData,
         suppliersData,
         customersData,
+        employeesData,
         inventoryData,
         transactionsData,
         batchesData,
@@ -599,16 +744,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         missedProductsData,
       } = await crudHelperService.loadAllStoreData(storeId);
 
-      console.log(`🔄 refreshData: Loaded ${customersData.length} customers, ${suppliersData.length} suppliers`);
+      console.log(`🔄 refreshData: Loaded ${customersData.length} customers, ${suppliersData.length} suppliers, ${employeesData.length} employees`);
       console.log('🔄 refreshData: Latest customers:', customersData.slice(-3));
       console.log('🔄 refreshData: Latest suppliers:', suppliersData.slice(-3));
+      console.log(`🔄 refreshData: Loaded ${inventoryData.length} inventory_items, ${batchesData.length} inventory_bills`);
 
-      debug(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${inventoryData.length} inventory items, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
+      debug(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${employeesData.length} employees, ${inventoryData.length} inventory items, ${batchesData.length} inventory bills, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
 
       // Transform data for offline-first structure
       setProducts(productsData as Tables['products']['Row'][]);
       setSuppliers(suppliersData.map((s: any) => ({ ...s, lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0 })) as Tables['suppliers']['Row'][]);
       setCustomers(customersData.map((c: any) => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
+      setEmployees(employeesData.map((e: any) => ({ ...e, lbp_balance: e.lbp_balance || 0, usd_balance: e.usd_balance || 0 })) as Tables['users']['Row'][]);
       setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
 
       // Store raw data
@@ -654,6 +801,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setBillAuditLogs(billAuditLogsData);
       setMissedProducts(missedProductsData);
 
+      // Load notifications and preferences
+      const notificationsData = await notificationService.getNotifications(storeId, { limit: 100 });
+      setNotifications(notificationsData);
+      
+      const preferencesData = await notificationService.getPreferences(storeId);
+      setNotificationPreferences(preferencesData);
+
       // Transform inventory to match expected structure and attach batch info for grouping/export
       const batchById = (batchesData || []).reduce((acc: any, b: any) => {
         acc[b.id] = b;
@@ -675,15 +829,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Refresh cash drawer status
       await refreshCashDrawerStatus();
 
+      // Clean up expired notifications
+      await notificationService.deleteExpiredNotifications(storeId);
+
       debug('✅ Data refresh completed successfully');
 
     } catch (error) {
       console.error('❌ Error loading data from Dexie:', error);
     }
-  };
+  }, [storeId, refreshCashDrawerStatus]);
 
   // Simplified using crudHelperService
-  const updateUnsyncedCount = async () => {
+  const updateUnsyncedCount = useCallback(async () => {
     try {
       const { total, byTable } = await crudHelperService.getUnsyncedCount();
       
@@ -700,7 +857,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Error counting unsynced records:', error);
     }
-  };
+  }, []);
 
   // Simplified helper function using crudHelperService
   const getCurrentUnsyncedCount = async (): Promise<number> => {
@@ -719,7 +876,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await updateUnsyncedCount();
   };
 
-  // Reset auto-sync timer on every data change
+  // Reset auto-sync timer on every data change - optimized with debouncing
   const resetAutoSyncTimer = useCallback(() => {
     // Clear existing timer
     if (autoSyncTimerRef.current) {
@@ -730,7 +887,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Always set new timer if online (we'll check unsyncedCount when timer fires)
     if (isOnline && storeId && !isSyncing) {
-      debug('⏰ Setting new 8-second auto-sync timer');
+      // Use shorter delay for immediate changes, longer for idle state
+      const syncDelay = unsyncedCount > 0 ? 5000 : 30000; // 5s for active changes, 30s for idle
+      debug(`⏰ Setting auto-sync timer (${syncDelay}ms delay)`);
       autoSyncTimerRef.current = setTimeout(async () => {
         debug('⏰ Auto-sync timer fired, checking for unsynced data...');
 
@@ -739,16 +898,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         debug(`📊 Current unsynced count: ${currentUnsyncedCount}`);
 
         if (!syncService.isCurrentlyRunning() && currentUnsyncedCount > 0) {
-          debug('⏰ Auto-sync triggered after 30-second delay');
+          debug('⏰ Auto-sync triggered');
           performSync(true);
         } else {
           debug('⏰ No unsynced data or sync already running, skipping auto-sync');
         }
-      }, 30000); // 30 seconds - same as undo window
+      }, syncDelay);
     } else {
       debug('⏰ Not setting auto-sync timer - offline, no store, or syncing');
     }
-  }, [isOnline, storeId, isSyncing]);
+  }, [isOnline, storeId, isSyncing, unsyncedCount]);
 
   // Auto-sync with reset on every change - ensures full undo window
   useEffect(() => {
@@ -761,16 +920,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [resetAutoSyncTimer]);
-
-  // Setup crudHelperService callbacks (runs once after all functions are defined)
-  useEffect(() => {
-    crudHelperService.setCallbacks({
-      onRefreshData: refreshData,
-      onUpdateUnsyncedCount: updateUnsyncedCount,
-      onDebouncedSync: debouncedSync,
-      onResetAutoSyncTimer: resetAutoSyncTimer
-    });
-  }, []); // Empty dependency array - callbacks will be updated when functions change
 
   const updateStockLevels = () => {
     const levels = products.map(product => {
@@ -805,7 +954,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setStockLevels(levels);
   };
 
-  const performSync = async (isAutomatic = false): Promise<SyncResult> => {
+  const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
     if (!storeId || isSyncing) {
       return { success: false, errors: ['No store ID or sync in progress'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
     }
@@ -838,10 +987,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setIsAutoSyncing(false);
       setLoading(prev => ({ ...prev, sync: false }));
     }
-  };
+  }, [storeId, isSyncing, refreshData, updateUnsyncedCount, checkUndoValidity]);
 
   // Debounced sync to batch rapid changes and prevent excessive sync calls
-  const debouncedSync = () => {
+  const debouncedSync = useCallback(() => {
     if (!isOnline || isSyncing) return;
 
     // Clear existing timeout
@@ -859,7 +1008,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }, 1000);
 
     setDebouncedSyncTimeout(timeout);
-  };
+  }, [isOnline, isSyncing, debouncedSyncTimeout, unsyncedCount, performSync]);
+
+  // Setup crudHelperService callbacks (updates whenever callback functions change)
+  useEffect(() => {
+    crudHelperService.setCallbacks({
+      onRefreshData: refreshData,
+      onUpdateUnsyncedCount: updateUnsyncedCount,
+      onDebouncedSync: debouncedSync,
+      onResetAutoSyncTimer: resetAutoSyncTimer
+    });
+  }, [refreshData, updateUnsyncedCount, debouncedSync, resetAutoSyncTimer]);
 
   // Bill management functions
   const createBill = async (billData: any, lineItems: any[], customerBalanceUpdate?: { customerId: string; amountDue: number; originalBalance: number }): Promise<string> => {
@@ -1155,7 +1314,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const updateBill = async (billId: string, updates: any, changedBy: string, changeReason?: string): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
+    // Get original bill for undo
+    const originalBill = await db.bills.get(billId);
+    if (!originalBill) throw new Error('Bill not found');
+    
     const now = new Date().toISOString();
+    const auditLogId = createId();
 
     // Pure offline-first approach - update local database only
     await db.transaction('rw', [db.bills, db.bill_audit_logs], async () => {
@@ -1167,7 +1331,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Create audit log
       const auditLog = {
-        id: createId(),
+        id: auditLogId,
         bill_id: billId,
         store_id: storeId,
         action: 'updated' as const,
@@ -1177,12 +1341,33 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         change_reason: changeReason || null,
         changed_by: changedBy,
         ip_address: null,
+        user_agent: null, // Add missing field
         created_at: now,
         updated_at: now,
         _synced: false // Mark as unsynced for background sync
       };
 
       await db.bill_audit_logs.add(auditLog);
+    });
+
+    // Store undo data with original values
+    const undoChanges: any = {};
+    for (const key of Object.keys(updates)) {
+      if (key !== '_synced' && key !== 'updated_at') {
+        undoChanges[key] = (originalBill as any)[key];
+      }
+    }
+    
+    pushUndo({
+      type: 'update_bill',
+      affected: [
+        { table: 'bills', id: billId },
+        { table: 'bill_audit_logs', id: auditLogId }
+      ],
+      steps: [
+        { op: 'update', table: 'bills', id: billId, changes: undoChanges },
+        { op: 'delete', table: 'bill_audit_logs', id: auditLogId }
+      ]
     });
 
     await refreshData();
@@ -1198,6 +1383,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) throw new Error('No store ID available');
 
     const now = new Date().toISOString();
+    const auditLogId = createId();
+
+    // Get line items for undo
+    const lineItems = await db.bill_line_items.where('bill_id').equals(billId).toArray();
 
     // Pure offline-first approach - delete from local database only
     await db.transaction('rw', [db.bills, db.bill_line_items, db.bill_audit_logs], async () => {
@@ -1210,7 +1399,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         });
 
         // Also soft delete line items
-        const lineItems = await db.bill_line_items.where('bill_id').equals(billId).toArray();
         for (const item of lineItems) {
           await db.bill_line_items.update(item.id, {
             _deleted: true,
@@ -1225,7 +1413,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Create audit log
       const auditLog = {
-        id: createId(),
+        id: auditLogId,
         bill_id: billId,
         store_id: storeId,
         action: 'deleted' as const,
@@ -1235,12 +1423,38 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         change_reason: deleteReason || null,
         changed_by: deletedBy,
         ip_address: null,
+        user_agent: null, // Add missing field
         created_at: now,
         updated_at: now,
         _synced: false // Mark as unsynced for background sync
       };
 
       await db.bill_audit_logs.add(auditLog);
+    });
+
+    // Build undo data
+    const undoSteps: any[] = [];
+    const affectedRecords: any[] = [
+      { table: 'bills', id: billId },
+      { table: 'bill_audit_logs', id: auditLogId }
+    ];
+    
+    if (softDelete) {
+      // Restore bill and line items
+      undoSteps.push({ op: 'update', table: 'bills', id: billId, changes: { _deleted: false, _synced: false } });
+      for (const item of lineItems) {
+        undoSteps.push({ op: 'update', table: 'bill_line_items', id: item.id, changes: { _deleted: false, _synced: false } });
+        affectedRecords.push({ table: 'bill_line_items', id: item.id });
+      }
+    }
+    // Note: Hard delete cannot be undone as we lost the data
+    
+    undoSteps.push({ op: 'delete', table: 'bill_audit_logs', id: auditLogId });
+    
+    pushUndo({
+      type: 'delete_bill',
+      affected: affectedRecords,
+      steps: undoSteps
     });
 
     await refreshData();
@@ -1363,39 +1577,219 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // CRUD Operations - matching exact function signatures
   const addProduct = async (productData: Omit<Tables['products']['Insert'], 'store_id'>): Promise<void> => {
-    await crudHelperService.addEntity('products', storeId!, productData);
+    const productId = productData.id || createId();
+    const dataWithId = { ...productData, id: productId };
+    
+    await crudHelperService.addEntity('products', storeId!, dataWithId);
+    
+    // Store undo data
+    pushUndo({
+      type: 'add_product',
+      affected: [{ table: 'products', id: productId }],
+      steps: [{ op: 'delete', table: 'products', id: productId }]
+    });
+    
+    resetAutoSyncTimer();
   };
 
   const addSupplier = async (supplierData: Omit<Tables['suppliers']['Insert'], 'store_id'>): Promise<void> => {
-    await crudHelperService.addEntity('suppliers', storeId!, supplierData);
+    const supplierId = supplierData.id || createId();
+    const dataWithId = { ...supplierData, id: supplierId };
+    
+    await crudHelperService.addEntity('suppliers', storeId!, dataWithId);
+    
+    // Store undo data
+    pushUndo({
+      type: 'add_supplier',
+      affected: [{ table: 'suppliers', id: supplierId }],
+      steps: [{ op: 'delete', table: 'suppliers', id: supplierId }]
+    });
+    
+    resetAutoSyncTimer();
   };
 
   const addCustomer = async (customerData: Omit<Tables['customers']['Insert'], 'store_id'>): Promise<void> => {
-    await crudHelperService.addEntity('customers', storeId!, customerData);
+    const customerId = customerData.id || createId();
+    const dataWithId = { ...customerData, id: customerId };
+    
+    await crudHelperService.addEntity('customers', storeId!, dataWithId);
+    
+    // Store undo data
+    pushUndo({
+      type: 'add_customer',
+      affected: [{ table: 'customers', id: customerId }],
+      steps: [{ op: 'delete', table: 'customers', id: customerId }]
+    });
+    
+    resetAutoSyncTimer();
   };
 
   const updateCustomer = async (id: string, updates: Tables['customers']['Update']): Promise<void> => {
+    // Get original data for undo
+    const originalCustomer = await db.customers.get(id);
+    if (!originalCustomer) throw new Error('Customer not found');
+    
     await crudHelperService.updateEntity('customers', id, updates);
+    
+    // Store undo data with original values
+    const undoChanges: any = {};
+    for (const key of Object.keys(updates)) {
+      if (key !== '_synced' && key !== 'updated_at') {
+        undoChanges[key] = (originalCustomer as any)[key];
+      }
+    }
+    
+    pushUndo({
+      type: 'update_customer',
+      affected: [{ table: 'customers', id }],
+      steps: [{ op: 'update', table: 'customers', id, changes: undoChanges }]
+    });
+    
+    resetAutoSyncTimer();
   };
 
   const updateSupplier = async (id: string, updates: Tables['suppliers']['Update']): Promise<void> => {
+    // Get original data for undo
+    const originalSupplier = await db.suppliers.get(id);
+    if (!originalSupplier) throw new Error('Supplier not found');
+    
     await crudHelperService.updateEntity('suppliers', id, updates);
+    
+    // Store undo data with original values
+    const undoChanges: any = {};
+    for (const key of Object.keys(updates)) {
+      if (key !== '_synced' && key !== 'updated_at') {
+        undoChanges[key] = (originalSupplier as any)[key];
+      }
+    }
+    
+    pushUndo({
+      type: 'update_supplier',
+      affected: [{ table: 'suppliers', id }],
+      steps: [{ op: 'update', table: 'suppliers', id, changes: undoChanges }]
+    });
+    
+    resetAutoSyncTimer();
   };
 
   const updateProduct = async (id: string, updates: Tables['products']['Update']): Promise<void> => {
+    // Get original data for undo
+    const originalProduct = await db.products.get(id);
+    if (!originalProduct) throw new Error('Product not found');
+    
     await crudHelperService.updateEntity('products', id, updates);
+    
+    // Store undo data with original values
+    const undoChanges: any = {};
+    for (const key of Object.keys(updates)) {
+      if (key !== '_synced' && key !== 'updated_at') {
+        undoChanges[key] = (originalProduct as any)[key];
+      }
+    }
+    
+    pushUndo({
+      type: 'update_product',
+      affected: [{ table: 'products', id }],
+      steps: [{ op: 'update', table: 'products', id, changes: undoChanges }]
+    });
+    
+    resetAutoSyncTimer();
   };
 
   const deleteProduct = async (id: string): Promise<void> => {
+    // Get original data for undo
+    const originalProduct = await db.products.get(id);
+    if (!originalProduct) throw new Error('Product not found');
+    
     await crudHelperService.deleteEntity('products', id);
+    
+    // Store undo data with full record to restore
+    pushUndo({
+      type: 'delete_product',
+      affected: [{ table: 'products', id }],
+      steps: [{ 
+        op: 'update', 
+        table: 'products', 
+        id, 
+        changes: { _deleted: false, _synced: false } 
+      }]
+    });
+    
+    resetAutoSyncTimer();
+  };
+
+  const addEmployee = async (employeeData: Omit<Tables['users']['Insert'], 'store_id'>): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+    
+    const employeeId = employeeData.id || createId();
+    const dataWithId = { ...employeeData, id: employeeId };
+    
+    await crudHelperService.addEntity('users', storeId, dataWithId);
+    
+    // Store undo data
+    pushUndo({
+      type: 'add_employee',
+      affected: [{ table: 'users', id: employeeId }],
+      steps: [{ op: 'delete', table: 'users', id: employeeId }]
+    });
+    
+    resetAutoSyncTimer();
+  };
+
+  const updateEmployee = async (id: string, updates: Tables['users']['Update']): Promise<void> => {
+    // Get original data for undo
+    const originalEmployee = await db.users.get(id);
+    if (!originalEmployee) throw new Error('Employee not found');
+    
+    await crudHelperService.updateEntity('users', id, updates);
+    
+    // Store undo data with original values
+    const undoChanges: any = {};
+    for (const key of Object.keys(updates)) {
+      if (key !== '_synced' && key !== 'updated_at') {
+        undoChanges[key] = (originalEmployee as any)[key];
+      }
+    }
+    
+    pushUndo({
+      type: 'update_employee',
+      affected: [{ table: 'users', id }],
+      steps: [{ op: 'update', table: 'users', id, changes: undoChanges }]
+    });
+    
+    resetAutoSyncTimer();
+  };
+
+  const deleteEmployee = async (id: string): Promise<void> => {
+    // Get original data for undo
+    const originalEmployee = await db.users.get(id);
+    if (!originalEmployee) throw new Error('Employee not found');
+    
+    await crudHelperService.deleteEntity('users', id);
+    
+    // Store undo data
+    pushUndo({
+      type: 'delete_employee',
+      affected: [{ table: 'users', id }],
+      steps: [{ 
+        op: 'update', 
+        table: 'users', 
+        id, 
+        changes: { _deleted: false, _synced: false } 
+      }]
+    });
+    
+    resetAutoSyncTimer();
   };
 
   const addInventoryItem = async (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
+    const itemId = itemData.id || createId();
+    
     // Prepare item with defaults - crudHelperService will add base entity fields (id, store_id, created_at, _synced)
     const preparedData = {
-      ...(itemData.id && { id: itemData.id }), // Only include id if provided
+      id: itemId,
       product_id: itemData.product_id ?? '',
       quantity: itemData.quantity ?? 0,
       unit: itemData.unit ?? '',
@@ -1408,10 +1802,39 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Use crudHelperService - it will handle all callbacks automatically
     await crudHelperService.addEntity('inventory_items', storeId, preparedData);
+    
+    // Store undo data
+    pushUndo({
+      type: 'add_inventory_item',
+      affected: [{ table: 'inventory_items', id: itemId }],
+      steps: [{ op: 'delete', table: 'inventory_items', id: itemId }]
+    });
+    
+    resetAutoSyncTimer();
   };
 
   const updateInventoryItem = async (id: string, updates: Tables['inventory_items']['Update']): Promise<void> => {
+    // Get original data for undo
+    const originalItem = await db.inventory_items.get(id);
+    if (!originalItem) throw new Error('Inventory item not found');
+    
     await crudHelperService.updateEntity('inventory_items', id, updates);
+    
+    // Store undo data with original values
+    const undoChanges: any = {};
+    for (const key of Object.keys(updates)) {
+      if (key !== '_synced' && key !== 'updated_at') {
+        undoChanges[key] = (originalItem as any)[key];
+      }
+    }
+    
+    pushUndo({
+      type: 'update_inventory_item',
+      affected: [{ table: 'inventory_items', id }],
+      steps: [{ op: 'update', table: 'inventory_items', id, changes: undoChanges }]
+    });
+    
+    resetAutoSyncTimer();
   };
 
   const checkInventoryItemReferences = async (id: string): Promise<{
@@ -1451,6 +1874,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       console.log(`🗑️ Deleting inventory item ${id}`);
       
+      // Get the inventory item for undo
+      const originalItem = await db.inventory_items.get(id);
+      if (!originalItem) throw new Error('Inventory item not found');
+      
       // Get all related records
       const sales = await db.bill_line_items
         .where('inventory_item_id')
@@ -1466,16 +1893,24 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       console.log(`🗑️ Found ${sales.length} sales records and ${missedProducts.length} missed products to delete`);
 
+      // Build undo data
+      const undoSteps: any[] = [];
+      const affectedRecords: any[] = [{ table: 'inventory_items', id }];
+      
       if (sales.length > 0 || missedProducts.length > 0) {
         await db.transaction('rw', [db.bill_line_items, db.missed_products, db.inventory_items], async () => {
           // Delete related sales records (bill_line_items)
           for (const sale of sales) {
             await crudHelperService.deleteEntity('bill_line_items', sale.id);
+            affectedRecords.push({ table: 'bill_line_items', id: sale.id });
+            undoSteps.push({ op: 'update', table: 'bill_line_items', id: sale.id, changes: { _deleted: false, _synced: false } });
           }
 
           // Delete missed_products records (inventory_item_id has NOT NULL constraint)
           for (const missedProduct of missedProducts) {
             await crudHelperService.deleteEntity('missed_products', missedProduct.id);
+            affectedRecords.push({ table: 'missed_products', id: missedProduct.id });
+            undoSteps.push({ op: 'update', table: 'missed_products', id: missedProduct.id, changes: { _deleted: false, _synced: false } });
           }
           
           // Delete the inventory item
@@ -1486,6 +1921,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       } else {
         await crudHelperService.deleteEntity('inventory_items', id);
       }
+      
+      // Add inventory item restoration to undo steps (last step so it runs first on undo)
+      undoSteps.unshift({ op: 'update', table: 'inventory_items', id, changes: { _deleted: false, _synced: false } });
+      
+      // Store undo data
+      pushUndo({
+        type: 'delete_inventory_item',
+        affected: affectedRecords,
+        steps: undoSteps
+      });
+      
+      resetAutoSyncTimer();
       
       console.log(`🗑️ Inventory item ${id} deleted successfully`);
       
@@ -1594,6 +2041,30 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }));
 
       await db.inventory_items.bulkAdd(mappedItems);
+      
+      // Store the created item IDs for undo
+      const itemIds = mappedItems.map(item => item.id);
+      
+      // Build undo data
+      const undoSteps: any[] = [
+        { op: 'delete', table: 'inventory_bills', id: batchId }
+      ];
+      
+      const affectedRecords: any[] = [{ table: 'inventory_bills', id: batchId }];
+      
+      // Add inventory items to undo
+      for (const itemId of itemIds) {
+        undoSteps.push({ op: 'delete', table: 'inventory_items', id: itemId });
+        affectedRecords.push({ table: 'inventory_items', id: itemId });
+      }
+      
+      // Note: Financial transactions have their own undo mechanism
+      // Store undo data
+      pushUndo({
+        type: 'add_inventory_batch',
+        affected: affectedRecords,
+        steps: undoSteps
+      });
     });
 
     await refreshData();
@@ -1876,7 +2347,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const quantityDifference = quantityChanged ? (updates.quantity || 0) - (originalSale.quantity || 0) : 0;
 
     // Check if price-related fields have changed (these affect bill totals)
-    const priceChanged = updates.unitPrice !== undefined || updates.receivedValue !== undefined || updates.weight !== undefined;
+    const priceChanged = updates.unit_price !== undefined || updates.received_value !== undefined || updates.weight !== undefined;
 
     // Use transaction to ensure atomicity for the sale update only
     await db.transaction('rw', [db.bill_line_items], async () => {
@@ -1903,6 +2374,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (priceChanged) {
       await db.updateBillsForLineItem(id);
     }
+
+    // Store undo data with original values
+    const undoChanges: any = {};
+    for (const key of Object.keys(dbUpdates)) {
+      if (key !== '_synced' && key !== 'updated_at') {
+        undoChanges[key] = (originalSale as any)[key];
+      }
+    }
+    
+    pushUndo({
+      type: 'update_sale',
+      affected: [{ table: 'bill_line_items', id }],
+      steps: [{ op: 'update', table: 'bill_line_items', id, changes: undoChanges }],
+      // Store inventory adjustment info for undo
+      metadata: {
+        quantityDifference,
+        product_id: originalSale.product_id,
+        supplier_id: originalSale.supplier_id
+      }
+    });
 
     await refreshData();
     await updateUnsyncedCount();
@@ -1932,6 +2423,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await restoreInventoryQuantity(saleItem.product_id, saleItem.supplier_id, saleItem.quantity);
     }
 
+    // Store undo data - restore the deleted sale item
+    pushUndo({
+      type: 'delete_sale',
+      affected: [{ table: 'bill_line_items', id }],
+      steps: [{ op: 'restore', table: 'bill_line_items', record: saleItem }],
+      // Store inventory info for undo
+      metadata: {
+        quantity: saleItem.quantity,
+        product_id: saleItem.product_id,
+        supplier_id: saleItem.supplier_id
+      }
+    });
+
     await refreshData();
     await updateUnsyncedCount();
 
@@ -1945,20 +2449,31 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addTransaction = async (transactionData: Omit<Tables['transactions']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
+    const transactionId = (transactionData as any).id || createId();
+    
     // Store amounts as-is in their original currency
     // We'll handle database precision issues only during sync to Supabase
     const transaction: Transaction = {
+      ...transactionData,
+      id: transactionId,
       customer_id: transactionData.customer_id ?? null,
       supplier_id: transactionData.supplier_id ?? null,
       store_id: storeId,
       created_at: new Date().toISOString(),
       _synced: false,
-      ...transactionData,
       amount: transactionData.amount, // Store original amount
       reference: transactionData.reference ?? null
     };
 
     await db.transactions.add(transaction);
+    
+    // Store undo data
+    pushUndo({
+      type: 'add_transaction',
+      affected: [{ table: 'transactions', id: transactionId }],
+      steps: [{ op: 'delete', table: 'transactions', id: transactionId }]
+    });
+    
     await refreshData();
     await updateUnsyncedCount();
 
@@ -1978,6 +2493,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateInventoryBatch = async (id: string, updates: Partial<Tables['inventory_bills']['Update']>): Promise<void> => {
+    // Get original data for undo
+    const originalBatch = await db.inventory_bills.get(id);
+    if (!originalBatch) throw new Error('Inventory batch not found');
+    
     // Process updates to ensure proper data types
     const processedUpdates: any = {
       ...updates,
@@ -2037,6 +2556,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     delete processedUpdates.plastic_price;
 
     await db.inventory_bills.update(id, processedUpdates);
+    
+    // Store undo data with original values
+    const undoChanges: any = {};
+    for (const key of Object.keys(updates)) {
+      if (key !== '_synced' && key !== 'updated_at') {
+        undoChanges[key] = (originalBatch as any)[key];
+      }
+    }
+    
+    pushUndo({
+      type: 'update_inventory_batch',
+      affected: [{ table: 'inventory_bills', id }],
+      steps: [{ op: 'update', table: 'inventory_bills', id, changes: undoChanges }]
+    });
+    
     await refreshData();
     await updateUnsyncedCount();
 
@@ -2047,12 +2581,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const applyCommissionRateToBatch = async (batchId: string, commissionRate: number): Promise<void> => {
+    // Get original data for undo
+    const originalBatch = await db.inventory_bills.get(batchId);
+    if (!originalBatch) throw new Error('Inventory batch not found');
+    
     // Update commission rate for the batch
     await db.inventory_bills
       .where('id')
       .equals(batchId)
       .modify({ commission_rate: commissionRate, _synced: false });
 
+    // Store undo data
+    pushUndo({
+      type: 'apply_commission_rate',
+      affected: [{ table: 'inventory_bills', id: batchId }],
+      steps: [{ op: 'update', table: 'inventory_bills', id: batchId, changes: { commission_rate: originalBatch.commission_rate, _synced: false } }]
+    });
+    
     await refreshData();
     await updateUnsyncedCount();
 
@@ -2421,6 +2966,672 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Process supplier advance payment (give advance or deduct from advance)
+  const processSupplierAdvance = async (params: {
+    supplierId: string;
+    amount: number;
+    currency: 'USD' | 'LBP';
+    type: 'give' | 'deduct';
+    description: string;
+    date: string;
+    reviewDate?: string;
+  }): Promise<void> => {
+    try {
+      const { supplierId, amount, currency, type, description, date, reviewDate } = params;
+
+      // Validate amount
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error('Please enter a valid positive amount');
+      }
+
+      // Find supplier
+      const supplier = suppliers.find(s => s.id === supplierId);
+      if (!supplier) {
+        throw new Error('Supplier not found');
+      }
+
+      // Get current advance balance
+      const currentAdvanceLBP = supplier.advance_lb_balance || 0;
+      const currentAdvanceUSD = supplier.advance_usd_balance || 0;
+
+      console.log(`💰 Supplier Advance - Supplier: ${supplier.name}, Type: ${type}, Currency: ${currency}, Amount: ${amount}`);
+      console.log(`💰 Current Advance Balances - LBP: ${currentAdvanceLBP}, USD: ${currentAdvanceUSD}`);
+
+      // Calculate new advance balance
+      let newAdvanceBalance = 0;
+      let updateData: any = {};
+
+      if (currency === 'LBP') {
+        // Give advance → increase advance balance
+        // Deduct advance → decrease advance balance
+        newAdvanceBalance = type === 'give' 
+          ? currentAdvanceLBP + amount
+          : currentAdvanceLBP - amount;
+
+        // Ensure advance balance doesn't go negative
+        if (newAdvanceBalance < 0) {
+          throw new Error('Cannot deduct more than the current advance balance');
+        }
+
+        updateData.advance_lb_balance = newAdvanceBalance;
+        console.log(`💰 ${type === 'give' ? 'Giving' : 'Deducting'} advance: LBP advance ${currentAdvanceLBP} → ${newAdvanceBalance}`);
+      } else {
+        // USD advance
+        newAdvanceBalance = type === 'give'
+          ? currentAdvanceUSD + amount
+          : currentAdvanceUSD - amount;
+
+        // Ensure advance balance doesn't go negative
+        if (newAdvanceBalance < 0) {
+          throw new Error('Cannot deduct more than the current advance balance');
+        }
+
+        updateData.advance_usd_balance = newAdvanceBalance;
+        console.log(`💰 ${type === 'give' ? 'Giving' : 'Deducting'} advance: USD advance ${currentAdvanceUSD} → ${newAdvanceBalance}`);
+      }
+
+      // Store previous balances for undo
+      const previousAdvanceLBP = currentAdvanceLBP;
+      const previousAdvanceUSD = currentAdvanceUSD;
+
+      // Update supplier advance balance
+      await updateSupplier(supplierId, updateData);
+
+      // Create transaction record
+      const transactionId = createIdFunction();
+      const reviewDateNote = reviewDate ? ` [Review: ${new Date(reviewDate).toLocaleDateString()}]` : '';
+      const transactionData = {
+        id: transactionId,
+        type: type === 'give' ? 'expense' as const : 'income' as const,
+        category: 'Supplier Advance',
+        amount: amount,
+        currency: currency,
+        description: `${description || `Supplier advance ${type === 'give' ? 'payment' : 'deduction'} - ${supplier.name}`}${reviewDateNote}`,
+        reference: `ADV-${Date.now()}`,
+        store_id: userProfile?.store_id || '',
+        created_by: userProfile?.id || '',
+        created_at: date,
+        supplier_id: supplierId,
+        customer_id: null,
+        _synced: false,
+        _lastSyncedAt: undefined,
+        _deleted: false,
+      };
+
+      // Save transaction to IndexedDB
+      await db.transactions.add(transactionData);
+
+      // If giving advance, withdraw from cash drawer
+      let cashDrawerResult: any = null;
+      let previousCashDrawerBalance: number | undefined = undefined;
+      let cashDrawerAccountId: string | undefined = undefined;
+      
+      if (type === 'give') {
+        const amountInLBP = currency === 'USD' ? amount * exchangeRate : amount;
+        
+        // Check cash drawer balance
+        const currentBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
+        previousCashDrawerBalance = currentBalance;
+        
+        if (amountInLBP > currentBalance) {
+          throw new Error(`Insufficient cash drawer balance. Advance: ${currency === 'USD' ? `$${amount.toFixed(2)}` : `${Math.round(amount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP`);
+        }
+
+        // Process cash drawer withdrawal
+        cashDrawerResult = await processCashDrawerTransaction({
+          type: 'expense',
+          amount: amountInLBP,
+          currency: 'LBP',
+          description: `Advance payment to ${supplier.name}${currency === 'USD' ? ` ($${amount.toFixed(2)} USD)` : ''}`,
+          reference: `ADV-${Date.now()}`,
+          supplierId: supplierId,
+          storeId: userProfile?.store_id || '',
+          createdBy: userProfile?.id || '',
+        } as any);
+        
+        cashDrawerAccountId = cashDrawerResult.accountId;
+      }
+
+      // Create undo data
+      const baseUndoData = {
+        affected: [
+          { table: 'suppliers', id: supplierId },
+          { table: 'transactions', id: transactionId }
+        ],
+        steps: [
+          {
+            op: 'delete',
+            table: 'transactions',
+            id: transactionId
+          },
+          {
+            op: 'update',
+            table: 'suppliers',
+            id: supplierId,
+            changes: currency === 'LBP'
+              ? { advance_lb_balance: previousAdvanceLBP, _synced: false }
+              : { advance_usd_balance: previousAdvanceUSD, _synced: false }
+          }
+        ]
+      };
+
+      // If it was a "give" advance, include cash drawer undo
+      let undoData;
+      if (type === 'give' && cashDrawerResult) {
+        undoData = createCashDrawerUndoData(
+          cashDrawerResult.transactionId,
+          previousCashDrawerBalance,
+          cashDrawerAccountId,
+          baseUndoData
+        );
+      } else {
+        undoData = baseUndoData;
+      }
+
+      pushUndo(undoData);
+
+      // Refresh data to show updated balances
+      await refreshData();
+
+      console.log(`✅ Supplier advance processed successfully - ${type === 'give' ? 'Given' : 'Deducted'} ${amount} ${currency}`);
+    } catch (error) {
+      console.error('❌ Error processing supplier advance:', error);
+      throw error;
+    }
+  };
+
+  // Delete supplier advance transaction and reverse the balance changes
+  const deleteSupplierAdvance = async (transactionId: string): Promise<void> => {
+    try {
+      // Find the transaction
+      const transaction = await db.transactions.get(transactionId);
+      if (!transaction) {
+        throw new Error('Transaction not found');
+      }
+
+      // Only allow deletion of Supplier Advance transactions
+      if (transaction.category !== 'Supplier Advance') {
+        throw new Error('Can only delete Supplier Advance transactions from this module');
+      }
+
+      if (!transaction.supplier_id) {
+        throw new Error('Transaction missing supplier ID');
+      }
+
+      // Find supplier
+      const supplier = suppliers.find(s => s.id === transaction.supplier_id);
+      if (!supplier) {
+        throw new Error('Supplier not found');
+      }
+
+      console.log(`🗑️ Deleting supplier advance transaction: ${transactionId}`);
+
+      // Determine the original transaction type by checking the description
+      // expense = "give" advance, income = "deduct" advance
+      const wasGiveAdvance = transaction.type === 'expense';
+
+      // Store previous balances for undo
+      const previousAdvanceLBP = supplier.advance_lb_balance || 0;
+      const previousAdvanceUSD = supplier.advance_usd_balance || 0;
+      
+      // Reverse the advance balance changes
+      const currentAdvanceLBP = supplier.advance_lb_balance || 0;
+      const currentAdvanceUSD = supplier.advance_usd_balance || 0;
+      let updateData: any = {};
+
+      if (transaction.currency === 'LBP') {
+        // Reverse: if it was "give", subtract from balance; if it was "deduct", add back
+        const newBalance = wasGiveAdvance 
+          ? currentAdvanceLBP - transaction.amount
+          : currentAdvanceLBP + transaction.amount;
+        
+        if (newBalance < 0) {
+          throw new Error('Cannot delete: would result in negative advance balance');
+        }
+        
+        updateData.advance_lb_balance = newBalance;
+        console.log(`💰 Reversing LBP advance: ${currentAdvanceLBP} → ${newBalance}`);
+      } else {
+        // USD
+        const newBalance = wasGiveAdvance
+          ? currentAdvanceUSD - transaction.amount
+          : currentAdvanceUSD + transaction.amount;
+        
+        if (newBalance < 0) {
+          throw new Error('Cannot delete: would result in negative advance balance');
+        }
+        
+        updateData.advance_usd_balance = newBalance;
+        console.log(`💰 Reversing USD advance: ${currentAdvanceUSD} → ${newBalance}`);
+      }
+
+      // Update supplier balance
+      await updateSupplier(transaction.supplier_id, updateData);
+
+      // If it was a "give" advance, reverse the cash drawer withdrawal
+      let cashDrawerResult: any = null;
+      let previousCashDrawerBalance: number | undefined = undefined;
+      let cashDrawerAccountId: string | undefined = undefined;
+      
+      if (wasGiveAdvance) {
+        const amountInLBP = transaction.currency === 'USD' 
+          ? transaction.amount * exchangeRate 
+          : transaction.amount;
+
+        // Get cash drawer balance before reversal
+        previousCashDrawerBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
+
+        // Reverse cash drawer transaction (add back the money)
+        cashDrawerResult = await processCashDrawerTransaction({
+          type: 'payment',
+          amount: amountInLBP,
+          currency: 'LBP',
+          description: `Reversal: Deleted advance payment to ${supplier.name}`,
+          reference: `REV-${transaction.reference || Date.now()}`,
+          supplierId: transaction.supplier_id,
+          storeId: userProfile?.store_id || '',
+          createdBy: userProfile?.id || '',
+        } as any);
+        
+        cashDrawerAccountId = cashDrawerResult.accountId;
+      }
+
+      // Create undo data - restore transaction and supplier balances
+      const baseUndoData = {
+        affected: [
+          { table: 'suppliers', id: transaction.supplier_id },
+          { table: 'transactions', id: transactionId }
+        ],
+        steps: [
+          {
+            op: 'update',
+            table: 'transactions',
+            id: transactionId,
+            changes: { _deleted: false, _synced: false }
+          },
+          {
+            op: 'update',
+            table: 'suppliers',
+            id: transaction.supplier_id,
+            changes: transaction.currency === 'LBP'
+              ? { advance_lb_balance: previousAdvanceLBP, _synced: false }
+              : { advance_usd_balance: previousAdvanceUSD, _synced: false }
+          }
+        ]
+      };
+
+      // If it was a "give" advance, include cash drawer undo
+      let undoData;
+      if (wasGiveAdvance && cashDrawerResult) {
+        // For undo of delete, we need to reverse the reversal transaction and restore previous balance
+        // The reversal transaction needs to be deleted, and balance restored
+        undoData = {
+          type: 'supplier_advance_delete',
+          affected: [
+            ...baseUndoData.affected,
+            ...(cashDrawerResult.transactionId ? [{ table: 'transactions', id: cashDrawerResult.transactionId }] : []),
+            ...(cashDrawerAccountId ? [{ table: 'cash_drawer_accounts', id: cashDrawerAccountId }] : [])
+          ],
+          steps: [
+            ...baseUndoData.steps,
+            // Delete the reversal transaction
+            ...(cashDrawerResult.transactionId ? [{
+              op: 'delete',
+              table: 'transactions',
+              id: cashDrawerResult.transactionId
+            }] : []),
+            // Restore cash drawer balance
+            ...(previousCashDrawerBalance !== undefined && cashDrawerAccountId ? [{
+              op: 'update',
+              table: 'cash_drawer_accounts',
+              id: cashDrawerAccountId,
+              changes: {
+                current_balance: previousCashDrawerBalance,
+                _synced: false
+              }
+            }] : [])
+          ]
+        };
+      } else {
+        undoData = baseUndoData;
+      }
+
+      pushUndo(undoData);
+
+      // Delete transaction from IndexedDB (soft delete)
+      await db.transactions.update(transactionId, {
+        _deleted: true,
+        _synced: false
+      });
+
+      // Refresh data to show updated balances
+      await refreshData();
+
+      console.log(`✅ Supplier advance transaction deleted successfully`);
+    } catch (error) {
+      console.error('❌ Error deleting supplier advance:', error);
+      throw error;
+    }
+  };
+
+  // Update supplier advance transaction
+  const updateSupplierAdvance = async (
+    transactionId: string,
+    updates: {
+      supplierId: string;
+      amount: number;
+      currency: 'USD' | 'LBP';
+      type: 'give' | 'deduct';
+      description: string;
+      date: string;
+      reviewDate?: string;
+    }
+  ): Promise<void> => {
+    try {
+      // Find the old transaction
+      const oldTransaction = await db.transactions.get(transactionId);
+      if (!oldTransaction) {
+        throw new Error('Transaction not found');
+      }
+
+      // Only allow updating Supplier Advance transactions
+      if (oldTransaction.category !== 'Supplier Advance') {
+        throw new Error('Can only update Supplier Advance transactions');
+      }
+
+      if (!oldTransaction.supplier_id) {
+        throw new Error('Transaction missing supplier ID');
+      }
+
+      // Validate new amount
+      if (isNaN(updates.amount) || updates.amount <= 0) {
+        throw new Error('Please enter a valid positive amount');
+      }
+
+      // Find old and new suppliers
+      const oldSupplier = suppliers.find(s => s.id === oldTransaction.supplier_id);
+      if (!oldSupplier) {
+        throw new Error('Old supplier not found');
+      }
+
+      const newSupplier = suppliers.find(s => s.id === updates.supplierId);
+      if (!newSupplier) {
+        throw new Error('New supplier not found');
+      }
+
+      console.log(`✏️ Updating supplier advance transaction: ${transactionId}`);
+      console.log(`Old: ${oldTransaction.type} ${oldTransaction.amount} ${oldTransaction.currency} for supplier ${oldSupplier.name}`);
+      console.log(`New: ${updates.type} ${updates.amount} ${updates.currency} for supplier ${newSupplier.name}`);
+
+      // Determine old transaction type
+      const oldWasGiveAdvance = oldTransaction.type === 'expense';
+      const newIsGiveAdvance = updates.type === 'give';
+
+      // Store previous balances for undo
+      const oldPreviousAdvanceLBP = oldSupplier.advance_lb_balance || 0;
+      const oldPreviousAdvanceUSD = oldSupplier.advance_usd_balance || 0;
+      const newPreviousAdvanceLBP = updates.supplierId !== oldTransaction.supplier_id 
+        ? (newSupplier.advance_lb_balance || 0)
+        : oldPreviousAdvanceLBP;
+      const newPreviousAdvanceUSD = updates.supplierId !== oldTransaction.supplier_id 
+        ? (newSupplier.advance_usd_balance || 0)
+        : oldPreviousAdvanceUSD;
+
+      // STEP 1: Reverse old transaction effects
+      const oldCurrentAdvanceLBP = oldSupplier.advance_lb_balance || 0;
+      const oldCurrentAdvanceUSD = oldSupplier.advance_usd_balance || 0;
+      let oldReverseData: any = {};
+
+      if (oldTransaction.currency === 'LBP') {
+        const reversedBalance = oldWasGiveAdvance
+          ? oldCurrentAdvanceLBP - oldTransaction.amount
+          : oldCurrentAdvanceLBP + oldTransaction.amount;
+        
+        if (reversedBalance < 0) {
+          throw new Error('Cannot update: reversing old transaction would result in negative balance');
+        }
+        
+        oldReverseData.advance_lb_balance = reversedBalance;
+      } else {
+        const reversedBalance = oldWasGiveAdvance
+          ? oldCurrentAdvanceUSD - oldTransaction.amount
+          : oldCurrentAdvanceUSD + oldTransaction.amount;
+        
+        if (reversedBalance < 0) {
+          throw new Error('Cannot update: reversing old transaction would result in negative balance');
+        }
+        
+        oldReverseData.advance_usd_balance = reversedBalance;
+      }
+
+      // Reverse old cash drawer transaction if it was a "give" advance
+      let oldCashDrawerResult: any = null;
+      let oldPreviousCashDrawerBalance: number | undefined = undefined;
+      let oldCashDrawerAccountId: string | undefined = undefined;
+      
+      if (oldWasGiveAdvance) {
+        const oldAmountInLBP = oldTransaction.currency === 'USD'
+          ? oldTransaction.amount * exchangeRate
+          : oldTransaction.amount;
+
+        // Get cash drawer balance before reversal
+        oldPreviousCashDrawerBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
+
+        // Reverse cash drawer transaction (add back the money)
+        oldCashDrawerResult = await processCashDrawerTransaction({
+          type: 'payment',
+          amount: oldAmountInLBP,
+          currency: 'LBP',
+          description: `Reversal: Updated advance payment to ${oldSupplier.name}`,
+          reference: `REV-UPD-${oldTransaction.reference || Date.now()}`,
+          supplierId: oldTransaction.supplier_id,
+          storeId: userProfile?.store_id || '',
+          createdBy: userProfile?.id || '',
+        } as any);
+        
+        oldCashDrawerAccountId = oldCashDrawerResult.accountId;
+      }
+
+      // STEP 2: Apply new transaction effects
+      // Get supplier balance after reversal (if supplier changed, use new supplier's current balance)
+      const supplierToUpdate = updates.supplierId === oldTransaction.supplier_id 
+        ? { ...oldSupplier, ...oldReverseData }
+        : newSupplier;
+      
+      const newCurrentAdvanceLBP = supplierToUpdate.advance_lb_balance || 0;
+      const newCurrentAdvanceUSD = supplierToUpdate.advance_usd_balance || 0;
+      let newUpdateData: any = {};
+
+      if (updates.currency === 'LBP') {
+        const newBalance = newIsGiveAdvance
+          ? newCurrentAdvanceLBP + updates.amount
+          : newCurrentAdvanceLBP - updates.amount;
+
+        if (newBalance < 0) {
+          throw new Error('Cannot update: would result in negative advance balance');
+        }
+
+        newUpdateData.advance_lb_balance = newBalance;
+      } else {
+        const newBalance = newIsGiveAdvance
+          ? newCurrentAdvanceUSD + updates.amount
+          : newCurrentAdvanceUSD - updates.amount;
+
+        if (newBalance < 0) {
+          throw new Error('Cannot update: would result in negative advance balance');
+        }
+
+        newUpdateData.advance_usd_balance = newBalance;
+      }
+
+      // Update old supplier (if changed, reverse the old transaction)
+      if (updates.supplierId !== oldTransaction.supplier_id) {
+        await updateSupplier(oldTransaction.supplier_id, oldReverseData);
+      }
+
+      // Update new supplier
+      await updateSupplier(updates.supplierId, newUpdateData);
+
+      // If giving advance, withdraw from cash drawer
+      let newCashDrawerResult: any = null;
+      let newPreviousCashDrawerBalance: number | undefined = undefined;
+      let newCashDrawerAccountId: string | undefined = undefined;
+      
+      if (newIsGiveAdvance) {
+        const newAmountInLBP = updates.currency === 'USD' ? updates.amount * exchangeRate : updates.amount;
+        
+        // Check cash drawer balance
+        const currentBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
+        newPreviousCashDrawerBalance = currentBalance;
+        
+        if (newAmountInLBP > currentBalance) {
+          throw new Error(`Insufficient cash drawer balance. Advance: ${updates.currency === 'USD' ? `$${updates.amount.toFixed(2)}` : `${Math.round(updates.amount).toLocaleString()} ل.ل`} (${Math.round(newAmountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP`);
+        }
+
+        // Process cash drawer withdrawal
+        newCashDrawerResult = await processCashDrawerTransaction({
+          type: 'expense',
+          amount: newAmountInLBP,
+          currency: 'LBP',
+          description: `Advance payment to ${newSupplier.name}${updates.currency === 'USD' ? ` ($${updates.amount.toFixed(2)} USD)` : ''}`,
+          reference: `ADV-UPD-${Date.now()}`,
+          supplierId: updates.supplierId,
+          storeId: userProfile?.store_id || '',
+          createdBy: userProfile?.id || '',
+        } as any);
+        
+        newCashDrawerAccountId = newCashDrawerResult.accountId;
+      }
+
+      // STEP 3: Update transaction record
+      const reviewDateNote = updates.reviewDate ? ` [Review: ${new Date(updates.reviewDate).toLocaleDateString()}]` : '';
+      const transactionUpdate: any = {
+        type: newIsGiveAdvance ? 'expense' : 'income',
+        category: 'Supplier Advance',
+        amount: updates.amount,
+        currency: updates.currency,
+        description: `${updates.description || `Supplier advance ${updates.type === 'give' ? 'payment' : 'deduction'} - ${newSupplier.name}`}${reviewDateNote}`,
+        supplier_id: updates.supplierId,
+        created_at: updates.date,
+        _synced: false,
+      };
+
+      // Store old transaction data for undo
+      const oldTransactionData = {
+        type: oldTransaction.type,
+        category: oldTransaction.category,
+        amount: oldTransaction.amount,
+        currency: oldTransaction.currency,
+        description: oldTransaction.description,
+        supplier_id: oldTransaction.supplier_id,
+        created_at: oldTransaction.created_at,
+        _synced: oldTransaction._synced
+      };
+
+      // Update transaction in IndexedDB
+      await db.transactions.update(transactionId, transactionUpdate);
+
+      // Create undo data - restore old transaction and supplier balances
+      const affectedTables: any[] = [
+        { table: 'transactions', id: transactionId },
+        { table: 'suppliers', id: oldTransaction.supplier_id }
+      ];
+      
+      const undoSteps: any[] = [
+        {
+          op: 'update',
+          table: 'transactions',
+          id: transactionId,
+          changes: oldTransactionData
+        },
+        {
+          op: 'update',
+          table: 'suppliers',
+          id: oldTransaction.supplier_id,
+          changes: oldTransaction.currency === 'LBP'
+            ? { advance_lb_balance: oldPreviousAdvanceLBP, _synced: false }
+            : { advance_usd_balance: oldPreviousAdvanceUSD, _synced: false }
+        }
+      ];
+
+      // If supplier changed, add new supplier to undo
+      if (updates.supplierId !== oldTransaction.supplier_id) {
+        affectedTables.push({ table: 'suppliers', id: updates.supplierId });
+        undoSteps.push({
+          op: 'update',
+          table: 'suppliers',
+          id: updates.supplierId,
+          changes: updates.currency === 'LBP'
+            ? { advance_lb_balance: newPreviousAdvanceLBP, _synced: false }
+            : { advance_usd_balance: newPreviousAdvanceUSD, _synced: false }
+        });
+      }
+
+      // Handle cash drawer undo
+      const cashDrawerAccountId = oldCashDrawerAccountId || newCashDrawerAccountId;
+      const previousCashDrawerBalance = oldWasGiveAdvance && oldCashDrawerResult
+        ? oldPreviousCashDrawerBalance
+        : (newIsGiveAdvance && newCashDrawerResult ? newPreviousCashDrawerBalance : undefined);
+
+      let undoData;
+      if ((oldWasGiveAdvance && oldCashDrawerResult) || (newIsGiveAdvance && newCashDrawerResult)) {
+        // Collect all cash drawer transaction IDs
+        const cashDrawerTransactionIds: string[] = [];
+        if (oldCashDrawerResult?.transactionId) {
+          cashDrawerTransactionIds.push(oldCashDrawerResult.transactionId);
+        }
+        if (newCashDrawerResult?.transactionId) {
+          cashDrawerTransactionIds.push(newCashDrawerResult.transactionId);
+        }
+
+        // Delete cash drawer transactions and restore balance
+        undoData = {
+          type: 'supplier_advance_update',
+          affected: [
+            ...affectedTables,
+            ...(cashDrawerTransactionIds.map(id => ({ table: 'transactions', id }))),
+            ...(cashDrawerAccountId ? [{ table: 'cash_drawer_accounts', id: cashDrawerAccountId }] : [])
+          ],
+          steps: [
+            ...undoSteps,
+            // Delete cash drawer transactions
+            ...(cashDrawerTransactionIds.map(id => ({
+              op: 'delete',
+              table: 'transactions',
+              id
+            }))),
+            // Restore cash drawer balance
+            ...(previousCashDrawerBalance !== undefined && cashDrawerAccountId ? [{
+              op: 'update',
+              table: 'cash_drawer_accounts',
+              id: cashDrawerAccountId,
+              changes: {
+                current_balance: previousCashDrawerBalance,
+                _synced: false
+              }
+            }] : [])
+          ]
+        };
+      } else {
+        undoData = {
+          type: 'supplier_advance_update',
+          affected: affectedTables,
+          steps: undoSteps
+        };
+      }
+
+      pushUndo(undoData);
+
+      // Refresh data to show updated balances
+      await refreshData();
+
+      console.log(`✅ Supplier advance transaction updated successfully`);
+    } catch (error) {
+      console.error('❌ Error updating supplier advance:', error);
+      throw error;
+    }
+  };
+
   // Undo functionality - simple single-level undo
   const pushUndo = (undoData: any) => {
     const undoWithTimestamp = {
@@ -2518,36 +3729,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Check undo validity after data changes
-  const checkUndoValidity = async () => {
-    const undoData = localStorage.getItem('last_undo_action');
-    if (!undoData) {
-      setCanUndo(false);
-      return;
-    }
-
-    const action = JSON.parse(undoData);
-    let isValid = true;
-
-    for (const item of action.affected || []) {
-      const record = await (db as any)[item.table].get(item.id);
-      if (!record) {
-        isValid = false;
-        break;
-      }
-
-      // Allow undo for cash_drawer_accounts even if synced (only balance changes)
-      if (record._synced && item.table !== 'cash_drawer_accounts') {
-        isValid = false;
-        break;
-      }
-    }
-
-    if (!isValid) {
-      localStorage.removeItem('last_undo_action');
-      setCanUndo(false);
-    }
-  };
 
   const openCashDrawer = async (amount: number, openedBy: string) => {
     if (!storeId) return;
@@ -2686,31 +3867,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const getCurrentCashDrawerStatus = async () => {
     if (!storeId) return null;
     return await db.getCurrentCashDrawerStatus(storeId);
-  };
-
-  const refreshCashDrawerStatus = async () => {
-    if (!storeId) return;
-
-    try {
-      const status = await db.getCurrentCashDrawerStatus(storeId);
-      if (status && status.status === 'active') {
-        // Update local state with current session info
-        setCashDrawer({
-          id: status.sessionId,
-          accountId: status.accountId,
-          status: 'open',
-          currentBalance: status.currentBalance,
-          currency: currency,
-          lastUpdated: new Date().toISOString()
-        });
-
-      } else {
-        // No active session
-        setCashDrawer(null);
-      }
-    } catch (error) {
-      console.error('Error refreshing cash drawer status:', error);
-    }
   };
 
   const getCashDrawerSessionDetails = async (sessionId: string) => {
@@ -3095,6 +4251,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         products: [],
         suppliers: [],
         customers: [],
+        employees: [],
         sales: [],
         inventory: [],
         inventoryBills: [],
@@ -3126,6 +4283,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           products: false,
           suppliers: false,
           customers: false,
+          employees: false,
           sales: false,
           inventory: false,
           transactions: false,
@@ -3140,6 +4298,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateSupplier: async () => { },
         updateProduct: async () => { },
         deleteProduct: async () => { },
+        addEmployee: async () => { },
+        updateEmployee: async () => { },
+        deleteEmployee: async () => { },
         addInventoryItem: async () => { },
         updateInventoryItem: async () => { },
         checkInventoryItemReferences: async () => ({ salesCount: 0, variancesCount: 0, hasReferences: false }),
@@ -3184,7 +4345,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         createId: () => crypto.randomUUID(),
         getCurrentCashDrawerBalance: async () => 0,
         refreshCashDrawerBalance: async () => 0,
-        processPayment: async (params: any) => ({ success: false, error: 'No store ID available' })
+        processPayment: async (params: any) => ({ success: false, error: 'No store ID available' }),
+        processSupplierAdvance: async () => {},
+        updateSupplierAdvance: async () => {},
+        deleteSupplierAdvance: async () => {},
+        // Notification management
+        notifications: [],
+        unreadCount: 0,
+        notificationPreferences: {
+          store_id: '',
+          enabled: true,
+          enabled_types: [],
+          sound_enabled: false,
+          show_in_app: true,
+          max_notifications_in_history: 1000,
+        },
+        createNotification: async () => {},
+        markAsRead: async () => {},
+        markAllAsRead: async () => {},
+        deleteNotification: async () => {},
+        updateNotificationPreferences: async () => {},
       }}>
         {children}
       </OfflineDataContext.Provider>
@@ -3199,6 +4379,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       suppliers,
       expenseCategories,
       customers,
+      employees,
       sales,
       inventory,
       inventoryBills,
@@ -3237,6 +4418,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateSupplier,
       updateProduct,
       deleteProduct,
+      addEmployee,
+      updateEmployee,
+      deleteEmployee,
       addInventoryItem,
       updateInventoryItem,
       checkInventoryItemReferences,
@@ -3299,6 +4483,64 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       getCurrentCashDrawerBalance,
       refreshCashDrawerBalance,
       processPayment,
+      processSupplierAdvance,
+      updateSupplierAdvance,
+      deleteSupplierAdvance,
+
+      // Notification management
+      notifications,
+      unreadCount: notifications.filter(n => !n.read).length,
+      notificationPreferences: notificationPreferences || {
+        store_id: storeId || '',
+        enabled: true,
+        enabled_types: [],
+        sound_enabled: false,
+        show_in_app: true,
+        max_notifications_in_history: 1000,
+      },
+      createNotification: async (
+        type: NotificationType,
+        title: string,
+        message: string,
+        options?: {
+          priority?: 'low' | 'medium' | 'high';
+          action_url?: string;
+          action_label?: string;
+          metadata?: Record<string, any>;
+          expires_at?: string;
+        }
+      ) => {
+        if (!storeId) return;
+        const notification = await notificationService.createNotification(
+          storeId,
+          type,
+          title,
+          message,
+          options
+        );
+        setNotifications(prev => [notification, ...prev]);
+      },
+      markAsRead: async (id: string) => {
+        await notificationService.markAsRead(id);
+        setNotifications(prev =>
+          prev.map(n => (n.id === id ? { ...n, read: true } : n))
+        );
+      },
+      markAllAsRead: async () => {
+        if (!storeId) return;
+        await notificationService.markAllAsRead(storeId);
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      },
+      deleteNotification: async (id: string) => {
+        await notificationService.deleteNotification(id);
+        setNotifications(prev => prev.filter(n => n.id !== id));
+      },
+      updateNotificationPreferences: async (prefs: Partial<NotificationPreferences>) => {
+        if (!storeId) return;
+        await notificationService.updatePreferences(storeId, prefs);
+        const updated = await notificationService.getPreferences(storeId);
+        setNotificationPreferences(updated);
+      },
 
       openCashDrawer,
     }}>

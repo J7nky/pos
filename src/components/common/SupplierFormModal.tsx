@@ -22,6 +22,8 @@ export default function SupplierFormModal({
     phone: '',
     email: '',
     address: '',
+    advance_lb_balance: 0,
+    advance_usd_balance: 0,
   });
   const [supplierFormError, setSupplierFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,6 +52,8 @@ export default function SupplierFormModal({
           phone: editingSupplier.phone,
           email: editingSupplier.email || '',
           address: editingSupplier.address || '',
+          advance_lb_balance: editingSupplier.advance_lb_balance || 0,
+          advance_usd_balance: editingSupplier.advance_usd_balance || 0,
         });
       } else {
         setSupplierForm({
@@ -57,6 +61,8 @@ export default function SupplierFormModal({
           phone: '',
           email: '',
           address: '',
+          advance_lb_balance: 0,
+          advance_usd_balance: 0,
         });
       }
       setSupplierFormError(null);
@@ -102,6 +108,8 @@ export default function SupplierFormModal({
         address: supplierForm.address || '',
         lb_balance: 0,
         usd_balance: 0,
+        advance_lb_balance: supplierForm.advance_lb_balance || 0,
+        advance_usd_balance: supplierForm.advance_usd_balance || 0,
       });
       onClose();
     } catch (error) {
@@ -187,6 +195,43 @@ export default function SupplierFormModal({
                 onChange={handleSupplierFormChange}
                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               />
+            </div>
+          </div>
+
+          {/* Advance Payment Section - Optional for new suppliers */}
+          <div className="border-t border-gray-200 pt-4 mt-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-3">Initial Advance Payment (Optional)</h3>
+            <p className="text-xs text-gray-500 mb-3">You can also manage advances later from the Supplier Advances tab in Accounting.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="advance-usd" className="block text-sm font-medium text-gray-700">Advance (USD)</label>
+                <input
+                  type="number"
+                  id="advance-usd"
+                  name="advance_usd_balance"
+                  min="0"
+                  step="0.01"
+                  value={supplierForm.advance_usd_balance || 0}
+                  onChange={handleSupplierFormChange}
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="0.00"
+                />
+              </div>
+              
+              <div>
+                <label htmlFor="advance-lbp" className="block text-sm font-medium text-gray-700">Advance (LBP)</label>
+                <input
+                  type="number"
+                  id="advance-lbp"
+                  name="advance_lb_balance"
+                  min="0"
+                  step="1"
+                  value={supplierForm.advance_lb_balance || 0}
+                  onChange={handleSupplierFormChange}
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="0"
+                />
+              </div>
             </div>
           </div>
           
