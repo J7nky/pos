@@ -1,0 +1,433 @@
+/* Professional A4 Print Styles */
+
+@media print {
+  /* Hide non-essential elements */
+  button,
+  input[type="date"],
+  input[type="checkbox"],
+  .no-print,
+  nav,
+  header:not(.print-header),
+  footer:not(.print-footer),
+  .fixed {
+    display: none !important;
+  }
+
+  /* Show print-only elements */
+  .print-only,
+  .hidden.print\:block {
+    display: block !important;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 0.75cm 1cm;
+    /* Footer support */
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 9pt;
+      color: #666;
+    }
+  }
+
+  /* Base print layout */
+  body {
+    background: white;
+    font-size: 10pt;
+    line-height: 1.4;
+    color: black;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Print container */
+  .print-container {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    background: white;
+    display: block !important;
+  }
+
+  /* Content wrapper */
+  .print-content {
+    width: 100%;
+  }
+
+  /* Print Header Section */
+  .print-header {
+    display: block;
+    width: 100%;
+    margin-bottom: 15pt;
+    page-break-inside: avoid;
+  }
+
+  .print-company-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12pt;
+    border-bottom: 2px solid #000;
+    padding-bottom: 8pt;
+  }
+
+  .print-company-logo {
+    width: 60pt;
+    height: 60pt;
+    background: #f0f0f0;
+    border: 1px solid #ccc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8pt;
+    color: #666;
+    flex-shrink: 0;
+  }
+
+  .print-company-details {
+    flex: 1;
+    text-align: center;
+    padding: 0 20pt;
+  }
+
+  .print-company-name {
+    font-size: 14pt;
+    font-weight: bold;
+    margin-bottom: 4pt;
+    text-transform: uppercase;
+  }
+
+  .print-company-address {
+    font-size: 9pt;
+    color: #333;
+    margin-bottom: 2pt;
+  }
+
+  .print-company-contact {
+    font-size: 8pt;
+    color: #666;
+  }
+
+  .print-report-metadata {
+    text-align: right;
+    font-size: 8pt;
+    color: #666;
+  }
+
+  /* Report Title */
+  .print-report-title {
+    text-align: center;
+    font-size: 16pt;
+    font-weight: bold;
+    margin: 12pt 0;
+    padding: 8pt;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    page-break-inside: avoid;
+  }
+
+  /* Account/Customer Details Section */
+  .print-account-info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20pt;
+    margin: 15pt 0;
+    padding: 12pt;
+    background: #fafafa;
+    border: 1px solid #ddd;
+    page-break-inside: avoid;
+  }
+
+  .print-account-label {
+    font-size: 8pt;
+    color: #666;
+    margin-bottom: 2pt;
+    font-weight: bold;
+  }
+
+  .print-account-value {
+    font-size: 10pt;
+    color: #000;
+    font-weight: 500;
+  }
+
+  .print-currency-box {
+    display: inline-block;
+    padding: 2pt 6pt;
+    background: #e5e5e5;
+    border: 1px solid #ccc;
+    font-size: 8pt;
+    margin-left: 4pt;
+  }
+
+  /* Transaction Table */
+  .print-table-container {
+    width: 100%;
+    margin: 15pt 0;
+    page-break-inside: avoid;
+  }
+
+  .print-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+    border: 1px solid #000;
+  }
+
+  .print-table thead {
+    background: #f0f0f0;
+    border-bottom: 2px solid #000;
+  }
+
+  .print-table th {
+    padding: 6pt 4pt;
+    text-align: right;
+    font-weight: bold;
+    font-size: 8pt;
+    text-transform: uppercase;
+    border: 1px solid #666;
+    vertical-align: middle;
+  }
+
+  .print-table td {
+    padding: 4pt;
+    border: 1px solid #ccc;
+    text-align: right;
+    vertical-align: middle;
+  }
+
+  .print-table tbody tr {
+    page-break-inside: avoid;
+  }
+
+  /* Ensure table doesn't break awkwardly */
+  .print-table tbody tr:last-child {
+    page-break-after: auto;
+  }
+
+  /* Number formatting */
+  .print-number {
+    text-align: right;
+    font-family: 'Courier New', monospace;
+    white-space: nowrap;
+  }
+
+  .print-currency {
+    font-weight: 500;
+  }
+
+  /* Summary Footer */
+  .print-summary {
+    margin-top: 15pt;
+    page-break-inside: avoid;
+    border-top: 2px solid #000;
+    padding-top: 8pt;
+  }
+
+  .print-summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4pt 0;
+    font-weight: bold;
+    font-size: 10pt;
+  }
+
+  .print-total-row {
+    border-top: 1px solid #666;
+    padding-top: 6pt;
+    margin-top: 4pt;
+    font-size: 11pt;
+    font-weight: bold;
+  }
+
+  /* Page breaks */
+  .print-page-break {
+    page-break-before: always;
+    break-before: page;
+  }
+  
+  /* Avoid breaking table rows */
+  .print-table tbody tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  
+  /* Ensure table headers repeat on each page */
+  .print-table thead {
+    display: table-header-group;
+  }
+
+  .print-avoid-break {
+    page-break-inside: avoid;
+  }
+
+  /* Opening Balance Section */
+  .print-opening-balance {
+    margin: 12pt 0;
+    padding: 8pt;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    text-align: right;
+    font-size: 10pt;
+    page-break-inside: avoid;
+  }
+
+  .print-opening-balance-label {
+    font-weight: bold;
+    margin-right: 8pt;
+  }
+
+  .print-opening-balance-value {
+    font-size: 11pt;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+  }
+
+  /* Date Range */
+  .print-date-range {
+    text-align: center;
+    margin: 8pt 0;
+    font-size: 9pt;
+    color: #666;
+    page-break-inside: avoid;
+  }
+
+  /* RTL Support */
+  [dir="rtl"] .print-table th,
+  [dir="rtl"] .print-table td {
+    text-align: left;
+  }
+
+  [dir="rtl"] .print-company-info {
+    direction: rtl;
+  }
+
+  [dir="rtl"] .print-report-metadata {
+    text-align: left;
+  }
+
+  [dir="rtl"] .print-account-info {
+    direction: rtl;
+  }
+
+  /* Avoid breaking important sections */
+  .print-section {
+    page-break-inside: avoid;
+    margin-bottom: 12pt;
+  }
+
+  /* Final Balance Box */
+  .print-final-balance {
+    margin-top: 15pt;
+    padding: 10pt;
+    border: 2px solid #000;
+    background: #f5f5f5;
+    text-align: right;
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  .print-final-balance-label {
+    font-size: 10pt;
+    font-weight: bold;
+    margin-bottom: 4pt;
+  }
+
+  .print-final-balance-value {
+    font-size: 14pt;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+  }
+
+  /* Column widths for detailed statement */
+  .print-table-col-date {
+    width: 10%;
+  }
+
+  .print-table-col-reference {
+    width: 10%;
+  }
+
+  .print-table-col-description {
+    width: 25%;
+  }
+
+  .print-table-col-quantity {
+    width: 6%;
+    text-align: center;
+  }
+
+  .print-table-col-weight {
+    width: 6%;
+    text-align: center;
+  }
+
+  .print-table-col-price {
+    width: 8%;
+  }
+
+  .print-table-col-debit {
+    width: 12%;
+  }
+
+  .print-table-col-credit {
+    width: 12%;
+  }
+
+  .print-table-col-balance {
+    width: 12%;
+  }
+
+  /* Ensure proper spacing */
+  .print-spacer {
+    height: 8pt;
+  }
+
+  /* Error/Empty states hidden in print */
+  .print-hide-empty {
+    display: none;
+  }
+}
+
+/* Print Preview Styles (for on-screen preview) */
+.print-preview-content {
+  /* Same styles as print but visible on screen */
+  background: white;
+  color: black;
+}
+
+.print-preview-content .print-container {
+  display: block;
+}
+
+.print-preview-content .print-header {
+  display: block;
+  width: 100%;
+  margin-bottom: 15pt;
+}
+
+.print-preview-content .print-company-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12pt;
+  border-bottom: 2px solid #000;
+  padding-bottom: 8pt;
+}
+
+.print-preview-content .print-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  border: 1px solid #000;
+}
+
+.print-preview-content .print-table th,
+.print-preview-content .print-table td {
+  padding: 4pt;
+  border: 1px solid #ccc;
+  text-align: right;
+}
+

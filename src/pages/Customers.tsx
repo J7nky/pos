@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
@@ -10,6 +10,7 @@ import SupplierFormModal from '../components/common/SupplierFormModal';
 import AccountStatementModal from '../components/AccountStatementModal';
 import SupplierAdvances from '../components/accountingPage/tabs/SupplierAdvances';
 import { useCurrency } from '../hooks/useCurrency';
+import { Pagination } from '../components/common/Pagination';
 
 export default function Customers() {
   const raw = useOfflineData();
@@ -84,6 +85,9 @@ export default function Customers() {
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [customersPage, setCustomersPage] = useState(1);
+  const [suppliersPage, setSuppliersPage] = useState(1);
+  const itemsPerPage = 20;
   const [customerForm, setCustomerForm] = useState<Partial<Customer>>({
     name: '',
     phone: '',
@@ -391,17 +395,39 @@ export default function Customers() {
   };
 
 
-  const filteredCustomers = customers.filter(customer =>
+  const filteredCustomers = useMemo(() => customers.filter(customer =>
     customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     customer.phone.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  ), [customers, searchTerm]);
 
-  const filteredSuppliers = suppliers.filter(supplier =>
+  const filteredSuppliers = useMemo(() => suppliers.filter(supplier =>
     supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     supplier.phone.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (supplier.email && supplier.email.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  ), [suppliers, searchTerm]);
+
+  // Pagination for customers
+  const paginatedCustomers = useMemo(() => {
+    const startIndex = (customersPage - 1) * itemsPerPage;
+    return filteredCustomers.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredCustomers, customersPage]);
+
+  const customersTotalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+
+  // Pagination for suppliers
+  const paginatedSuppliers = useMemo(() => {
+    const startIndex = (suppliersPage - 1) * itemsPerPage;
+    return filteredSuppliers.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredSuppliers, suppliersPage]);
+
+  const suppliersTotalPages = Math.ceil(filteredSuppliers.length / itemsPerPage);
+
+  // Reset to page 1 when search term changes
+  useEffect(() => {
+    setCustomersPage(1);
+    setSuppliersPage(1);
+  }, [searchTerm]);
 
   return (
     <div className="p-6">
@@ -501,7 +527,7 @@ export default function Customers() {
                     </td>
                   </tr>
                 ) : (
-                  filteredCustomers.map(customer => (
+                  paginatedCustomers.map(customer => (
                     <tr key={customer.id}>
                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
                         <div className="text-sm font-medium text-gray-900">{customer.name}</div>
@@ -581,6 +607,16 @@ export default function Customers() {
               </tbody>
             </table>
           </div>
+          {/* Pagination */}
+          {customersTotalPages > 1 && (
+            <Pagination
+              currentPage={customersPage}
+              totalPages={customersTotalPages}
+              onPageChange={setCustomersPage}
+              itemsPerPage={itemsPerPage}
+              totalItems={filteredCustomers.length}
+            />
+          )}
         </div>
       )}
 
@@ -608,7 +644,7 @@ export default function Customers() {
                     </td>
                   </tr>
                  ) : (
-                                     filteredSuppliers.map(supplier => (
+                                     paginatedSuppliers.map(supplier => (
                      <tr key={supplier.id}>
                        <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
                          <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
@@ -682,6 +718,16 @@ export default function Customers() {
               </tbody>
             </table>
           </div>
+          {/* Pagination */}
+          {suppliersTotalPages > 1 && (
+            <Pagination
+              currentPage={suppliersPage}
+              totalPages={suppliersTotalPages}
+              onPageChange={setSuppliersPage}
+              itemsPerPage={itemsPerPage}
+              totalItems={filteredSuppliers.length}
+            />
+          )}
         </div>
       )}
 

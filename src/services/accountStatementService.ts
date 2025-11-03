@@ -1,14 +1,7 @@
-import { LocalSaleItem, Bill, BillLineItem } from '../lib/db';
+import { db } from '../lib/db';
 import { Customer, Supplier, Transaction, BillLineItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
-import { 
-  generatePaymentReference, 
-  generateSaleReference, 
-  generateBillReference,
-  generateCreditReference,
-  generateCommissionReference
-} from '../utils/referenceGenerator';
 
 export interface AccountStatement {
   entityId: string;
@@ -91,93 +84,133 @@ export class AccountStatementService {
 
   /**
    * Compute opening balances for a customer prior to the given start date.
-   * Opening = sum(credit sales) - sum(payments), per currency
+   * OPTIMIZED: Uses stored balance from customer table and queries all transactions from start date.
+   * Opening balance = current stored balance - (all transactions from start date to today)
+   * This way, when we add period transactions chronologically, we get the correct balance progression.
    */
-  private computeCustomerOpeningBalance(
+  private async computeCustomerOpeningBalanceOptimized(
     customerId: string,
-    allSales: BillLineItem[],
-    allTransactions: Transaction[],
     startDateISO: string
-  ): { USD: number; LBP: number } {
+  ): Promise<{ USD: number; LBP: number }> {
+    // 1. Get current stored balance (source of truth)
+    const customer = await db.customers.get(customerId);
+    if (!customer) {
+      return { USD: 0, LBP: 0 };
+    }
+
+    const currentBalance = {
+      USD: customer.usd_balance || 0,
+      LBP: customer.lb_balance || 0
+    };
+
+    // 2. Parse start date for comparison
     const startDate = new Date(startDateISO);
+    startDate.setHours(0, 0, 0, 0);
 
-    // Credit sales (increase receivable) before start date (assumed LBP)
-    const preCreditSalesLBP = allSales.filter(s =>
-      s.customer_id === customerId &&
-      s.payment_method === 'credit' &&
-      !!s.created_at && new Date(s.created_at) < startDate
-    );
-    const creditSalesSumLBP = preCreditSalesLBP.reduce((sum, s) => sum + (s.received_value || 0), 0);
+    // 3. Calculate opening balance at start date:
+    // Opening balance = Current balance - (all transactions from start date to today)
+    // This way, when we add period transactions chronologically, we get the correct balance progression
+    const allTransactionsFromStart = await db.transactions
+      .where('customer_id')
+      .equals(customerId)
+      .and(t => !!t.created_at && new Date(t.created_at) >= startDate)
+      .toArray();
 
-    // Customer payments (decrease receivable) before start date
-    const prePayments = allTransactions.filter(t =>
-      t.customer_id === customerId &&
-      t.type === 'income' &&
-      t.category === PAYMENT_CATEGORIES.CUSTOMER_PAYMENT &&
-      new Date(t.created_at) < startDate
-    );
-    const paymentsSumUSD = prePayments
-      .filter(t => t.currency === 'USD')
+    const allSalesFromStart = await db.bill_line_items
+      .where('customer_id')
+      .equals(customerId)
+      .and(s => (s.payment_method as string) === 'credit' && 
+                !!s.created_at && 
+                new Date(s.created_at) >= startDate)
+      .toArray();
+
+    const allSalesFromStartLBP = allSalesFromStart.reduce((sum, s) => sum + (s.received_value || 0), 0);
+    
+    const allPaymentsFromStartUSD = allTransactionsFromStart
+      .filter(t => t.currency === 'USD' && 
+                   t.type === 'income' && 
+                   t.category === PAYMENT_CATEGORIES.CUSTOMER_PAYMENT)
       .reduce((sum, t) => sum + t.amount, 0);
-    const paymentsSumLBP = prePayments
-      .filter(t => t.currency === 'LBP')
+
+    const allPaymentsFromStartLBP = allTransactionsFromStart
+      .filter(t => t.currency === 'LBP' && 
+                   t.type === 'income' && 
+                   t.category === PAYMENT_CATEGORIES.CUSTOMER_PAYMENT)
       .reduce((sum, t) => sum + t.amount, 0);
 
-    // Opening per currency
+    const netChangeFromStart = {
+      USD: -allPaymentsFromStartUSD,
+      LBP: allSalesFromStartLBP - allPaymentsFromStartLBP
+    };
+
+    // Opening balance at start date = Current balance - (all transactions from start date to today)
     return {
-      USD: 0 - paymentsSumUSD,
-      LBP: creditSalesSumLBP - paymentsSumLBP
+      USD: currentBalance.USD - netChangeFromStart.USD,
+      LBP: currentBalance.LBP - netChangeFromStart.LBP
     };
   }
 
   /**
    * Build period transactions (sorted) and compute running balances per currency for a customer
+   * OPTIMIZED: Queries transactions directly from database using indexed queries
    */
-  private buildCustomerPeriodTransactions(
+  private async buildCustomerPeriodTransactionsOptimized(
     customer: Customer,
-    sales: LocalSaleItem[],
-    transactions: Transaction[],
     products: Product[],
     inventory: InventoryItem[],
     startDateISO: string,
     endDateISO: string,
     viewMode: 'summary' | 'detailed',
     opening: { USD: number; LBP: number },
-    bills?: Bill[]
-  ): { statementTransactions: StatementTransaction[]; ending: { USD: number; LBP: number }; totals: { salesLBP: number; paymentsUSD: number; paymentsLBP: number } } {
+    bills?: any[]
+  ): Promise<{ statementTransactions: StatementTransaction[]; ending: { USD: number; LBP: number }; totals: { salesLBP: number; paymentsUSD: number; paymentsLBP: number } }> {
+    // Normalize dates for consistent comparison
     const startDate = new Date(startDateISO);
+    startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(endDateISO);
+    endDate.setHours(23, 59, 59, 999); // Include entire end date
     
-    // Period credit sales (LBP) - filter by customer and date range
-    const periodSales = sales.filter(s =>
-      s.customer_id === customer.id &&
-      s.payment_method === 'credit' &&
-      !!s.created_at && new Date(s.created_at) >= startDate && new Date(s.created_at) <= endDate
-    );
+    // Query period credit sales directly from database using indexed query
+    const periodSales = await db.bill_line_items
+      .where('customer_id')
+      .equals(customer.id)
+      .and(s => (s.payment_method as string) === 'credit' &&
+                !!s.created_at &&
+                new Date(s.created_at) >= startDate &&
+                new Date(s.created_at) <= endDate)
+      .toArray();
 
-    // Period customer payments (USD or LBP)
-    const periodPayments = transactions.filter(t =>
-      t.customer_id === customer.id &&
-      t.type === 'income' &&
-      new Date(t.created_at) >= startDate && new Date(t.created_at) <= endDate
-    );
+    // Query period customer payments directly from database using indexed query
+    const periodPayments = await db.transactions
+      .where('customer_id')
+      .equals(customer.id)
+      .and(t => t.type === 'income' &&
+                !!t.created_at &&
+                new Date(t.created_at) >= startDate &&
+                new Date(t.created_at) <= endDate)
+      .toArray();
 
-    // In summary mode, group sales by bills if bills data is available
-    if (viewMode === 'summary' && bills && bills.length > 0) {
-      // Group sales by bill_id if available, otherwise use individual sales
-      const salesByBill = new Map<string, LocalSaleItem[]>();
+    // Query bills from database if summary mode
+    let customerBills: any[] = [];
+    if (viewMode === 'summary') {
+      const allBills = bills || await db.bills
+        .where('customer_id')
+        .equals(customer.id)
+        .and(b => (b.payment_method as string) === 'credit' &&
+                  b.bill_date &&
+                  new Date(b.bill_date) >= startDate &&
+                  new Date(b.bill_date) <= endDate)
+        .toArray();
       
-      periodSales.forEach(sale => {
-        // Check if sale has a bill_id (this might be stored in a different field)
-        const billId = (sale as any).bill_id || 'individual';
-        if (!salesByBill.has(billId)) {
-          salesByBill.set(billId, []);
-        }
-        salesByBill.get(billId)!.push(sale);
-      });
-
-      // For summary mode, we'll process bills instead of individual sales
-      // Keep original logic for now, will modify below
+      customerBills = Array.isArray(allBills) ? allBills.filter(bill => {
+        if (!bill.customer_id || bill.customer_id !== customer.id) return false;
+        if (bill.payment_method !== 'credit') return false;
+        if (!bill.bill_date) return false;
+        
+        const billDate = new Date(bill.bill_date);
+        billDate.setHours(0, 0, 0, 0);
+        return billDate >= startDate && billDate <= endDate;
+      }) : [];
     }
 
     type RawEvent = {
@@ -195,18 +228,15 @@ export class AccountStatementService {
       weight?: number;
       unitPrice?: number;
       notes?: string | null;
+      // Reference fields
+      reference?: string | null;
+      billNumber?: string;
     };
 
     let saleEvents: RawEvent[] = [];
     
-    if (viewMode === 'summary' && bills && bills.length > 0) {
+    if (viewMode === 'summary' && customerBills.length > 0) {
       // In summary mode, create bill-level transactions
-      const customerBills = bills.filter(bill => 
-        bill.customer_id === customer.id &&
-        bill.payment_method === 'credit' &&
-        new Date(bill.bill_date) >= startDate && 
-        new Date(bill.bill_date) <= endDate
-      );
 
       saleEvents = customerBills.map(bill => ({
         id: bill.id,
@@ -221,7 +251,8 @@ export class AccountStatementService {
         quantity: 1,
         weight: undefined,
         unitPrice: bill.total_amount,
-        notes: bill.notes || null
+        notes: bill.notes || null,
+        billNumber: bill.bill_number
       }));
     } else {
       // In detailed mode, create individual sale item transactions
@@ -241,7 +272,8 @@ export class AccountStatementService {
           quantity: sale.quantity,
           weight: sale.weight ?? undefined,
           unitPrice: sale.unit_price,
-          notes: sale.notes || null
+          notes: sale.notes || null,
+          reference: `SALE-${sale.id.slice(-8)}`
         };
       });
     }
@@ -252,7 +284,8 @@ export class AccountStatementService {
       kind: 'payment',
       currency: t.currency,
       amount: t.amount,
-      delta: -t.amount
+      delta: -t.amount,
+      reference: t.reference || null
     }));
 
     const events: RawEvent[] = [...saleEvents, ...paymentEvents].sort((a, b) => {
@@ -309,7 +342,9 @@ export class AccountStatementService {
           balanceAfter: runningLBP,
           paymentMethod: 'credit',
           productDetails,
-          reference: viewMode === 'summary' && ev.unit === 'bill' ? generateBillReference() : generateSaleReference()
+          reference: viewMode === 'summary' && ev.unit === 'bill' && ev.billNumber 
+            ? `BILL-${ev.billNumber}` 
+            : (ev.reference || `SALE-${ev.id.slice(-8)}`)
         });
       } else {
         statementTransactions.push({
@@ -323,7 +358,7 @@ export class AccountStatementService {
           amount: ev.amount,
           currency: ev.currency,
           balanceAfter: ev.currency === 'USD' ? runningUSD : runningLBP,
-          reference: generatePaymentReference(),
+          reference: ev.reference || `PAY-${ev.id.slice(-8)}`,
           paymentMethod: 'Payment Received'
         });
       }
@@ -430,6 +465,8 @@ export class AccountStatementService {
       inventoryItems?: InventoryItem[];
       commissionRate?: number;
       notes?: string | null;
+      // Reference field
+      reference?: string | null;
     };
 
     
@@ -504,7 +541,8 @@ export class AccountStatementService {
       currency: t.currency,
       amount: t.amount,
       delta: -t.amount, // Decreases what we owe
-      notes: t.description
+      notes: t.description,
+      reference: t.reference || null
     }));
 
     // Sort all events by date
@@ -583,7 +621,7 @@ export class AccountStatementService {
               amount: totalPrice,
               currency: ev.currency,
               balanceAfter: ev.currency === 'USD' ? itemRunningUSD : itemRunningLBP,
-              reference: generateCreditReference(),
+              reference: `CREDIT-${ev.id.slice(-8)}`,
               paymentMethod: 'Received Bill',
               productDetails
             });
@@ -651,7 +689,7 @@ export class AccountStatementService {
               amount: itemCommission,
               currency: 'LBP',
               balanceAfter: itemRunningLBP,
-              reference: generateCommissionReference(),
+              reference: `COMM-${ev.id.slice(-8)}`,
               productDetails
             });
           });
@@ -688,7 +726,7 @@ export class AccountStatementService {
           amount: ev.amount,
           currency: ev.currency,
           balanceAfter: ev.currency === 'USD' ? runningUSD : runningLBP,
-          reference: generatePaymentReference(),
+          reference: ev.reference || `PAY-${ev.id.slice(-8)}`,
           paymentMethod: 'Payment'
         });
       }
@@ -706,28 +744,28 @@ export class AccountStatementService {
 
   /**
    * Generate comprehensive account statement for a customer
+   * OPTIMIZED: Uses indexed database queries and stored balances
    */
-  public generateCustomerStatement(
+  public async generateCustomerStatement(
     customer: Customer,
-    sales: BillLineItem[],
-    transactions: Transaction[],
+    sales: BillLineItem[], // Kept for backward compatibility but not used
+    transactions: Transaction[], // Kept for backward compatibility but not used
     products: Product[],
     inventory: InventoryItem[],
     dateRange?: { start: string; end: string },
     viewMode: 'summary' | 'detailed' = 'detailed',
-    bills?: Bill[]
-  ): AccountStatement {
+    bills?: any[] // Kept for backward compatibility
+  ): Promise<AccountStatement> {
     const now = new Date();
     const startDate = this.startOfDayISO(dateRange?.start || new Date(now.getFullYear(), 0, 1));
     const endDate = this.endOfDayISO(dateRange?.end || now);
 
-    // Compute opening balances from full history prior to start
-    const openingBalance = this.computeCustomerOpeningBalance(customer.id, sales, transactions, startDate);
-    // Build period transactions and running balances
-    const { statementTransactions, ending, totals } = this.buildCustomerPeriodTransactions(
+    // Compute opening balances using optimized method (uses stored balance + queries only after start date)
+    const openingBalance = await this.computeCustomerOpeningBalanceOptimized(customer.id, startDate);
+    
+    // Build period transactions and running balances using optimized method (queries directly from database)
+    const { statementTransactions, ending, totals } = await this.buildCustomerPeriodTransactionsOptimized(
       customer,
-      sales,
-      transactions,
       products,
       inventory,
       startDate,
@@ -737,8 +775,21 @@ export class AccountStatementService {
       bills
     );
 
-    // Product summary based on period credit sales
-    const periodCreditSales = sales.filter(s => s.customer_id === customer.id && s.payment_method === 'credit' && !!s.created_at && new Date(s.created_at) >= new Date(startDate) && new Date(s.created_at) <= new Date(endDate));
+    // Product summary based on period credit sales (query from database)
+    const startDateObj = new Date(startDate);
+    startDateObj.setHours(0, 0, 0, 0);
+    const endDateObj = new Date(endDate);
+    endDateObj.setHours(23, 59, 59, 999);
+    
+    const periodCreditSales = await db.bill_line_items
+      .where('customer_id')
+      .equals(customer.id)
+      .and(s => (s.payment_method as string) === 'credit' &&
+                !!s.created_at &&
+                new Date(s.created_at) >= startDateObj &&
+                new Date(s.created_at) <= endDateObj)
+      .toArray();
+    
     const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(periodCreditSales as unknown as BillLineItem[], products) : undefined;
 
     return {
@@ -799,35 +850,49 @@ export class AccountStatementService {
     );
 
     // Product summary based on items in received bills only
-    const periodReceivedBillItems = inventoryItems.filter(item => 
-      item.supplierId === supplier.id && 
-      !!item.createdAt && 
-      new Date(item.createdAt) >= new Date(startDate) && 
-      new Date(item.createdAt) <= new Date(endDate)
-    );
+    // Need to resolve supplier via batchId -> inventory_bills
+    const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
+    const periodReceivedBillItems = inventoryItems.filter(item => {
+      if (!item.batchId) return false;
+      const batch = batchMap.get(item.batchId);
+      const itemSupplierId = batch?.supplier_id;
+      return itemSupplierId === supplier.id && 
+        !!item.createdAt && 
+        new Date(item.createdAt) >= new Date(startDate) && 
+        new Date(item.createdAt) <= new Date(endDate);
+    });
     
     // Create synthetic sales for product summary calculation
-    const syntheticSales: BillLineItem[] = periodReceivedBillItems.map(item => ({
-      id: item.id,
-      storeId: 'default-store',
-      billId: item.batchId || 'synthetic-bill',
-      inventoryItemId: item.id,
-      productId: item.productId,
-      supplierId: item.supplierId,
-      customerId: undefined,
-      quantity: item.quantity,
-      weight: item.weight,
-      unitPrice: item.price || 0,
-      lineTotal: (item.quantity || 0) * (item.price || 0),
-      receivedValue: (item.quantity || 0) * (item.price || 0),
-      paymentMethod: 'credit' as const,
-      notes: undefined,
-      createdAt: item.createdAt,
-      createdBy: 'system',
-      inventoryType: 'cash' as const,
-      synced: true,
-      deleted: false
-    }));
+    const syntheticSales: BillLineItem[] = periodReceivedBillItems.map(item => {
+      const batch = item.batchId ? batchMap.get(item.batchId) : null;
+      const supplierId = batch?.supplier_id || supplier.id;
+      
+      return {
+        id: item.id,
+        store_id: batch?.store_id || 'default-store',
+        bill_id: item.batchId || 'synthetic-bill',
+        inventory_item_id: item.id,
+        product_id: item.productId,
+        supplier_id: supplierId,
+        customer_id: null,
+        product_name: products.find(p => p.id === item.productId)?.name || '',
+        supplier_name: supplier.name,
+        quantity: item.quantity,
+        weight: item.weight || null,
+        unit_price: item.price || 0,
+        line_total: (item.quantity || 0) * (item.price || 0),
+        received_value: (item.quantity || 0) * (item.price || 0),
+        payment_method: 'credit' as const,
+        notes: null,
+        line_order: 1,
+        created_at: item.createdAt,
+        updated_at: item.createdAt,
+        created_by: 'system',
+        _synced: true,
+        _lastSyncedAt: undefined,
+        _deleted: false
+      };
+    });
 
     const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(syntheticSales, products) : undefined;
 

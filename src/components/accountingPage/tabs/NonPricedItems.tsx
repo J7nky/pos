@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import MoneyInput from "../../common/MoneyInput";
 import { useI18n } from "../../../i18n";
+import { Pagination } from "../../../components/common/Pagination";
 
 interface NonPricedItem {
   id: string;
@@ -439,36 +440,15 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
         </div>
 
         {/* Pagination */}
-        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between rtl:flex-row-reverse">
-          <div className="text-sm text-gray-700 rtl:text-right">
-            {t('nonPriced.showingResults', { 
-              start: (nonPricedPage - 1) * NON_PRICED_PAGE_SIZE + 1, 
-              end: Math.min(nonPricedPage * NON_PRICED_PAGE_SIZE, filteredNonPricedItems.length),
-              total: filteredNonPricedItems.length 
-            })}
-          </div>
-          <div className="flex space-x-2 rtl:space-x-reverse">
-            <button
-              onClick={() => setNonPricedPage(Math.max(1, nonPricedPage - 1))}
-              disabled={nonPricedPage === 1}
-              className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-            >
-              {t('nonPriced.previous')}
-            </button>
-            <span className="px-3 py-1 text-sm text-gray-700">
-              {t('nonPriced.page')} {nonPricedPage} {t('nonPriced.of')} {nonPricedTotalPages || 1}
-            </span>
-            <button
-              onClick={() =>
-                setNonPricedPage(Math.min(nonPricedTotalPages, nonPricedPage + 1))
-              }
-              disabled={nonPricedPage === nonPricedTotalPages || nonPricedTotalPages === 0}
-              className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-            >
-              {t('nonPriced.next')}
-            </button>
-          </div>
-        </div>
+        {nonPricedTotalPages > 1 && (
+          <Pagination
+            currentPage={nonPricedPage}
+            totalPages={nonPricedTotalPages}
+            onPageChange={setNonPricedPage}
+            itemsPerPage={NON_PRICED_PAGE_SIZE}
+            totalItems={filteredNonPricedItems.length}
+          />
+        )}
       </div>
     </div>
   );

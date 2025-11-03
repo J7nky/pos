@@ -20,6 +20,7 @@ import { PAYMENT_CATEGORIES, getPaymentDirection, getPaymentEntityType } from ".
 import { paymentManagementService, PaymentUpdateData } from "../../../services/paymentManagementService";
 import { useI18n } from "../../../i18n";
 import { useOfflineData } from "../../../contexts/OfflineDataContext";
+import { Pagination } from "../../../components/common/Pagination";
 
 type Currency = "USD" | "LBP";
 
@@ -73,15 +74,10 @@ interface PaymentFilters {
     start: string;
     end: string;
   };
-  category: string;
   entityType: 'all' | 'customer' | 'supplier';
   entityId: string;
   direction: 'all' | 'received' | 'paid';
-  currency: 'all' | 'USD' | 'LBP';
-  amountRange: {
-    min: string;
-    max: string;
-  };
+ 
 }
 
 const PaymentsSummaryCards: React.FC<{
@@ -313,12 +309,9 @@ const PaymentFiltersPanel: React.FC<{
                     onFiltersChange({
                       search: '',
                       dateRange: { start: '', end: '' },
-                      category: '',
                       entityType: 'all',
                       entityId: '',
                       direction: 'all',
-                      currency: 'all',
-                      amountRange: { min: '', max: '' }
                     });
                   }}
                   className="px-4 py-2 text-sm text-gray-600 border border-gray-200 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
@@ -353,19 +346,7 @@ const PaymentFiltersPanel: React.FC<{
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
               />
             </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('payments.category')}</label>
-              <select
-                value={filters.category}
-                onChange={(e) => updateFilters({ category: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">{t('payments.allCategories')}</option>
-                {categories.map(category => (
-                  <option key={category} value={category}>{translatePaymentCategory(category)}</option>
-                ))}
-              </select>
-            </div>
+          
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('payments.entityType')}</label>
               <select
@@ -376,6 +357,18 @@ const PaymentFiltersPanel: React.FC<{
                 <option value="all">{t('payments.allEntities')}</option>
                 <option value="customer">{t('payments.customers')}</option>
                 <option value="supplier">{t('payments.suppliers')}</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('payments.direction')}</label>
+              <select
+                value={filters.direction}
+                onChange={(e) => updateFilters({ direction: e.target.value as any })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">{t('payments.allDirections')}</option>
+                <option value="received">{t('payments.received')}</option>
+                <option value="paid">{t('payments.paid')}</option>
               </select>
             </div>
           </div>
@@ -400,52 +393,8 @@ const PaymentFiltersPanel: React.FC<{
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('payments.direction')}</label>
-              <select
-                value={filters.direction}
-                onChange={(e) => updateFilters({ direction: e.target.value as any })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">{t('payments.allDirections')}</option>
-                <option value="received">{t('payments.received')}</option>
-                <option value="paid">{t('payments.paid')}</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('payments.currency')}</label>
-              <select
-                value={filters.currency}
-                onChange={(e) => updateFilters({ currency: e.target.value as any })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">{t('payments.allCurrencies')}</option>
-                <option value="USD">USD</option>
-                <option value="LBP">LBP</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('dashboard.minAmount') || t('payments.min')}</label>
-              <input
-                type="number"
-                placeholder={t('payments.min')}
-                value={filters.amountRange.min}
-                onChange={(e) => updateFilters({ amountRange: { ...filters.amountRange, min: e.target.value } })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-gray-700 rtl:text-right">{t('dashboard.maxAmount') || t('payments.max')}</label>
-              <input
-                type="number"
-                placeholder={t('payments.max')}
-                value={filters.amountRange.max}
-                onChange={(e) => updateFilters({ amountRange: { ...filters.amountRange, max: e.target.value } })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-              />
-            </div>
-          </div>
+          
+           
 
         
         </div>
@@ -1006,34 +955,13 @@ const PaymentsTable: React.FC<{
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between rtl:flex-row-reverse">
-          <div className="text-sm text-gray-700 rtl:text-right">
-            {t('payments.showingResults', { 
-              start: ((currentPage - 1) * itemsPerPage) + 1, 
-              end: Math.min(currentPage * itemsPerPage, sortedPayments.length), 
-              total: sortedPayments.length 
-            })}
-          </div>
-          <div className="flex items-center space-x-2 rtl:space-x-reverse">
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {t('payments.previous')}
-            </button>
-            <span className="text-sm text-gray-700">
-              {t('payments.page')} {currentPage} {t('payments.of')} {totalPages}
-            </span>
-            <button
-              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage === totalPages}
-              className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {t('payments.next')}
-            </button>
-          </div>
-        </div>
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          itemsPerPage={itemsPerPage}
+          totalItems={sortedPayments.length}
+        />
       )}
     </div>
   );

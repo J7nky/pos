@@ -388,10 +388,10 @@ class POSDatabase extends Dexie {
   async getCurrentCashDrawerSession(storeId: string): Promise<CashDrawerSession | null> {
     // Fetch all sessions for the store
     const all = await this.cash_drawer_sessions.where('store_id').equals(storeId).toArray();
-    console.log('DEBUG: All sessions for store', storeId, all);
+    // console.log('DEBUG: All sessions for store', storeId, all);
     // Find open sessions, robust to whitespace/case issues
     const open = all.filter(sess => String(sess.status).trim().toLowerCase() === 'open');
-    console.log('DEBUG: Open sessions for store', storeId, open);
+    // console.log('DEBUG: Open sessions for store', storeId, open);
     return open[0] || null;
   }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Download, 
@@ -19,6 +19,10 @@ import { AccountStatement, AccountStatementService } from '../services/accountSt
 import { Customer, Supplier, Transaction, InventoryItem, Product,  } from '../types';
 import { BillLineItem } from '../lib/db';
 import Toast from './common/Toast';
+import { PrintLayout } from './common/PrintLayout';
+import { PrintPreview } from './common/PrintPreview';
+import { setupPrintWithPageSelection } from '../utils/printUtils';
+import { paginateTransactions, getTotalPages } from '../utils/printPagination';
 
 interface AccountStatementModalProps {
   isOpen: boolean;
@@ -53,6 +57,9 @@ export default function AccountStatementModal({
     end: new Date().toISOString().split('T')[0] // Today
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [totalPages, setTotalPages] = useState(1);
+  const printContentRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
     message: '',
     type: 'success',
@@ -80,9 +87,9 @@ export default function AccountStatementModal({
 
       let newStatement: AccountStatement | null = null;
 
-      // Compute locally (always)
+      // Compute locally (always) - now uses optimized database queries
       if (entityType === 'customer') {
-        newStatement = accountStatementService.generateCustomerStatement(
+        newStatement = await accountStatementService.generateCustomerStatement(
           entity as Customer,
           sales,
           transactions,
@@ -160,8 +167,25 @@ export default function AccountStatementModal({
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  // Update page count when statement changes
+  useEffect(() => {
+    if (statement) {
+      const total = getTotalPages(statement.transactions.length, viewMode);
+      setTotalPages(total);
+    }
+  }, [statement, viewMode]);
+
+  const handlePrintClick = () => {
+    if (!statement) return;
+    setShowPrintPreview(true);
+  };
+
+  const handlePrint = (selectedPages?: number[]) => {
+    setupPrintWithPageSelection(selectedPages, totalPages);
+  };
+
+  const handleClosePreview = () => {
+    setShowPrintPreview(false);
   };
 
 
@@ -175,11 +199,329 @@ export default function AccountStatementModal({
 
   if (!isOpen) return null;
 
+  // Format currency helper
+  const formatCurrencyValue = (amount: number, currency: 'USD' | 'LBP') => {
+    if (currency === 'USD') {
+      return `$${amount.toFixed(2)}`;
+    } else {
+      return `${Math.round(amount).toLocaleString()}`;
+    }
+  };
+
   return (
     <>
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
 
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      {/* Print Preview Modal */}
+      {showPrintPreview && statement && (() => {
+        const paginatedPages = paginateTransactions(statement.transactions, viewMode);
+        
+        return (
+          <PrintPreview
+            isOpen={showPrintPreview}
+            onClose={handleClosePreview}
+            onPrint={handlePrint}
+            totalPages={totalPages}
+            title={`Account Statement - ${entity.name}`}
+            content={paginatedPages.map((page, idx) => {
+              const isFirstPage = page.isFirstPage;
+              const isLastPage = page.isLastPage;
+              
+              return (
+                <div key={page.pageNumber} className={idx === 0 ? '' : 'print-page-break'}>
+                  <PrintLayout
+                    title="كشف حساب مفصل"
+                    accountName={isFirstPage ? entity.name : undefined}
+                    accountNumber={isFirstPage ? entity.id.slice(0, 10) : undefined}
+                    phone={isFirstPage ? entity.phone : undefined}
+                    previousBalance={isFirstPage ? statement.financialSummary.openingBalance : undefined}
+                    currency={statement.transactions[0]?.currency || 'LBP'}
+                    dateRange={isFirstPage ? statement.dateRange : undefined}
+                    reportDate={isFirstPage ? statement.statementDate : undefined}
+                    pageNumber={page.pageNumber}
+                    totalPages={totalPages}
+                    showHeader={isFirstPage}
+                    showFooter={isLastPage}
+                    showAccountInfo={isFirstPage}
+                    showOpeningBalance={isFirstPage}
+                  >
+                    {/* Opening Balance - Only on first page */}
+                    {isFirstPage && (
+                      <div className="print-opening-balance print-section">
+                        <span className="print-opening-balance-label">الرصيد ما قبل:</span>
+                        <span className="print-opening-balance-value">
+                          {formatCurrencyValue(
+                            statement.financialSummary.openingBalance[statement.transactions[0]?.currency || 'LBP'],
+                            statement.transactions[0]?.currency || 'LBP'
+                          )}
+                          {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Transaction Table */}
+                    <div className="print-table-container print-section">
+                      <table className="print-table">
+                        <thead>
+                          <tr>
+                            <th className="print-table-col-date">التاريخ</th>
+                            <th className="print-table-col-reference">المرجع</th>
+                            <th className="print-table-col-description">البيان</th>
+                            {viewMode === 'detailed' && (
+                              <>
+                                <th className="print-table-col-quantity">العدد</th>
+                                <th className="print-table-col-weight">الوزن</th>
+                                <th className="print-table-col-price">السعر</th>
+                              </>
+                            )}
+                            <th className="print-table-col-debit">مدين</th>
+                            <th className="print-table-col-credit">دائن</th>
+                            <th className="print-table-col-balance">الرصيد</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {page.transactions.map((transaction, index) => (
+                            <tr key={transaction.id || index}>
+                              <td className="print-table-col-date">
+                                {new Date(transaction.date).toLocaleDateString('ar-LB', {
+                                  year: 'numeric',
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                })}
+                              </td>
+                              <td className="print-table-col-reference">{transaction.reference || '-'}</td>
+                              <td className="print-table-col-description">{transaction.description}</td>
+                              {viewMode === 'detailed' && (
+                                <>
+                                  <td className="print-table-col-quantity print-number">
+                                    {transaction.quantity || '-'}
+                                  </td>
+                                  <td className="print-table-col-weight print-number">
+                                    {transaction.weight ? `${transaction.weight}` : '-'}
+                                  </td>
+                                  <td className="print-table-col-price print-number">
+                                    {transaction.price ? formatCurrencyValue(transaction.price, transaction.currency || 'LBP') : '-'}
+                                  </td>
+                                </>
+                              )}
+                              <td className="print-table-col-debit print-number print-currency">
+                                {transaction.type !== 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
+                              </td>
+                              <td className="print-table-col-credit print-number print-currency">
+                                {transaction.type === 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
+                              </td>
+                              <td className="print-table-col-balance print-number print-currency">
+                                {formatCurrencyValue(transaction.balanceAfter, transaction.currency)}
+                                {transaction.currency === 'LBP' ? ' ل.ل' : ''}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Summary Footer - Only on last page */}
+                    {isLastPage && (
+                      <div className="print-summary print-section">
+                        <div className="print-summary-row">
+                          <span>إجمالي مدين:</span>
+                          <span className="print-number">
+                            {formatCurrencyValue(
+                              statement.transactions
+                                .filter(t => t.type !== 'payment')
+                                .reduce((sum, t) => sum + (t.amount || 0), 0),
+                              statement.transactions[0]?.currency || 'LBP'
+                            )}
+                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                          </span>
+                        </div>
+                        <div className="print-summary-row">
+                          <span>إجمالي دائن:</span>
+                          <span className="print-number">
+                            {formatCurrencyValue(
+                              statement.transactions
+                                .filter(t => t.type === 'payment')
+                                .reduce((sum, t) => sum + (t.amount || 0), 0),
+                              statement.transactions[0]?.currency || 'LBP'
+                            )}
+                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                          </span>
+                        </div>
+                        <div className="print-total-row">
+                          <div className="print-final-balance">
+                            <div className="print-final-balance-label">الرصيد</div>
+                            <div className="print-final-balance-value">
+                              {formatCurrencyValue(
+                                statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
+                                statement.transactions[0]?.currency || 'LBP'
+                              )}
+                              {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </PrintLayout>
+                </div>
+              );
+            })}
+          />
+        );
+      })()}
+
+      {/* Printable Statement View - Hidden in screen, visible in print */}
+      {statement && (() => {
+        const paginatedPages = paginateTransactions(statement.transactions, viewMode);
+        
+        return (
+          <div className="print-only" style={{ display: 'none' }}>
+            {paginatedPages.map((page, idx) => {
+              const isFirstPage = page.isFirstPage;
+              const isLastPage = page.isLastPage;
+              
+              return (
+                <div key={page.pageNumber} className={idx === 0 ? '' : 'print-page-break'}>
+                  <PrintLayout
+                    title="كشف حساب مفصل"
+                    accountName={isFirstPage ? entity.name : undefined}
+                    accountNumber={isFirstPage ? entity.id.slice(0, 10) : undefined}
+                    phone={isFirstPage ? entity.phone : undefined}
+                    previousBalance={isFirstPage ? statement.financialSummary.openingBalance : undefined}
+                    currency={statement.transactions[0]?.currency || 'LBP'}
+                    dateRange={isFirstPage ? statement.dateRange : undefined}
+                    reportDate={isFirstPage ? statement.statementDate : undefined}
+                    pageNumber={page.pageNumber}
+                    totalPages={totalPages}
+                    showHeader={isFirstPage}
+                    showFooter={isLastPage}
+                    showAccountInfo={isFirstPage}
+                    showOpeningBalance={isFirstPage}
+                  >
+                    {/* Opening Balance - Only on first page */}
+                    {isFirstPage && (
+                      <div className="print-opening-balance print-section">
+                        <span className="print-opening-balance-label">الرصيد ما قبل:</span>
+                        <span className="print-opening-balance-value">
+                          {formatCurrencyValue(
+                            statement.financialSummary.openingBalance[statement.transactions[0]?.currency || 'LBP'],
+                            statement.transactions[0]?.currency || 'LBP'
+                          )}
+                          {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Transaction Table */}
+                    <div className="print-table-container print-section">
+                      <table className="print-table">
+                        <thead>
+                          <tr>
+                            <th className="print-table-col-date">التاريخ</th>
+                            <th className="print-table-col-reference">المرجع</th>
+                            <th className="print-table-col-description">البيان</th>
+                            {viewMode === 'detailed' && (
+                              <>
+                                <th className="print-table-col-quantity">العدد</th>
+                                <th className="print-table-col-weight">الوزن</th>
+                                <th className="print-table-col-price">السعر</th>
+                              </>
+                            )}
+                            <th className="print-table-col-debit">مدين</th>
+                            <th className="print-table-col-credit">دائن</th>
+                            <th className="print-table-col-balance">الرصيد</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {page.transactions.map((transaction, index) => (
+                            <tr key={transaction.id || index}>
+                              <td className="print-table-col-date">
+                                {new Date(transaction.date).toLocaleDateString('ar-LB', {
+                                  year: 'numeric',
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                })}
+                              </td>
+                              <td className="print-table-col-reference">{transaction.reference || '-'}</td>
+                              <td className="print-table-col-description">{transaction.description}</td>
+                              {viewMode === 'detailed' && (
+                                <>
+                                  <td className="print-table-col-quantity print-number">
+                                    {transaction.quantity || '-'}
+                                  </td>
+                                  <td className="print-table-col-weight print-number">
+                                    {transaction.weight ? `${transaction.weight}` : '-'}
+                                  </td>
+                                  <td className="print-table-col-price print-number">
+                                    {transaction.price ? formatCurrencyValue(transaction.price, transaction.currency || 'LBP') : '-'}
+                                  </td>
+                                </>
+                              )}
+                              <td className="print-table-col-debit print-number print-currency">
+                                {transaction.type !== 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
+                              </td>
+                              <td className="print-table-col-credit print-number print-currency">
+                                {transaction.type === 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
+                              </td>
+                              <td className="print-table-col-balance print-number print-currency">
+                                {formatCurrencyValue(transaction.balanceAfter, transaction.currency)}
+                                {transaction.currency === 'LBP' ? ' ل.ل' : ''}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Summary Footer - Only on last page */}
+                    {isLastPage && (
+                      <div className="print-summary print-section">
+                        <div className="print-summary-row">
+                          <span>إجمالي مدين:</span>
+                          <span className="print-number">
+                            {formatCurrencyValue(
+                              statement.transactions
+                                .filter(t => t.type !== 'payment')
+                                .reduce((sum, t) => sum + (t.amount || 0), 0),
+                              statement.transactions[0]?.currency || 'LBP'
+                            )}
+                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                          </span>
+                        </div>
+                        <div className="print-summary-row">
+                          <span>إجمالي دائن:</span>
+                          <span className="print-number">
+                            {formatCurrencyValue(
+                              statement.transactions
+                                .filter(t => t.type === 'payment')
+                                .reduce((sum, t) => sum + (t.amount || 0), 0),
+                              statement.transactions[0]?.currency || 'LBP'
+                            )}
+                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                          </span>
+                        </div>
+                        <div className="print-total-row">
+                          <div className="print-final-balance">
+                            <div className="print-final-balance-label">الرصيد</div>
+                            <div className="print-final-balance-value">
+                              {formatCurrencyValue(
+                                statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
+                                statement.transactions[0]?.currency || 'LBP'
+                              )}
+                              {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </PrintLayout>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 no-print">
         <div className="bg-white rounded-lg max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
           {/* Header */}
           <div className="p-6 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
@@ -244,7 +586,7 @@ export default function AccountStatementModal({
               </button>
 
               <button
-                onClick={handlePrint}
+                onClick={handlePrintClick}
                 className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
               >
                 <Printer className="w-4 h-4" />

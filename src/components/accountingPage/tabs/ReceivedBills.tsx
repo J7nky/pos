@@ -15,6 +15,7 @@ import { Bill } from '../../../lib/db';
 import WeightComparisonReport from '../../WeightComparisonReport';
 import ReceiveFormModal from '../../inventory/ReceiveFormModal';
 import { useI18n } from '../../../i18n';
+import { Pagination } from '../../../components/common/Pagination';
 
 type ReceivedBillsProps = {
   inventory: any[];
@@ -1071,20 +1072,13 @@ export default function ReceivedBills({
         </div>
 
         {groupTotalPages > 1 && (
-          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between rtl:flex-row-reverse">
-            <div className="text-sm text-gray-700 rtl:text-right">
-              {t('receivedBills.showingResults', { 
-                start: ((receivedBillsPage - 1) * 10) + 1, 
-                end: Math.min(receivedBillsPage * 10, groupedReceivedBills.length), 
-                total: groupedReceivedBills.length 
-              })}
-            </div>
-            <div className="flex items-center space-x-2 rtl:space-x-reverse">
-              <button onClick={() => setReceivedBillsPage(Math.max(1, receivedBillsPage - 1))} disabled={receivedBillsPage === 1} className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">{t('receivedBills.previous')}</button>
-              <span className="text-sm text-gray-700 rtl:text-right">{t('receivedBills.page')} {receivedBillsPage} {t('receivedBills.of')} {groupTotalPages}</span>
-              <button onClick={() => setReceivedBillsPage(Math.min(groupTotalPages, receivedBillsPage + 1))} disabled={receivedBillsPage === groupTotalPages} className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">{t('receivedBills.next')}</button>
-            </div>
-          </div>
+          <Pagination
+            currentPage={receivedBillsPage}
+            totalPages={groupTotalPages}
+            onPageChange={setReceivedBillsPage}
+            itemsPerPage={10}
+            totalItems={groupedReceivedBills.length}
+          />
         )}
       </div>
 

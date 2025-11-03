@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   DollarSign, 
   TrendingDown, 
@@ -13,6 +13,7 @@ import {
 import { useI18n } from '../../../i18n';
 import { Supplier, Transaction } from '../../../types';
 import SupplierFormModal from '../../common/SupplierFormModal';
+import { Pagination } from '../../../components/common/Pagination';
 
 interface SupplierAdvancesProps {
   suppliers: Supplier[];
@@ -56,6 +57,8 @@ export default function SupplierAdvances({
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
   const [currencyFilter, setCurrencyFilter] = useState<'all' | 'USD' | 'LBP'>('all');
   const [editingAdvance, setEditingAdvance] = useState<Transaction | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
   
   // Advance form state
   const [advanceForm, setAdvanceForm] = useState({
@@ -155,6 +158,19 @@ export default function SupplierAdvances({
 
     return filtered;
   }, [advanceTransactionsWithDetails, searchTerm, dateFilter, currencyFilter]);
+
+  // Pagination
+  const paginatedAdvances = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredAdvances.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredAdvances, currentPage]);
+
+  const totalPages = Math.ceil(filteredAdvances.length / itemsPerPage);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, dateFilter, currencyFilter]);
 
   const handleSubmitAdvance = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -601,7 +617,7 @@ export default function SupplierAdvances({
                   </td>
                 </tr>
               ) : (
-                filteredAdvances.map(advance => (
+                paginatedAdvances.map(advance => (
                   <tr key={advance.id} className="hover:bg-gray-50">
                     <td className="px-4 py-4 rtl:text-right ltr:text-left">
                       <div className="text-sm text-gray-900">
@@ -674,6 +690,17 @@ export default function SupplierAdvances({
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            itemsPerPage={itemsPerPage}
+            totalItems={filteredAdvances.length}
+          />
+        )}
       </div>
 
       {/* Supplier Form Modal */}
