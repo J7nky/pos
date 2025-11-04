@@ -204,14 +204,14 @@ export default function Accounting() {
     fetchCurrentSession();
   }, [userProfile?.store_id, raw, activeTab]);
 
-  // Inventory logs state
-  const [inventoryLogsSearchTerm, setInventoryLogsSearchTerm] = useState('');
-  const [inventoryLogsProductFilter, setInventoryLogsProductFilter] = useState('');
-  const [inventoryLogsSupplierFilter, setInventoryLogsSupplierFilter] = useState('');
-  const [inventoryLogsDateFilter, setInventoryLogsDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
-  const [inventoryLogsPage, setInventoryLogsPage] = useState(1);
-  const [inventoryLogsSort, setInventoryLogsSort] = useState<'date' | 'product' | 'supplier' | 'amount'>('date');
-  const [inventoryLogsSortDir, setInventoryLogsSortDir] = useState<'asc' | 'desc'>('desc');
+  // Inventory logs state - persisted in localStorage
+  const [inventoryLogsSearchTerm, setInventoryLogsSearchTerm] = useLocalStorage('accounting_inventoryLogsSearchTerm', '');
+  const [inventoryLogsProductFilter, setInventoryLogsProductFilter] = useLocalStorage('accounting_inventoryLogsProductFilter', '');
+  const [inventoryLogsSupplierFilter, setInventoryLogsSupplierFilter] = useLocalStorage('accounting_inventoryLogsSupplierFilter', '');
+  const [inventoryLogsDateFilter, setInventoryLogsDateFilter] = useLocalStorage<'all' | 'today' | 'week' | 'month'>('accounting_inventoryLogsDateFilter', 'all');
+  const [inventoryLogsPage, setInventoryLogsPage] = useLocalStorage('accounting_inventoryLogsPage', 1);
+  const [inventoryLogsSort, setInventoryLogsSort] = useLocalStorage<'date' | 'product' | 'supplier' | 'amount'>('accounting_inventoryLogsSort', 'date');
+  const [inventoryLogsSortDir, setInventoryLogsSortDir] = useLocalStorage<'asc' | 'desc'>('accounting_inventoryLogsSortDir', 'desc');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<any>(null);
   const [showInventoryItemDetails, setShowInventoryItemDetails] = useState(false);
 
@@ -492,10 +492,10 @@ export default function Accounting() {
   const [nonPricedItems, setNonPricedItems] = useState<any[]>([]);
   const [showEditNonPriced, setShowEditNonPriced] = useState<any | null>(null);
   const [stagedNonPricedChanges, setStagedNonPricedChanges] = useState<{[key: string]: any}>({});
-  const [nonPricedSearch, setNonPricedSearch] = useState('');
-  const [nonPricedSort, setNonPricedSort] = useState<'customer'|'product'|'date'|'value'>('date');
-  const [nonPricedSortDir, setNonPricedSortDir] = useState<'asc'|'desc'>('desc');
-  const [nonPricedPage, setNonPricedPage] = useState(1);
+  const [nonPricedSearch, setNonPricedSearch] = useLocalStorage('accounting_nonPricedSearch', '');
+  const [nonPricedSort, setNonPricedSort] = useLocalStorage<'customer'|'product'|'date'|'value'>('accounting_nonPricedSort', 'date');
+  const [nonPricedSortDir, setNonPricedSortDir] = useLocalStorage<'asc'|'desc'>('accounting_nonPricedSortDir', 'desc');
+  const [nonPricedPage, setNonPricedPage] = useLocalStorage('accounting_nonPricedPage', 1);
   const [showBulkActions, setShowBulkActions] = useState(false);
   const [selectedNonPriced, setSelectedNonPriced] = useState<string[]>([]);
   const NON_PRICED_PAGE_SIZE = 10;
@@ -980,14 +980,14 @@ export default function Accounting() {
     }
   };
 
-  // Pending bills state
-  const [pendingBillsSearchTerm, setPendingBillsSearchTerm] = useState('');
-  const [pendingBillsSupplierFilter, setPendingBillsSupplierFilter] = useState('');
-  const [pendingBillsProductFilter, setPendingBillsProductFilter] = useState('');
-  const [pendingBillsPage, setPendingBillsPage] = useState(1);
-  const [pendingBillsSort, setPendingBillsSort] = useState<'date' | 'supplier' | 'product' | 'amount' | 'progress' | 'revenue' | 'status'>('date');
-  const [pendingBillsSortDir, setPendingBillsSortDir] = useState<'asc' | 'desc'>('desc');
-  const [pendingBillsStatusFilter, setPendingBillsStatusFilter] = useState<string>('all');
+  // Pending bills state - persisted in localStorage
+  const [pendingBillsSearchTerm, setPendingBillsSearchTerm] = useLocalStorage('accounting_pendingBillsSearchTerm', '');
+  const [pendingBillsSupplierFilter, setPendingBillsSupplierFilter] = useLocalStorage('accounting_pendingBillsSupplierFilter', '');
+  const [pendingBillsProductFilter, setPendingBillsProductFilter] = useLocalStorage('accounting_pendingBillsProductFilter', '');
+  const [pendingBillsPage, setPendingBillsPage] = useLocalStorage('accounting_pendingBillsPage', 1);
+  const [pendingBillsSort, setPendingBillsSort] = useLocalStorage<'date' | 'supplier' | 'product' | 'amount' | 'progress' | 'revenue' | 'status'>('accounting_pendingBillsSort', 'date');
+  const [pendingBillsSortDir, setPendingBillsSortDir] = useLocalStorage<'asc' | 'desc'>('accounting_pendingBillsSortDir', 'desc');
+  const [pendingBillsStatusFilter, setPendingBillsStatusFilter] = useLocalStorage<string>('accounting_pendingBillsStatusFilter', 'all');
   const [selectedPendingBill, setSelectedPendingBill] = useState<any>(null);
   const [showPendingBillDetails, setShowPendingBillDetails] = useState(false);
   const [showCloseBillModal, setShowCloseBillModal] = useState(false);
@@ -995,14 +995,14 @@ export default function Accounting() {
   const [selectedBills, setSelectedBills] = useState<Set<string>>(new Set());
   const [showPendingBillsBulkActions, setShowPendingBillsBulkActions] = useState(false);
 
-  // Received bills state
-  const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
-  const [receivedBillsSupplierFilter, setReceivedBillsSupplierFilter] = useState('');
-  const [receivedBillsProductFilter, setReceivedBillsProductFilter] = useState('');
-  const [receivedBillsPage, setReceivedBillsPage] = useState(1);
-  const [receivedBillsSort, setReceivedBillsSort] = useState<'date' | 'supplier' | 'product' | 'amount' | 'progress' | 'revenue' | 'status'>('date');
-  const [receivedBillsSortDir, setReceivedBillsSortDir] = useState<'asc' | 'desc'>('desc');
-  const [receivedBillsStatusFilter, setReceivedBillsStatusFilter] = useState<string>('all');
+  // Received bills state - persisted in localStorage
+  const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useLocalStorage('accounting_receivedBillsSearchTerm', '');
+  const [receivedBillsSupplierFilter, setReceivedBillsSupplierFilter] = useLocalStorage('accounting_receivedBillsSupplierFilter', '');
+  const [receivedBillsProductFilter, setReceivedBillsProductFilter] = useLocalStorage('accounting_receivedBillsProductFilter', '');
+  const [receivedBillsPage, setReceivedBillsPage] = useLocalStorage('accounting_receivedBillsPage', 1);
+  const [receivedBillsSort, setReceivedBillsSort] = useLocalStorage<'date' | 'supplier' | 'product' | 'amount' | 'progress' | 'revenue' | 'status'>('accounting_receivedBillsSort', 'date');
+  const [receivedBillsSortDir, setReceivedBillsSortDir] = useLocalStorage<'asc' | 'desc'>('accounting_receivedBillsSortDir', 'desc');
+  const [receivedBillsStatusFilter, setReceivedBillsStatusFilter] = useLocalStorage<string>('accounting_receivedBillsStatusFilter', 'all');
   const [selectedReceivedBill, setSelectedReceivedBill] = useState<any>(null);
   const [showReceivedBillDetails, setShowReceivedBillDetails] = useState(false);
   // Moved to ReceivedBills component

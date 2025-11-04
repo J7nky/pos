@@ -34,10 +34,10 @@ export function generateSaleReference(): string {
 
 /**
  * Generates a bill reference ID
- * Format: "BILL-12345678" (8 digits)
+ * Format: "Bill-12345678" (8 digits)
  */
 export function generateBillReference(): string {
-  return `BILL-${generateShortId()}`;
+  return `Bill-${generateShortId()}`;
 }
 
 /**

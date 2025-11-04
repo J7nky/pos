@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useCurrency } from '../../../hooks/useCurrency';
 import { useI18n } from '../../../i18n';
+import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { Pagination } from '../../common/Pagination';
 
 import { 
@@ -18,7 +19,6 @@ import {
   CheckCircle,
   X,
   Save,
-  Download,
   RefreshCw,
   History,
   CreditCard,
@@ -56,10 +56,22 @@ interface BillLineItem {
   quantity: number;
   unit_price: number;
   line_total: number;
+  received_value: number;
   weight: number | null;
   notes: string | null;
   line_order: number;
 }
+
+type LineItemEditState = {
+  product_id?: string;
+  product_name?: string;
+  supplier_id?: string;
+  supplier_name?: string;
+  quantity?: string;
+  unitPrice?: string;
+  weight?: string;
+  notes?: string;
+};
 
 interface BillAuditLog {
   id: string;
@@ -88,6 +100,10 @@ export default function InventoryLogs() {
 
   // Get data from offline context
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0}));
+  const inventoryItems = raw.inventory || [];
+  const inventoryBills = raw.inventoryBills || [];
+  const products = raw.products || [];
+  const suppliers = raw.suppliers || [];
 
   // Helper function to get customer name - memoized for performance
   const getCustomerName = useCallback((customerId: string | null): string => {
@@ -106,31 +122,39 @@ export default function InventoryLogs() {
   const [isEditing, setIsEditing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
 
-  // Filters
-  const [searchTerm, setSearchTerm] = useState('');
+  // Filters - persisted in localStorage
+  const [searchTerm, setSearchTerm] = useLocalStorage('soldBills_searchTerm', '');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [showFilters, setShowFilters] = useState(true);
-  const [fastDateFilter, setFastDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [dateFrom, setDateFrom] = useLocalStorage('soldBills_dateFrom', '');
+  const [dateTo, setDateTo] = useLocalStorage('soldBills_dateTo', '');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useLocalStorage('soldBills_paymentStatusFilter', '');
+  const [statusFilter, setStatusFilter] = useLocalStorage('soldBills_statusFilter', '');
+  const [showFilters, setShowFilters] = useLocalStorage('soldBills_showFilters', true);
+  const [fastDateFilter, setFastDateFilter] = useLocalStorage<'all' | 'today' | 'week' | 'month'>('soldBills_fastDateFilter', 'today');
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Initialize with previous month by default (only once)
+  // Helper function to format date in local timezone as YYYY-MM-DD
+  const formatLocalDate = useCallback((date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }, []);
+
+  // Initialize with today's date by default (only once, if not already set from localStorage)
   useEffect(() => {
     if (!storeId || isInitialized) return;
     
-    const now = new Date();
-    const firstDayOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const firstDayOfPreviousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastDayOfPreviousMonth = new Date(firstDayOfCurrentMonth.getTime() - 1);
-    
-    // Set to previous month
-    setDateFrom(firstDayOfPreviousMonth.toISOString().split('T')[0]);
-    setDateTo(lastDayOfPreviousMonth.toISOString().split('T')[0]);
+    // Only set default dates if not already set from localStorage
+    if (!dateFrom && !dateTo) {
+      const now = new Date();
+      // Set to today - use local timezone
+      setDateFrom(formatLocalDate(now));
+      setDateTo(formatLocalDate(now));
+      setFastDateFilter('today'); // Set fast filter to today as well
+    }
     setIsInitialized(true);
-  }, [storeId, isInitialized]);
+  }, [storeId, isInitialized, dateFrom, dateTo, formatLocalDate, setDateFrom, setDateTo, setFastDateFilter]);
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -155,20 +179,21 @@ export default function InventoryLogs() {
 
     switch (filter) {
       case 'today':
-        fromDate = now.toISOString().split('T')[0];
-        toDate = now.toISOString().split('T')[0];
+        // Use local date, not UTC
+        fromDate = formatLocalDate(now);
+        toDate = formatLocalDate(now);
         break;
       case 'week':
         const startOfWeek = new Date(now);
         startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday
         startOfWeek.setHours(0, 0, 0, 0);
-        fromDate = startOfWeek.toISOString().split('T')[0];
-        toDate = now.toISOString().split('T')[0];
+        fromDate = formatLocalDate(startOfWeek);
+        toDate = formatLocalDate(now);
         break;
       case 'month':
         const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        fromDate = firstDayOfMonth.toISOString().split('T')[0];
-        toDate = now.toISOString().split('T')[0];
+        fromDate = formatLocalDate(firstDayOfMonth);
+        toDate = formatLocalDate(now);
         break;
       case 'all':
         fromDate = '';
@@ -182,10 +207,292 @@ export default function InventoryLogs() {
 
   // Edit form state
   const [editForm, setEditForm] = useState<Partial<Bill>>({});
+  const [lineItemEdits, setLineItemEdits] = useState<Record<string, LineItemEditState>>({});
 
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const inventoryItemMap = useMemo(() => {
+    const map = new Map<string, any>();
+    (inventoryItems || []).forEach((item: any) => {
+      if (item?.id) {
+        map.set(item.id, item);
+      }
+    });
+    return map;
+  }, [inventoryItems]);
+
+  const inventoryBillStatusMap = useMemo(() => {
+    const map = new Map<string, string>();
+    (inventoryBills || []).forEach((bill: any) => {
+      if (bill?.id) {
+        const status = typeof bill.status === 'string' ? bill.status.toLowerCase() : '';
+        map.set(bill.id, status);
+      }
+    });
+    return map;
+  }, [inventoryBills]);
+
+  const billLineItems = useMemo(() => {
+    if (!selectedBill) return [] as BillLineItem[];
+    let items: BillLineItem[] = [];
+    if (Array.isArray(selectedBill.bill_line_items)) {
+      items = selectedBill.bill_line_items;
+    } else {
+      const fallback = (selectedBill as any)?.line_items;
+      items = Array.isArray(fallback) ? fallback : [];
+    }
+
+    // Enrich items with product and supplier names if missing
+    return items.map(item => {
+      const product = products.find(p => p.id === item.product_id);
+      const supplier = suppliers.find(s => s.id === item.supplier_id);
+      
+      return {
+        ...item,
+        product_name: product?.name || item.product_name || 'Unknown Product',
+        supplier_name: supplier?.name || item.supplier_name || 'Unknown Supplier',
+      };
+    });
+  }, [selectedBill, products, suppliers]);
+
+  const getInventoryContextForLineItem = useCallback((lineItem: BillLineItem) => {
+    const inventoryItem = lineItem.inventory_item_id
+      ? inventoryItemMap.get(lineItem.inventory_item_id)
+      : null;
+    const batchId = inventoryItem?.batch_id || null;
+    const batchStatus = batchId ? inventoryBillStatusMap.get(batchId) : undefined;
+    const inventoryStatus = typeof inventoryItem?.status === 'string'
+      ? inventoryItem.status.toLowerCase()
+      : undefined;
+    const isClosed = (batchStatus && batchStatus.toLowerCase() === 'closed') || inventoryStatus === 'closed';
+
+    return {
+      inventoryItem,
+      inventoryBillId: batchId,
+      batchStatus: batchStatus || inventoryStatus || null,
+      isEditable: !isClosed,
+    };
+  }, [inventoryItemMap, inventoryBillStatusMap]);
+
+  const billFormHasChanges = useMemo(() => {
+    if (!selectedBill) return false;
+    
+    // Check bill-level changes
+    const billChanges = (
+      editForm.customer_id !== selectedBill.customer_id ||
+      editForm.payment_method !== selectedBill.payment_method ||
+      editForm.payment_status !== selectedBill.payment_status ||
+      (editForm.amount_paid !== undefined && editForm.amount_paid !== selectedBill.amount_paid) ||
+      (editForm.notes !== undefined && editForm.notes !== selectedBill.notes)
+    );
+    
+    // Check line item changes
+    const hasLineItemChanges = billLineItems.some(item => {
+      const edits = lineItemEdits[item.id] || {};
+      if (Object.keys(edits).length === 0) return false;
+      
+      const quantityValue = edits.quantity ?? item.quantity.toString();
+      const unitPriceValue = edits.unitPrice ?? item.unit_price.toString();
+      const weightValue = edits.weight ?? (item.weight !== null && item.weight !== undefined ? item.weight.toString() : '');
+      const notesValue = edits.notes ?? (item.notes ?? '');
+      
+      return (
+        (edits.quantity !== undefined && Number(quantityValue) !== item.quantity) ||
+        (edits.unitPrice !== undefined && Number(unitPriceValue) !== item.unit_price) ||
+        (edits.weight !== undefined && (weightValue === '' ? null : Number(weightValue)) !== (item.weight ?? null)) ||
+        (edits.notes !== undefined && notesValue !== (item.notes ?? ''))
+      );
+    });
+    
+    return billChanges || hasLineItemChanges;
+  }, [selectedBill, editForm, lineItemEdits, billLineItems]);
+
+  const getFieldLabel = useCallback((fieldName: string): string => {
+    const fieldLabels: Record<string, string> = {
+      customer_id: t('soldBills.customer'),
+      payment_method: t('soldBills.paymentMethod'),
+      payment_status: t('soldBills.paymentStatus'),
+      amount_paid: t('soldBills.amountPaid'),
+      notes: t('soldBills.notes'),
+      subtotal: t('soldBills.subtotal'),
+      total_amount: t('soldBills.total'),
+      status: t('soldBills.status'),
+    };
+    return fieldLabels[fieldName] || fieldName;
+  }, [t]);
+
+  const renderAuditValue = useCallback((fieldName: string | null, value: string | null) => {
+    if (value === null || value === undefined || value === '') {
+      return <span className="italic text-slate-400">{t('soldBills.notAvailable')}</span>;
+    }
+
+    const trimmed = typeof value === 'string' ? value.trim() : value;
+    const normalizedField = fieldName || '';
+
+    // Customer ID - resolve to customer name
+    if (normalizedField === 'customer_id') {
+      const customerName = getCustomerName(value);
+      return (
+        <span className="inline-flex items-center gap-1.5">
+          <User className="h-3.5 w-3.5 text-slate-400" />
+          <span>{customerName}</span>
+        </span>
+      );
+    }
+
+    // Payment method - with icon
+    if (normalizedField === 'payment_method') {
+      const translatedValue = t(`soldBills.${value}`);
+      return (
+        <span className="inline-flex items-center gap-1.5">
+          {value === 'cash' && <DollarSign className="h-3.5 w-3.5 text-green-500" />}
+          {value === 'card' && <CreditCard className="h-3.5 w-3.5 text-blue-500" />}
+          {value === 'credit' && <Clock className="h-3.5 w-3.5 text-amber-500" />}
+          <span className="capitalize">{translatedValue}</span>
+        </span>
+      );
+    }
+
+    // Payment status - with badge
+    if (normalizedField === 'payment_status') {
+      const statusColors: Record<string, string> = {
+        paid: 'bg-green-100 text-green-700 border-green-200',
+        partial: 'bg-amber-100 text-amber-700 border-amber-200',
+        pending: 'bg-gray-100 text-gray-700 border-gray-200',
+      };
+      const colorClass = statusColors[value] || 'bg-gray-100 text-gray-700 border-gray-200';
+      return (
+        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${colorClass}`}>
+          <span className="capitalize">{t(`soldBills.${value}`)}</span>
+        </span>
+      );
+    }
+
+    // Monetary amounts - with currency formatting
+    if (['amount_paid', 'subtotal', 'total_amount', 'line_total'].includes(normalizedField)) {
+      const numericValue = Number(value);
+      if (!Number.isNaN(numericValue)) {
+        return (
+          <span className="inline-flex items-center gap-1.5 font-mono text-sm">
+            <DollarSign className="h-3.5 w-3.5 text-slate-400" />
+            <span className="font-semibold">{formatCurrency(numericValue)}</span>
+          </span>
+        );
+      }
+    }
+
+    // Bill status - with badge
+    if (normalizedField === 'status') {
+      const statusColors: Record<string, string> = {
+        active: 'bg-green-100 text-green-700 border-green-200',
+        cancelled: 'bg-red-100 text-red-700 border-red-200',
+        refunded: 'bg-purple-100 text-purple-700 border-purple-200',
+      };
+      
+      const colorClass = statusColors[value] || 'bg-gray-100 text-gray-700 border-gray-200';
+      return (
+        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${colorClass}`}>
+          <span className="capitalize">{t(`soldBills.${value}`)}</span>
+        </span>
+      );
+    }
+
+    // Dates and timestamps - with icon
+    if (normalizedField.endsWith('_at') || normalizedField.includes('date')) {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) {
+        return (
+          <span className="inline-flex items-center gap-1.5 text-sm">
+            <Clock className="h-3.5 w-3.5 text-slate-400" />
+            <span>{date.toLocaleString()}</span>
+          </span>
+        );
+      }
+    }
+
+    // Notes - with multiline support
+    if (normalizedField === 'notes') {
+      return (
+        <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-sm text-slate-700">
+          {value || <span className="italic text-slate-400">{t('soldBills.noNotes')}</span>}
+        </div>
+      );
+    }
+
+    // Boolean values
+    if (value === 'true' || value === 'false') {
+      const isTrue = value === 'true';
+      return (
+        <span className={`inline-flex items-center gap-1.5 ${isTrue ? 'text-green-600' : 'text-red-600'}`}>
+          {isTrue ? <CheckCircle className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+          <span className="capitalize font-medium">{isTrue ? t('soldBills.yes') : t('soldBills.no')}</span>
+        </span>
+      );
+    }
+
+    // Hide JSON objects and arrays completely
+    if (typeof trimmed === 'string' && trimmed.length > 1 && ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')))) {
+      try {
+        JSON.parse(trimmed);
+        // If it's valid JSON, hide it with a friendly message
+        return (
+          <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            <div className="flex items-center gap-2">
+              <Activity className="h-3.5 w-3.5" />
+              <span className="font-medium">{t('soldBills.systemUpdate')}</span>
+            </div>
+          </div>
+        );
+      } catch (error) {
+        // Not valid JSON, continue to show as regular value
+      }
+    }
+
+    // Default - plain text
+    return <span className="text-sm">{value}</span>;
+  }, [formatCurrency, getCustomerName, t]);
+
+  const groupedAuditLogs = useMemo(() => {
+    if (!selectedBill?.bill_audit_logs) return [];
+
+    // Group by timestamp and change reason to combine related changes
+    const groups = new Map<string, BillAuditLog[]>();
+    
+    selectedBill.bill_audit_logs.forEach(log => {
+      const key = `${log.created_at}_${log.changed_by}_${log.change_reason || 'no_reason'}`;
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key)!.push(log);
+    });
+
+    // Convert to array and sort by timestamp (newest first)
+    return Array.from(groups.values())
+      .sort((a, b) => new Date(b[0].created_at).getTime() - new Date(a[0].created_at).getTime());
+  }, [selectedBill]);
+
+  const auditActionMeta = useMemo(() => ({
+    updated: {
+      label: t('soldBills.auditActionUpdated'),
+      badgeClass: 'border border-blue-100 bg-blue-50 text-blue-700 shadow-sm',
+      dotClass: 'bg-blue-500',
+      icon: <RefreshCw className="h-3 w-3" />,
+    },
+    created: {
+      label: t('soldBills.auditActionCreated'),
+      badgeClass: 'border border-green-100 bg-green-50 text-green-700 shadow-sm',
+      dotClass: 'bg-green-500',
+      icon: <CheckCircle className="h-3 w-3" />,
+    },
+    deleted: {
+      label: t('soldBills.auditActionDeleted'),
+      badgeClass: 'border border-red-100 bg-red-50 text-red-700 shadow-sm',
+      dotClass: 'bg-red-500',
+      icon: <Trash2 className="h-3 w-3" />,
+    },
+  }), [t]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -207,8 +514,14 @@ export default function InventoryLogs() {
     setSyncStatus('syncing');
     
     try {
+      // Normalize search term: if it's a number, add "Bill-" prefix for matching
+      let normalizedSearchTerm = debouncedSearchTerm;
+      if (debouncedSearchTerm && /^\d+$/.test(debouncedSearchTerm.trim())) {
+        normalizedSearchTerm = `Bill-${debouncedSearchTerm.trim()}`;
+      }
+      
       const filters = {
-        searchTerm: debouncedSearchTerm || undefined,
+        searchTerm: normalizedSearchTerm || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
         paymentStatus: paymentStatusFilter || undefined,
@@ -237,8 +550,32 @@ export default function InventoryLogs() {
   const loadBillDetails = async (billId: string) => {
     try {
       const data = await raw.getBillDetails(billId);
-      setSelectedBill(data);
-      setEditForm(data);
+      if (!data) {
+        setSelectedBill(null);
+        return;
+      }
+
+      const normalizedLineItems = Array.isArray((data as any).bill_line_items)
+        ? (data as any).bill_line_items
+        : Array.isArray((data as any).line_items)
+          ? (data as any).line_items
+          : [];
+
+      const normalizedAuditLogs = Array.isArray((data as any).bill_audit_logs)
+        ? (data as any).bill_audit_logs
+        : Array.isArray((data as any).audit_logs)
+          ? (data as any).audit_logs
+          : [];
+
+      const normalizedBill = {
+        ...data,
+        bill_line_items: normalizedLineItems,
+        bill_audit_logs: normalizedAuditLogs,
+      } as BillDetails;
+
+      setSelectedBill(normalizedBill);
+      setEditForm(normalizedBill);
+      setLineItemEdits({});
     } catch (error) {
       console.error('Error loading bill details:', error);
       showToast('Failed to load bill details', 'error');
@@ -256,22 +593,211 @@ export default function InventoryLogs() {
   };
 
   const handleSaveBill = async () => {
-    if (!selectedBill || !userProfile?.id) return;
+    console.log('🔍 handleSaveBill called');
+    console.log('🔍 selectedBill:', selectedBill);
+    console.log('🔍 userProfile:', userProfile);
+    
+    if (!selectedBill || !userProfile?.id) {
+      console.log('❌ Early return - missing selectedBill or userProfile');
+      return;
+    }
 
     setIsEditing(true);
     try {
-      const updates = {
-        customer_id: editForm.customer_id,
-        payment_method: editForm.payment_method,
-        payment_status: editForm.payment_status,
-        amount_paid: editForm.amount_paid || 0,
-        notes: editForm.notes,
-      };
+      console.log('🔍 Starting validation...');
+      // Validate all line item changes before saving
+      const lineItemErrors: string[] = [];
+      
+      for (const item of billLineItems) {
+        const edits = lineItemEdits[item.id] || {};
+        if (Object.keys(edits).length === 0) continue;
+        
+        const quantityValue = edits.quantity ?? item.quantity.toString();
+        const unitPriceValue = edits.unitPrice ?? item.unit_price.toString();
+        const weightValue = edits.weight ?? (item.weight !== null && item.weight !== undefined ? item.weight.toString() : '');
+        
+        if (edits.quantity !== undefined) {
+          if (quantityValue.trim() === '' || !Number.isFinite(Number(quantityValue)) || Number(quantityValue) <= 0) {
+            lineItemErrors.push(`${item.product_name}: ${t('accounting.pleaseEnterValidQuantity')}`);
+          }
+        }
+        
+        if (edits.unitPrice !== undefined) {
+          if (unitPriceValue.trim() === '' || !Number.isFinite(Number(unitPriceValue)) || Number(unitPriceValue) <= 0) {
+            lineItemErrors.push(`${item.product_name}: ${t('accounting.pleaseEnterValidUnitPrice')}`);
+          }
+        }
+        
+        if (edits.weight !== undefined && weightValue !== '') {
+          if (!Number.isFinite(Number(weightValue)) || Number(weightValue) < 0) {
+            lineItemErrors.push(`${item.product_name}: ${t('soldBills.invalidWeight')}`);
+          }
+        }
+        
+        // Check if line item is editable
+        const { isEditable } = getInventoryContextForLineItem(item);
+        if (!isEditable && Object.keys(edits).length > 0) {
+          lineItemErrors.push(`${item.product_name}: ${t('soldBills.inventoryBillClosed')}`);
+        }
+      }
+      
+      if (lineItemErrors.length > 0) {
+        showToast(lineItemErrors.join('; '), 'error');
+        setIsEditing(false);
+        return;
+      }
 
-      await raw.updateBill(selectedBill.id, updates, userProfile.id, 'Bill updated via Inventory Logs');
+      // Save all line item changes first
+      console.log('🔍 Starting to save line items. Total items:', billLineItems.length);
+      console.log('🔍 Line item edits:', lineItemEdits);
+      
+      for (const item of billLineItems) {
+        const edits = lineItemEdits[item.id] || {};
+        console.log(`🔍 Processing item ${item.id} (${item.product_name}), edits:`, edits);
+        
+        if (Object.keys(edits).length === 0) {
+          console.log(`  ⏭️ Skipping item ${item.id} - no edits`);
+          continue;
+        }
+        
+        console.log(`  ✅ Item ${item.id} has edits, proceeding to save...`);
+        
+        const quantityValue = edits.quantity ?? item.quantity.toString();
+        const unitPriceValue = edits.unitPrice ?? item.unit_price.toString();
+        const weightValue = edits.weight ?? (item.weight !== null && item.weight !== undefined ? item.weight.toString() : '');
+        const notesValue = edits.notes ?? (item.notes ?? '');
+        
+        // ==================== ONLY UPDATE FIELDS THAT ACTUALLY CHANGED ====================
+        const updates: Partial<BillLineItem> = {};
+        
+        // Track if quantity or price changed (affects line_total calculation)
+        let quantityChanged = false;
+        let unitPriceChanged = false;
+        let weightChanged = false;
+        
+        // Only add quantity if it actually changed
+        if (edits.quantity !== undefined) {
+          const newQuantity = Number(quantityValue);
+          if (newQuantity !== item.quantity) {
+            updates.quantity = newQuantity;
+            quantityChanged = true;
+          }
+        }
+        
+        // Only add unit_price if it actually changed
+        if (edits.unitPrice !== undefined) {
+          const newUnitPrice = Number(unitPriceValue);
+          if (newUnitPrice !== item.unit_price) {
+            updates.unit_price = newUnitPrice;
+            unitPriceChanged = true;
+          }
+        }
+        
+        // Only add weight if it actually changed
+        if (edits.weight !== undefined) {
+          const newWeight = weightValue.trim() === '' ? null : Number(weightValue);
+          if (newWeight !== item.weight) {
+            updates.weight = newWeight;
+            weightChanged = true;
+          }
+        }
+        
+        // Recalculate line_total ONLY if quantity, price, or weight changed
+        if (quantityChanged || unitPriceChanged || weightChanged) {
+          const finalQuantity = updates.quantity ?? item.quantity;
+          const finalUnitPrice = updates.unit_price ?? item.unit_price;
+          const finalWeight = updates.weight !== undefined ? updates.weight : item.weight;
+          
+          const lineTotal = finalWeight && finalWeight > 0 
+            ? Number((finalWeight * finalUnitPrice).toFixed(2))
+            : Number((finalQuantity * finalUnitPrice).toFixed(2));
+          
+          // Only update line_total if it actually changed
+          if (lineTotal !== item.line_total) {
+            updates.line_total = lineTotal;
+            updates.received_value = lineTotal;
+          }
+        }
+        
+        // Add product changes if edited
+        if (edits.product_id !== undefined && edits.product_id !== item.product_id) {
+          updates.product_id = edits.product_id;
+          updates.product_name = edits.product_name || item.product_name;
+        }
+        
+        // Add supplier changes if edited
+        if (edits.supplier_id !== undefined && edits.supplier_id !== item.supplier_id) {
+          updates.supplier_id = edits.supplier_id;
+          updates.supplier_name = edits.supplier_name || item.supplier_name;
+        }
+        
+        // Only add notes if it actually changed
+        if (edits.notes !== undefined) {
+          const newNotes = notesValue.trim() === '' ? null : notesValue.trim();
+          if (newNotes !== item.notes) {
+            updates.notes = newNotes;
+          }
+        }
+        
+        // Only call updateSale if there are actual changes
+        if (Object.keys(updates).length > 0) {
+          await raw.updateSale(item.id, updates);
+        }
+      }
+      
+      console.log('✅ Finished saving all line items');
+
+      // Save bill-level changes - only include fields that have actually changed
+      const updates: Partial<Bill> = {};
+      
+      // Helper function to normalize values for comparison
+      const normalizeForComparison = (value: any): string => {
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'number') return String(value);
+        return String(value).trim();
+      };
+      
+      // Only include fields that have actually changed
+      if (editForm.customer_id !== undefined && normalizeForComparison(editForm.customer_id) !== normalizeForComparison(selectedBill.customer_id)) {
+        updates.customer_id = editForm.customer_id ?? null;
+      }
+      
+      if (editForm.payment_method !== undefined && editForm.payment_method !== selectedBill.payment_method) {
+        updates.payment_method = editForm.payment_method;
+      }
+      
+      if (editForm.payment_status !== undefined && editForm.payment_status !== selectedBill.payment_status) {
+        updates.payment_status = editForm.payment_status;
+      }
+      
+      if (editForm.amount_paid !== undefined) {
+        const newAmountPaid = editForm.amount_paid ?? 0;
+        const oldAmountPaid = selectedBill.amount_paid ?? 0;
+        if (normalizeForComparison(newAmountPaid) !== normalizeForComparison(oldAmountPaid)) {
+          updates.amount_paid = newAmountPaid;
+        }
+      }
+      
+      if (editForm.notes !== undefined && normalizeForComparison(editForm.notes) !== normalizeForComparison(selectedBill.notes)) {
+        updates.notes = editForm.notes ?? null;
+      }
+      
+      // Only call updateBill if there are actual changes
+      if (Object.keys(updates).length > 0) {
+        console.log('🔍 Bill-level updates:', updates);
+        await raw.updateBill(selectedBill.id, updates, userProfile.id, 'Bill updated via Inventory Logs');
+      } else {
+        console.log('⏭️ No bill-level changes to save');
+      }
 
       showToast('Bill updated successfully');
-      setShowEditBill(false);
+      
+      // Reload bill details to show updated audit logs (before closing modal)
+      if (selectedBill.id) {
+        await loadBillDetails(selectedBill.id);
+      }
+      
+      handleCloseEditBill();
       loadBills();
     } catch (error) {
       console.error('Error updating bill:', error);
@@ -279,6 +805,22 @@ export default function InventoryLogs() {
     } finally {
       setIsEditing(false);
     }
+  };
+
+  const handleLineItemChange = (lineItemId: string, field: keyof LineItemEditState, value: string) => {
+    setLineItemEdits(prev => ({
+      ...prev,
+      [lineItemId]: {
+        ...prev[lineItemId],
+        [field]: value,
+      },
+    }));
+  };
+
+
+  const handleCloseEditBill = () => {
+    setShowEditBill(false);
+    setLineItemEdits({});
   };
 
   const handleDeleteBill = async (bill: Bill, softDelete: boolean = true) => {
@@ -904,7 +1446,7 @@ export default function InventoryLogs() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {selectedBill.bill_line_items?.map((item) => (
+                      {billLineItems.map((item) => (
                         <tr key={item.id}>
                           <td className="px-4 py-3 text-sm text-gray-900">{item.product_name}</td>
                           <td className="px-4 py-3 text-sm text-gray-600">{item.supplier_name}</td>
@@ -936,13 +1478,13 @@ export default function InventoryLogs() {
       {/* Edit Bill Modal */}
       {showEditBill && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b flex items-center justify-between rtl:flex-row-reverse">
               <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
                 {t('soldBills.editBill')} - {selectedBill.bill_number}
               </h2>
               <button
-                onClick={() => setShowEditBill(false)}
+                onClick={handleCloseEditBill}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X className="w-6 h-6" />
@@ -1016,6 +1558,170 @@ export default function InventoryLogs() {
                 </div>
               </div>
 
+              <div className="space-y-4">
+                <div className="flex items-center justify-between rtl:flex-row-reverse">
+                  <h3 className="text-lg font-medium text-gray-900 rtl:text-right">{t('soldBills.lineItems')}</h3>
+                </div>
+                {billLineItems.length > 0 ? (
+                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.product')}</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.supplier')}</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.quantity')}</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.weight')}</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.price')}</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.total')}</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.notes')}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {billLineItems.map((item) => {
+                          const edit = lineItemEdits[item.id] || {};
+                          const quantityValue = edit.quantity ?? item.quantity.toString();
+                          const unitPriceValue = edit.unitPrice ?? item.unit_price.toString();
+                          const weightValue = edit.weight ?? (item.weight !== null && item.weight !== undefined ? item.weight.toString() : '');
+                          const notesValue = edit.notes ?? (item.notes ?? '');
+
+                          const quantityInvalid = edit.quantity !== undefined && (quantityValue.trim() === '' || !Number.isFinite(Number(quantityValue)) || Number(quantityValue) <= 0);
+                          const unitPriceInvalid = edit.unitPrice !== undefined && (unitPriceValue.trim() === '' || !Number.isFinite(Number(unitPriceValue)) || Number(unitPriceValue) <= 0);
+                          const weightInvalid = edit.weight !== undefined && weightValue !== '' && (!Number.isFinite(Number(weightValue)) || Number(weightValue) < 0);
+
+                          const numericQuantity = quantityInvalid ? null : Number(quantityValue);
+                          const numericUnitPrice = unitPriceInvalid ? null : Number(unitPriceValue);
+                          const numericWeight = weightValue ? Number(weightValue) : null;
+                          
+                          let computedTotalValue: number | string = 0;
+                          if (numericQuantity !== null && numericUnitPrice !== null) {
+                            if (numericWeight && numericWeight > 0) {
+                              computedTotalValue = Number((numericWeight * numericUnitPrice).toFixed(2));
+                            } else {
+                              computedTotalValue = Number((numericQuantity * numericUnitPrice).toFixed(2));
+                            }
+                          }
+
+                          const { isEditable, batchStatus } = getInventoryContextForLineItem(item);
+
+                          return (
+                            <tr key={item.id} className="align-top">
+                              <td className="px-4 py-3 text-sm text-gray-900">
+                                <select
+                                  value={edit.product_id ?? item.product_id}
+                                  onChange={(e) => {
+                                    const selectedProduct = raw.products.find(p => p.id === e.target.value);
+                                    handleLineItemChange(item.id, 'product_id', e.target.value);
+                                    if (selectedProduct) {
+                                      handleLineItemChange(item.id, 'product_name', selectedProduct.name);
+                                    }
+                                  }}
+                                  disabled={!isEditable || isEditing}
+                                  className="w-full border border-gray-300 rounded-lg px-2 py-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
+                                >
+                                  {raw.products.map(product => (
+                                    <option key={product.id} value={product.id}>
+                                      {product.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                {!isEditable && (
+                                  <div className="text-xs text-red-500 mt-1 rtl:text-right">
+                                    {t('soldBills.inventoryBillClosed')}
+                                    {batchStatus && (
+                                      <span className="text-gray-400 ltr:ml-1 rtl:mr-1">({batchStatus})</span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <select
+                                  value={edit.supplier_id ?? item.supplier_id}
+                                  onChange={(e) => {
+                                    const selectedSupplier = raw.suppliers.find(s => s.id === e.target.value);
+                                    handleLineItemChange(item.id, 'supplier_id', e.target.value);
+                                    if (selectedSupplier) {
+                                      handleLineItemChange(item.id, 'supplier_name', selectedSupplier.name);
+                                    }
+                                  }}
+                                  disabled={!isEditable || isEditing}
+                                  className="w-full border border-gray-300 rounded-lg px-2 py-2 focus:ring-blue-500 focus:border-blue-500"
+                                >
+                                  {raw.suppliers.map(supplier => (
+                                    <option key={supplier.id} value={supplier.id}>
+                                      {supplier.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="px-4 py-3">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={quantityValue}
+                                  onChange={(e) => handleLineItemChange(item.id, 'quantity', e.target.value)}
+                                  disabled={!isEditable || isEditing}
+                                  className={`w-full border rounded-lg px-2 py-2 focus:ring-blue-500 focus:border-blue-500 ${quantityInvalid ? 'border-red-400' : 'border-gray-300'}`}
+                                />
+                                {quantityInvalid && (
+                                  <div className="text-xs text-red-500 mt-1 rtl:text-right">{t('accounting.pleaseEnterValidQuantity')}</div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={weightValue}
+                                  onChange={(e) => handleLineItemChange(item.id, 'weight', e.target.value)}
+                                  disabled={!isEditable || isEditing}
+                                  className={`w-full border rounded-lg px-2 py-2 focus:ring-blue-500 focus:border-blue-500 ${weightInvalid ? 'border-red-400' : 'border-gray-300'}`}
+                                  placeholder={t('soldBills.weight')}
+                                />
+                                {weightInvalid && (
+                                  <div className="text-xs text-red-500 mt-1 rtl:text-right">{t('soldBills.invalidWeight')}</div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={unitPriceValue}
+                                  onChange={(e) => handleLineItemChange(item.id, 'unitPrice', e.target.value)}
+                                  disabled={!isEditable || isEditing}
+                                  className={`w-full border rounded-lg px-2 py-2 focus:ring-blue-500 focus:border-blue-500 ${unitPriceInvalid ? 'border-red-400' : 'border-gray-300'}`}
+                                />
+                                {unitPriceInvalid && (
+                                  <div className="text-xs text-red-500 mt-1 rtl:text-right">{t('accounting.pleaseEnterValidUnitPrice')}</div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                                {formatCurrency(typeof computedTotalValue === 'number' ? computedTotalValue : 0)}
+                              </td>
+                              <td className="px-4 py-3">
+                                <textarea
+                                  rows={2}
+                                  value={notesValue}
+                                  onChange={(e) => handleLineItemChange(item.id, 'notes', e.target.value)}
+                                  disabled={!isEditable || isEditing}
+                                  className="w-full border border-gray-300 rounded-lg px-2 py-2 focus:ring-blue-500 focus:border-blue-500"
+                                  placeholder={t('soldBills.notes')}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-4 rtl:text-right">
+                    {t('soldBills.noLineItems')}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.notes')}</label>
                 <textarea
@@ -1029,7 +1735,7 @@ export default function InventoryLogs() {
 
               <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 rtl:space-x-reverse">
                 <button
-                  onClick={() => setShowEditBill(false)}
+                  onClick={handleCloseEditBill}
                   className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   disabled={isEditing}
                 >
@@ -1037,8 +1743,8 @@ export default function InventoryLogs() {
                 </button>
                 <button
                   onClick={handleSaveBill}
-                  disabled={isEditing}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center"
+                  disabled={isEditing || !billFormHasChanges}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isEditing ? (
                     <>
@@ -1075,64 +1781,131 @@ export default function InventoryLogs() {
             </div>
 
             <div className="p-6">
-              {selectedBill.bill_audit_logs && selectedBill.bill_audit_logs.length > 0 ? (
-                <div className="space-y-4">
-                  {selectedBill.bill_audit_logs.map((log) => (
-                    <div key={log.id} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center">
-                          <div className={`w-3 h-3 rounded-full mr-3 ${
-                            log.action === 'created' ? 'bg-green-500' :
-                            log.action === 'updated' ? 'bg-blue-500' :
-                            log.action === 'deleted' ? 'bg-red-500' :
-                            'bg-gray-500'
-                          }`} />
-                          <span className="font-medium text-gray-900 capitalize">
-                            {log.action.replace('_', ' ')}
+              {groupedAuditLogs.length > 0 ? (
+                <div className="relative">
+                  <div className="absolute left-6 top-0 bottom-0 hidden w-px bg-gradient-to-b from-transparent via-slate-200 to-transparent md:block" />
+                  <div className="space-y-6">
+                    {groupedAuditLogs.map((logGroup, groupIndex) => {
+                      const firstLog = logGroup[0];
+                      const actionKey = (firstLog.action || 'updated') as keyof typeof auditActionMeta;
+                      const fallbackMeta = {
+                        label: firstLog.action,
+                        badgeClass: 'border border-slate-200 bg-slate-100 text-slate-700',
+                        dotClass: 'bg-slate-400',
+                        icon: <History className="h-3 w-3 text-slate-500" />,
+                      };
+                      const actionMeta = auditActionMeta[actionKey] || fallbackMeta;
+                      
+                      // Count only logs with actual changes
+                      const actualChangesCount = logGroup.filter((log) => {
+                        const isGeneralChange = !log.field_changed || log.field_changed === 'bill_record';
+                        if (isGeneralChange) return true;
+                        return log.old_value !== null || log.new_value !== null;
+                      }).length;
+                      
+                      const multipleChanges = actualChangesCount > 1;
+
+                      return (
+                        <div key={`group-${groupIndex}`} className="relative pl-10 md:pl-14">
+                          <span className="absolute left-4 top-7 hidden h-3 w-3 -translate-x-1.5 items-center justify-center md:flex">
+                            <span className={`h-3 w-3 rounded-full border-2 border-white shadow-sm ${actionMeta.dotClass}`} />
                           </span>
-                        </div>
-                        <span className="text-sm text-gray-500">
-                          {new Date(log.created_at).toLocaleString()}
-                        </span>
-                      </div>
-                      
-                      <div className="text-sm text-gray-600 mb-2 rtl:text-right">
-                        {t('soldBills.changedBy')}: {log.users?.name || t('soldBills.unknownUser')}
-                      </div>
-                      
-                      {log.field_changed && (
-                        <div className="text-sm text-gray-600 mb-2 rtl:text-right">
-                          {t('soldBills.field')}: <span className="font-mono bg-gray-100 px-1 rounded">{log.field_changed}</span>
-                        </div>
-                      )}
-                      
-                      {log.change_reason && (
-                        <div className="text-sm text-gray-600 mb-2 rtl:text-right">
-                          {t('soldBills.reason')}: {log.change_reason}
-                        </div>
-                      )}
-                      
-                      {(log.old_value || log.new_value) && (
-                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded rtl:text-right">
-                          {log.old_value && (
-                            <div className="mb-1">
-                              <span className="font-medium">{t('soldBills.old')}:</span> {log.old_value.length > 100 ? `${log.old_value.substring(0, 100)}...` : log.old_value}
+
+                          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow">
+                            <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 md:flex-row md:items-center md:justify-between">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${actionMeta.badgeClass}`}>
+                                  {actionMeta.icon}
+                                  <span>{actionMeta.label}</span>
+                                </span>
+                                {multipleChanges && (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                                    <Activity className="h-3 w-3" />
+                                    <span>{actualChangesCount} {t('soldBills.fieldsChanged')}</span>
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 text-right text-xs text-slate-500">
+                                <div>{new Date(firstLog.created_at).toLocaleString()}</div>
+                              </div>
                             </div>
-                          )}
-                          {log.new_value && (
-                            <div>
-                              <span className="font-medium">{t('soldBills.new')}:</span> {log.new_value.length > 100 ? `${log.new_value.substring(0, 100)}...` : log.new_value}
+
+                            <div className="space-y-4 px-5 py-4">
+                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                                <User className="h-3.5 w-3.5" />
+                                <span>{t('soldBills.changedBy')}: <span className="font-medium text-slate-700">{firstLog.users?.name || t('soldBills.unknownUser')}</span></span>
+                              </div>
+
+                              {firstLog.change_reason && (
+                                <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                                  <div className="flex items-center gap-2">
+                                    <FileText className="h-3.5 w-3.5" />
+                                    <span className="font-medium">{t('soldBills.reason')}:</span>
+                                    <span>{firstLog.change_reason}</span>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="space-y-3">
+                                {logGroup
+                                  .filter((log) => {
+                                    // ==================== ONLY SHOW LOGS WITH ACTUAL CHANGES ====================
+                                    // Show general changes (bill creation, etc.)
+                                    const isGeneralChange = !log.field_changed || log.field_changed === 'bill_record';
+                                    if (isGeneralChange) return true;
+                                    
+                                    // Show logs where old_value or new_value exists
+                                    // (indicating an actual change happened)
+                                    return log.old_value !== null || log.new_value !== null;
+                                  })
+                                  .map((log) => {
+                                  const isGeneralChange = !log.field_changed || log.field_changed === 'bill_record';
+                                  
+                                  if (isGeneralChange) {
+                                    return (
+                                      <div key={log.id} className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+                                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                          <Activity className="h-3.5 w-3.5" />
+                                          <span>{t('soldBills.systemUpdate')}</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+
+                                  return (
+                                    <div key={log.id} className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                                      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                                        <Edit className="h-4 w-4 text-slate-400" />
+                                        <span>{getFieldLabel(log.field_changed || '')}</span>
+                                      </div>
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+                                          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{t('soldBills.old')}</div>
+                                          <div>{renderAuditValue(log.field_changed, log.old_value)}</div>
+                                        </div>
+                                        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 shadow-sm">
+                                          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-blue-600">{t('soldBills.new')}</div>
+                                          <div>{renderAuditValue(log.field_changed, log.new_value)}</div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          )}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      );
+                    })}
+                  </div>
                 </div>
               ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <History className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                  <p className="rtl:text-right">{t('soldBills.noAuditTrailAvailable')}</p>
+                <div className="py-12 text-center">
+                  <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+                    <History className="h-8 w-8 text-slate-400" />
+                  </div>
+                  <h3 className="mb-1 text-sm font-medium text-slate-900">{t('soldBills.noAuditTrailAvailable')}</h3>
+                  <p className="text-xs text-slate-500">{t('soldBills.auditTrailEmptyDesc')}</p>
                 </div>
               )}
             </div>

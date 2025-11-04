@@ -5,7 +5,6 @@ import {
   TrendingUp, 
   Calendar,
   Search,
-  Download,
   Plus,
   Edit,
   Trash2
@@ -95,7 +94,7 @@ export default function SupplierAdvances({
   // Get all advance transactions with supplier details
   const advanceTransactionsWithDetails = useMemo(() => {
     return transactions
-      .filter(t => t.category === 'Supplier Advance' && !t._deleted)
+      .filter(t => (t.category === 'Supplier Advance' || t.description?.includes('advance')) && !t._deleted)
       .map(transaction => {
         const supplier = suppliers.find(s => s.id === transaction.supplier_id);
         
@@ -221,30 +220,6 @@ export default function SupplierAdvances({
     }
   };
 
-  const exportAdvances = () => {
-    const csvContent = [
-      ['Date', 'Supplier', 'Type', 'USD Amount', 'LBP Amount', 'Description', 'Review Date', 'Reference'].join(','),
-      ...filteredAdvances.map(adv => [
-        new Date(adv.created_at).toLocaleDateString(),
-        adv.supplierName,
-        adv.type === 'expense' ? 'Given' : 'Deducted',
-        adv.advanceUSD || 0,
-        adv.advanceLBP || 0,
-        (adv.description || '').replace(/,/g, ';'),
-        adv.reviewDate || 'N/A',
-        adv.reference || ''
-      ].join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `supplier-advances-history-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    showToast(t('customers.advancesExported'), 'success');
-  };
 
   const handleEditAdvance = (advance: any) => {
     // Extract review date from description if it exists
@@ -366,6 +341,55 @@ export default function SupplierAdvances({
 
       </div>
 
+      {/* Suppliers with Current Advances */}
+      {advanceStats.suppliersWithAdvances > 0 && (
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('customers.suppliersWithAdvances') || 'Suppliers with Advances'}</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">{t('payments.supplier') || 'Supplier'}</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">{t('customers.advanceUSD') || 'USD Advance'}</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">{t('customers.advanceLBP') || 'LBP Advance'}</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">{t('common.labels.contact') || 'Contact'}</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {suppliers
+                  .filter(s => (s.advance_usd_balance || 0) > 0 || (s.advance_lb_balance || 0) > 0)
+                  .map(supplier => (
+                    <tr key={supplier.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
+                        {supplier.address && (
+                          <div className="text-xs text-gray-500">{supplier.address}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className={`text-sm font-semibold ${(supplier.advance_usd_balance || 0) > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                          {(supplier.advance_usd_balance || 0) > 0 ? `$${formatCurrency(supplier.advance_usd_balance || 0)}` : '-'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className={`text-sm font-semibold ${(supplier.advance_lb_balance || 0) > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+                          {(supplier.advance_lb_balance || 0) > 0 ? `${formatCurrency(supplier.advance_lb_balance || 0)} ل.ل` : '-'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-sm text-gray-900">{supplier.phone}</div>
+                        {supplier.email && (
+                          <div className="text-xs text-gray-500">{supplier.email}</div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Action Buttons */}
       <div className="flex flex-wrap gap-3">
         <button
@@ -381,13 +405,6 @@ export default function SupplierAdvances({
         >
           <Plus className="w-5 h-5 mr-2" />
           {t('customers.addSupplier')}
-        </button>
-        <button
-          onClick={exportAdvances}
-          className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-        >
-          <Download className="w-5 h-5 mr-2" />
-          {t('common.actions.export')}
         </button>
       </div>
 

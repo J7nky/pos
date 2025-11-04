@@ -42,10 +42,13 @@ export function NotificationCenter() {
       case 'low_stock':
       case 'bill_due':
       case 'payment_due':
+      case 'reminder_overdue':
       case 'error':
         return 'bg-red-100 text-red-700';
       case 'payment_reminder':
       case 'inventory_alert':
+      case 'bill_ready_to_close':
+      case 'reminder_due':
       case 'warning':
         return 'bg-orange-100 text-orange-700';
       case 'sync_complete':
@@ -53,6 +56,8 @@ export function NotificationCenter() {
         return 'bg-green-100 text-green-700';
       case 'sync_error':
         return 'bg-red-100 text-red-700';
+      case 'reminder_upcoming':
+        return 'bg-blue-100 text-blue-700';
       default:
         return 'bg-blue-100 text-blue-700';
     }
@@ -83,7 +88,7 @@ export function NotificationCenter() {
 
       {/* Notification Panel */}
       {isOpen && (
-        <div className="absolute right-0 top-12 w-96 bg-white rounded-lg shadow-xl border border-gray-200 z-50 max-h-[600px] flex flex-col">
+        <div className="fixed right-4 top-16 w-96 max-w-[calc(100vw-2rem)] bg-white rounded-lg shadow-xl border border-gray-200 z-50 max-h-[600px] flex flex-col">
           {/* Header */}
           <div className="p-4 border-b border-gray-200 flex items-center justify-between">
             <h3 className="font-semibold text-lg">Notifications</h3>

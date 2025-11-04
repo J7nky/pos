@@ -13,6 +13,8 @@ import { syncService, SyncResult } from '../services/syncService';
 import { crudHelperService } from '../services/crudHelperService';
 import { realTimeSyncService } from '../services/realTimeSyncService';
 import { notificationService } from '../services/notificationService';
+import { receivedBillMonitoringService } from '../services/receivedBillMonitoringService';
+import { reminderMonitoringService } from '../services/reminderMonitoringService';
 import { 
   generatePaymentReference, 
   generateSaleReference, 
@@ -696,6 +698,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Run migration for existing transactions after data loads
     await migrateExistingTransactions();
+
+    // Start monitoring for completed bills
+    if (storeId) {
+      receivedBillMonitoringService.startMonitoring(storeId);
+      reminderMonitoringService.startMonitoring(storeId);
+    }
   };
 
   // Migration: Fix existing transactions with large LBP amounts
@@ -1074,13 +1082,34 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Store original inventory states for undo
     const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
 
-    // Use transaction to ensure atomicity for all operations including inventory, cash drawer, and customer balance
-    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.customers, db.suppliers, db.transactions], async () => {
+    // Use transaction to ensure atomicity for all operations including inventory, cash drawer, customer balance, and audit logs
+    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.customers, db.suppliers, db.transactions, db.bill_audit_logs], async () => {
       // Add bill and line items
       await db.bills.add(bill);
       if (mappedLineItems.length > 0) {
         await db.bill_line_items.bulkAdd(mappedLineItems);
       }
+
+      // ==================== CREATE AUDIT LOG ====================
+      // Create ONE audit log entry for bill creation with human-readable information
+      const generatedReason = `Creating bill #${bill.bill_number} with total amount ${bill.total_amount || 0}`;
+      
+      await db.bill_audit_logs.add({
+        id: createId(),
+        store_id: storeId,
+        bill_id: billId,
+        action: 'created',
+        field_changed: null,
+        old_value: null,
+        new_value: JSON.stringify(bill),
+        change_reason: generatedReason,
+        changed_by: currentUserId,
+        ip_address: null,
+        user_agent: null,
+        created_at: now,
+        updated_at: now,
+        _synced: false
+      });
 
       // Deduct inventory quantities for all line items (regardless of payment method)
       for (const item of mappedLineItems) {
@@ -1314,46 +1343,103 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     debouncedSync();
 
+    // Check if any inventory items are now 100% complete
+    for (const item of mappedLineItems) {
+      if (item.inventory_item_id) {
+        receivedBillMonitoringService.checkBillAfterSale(storeId, item.inventory_item_id).catch(err => {
+          console.error('Error checking bill completion:', err);
+        });
+      }
+    }
+
     return billId;
   };
 
   const updateBill = async (billId: string, updates: any, changedBy: string, changeReason?: string): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
-    // Get original bill for undo
+    // Get original bill for undo and comparison
     const originalBill = await db.bills.get(billId);
     if (!originalBill) throw new Error('Bill not found');
     
     const now = new Date().toISOString();
-    const auditLogId = createId();
 
     // Pure offline-first approach - update local database only
-    await db.transaction('rw', [db.bills, db.bill_audit_logs], async () => {
+    // Create audit logs for each changed field with ID resolution
+    const auditLogs: any[] = [];
+    const auditLogIds: string[] = [];
+
+    await db.transaction('rw', [db.bills, db.bill_audit_logs, db.customers], async () => {
+      // Update the bill
       await db.bills.update(billId, {
         ...updates,
         updated_at: now,
         _synced: false // Mark as unsynced for background sync
       });
 
-      // Create audit log
-      const auditLog = {
-        id: auditLogId,
-        bill_id: billId,
-        store_id: storeId,
-        action: 'updated' as const,
-        field_changed: null,
-        old_value: null,
-        new_value: JSON.stringify(updates),
-        change_reason: changeReason || null,
-        changed_by: changedBy,
-        ip_address: null,
-        user_agent: null, // Add missing field
-        created_at: now,
-        updated_at: now,
-        _synced: false // Mark as unsynced for background sync
-      };
+      // ==================== CREATE FIELD-LEVEL AUDIT LOGS ====================
+      // Create MULTIPLE audit logs (one per changed field) with ID resolution
+      for (const [field, newValue] of Object.entries(updates)) {
+        if (field !== '_synced' && field !== 'updated_at') {
+          const oldValue = (originalBill as any)[field];
+          if (oldValue !== newValue) {
+            // Resolve IDs to human-readable names
+            let oldValueDisplay = oldValue != null ? String(oldValue) : 'empty';
+            let newValueDisplay = newValue != null ? String(newValue) : 'empty';
 
-      await db.bill_audit_logs.add(auditLog);
+            // Resolve customer_id to customer name
+            if (field === 'customer_id') {
+              if (oldValue) {
+                const oldCustomer = await db.customers.get(oldValue);
+                oldValueDisplay = oldCustomer?.name || oldValue;
+              } else {
+                oldValueDisplay = 'Walk-in Customer';
+              }
+              
+              if (newValue) {
+                const newCustomer = await db.customers.get(newValue);
+                newValueDisplay = newCustomer?.name || newValue;
+              } else {
+                newValueDisplay = 'Walk-in Customer';
+              }
+            }
+
+            // Format numeric values for better readability
+            if (field === 'total_amount' || field === 'amount_paid' || field === 'amount_due' || 
+                field === 'subtotal' || field === 'tax_amount' || field === 'discount_amount') {
+              if (oldValue != null) oldValueDisplay = Number(oldValue).toLocaleString();
+              if (newValue != null) newValueDisplay = Number(newValue).toLocaleString();
+            }
+
+            // Generate descriptive change reason
+            const fieldLabel = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const generatedReason = changeReason || `Updating ${fieldLabel} from ${oldValueDisplay} to ${newValueDisplay}`;
+
+            const auditLogId = createId();
+            auditLogIds.push(auditLogId);
+
+            const auditLog = {
+              id: auditLogId,
+              bill_id: billId,
+              store_id: storeId,
+              action: 'updated' as const,
+              field_changed: field,
+              old_value: oldValueDisplay !== 'empty' ? oldValueDisplay : null,
+              new_value: newValueDisplay !== 'empty' ? newValueDisplay : null,
+              change_reason: generatedReason,
+              changed_by: changedBy,
+              ip_address: null,
+              user_agent: null,
+              created_at: now,
+              updated_at: now,
+              _synced: false
+            };
+
+            auditLogs.push(auditLog);
+            await db.bill_audit_logs.add(auditLog);
+          }
+        }
+      }
     });
 
     // Store undo data with original values
@@ -1368,11 +1454,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       type: 'update_bill',
       affected: [
         { table: 'bills', id: billId },
-        { table: 'bill_audit_logs', id: auditLogId }
+        ...auditLogIds.map(id => ({ table: 'bill_audit_logs', id }))
       ],
       steps: [
         { op: 'update', table: 'bills', id: billId, changes: undoChanges },
-        { op: 'delete', table: 'bill_audit_logs', id: auditLogId }
+        ...auditLogIds.map(id => ({ op: 'delete', table: 'bill_audit_logs', id }))
       ]
     });
 
@@ -1391,7 +1477,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const auditLogId = createId();
 
-    // Get line items for undo
+    // Get bill and line items for undo and audit trail
+    const bill = await db.bills.get(billId);
     const lineItems = await db.bill_line_items.where('bill_id').equals(billId).toArray();
 
     // Pure offline-first approach - delete from local database only
@@ -1417,22 +1504,28 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         await db.bill_line_items.where('bill_id').equals(billId).delete();
       }
 
-      // Create audit log
+      // ==================== CREATE AUDIT LOG ====================
+      // Create ONE audit log with descriptive reason
+      const deleteAction = softDelete ? 'cancelled' : 'permanently deleted';
+      const generatedReason = bill 
+        ? `Deleting bill #${bill.bill_number} (${deleteAction})` 
+        : `Deleting bill (${deleteAction})`;
+
       const auditLog = {
         id: auditLogId,
         bill_id: billId,
         store_id: storeId,
         action: 'deleted' as const,
         field_changed: 'status',
-        old_value: 'active',
+        old_value: bill?.status || 'active',
         new_value: softDelete ? 'cancelled' : 'deleted',
-        change_reason: deleteReason || null,
+        change_reason: deleteReason || generatedReason,
         changed_by: deletedBy,
         ip_address: null,
-        user_agent: null, // Add missing field
+        user_agent: null,
         created_at: now,
         updated_at: now,
-        _synced: false // Mark as unsynced for background sync
+        _synced: false
       };
 
       await db.bill_audit_logs.add(auditLog);
@@ -1512,7 +1605,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       allCustomers.forEach(c => customersMap.set(c.id, c.name.toLowerCase()));
 
       billsData = billsData.filter(bill => {
-        const billNumberMatch = bill.bill_number?.toLowerCase().includes(searchLower);
+        const billNumberLower = bill.bill_number?.toLowerCase() || '';
+        // Support searching with or without "Bill-" prefix
+        // e.g., searching "12345678" will match "Bill-12345678"
+        const billNumberWithoutPrefix = billNumberLower.replace(/^bill-/, '');
+        const billNumberMatch = billNumberLower.includes(searchLower) || billNumberWithoutPrefix.includes(searchLower);
         const notesMatch = bill.notes?.toLowerCase().includes(searchLower);
         const customerName = bill.customer_id ? customersMap.get(bill.customer_id) : '';
         const customerMatch = customerName?.includes(searchLower);
@@ -1559,10 +1656,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       .filter(log => !log._deleted)
       .toArray();
 
+    // ==================== RESOLVE USER NAMES IN AUDIT LOGS ====================
+    // Join audit logs with users to get user names and emails
+    const auditLogsWithUsers = await Promise.all(
+      auditLogs.map(async (log) => {
+        const user = await db.users.get(log.changed_by);
+        return {
+          ...log,
+          users: user ? { name: user.name, email: user.email } : undefined
+        };
+      })
+    );
+
     const result = {
       ...bill,
       line_items: lineItems,
-      audit_logs: auditLogs
+      bill_audit_logs: auditLogsWithUsers // Changed from 'audit_logs' to 'bill_audit_logs' to match documentation
     };
 
     return result;
@@ -2364,6 +2473,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateSale = async (id: string, updates: Partial<BillLineItem>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
+    
+    const currentUserId = userProfile?.id;
+    if (!currentUserId) {
+      throw new Error('No user ID available - user not authenticated');
+    }
 
     // Get the original sale item to compare quantities
     const originalSale = await db.bill_line_items.get(id);
@@ -2379,15 +2493,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Check if price-related fields have changed (these affect bill totals)
     const priceChanged = updates.unit_price !== undefined || updates.received_value !== undefined || updates.weight !== undefined;
 
-    // Use transaction to ensure atomicity for the sale update only
-    await db.transaction('rw', [db.bill_line_items], async () => {
-      // Update the sale item
-      const updateData = {
-        ...dbUpdates,
-        _synced: false
-      };
-      await db.bill_line_items.update(id, updateData);
-    });
+    // ==================== USE AUDIT TRAIL FUNCTION ====================
+    // Use db.updateBillLineItem which creates audit logs with ID resolution
+    await db.updateBillLineItem(id, dbUpdates, currentUserId);
 
     // Handle inventory adjustments outside the transaction if quantity changed
     if (quantityChanged && originalSale.product_id && originalSale.supplier_id) {
@@ -2586,6 +2694,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     delete processedUpdates.plastic_price;
 
     await db.inventory_bills.update(id, processedUpdates);
+    
+    // Check if bill was just closed - clean up notifications
+    if (updates.status && typeof updates.status === 'string' && updates.status.includes('[CLOSED]')) {
+      if (storeId) {
+        // Get all inventory items with this batch_id and mark them as closed in monitoring
+        const inventoryItems = await db.inventory_items
+          .where('batch_id')
+          .equals(id)
+          .toArray();
+        
+        for (const item of inventoryItems) {
+          receivedBillMonitoringService.markBillAsClosed(storeId, item.id).catch(err => {
+            console.error('Error marking bill as closed in monitoring:', err);
+          });
+        }
+      }
+    }
     
     // Store undo data with original values
     const undoChanges: any = {};
@@ -3090,6 +3215,41 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Save transaction to IndexedDB
       await db.transactions.add(transactionData);
+
+      // Create reminder if review date is provided
+      if (reviewDate && type === 'give') {
+        try {
+          await reminderMonitoringService.createReminder({
+            store_id: userProfile?.store_id || '',
+            type: 'supplier_advance_review',
+            entity_type: 'supplier',
+            entity_id: supplierId,
+            entity_name: supplier.name,
+            due_date: reviewDate,
+            remind_before_days: [7, 3, 1, 0], // Remind 7, 3, 1 days before and on due date
+            is_recurring: false,
+            status: 'pending',
+            title: `Review Advance for ${supplier.name}`,
+            description: `Review the ${currency === 'USD' ? `$${amount.toFixed(2)}` : `${Math.round(amount).toLocaleString()} ل.ل`} advance given to ${supplier.name}. Check if work is completed or if additional settlement is needed.`,
+            priority: 'medium',
+            action_url: '/accounting?tab=supplier-advances',
+            metadata: {
+              transaction_id: transactionId,
+              supplier_id: supplierId,
+              supplier_name: supplier.name,
+              amount: amount,
+              currency: currency,
+              advance_date: date,
+              advance_type: 'give'
+            },
+            created_by: userProfile?.id || ''
+          });
+          console.log(`📅 Reminder created for advance review on ${new Date(reviewDate).toLocaleDateString()}`);
+        } catch (reminderError) {
+          console.error('❌ Error creating reminder:', reminderError);
+          // Don't fail the transaction if reminder creation fails
+        }
+      }
 
       // If giving advance, withdraw from cash drawer
       let cashDrawerResult: any = null;

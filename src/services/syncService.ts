@@ -37,7 +37,9 @@ const SYNC_TABLES = [
 'bills',
   'bill_line_items',
   'bill_audit_logs',
-'cash_drawer_sessions'
+'cash_drawer_sessions',
+'missed_products',
+'reminders'
 ] as const;
 
 type SyncTable = typeof SYNC_TABLES[number];
@@ -57,7 +59,8 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
 'bill_line_items': ['bills', 'products', 'suppliers', 'inventory_items'],
 'bill_audit_logs': ['bills'],
 'cash_drawer_sessions': ['cash_drawer_accounts'],
-'missed_products': ['cash_drawer_sessions', 'inventory_items']
+'missed_products': ['cash_drawer_sessions', 'inventory_items'],
+'reminders': ['users'] // Reminders reference users (created_by, completed_by)
 };
 
 export interface SyncResult {

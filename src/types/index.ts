@@ -530,6 +530,10 @@ export type NotificationType =
   | 'sync_error'
   | 'inventory_alert'
   | 'cash_drawer_discrepancy'
+  | 'bill_ready_to_close'
+  | 'reminder_due'
+  | 'reminder_overdue'
+  | 'reminder_upcoming'
   | 'info'
   | 'warning'
   | 'error'
@@ -558,4 +562,173 @@ export interface NotificationPreferences {
   show_in_app: boolean;
   auto_dismiss_seconds?: number;
   max_notifications_in_history: number;
+}
+
+// =====================================================
+// UNIFIED REMINDER SYSTEM TYPES
+// =====================================================
+
+export type ReminderType = 
+  | 'supplier_advance_review'
+  | 'payment_due'
+  | 'bill_payment'
+  | 'customer_followup'
+  | 'inventory_reorder'
+  | 'contract_renewal'
+  | 'license_expiration'
+  | 'equipment_maintenance'
+  | 'employee_review'
+  | 'insurance_renewal'
+  | 'lease_renewal'
+  | 'custom';
+
+export type ReminderEntityType = 
+  | 'supplier'
+  | 'customer'
+  | 'transaction'
+  | 'bill'
+  | 'inventory'
+  | 'employee'
+  | 'contract'
+  | 'equipment'
+  | 'license'
+  | 'other';
+
+export type ReminderStatus = 
+  | 'pending'
+  | 'completed'
+  | 'dismissed'
+  | 'overdue'
+  | 'snoozed';
+
+export type RecurrencePattern = 
+  | 'daily'
+  | 'weekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'yearly';
+
+// Cloud notification channels (for future use)
+export interface NotificationChannels {
+  in_app: boolean;
+  email?: boolean;
+  sms?: boolean;
+  push?: boolean;
+}
+
+// Cloud notification history entry (for future use)
+export interface NotificationHistoryEntry {
+  sent_at: string;
+  channel: 'in_app' | 'email' | 'sms' | 'push';
+  status: 'pending' | 'sent' | 'delivered' | 'failed' | 'read' | 'clicked';
+  provider_id?: string;
+  error_message?: string;
+  opened_at?: string;
+  clicked_at?: string;
+}
+
+export interface Reminder {
+  // Primary key and store relationship
+  id: string;
+  store_id: string;
+  
+  // What to remind about
+  type: ReminderType;
+  
+  // Who/what is this about (polymorphic relationship)
+  entity_type: ReminderEntityType;
+  entity_id: string;
+  entity_name: string; // Denormalized for performance
+  
+  // When to remind
+  due_date: string; // ISO date string
+  remind_before_days: number[]; // [7, 3, 1, 0] = remind 7, 3, 1 days before and on due date
+  
+  // Recurrence (for recurring reminders)
+  is_recurring: boolean;
+  recurrence_pattern?: RecurrencePattern;
+  recurrence_interval?: number; // e.g., every 2 weeks
+  recurrence_end_date?: string; // ISO date string
+  
+  // Status tracking
+  status: ReminderStatus;
+  completed_at?: string;
+  completed_by?: string;
+  completion_note?: string;
+  snoozed_until?: string; // ISO date string
+  
+  // Notification tracking (for local notifications)
+  last_notified_at?: string;
+  notification_count: number;
+  
+  // Details
+  title: string;
+  description: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  action_url?: string;
+  
+  // Metadata (flexible for type-specific data)
+  metadata?: Record<string, any>;
+  
+  // =====================================================
+  // CLOUD NOTIFICATION INFRASTRUCTURE (FUTURE USE)
+  // These fields are included for future cloud notification support
+  // Currently inactive but ready for activation without code changes
+  // =====================================================
+  
+  // Notification delivery channels (for future cloud notifications)
+  notification_channels?: NotificationChannels;
+  
+  // Cloud notification settings (INACTIVE - for future use)
+  send_via_cloud?: boolean; // Set to TRUE to enable cloud notifications
+  cloud_notification_sent?: boolean;
+  next_cloud_notification_at?: string;
+  
+  // Notification history tracking (for future cloud delivery tracking)
+  notification_history?: NotificationHistoryEntry[];
+  
+  // User targeting (who should be notified - for future multi-user support)
+  notify_users?: string[]; // Array of user IDs
+  notify_roles?: ('admin' | 'manager' | 'cashier')[]; // Array of roles
+  
+  // =====================================================
+  // END CLOUD NOTIFICATION INFRASTRUCTURE
+  // =====================================================
+  
+  // Audit fields
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+  
+  // Sync state (for offline functionality)
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
+// Helper type for creating reminders (omits auto-generated fields)
+export type CreateReminderInput = Omit<
+  Reminder,
+  'id' | 'created_at' | 'updated_at' | 'notification_count' | '_synced' | '_lastSyncedAt' | '_deleted'
+> & {
+  id?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+// Helper type for updating reminders
+export type UpdateReminderInput = Partial<
+  Omit<Reminder, 'id' | 'store_id' | 'created_at' | 'created_by' | '_synced' | '_lastSyncedAt'>
+>;
+
+// Reminder statistics
+export interface ReminderStats {
+  total: number;
+  pending: number;
+  overdue: number;
+  dueToday: number;
+  dueThisWeek: number;
+  completed: number;
+  byType: Record<ReminderType, number>;
+  byPriority: Record<'low' | 'medium' | 'high' | 'urgent', number>;
 }

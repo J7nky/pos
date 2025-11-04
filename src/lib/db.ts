@@ -19,7 +19,8 @@ import {
   PendingSync,
   Employee,
   NotificationRecord,
-  NotificationPreferences
+  NotificationPreferences,
+  Reminder
 } from '../types';
 
 type Tables = Database['public']['Tables'];
@@ -89,6 +90,7 @@ class POSDatabase extends Dexie {
   missed_products!: Table<MissedProduct, string>;
   notifications!: Table<NotificationRecord, string>;
   notification_preferences!: Table<NotificationPreferences, string>;
+  reminders!: Table<Reminder, string>;
   constructor() {
     super('POSDatabase');
     
@@ -261,6 +263,59 @@ class POSDatabase extends Dexie {
     }).upgrade(trans => {
       console.log('🔄 Running migration v22: Adding customer_id and supplier_id indexes to transactions table');
       // No data migration needed - indexes are added automatically
+    });
+
+    // Migration for version 23 - add reminders table for unified reminder system
+    this.version(23).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
+      
+      // Core tables with comprehensive indexing for performance
+      products: 'id, store_id, name, category, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, customer_id, supplier_id, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, customer_id, payment_method, created_by, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Cash drawer management
+      missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification management
+      notifications: 'id, store_id, type, read, created_at, priority',
+      notification_preferences: 'store_id',
+      
+      // Reminder management (NEW) - unified reminder system for all types of reminders
+      // Indexes: id (primary), store_id, status, type, due_date, entity_type+entity_id
+      reminders: 'id, store_id, status, type, due_date, entity_type, [entity_type+entity_id], is_recurring, created_by, updated_at, _synced, _deleted'
+    }).upgrade(trans => {
+      console.log('🔄 Running migration v23: Adding reminders table for unified reminder system');
+      console.log('✅ Reminders table created with support for:');
+      console.log('   - Supplier advance reviews');
+      console.log('   - Payment reminders');
+      console.log('   - Customer follow-ups');
+      console.log('   - Inventory reorders');
+      console.log('   - Contract renewals');
+      console.log('   - Equipment maintenance');
+      console.log('   - And more...');
+      console.log('📢 Cloud notification infrastructure included but inactive (ready for future activation)');
+      // No data migration needed for new table
     });
 
     // Migration for version 5 - update existing records to match new schema
@@ -1478,96 +1533,38 @@ class POSDatabase extends Dexie {
     };
   }
 
-  async updateBillWithAudit(
-    billId: string, 
-    updates: Partial<Bill>, 
-    changedBy: string, 
-    changeReason?: string
-  ): Promise<void> {
-    const originalBill = await this.bills.get(billId);
-    if (!originalBill) throw new Error('Bill not found');
-    
-    return await this.transaction('rw', [this.bills, this.bill_audit_logs], async () => {
-      const now = new Date().toISOString();
-      
-      // Update the bill
-      await this.bills.update(billId, {
-        ...updates,
-        last_modified_by: changedBy,
-        last_modified_at: now,
-        updated_at: now,
-        _synced: false
-      });
-      
-      // Log each changed field
-      for (const [field, newValue] of Object.entries(updates)) {
-        if (!['last_modified_by', 'last_modified_at', 'updated_at', '_synced'].includes(field)) {
-          const oldValue = (originalBill as any)[field];
-          if (oldValue !== newValue) {
-            await this.bill_audit_logs.add({
-              id: uuidv4(),
-              store_id: originalBill.store_id,
-              created_at: now,
-              updated_at: now,
-              _synced: false,
-              bill_id: billId,
-              action: 'updated',
-              field_changed: field,
-              old_value: JSON.stringify(oldValue),
-              new_value: JSON.stringify(newValue),
-              change_reason: changeReason || 'Bill updated',
-              changed_by: changedBy,
-              ip_address: null,
-            });
-          }
-        }
-      }
-    });
-  }
-
-  async deleteBillWithAudit(
-    billId: string, 
-    deletedBy: string, 
-    deleteReason?: string, 
-    softDelete: boolean = true
-  ): Promise<void> {
+  // ==================== LINE ITEM AUDIT TRAIL FUNCTIONS ====================
+  
+  /**
+   * Add a line item to a bill with audit trail
+   */
+  async addBillLineItem(
+    billId: string,
+    lineItem: Partial<BillLineItem>,
+    addedBy: string
+  ): Promise<string> {
     const bill = await this.bills.get(billId);
     if (!bill) throw new Error('Bill not found');
+
+    const now = new Date().toISOString();
+    const lineItemId = uuidv4();
     
-    return await this.transaction('rw', [this.bills, this.bill_line_items, this.bill_audit_logs, this.inventory_items], async () => {
-      const now = new Date().toISOString();
-      
-      if (softDelete) {
-        // Soft delete - mark as cancelled
-        await this.bills.update(billId, {
-          status: 'cancelled',
-          last_modified_by: deletedBy,
-          last_modified_at: now,
-          updated_at: now,
-          _synced: false,
-          _deleted: true
-        });
-      } else {
-        // Hard delete - remove from database
-        await this.bills.delete(billId);
-        await this.bill_line_items.where('bill_id').equals(billId).delete();
-      }
-      
-      // Restore inventory quantities for deleted bill
-      const lineItems = await this.bill_line_items.where('bill_id').equals(billId).toArray();
-      for (const lineItem of lineItems) {
-        if (lineItem.inventory_item_id) {
-          const inventoryItem = await this.inventory_items.get(lineItem.inventory_item_id);
-          if (inventoryItem) {
-            await this.inventory_items.update(lineItem.inventory_item_id, {
-              quantity: inventoryItem.quantity + lineItem.quantity,
-              _synced: false
-            });
-          }
-        }
-      }
-      
-      // Create audit log entry
+    const newLineItem = {
+      id: lineItemId,
+      bill_id: billId,
+      store_id: bill.store_id,
+      created_at: now,
+      updated_at: now,
+      _synced: false,
+      ...lineItem
+    } as BillLineItem;
+
+    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs], async () => {
+      await this.bill_line_items.add(newLineItem);
+
+      // Create audit log with descriptive reason
+      const generatedReason = `Adding line item: ${newLineItem.product_name} (Qty: ${newLineItem.quantity}, Price: ${newLineItem.unit_price})`;
+
       await this.bill_audit_logs.add({
         id: uuidv4(),
         store_id: bill.store_id,
@@ -1575,13 +1572,157 @@ class POSDatabase extends Dexie {
         updated_at: now,
         _synced: false,
         bill_id: billId,
-        action: 'deleted',
-        field_changed: 'status',
-        old_value: bill.status,
-        new_value: softDelete ? 'cancelled' : 'deleted',
-        change_reason: deleteReason || 'Bill deleted',
-        changed_by: deletedBy,
+        action: 'item_added',
+        field_changed: 'line_items',
+        old_value: null,
+        new_value: JSON.stringify(newLineItem),
+        change_reason: generatedReason,
+        changed_by: addedBy,
         ip_address: null,
+        user_agent: null
+      });
+    });
+
+    return lineItemId;
+  }
+
+  /**
+   * Update a line item with field-level audit trail and ID resolution
+   */
+  async updateBillLineItem(
+    lineItemId: string,
+    updates: Partial<BillLineItem>,
+    updatedBy: string
+  ): Promise<void> {
+    const originalItem = await this.bill_line_items.get(lineItemId);
+    if (!originalItem) throw new Error('Line item not found');
+
+    const now = new Date().toISOString();
+
+    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs], async () => {
+      // Update the line item
+      await this.bill_line_items.update(lineItemId, {
+        ...updates,
+        updated_at: now,
+        _synced: false
+      });
+
+      // Create audit log for each changed field with ID resolution
+      // Skip computed/automatic fields that are consequences of other changes
+      const computedFields = ['line_total', 'received_value', 'updated_at', '_synced'];
+      
+      for (const [field, newValue] of Object.entries(updates)) {
+        if (!computedFields.includes(field)) {
+          const oldValue = (originalItem as any)[field];
+          if (oldValue !== newValue) {
+            // Resolve IDs to human-readable names
+            let oldValueDisplay = oldValue != null ? String(oldValue) : 'empty';
+            let newValueDisplay = newValue != null ? String(newValue) : 'empty';
+
+            // Resolve product_id to product name
+            if (field === 'product_id') {
+              if (oldValue) {
+                const oldProduct = await this.products.get(oldValue);
+                oldValueDisplay = oldProduct?.name || oldValue;
+              }
+              if (newValue) {
+                const newProduct = await this.products.get(newValue);
+                newValueDisplay = newProduct?.name || newValue;
+              }
+            }
+
+            // Resolve supplier_id to supplier name
+            if (field === 'supplier_id') {
+              if (oldValue) {
+                const oldSupplier = await this.suppliers.get(oldValue);
+                oldValueDisplay = oldSupplier?.name || oldValue;
+              }
+              if (newValue) {
+                const newSupplier = await this.suppliers.get(newValue);
+                newValueDisplay = newSupplier?.name || newValue;
+              }
+            }
+
+            // Resolve customer_id to customer name
+            if (field === 'customer_id') {
+              if (oldValue) {
+                const oldCustomer = await this.customers.get(oldValue);
+                oldValueDisplay = oldCustomer?.name || oldValue;
+              } else {
+                oldValueDisplay = 'None';
+              }
+              if (newValue) {
+                const newCustomer = await this.customers.get(newValue);
+                newValueDisplay = newCustomer?.name || newValue;
+              } else {
+                newValueDisplay = 'None';
+              }
+            }
+
+            // Generate descriptive change reason
+            const fieldLabel = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const generatedReason = `Modifying line item: ${fieldLabel} from ${oldValueDisplay} to ${newValueDisplay} (Product: ${originalItem.product_name})`;
+
+            await this.bill_audit_logs.add({
+              id: uuidv4(),
+              store_id: originalItem.store_id,
+              created_at: now,
+              updated_at: now,
+              _synced: false,
+              bill_id: originalItem.bill_id,
+              action: 'item_modified',
+              field_changed: field,
+              old_value: oldValueDisplay !== 'empty' ? oldValueDisplay : null,
+              new_value: newValueDisplay !== 'empty' ? newValueDisplay : null,
+              change_reason: generatedReason,
+              changed_by: updatedBy,
+              ip_address: null,
+              user_agent: null
+            });
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * Remove a line item with audit trail
+   */
+  async removeBillLineItem(
+    lineItemId: string,
+    removedBy: string
+  ): Promise<void> {
+    const lineItem = await this.bill_line_items.get(lineItemId);
+    if (!lineItem) throw new Error('Line item not found');
+
+    const now = new Date().toISOString();
+
+    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs], async () => {
+      // Soft delete the line item
+      await this.bill_line_items.update(lineItemId, {
+        _deleted: true,
+        updated_at: now,
+        _synced: false
+      });
+
+      // Create audit log with descriptive reason
+      const generatedReason = `Removing line item: ${lineItem.product_name} (Qty: ${lineItem.quantity}, Price: ${lineItem.unit_price})`;
+
+      await this.bill_audit_logs.add({
+        id: uuidv4(),
+        store_id: lineItem.store_id,
+        created_at: now,
+        updated_at: now,
+        _synced: false,
+        bill_id: lineItem.bill_id,
+        action: 'item_removed',
+        field_changed: 'line_items',
+        old_value: JSON.stringify(lineItem),
+        new_value: null,
+        change_reason: generatedReason,
+        changed_by: removedBy,
+        ip_address: null,
+        user_agent: null
       });
     });
   }

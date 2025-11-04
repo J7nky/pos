@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -20,6 +20,7 @@ import { PAYMENT_CATEGORIES, getPaymentDirection, getPaymentEntityType } from ".
 import { paymentManagementService, PaymentUpdateData } from "../../../services/paymentManagementService";
 import { useI18n } from "../../../i18n";
 import { useOfflineData } from "../../../contexts/OfflineDataContext";
+import { useLocalStorage } from "../../../hooks/useLocalStorage";
 import { Pagination } from "../../../components/common/Pagination";
 
 type Currency = "USD" | "LBP";
@@ -173,7 +174,7 @@ const PaymentFiltersPanel: React.FC<{
 }> = ({ filters, onFiltersChange, customers, suppliers, categories, translatePaymentCategory }) => {
   const { t } = useI18n();
   const [showFilters, setShowFilters] = useState(true);
-  const [fastDateFilter, setFastDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [fastDateFilter, setFastDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('today');
 
   const updateFilters = (updates: Partial<PaymentFilters>) => {
     onFiltersChange({ ...filters, ...updates });
@@ -1048,9 +1049,13 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
     return categoryMap[category] || category;
   };
   
-  const [filters, setFilters] = useState<PaymentFilters>({
+  // Initialize with today's date
+  const getTodayDate = () => new Date().toISOString().split('T')[0];
+  
+  // Persist filters in localStorage
+  const [filters, setFilters] = useLocalStorage<PaymentFilters>('paymentsManagement_filters', {
     search: '',
-    dateRange: { start: '', end: '' },
+    dateRange: { start: getTodayDate(), end: getTodayDate() },
     category: '',
     entityType: 'all',
     entityId: '',
@@ -1058,6 +1063,16 @@ export const PaymentsManagement: React.FC<PaymentsManagementProps> = ({
     currency: 'all',
     amountRange: { min: '', max: '' }
   });
+  
+  // Initialize date range to today if not already set
+  useEffect(() => {
+    if (!filters.dateRange.start && !filters.dateRange.end) {
+      setFilters({
+        ...filters,
+        dateRange: { start: getTodayDate(), end: getTodayDate() }
+      });
+    }
+  }, []);
   
   const [editModal, setEditModal] = useState<PaymentEditModal>({
     isOpen: false,

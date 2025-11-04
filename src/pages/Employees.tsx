@@ -227,6 +227,19 @@ console.log(userProfile,123123123);
   };
 
   const handleDelete = async (employeeId: string) => {
+    // Find the employee being deleted
+    const employeeToDelete = employees.find(emp => emp.id === employeeId);
+    
+    // Prevent admin from deleting themselves
+    if (employeeToDelete && employeeToDelete.email === userProfile?.email) {
+      setToast({ 
+        message: 'You cannot delete your own account', 
+        type: 'error', 
+        visible: true 
+      });
+      return;
+    }
+
     if (!confirm('Are you sure you want to delete this employee?')) return;
 
     try {
@@ -675,7 +688,13 @@ console.log(userProfile,123123123);
                       </button>
                       <button
                         onClick={() => handleDelete(employee.id)}
-                        className="text-red-600 hover:text-red-900"
+                        disabled={employee.email === userProfile?.email}
+                        className={`${
+                          employee.email === userProfile?.email
+                            ? 'text-gray-400 cursor-not-allowed'
+                            : 'text-red-600 hover:text-red-900'
+                        }`}
+                        title={employee.email === userProfile?.email ? "You cannot delete your own account" : "Delete employee"}
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>
