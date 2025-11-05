@@ -95,7 +95,7 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex justify-between items-center rtl:flex-row-reverse">
+      <div className="flex justify-between items-center">
         <div className="flex items-center rtl:space-x-reverse">
           <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
             {t('nonPriced.title')}

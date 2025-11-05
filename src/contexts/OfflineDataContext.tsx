@@ -247,6 +247,20 @@ interface OfflineDataContextType {
   // Delete supplier advance transaction
   deleteSupplierAdvance: (transactionId: string) => Promise<void>;
 
+  // Process employee payment
+  processEmployeePayment: (params: {
+    employeeId: string;
+    amount: string;
+    currency: 'USD' | 'LBP';
+    description: string;
+    reference: string;
+    storeId: string;
+    createdBy: string;
+  }) => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
   // Notification management
   notifications: NotificationRecord[];
   unreadCount: number;
@@ -3121,6 +3135,118 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Process employee payment (we pay them salary)
+  const processEmployeePayment = async (params: {
+    employeeId: string;
+    amount: string;
+    currency: 'USD' | 'LBP';
+    description: string;
+    reference: string;
+    storeId: string;
+    createdBy: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { employeeId, amount, currency, description, reference, storeId, createdBy } = params;
+      
+      // Validate amount
+      const numAmount = parseFloat(amount);
+      if (isNaN(numAmount) || numAmount <= 0) {
+        return { success: false, error: 'Please enter a valid positive amount' };
+      }
+
+      // Find employee
+      const employee = employees.find(e => e.id === employeeId);
+      if (!employee) {
+        return { success: false, error: 'Employee not found' };
+      }
+
+      // Calculate amount in LBP for cash drawer
+      let amountInLBP = numAmount;
+      if (currency === 'USD') {
+        amountInLBP = numAmount * exchangeRate;
+      }
+
+      // Check cash drawer balance
+      const currentBalance = await getCurrentCashDrawerBalance(storeId);
+      if (amountInLBP > currentBalance) {
+        return { 
+          success: false, 
+          error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP` 
+        };
+      }
+
+      // Employee balance represents what we owe them (salary/advance)
+      // When we pay them, we DECREASE their balance (we owe them less)
+      const currentLbBalance = employee.lbp_balance || 0;
+      const currentUsdBalance = employee.usd_balance || 0;
+
+      console.log(`💳 Employee Payment - Employee: ${employee.name}, Currency: ${currency}`);
+      console.log(`💳 Current Balances - LBP: ${currentLbBalance}, USD: ${currentUsdBalance}`);
+      console.log(`💳 Payment Amount: ${numAmount}`);
+
+      if (currency === 'LBP') {
+        const newBalance = currentLbBalance - numAmount;
+        await updateEmployee(employeeId, { 
+          lbp_balance: newBalance,
+          updated_at: new Date().toISOString()
+        });
+        console.log(`💳 Payment sent to employee: LBP balance ${currentLbBalance} → ${newBalance}`);
+      } else {
+        const newBalance = currentUsdBalance - numAmount;
+        await updateEmployee(employeeId, { 
+          usd_balance: newBalance,
+          updated_at: new Date().toISOString()
+        });
+        console.log(`💳 Payment sent to employee: USD balance ${currentUsdBalance} → ${newBalance}`);
+      }
+
+      // Process cash drawer transaction (expense - we're paying out)
+      const cashDrawerResult = await processCashDrawerTransaction({
+        type: 'expense',
+        amount: amountInLBP,
+        currency: 'LBP',
+        description: `Employee payment - ${employee.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`,
+        reference: reference || generatePaymentReference(),
+        customerId: undefined,
+        supplierId: undefined
+      });
+
+      if (!cashDrawerResult.success) {
+        return { success: false, error: 'Failed to process cash drawer transaction' };
+      }
+
+      // Create transaction record
+      const transactionId = createIdFunction();
+      const transactionData = {
+        id: transactionId,
+        type: 'expense' as const,
+        category: 'Employee Payment',
+        amount: numAmount,
+        currency: currency,
+        description: `Employee payment - ${employee.name}${description ? ': ' + description : ''}`,
+        reference: reference || generatePaymentReference(),
+        store_id: storeId,
+        created_by: createdBy,
+        created_at: new Date().toISOString(),
+        supplier_id: null,
+        customer_id: null,
+        _synced: false,
+        _lastSyncedAt: undefined,
+        _deleted: false,
+      };
+
+      await db.transactions.add(transactionData);
+
+      // Refresh data
+      await refreshData();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Employee payment processing error:', error);
+      return { success: false, error: error?.message || 'Failed to process employee payment' };
+    }
+  };
+
   // Process supplier advance payment (give advance or deduct from advance)
   const processSupplierAdvance = async (params: {
     supplierId: string;
@@ -3227,7 +3353,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             entity_name: supplier.name,
             due_date: reviewDate,
             remind_before_days: [7, 3, 1, 0], // Remind 7, 3, 1 days before and on due date
-            is_recurring: false,
             status: 'pending',
             title: `Review Advance for ${supplier.name}`,
             description: `Review the ${currency === 'USD' ? `$${amount.toFixed(2)}` : `${Math.round(amount).toLocaleString()} ل.ل`} advance given to ${supplier.name}. Check if work is completed or if additional settlement is needed.`,
@@ -4541,6 +4666,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         processSupplierAdvance: async () => {},
         updateSupplierAdvance: async () => {},
         deleteSupplierAdvance: async () => {},
+        processEmployeePayment: async () => ({ success: false, error: 'No store ID available' }),
         // Notification management
         notifications: [],
         unreadCount: 0,
@@ -4678,6 +4804,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       processSupplierAdvance,
       updateSupplierAdvance,
       deleteSupplierAdvance,
+      processEmployeePayment,
 
       // Notification management
       notifications,

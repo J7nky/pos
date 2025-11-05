@@ -526,7 +526,7 @@ export interface Database {
           change_reason: string | null;
           changed_by: string;
           ip_address: string | null;
-          user_agent: string | null;
+        
           created_at: string;
           updated_at: string;
         };
@@ -541,7 +541,7 @@ export interface Database {
           change_reason?: string | null;
           changed_by: string;
           ip_address?: string | null;
-          user_agent?: string | null;
+        
           created_at?: string;
           updated_at?: string;
         };
@@ -556,7 +556,7 @@ export interface Database {
           change_reason?: string | null;
           changed_by?: string;
           ip_address?: string | null;
-          user_agent?: string | null;
+        
           updated_at?: string;
         };
       };
@@ -677,6 +677,43 @@ export interface Database {
           variance?: number;
           notes?: string | null;
           updated_at?: string;
+        };
+      };
+      employee_attendance: {
+        Row: {
+          id: string;
+          store_id: string;
+          employee_id: string;
+          check_in_at: string;
+          check_out_at: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+          _synced?: boolean;
+          _deleted?: boolean;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          employee_id: string;
+          check_in_at?: string;
+          check_out_at?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          employee_id?: string;
+          check_in_at?: string;
+          check_out_at?: string | null;
+          notes?: string | null;
+          updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
         };
       };
       

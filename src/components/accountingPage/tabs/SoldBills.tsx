@@ -1023,7 +1023,7 @@ export default function InventoryLogs() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between rtl:flex-row-reverse">
+      <div className="flex items-center justify-between">
         <div className="flex items-center rtl:space-x-reverse">
           <Activity className="w-6 h-6 text-blue-600 rtl:ml-3 ltr:mr-3" />
           <div className="rtl:text-right">
@@ -1084,7 +1084,7 @@ export default function InventoryLogs() {
               {/* Fast Date Filters */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('dashboard.filters') || 'Quick Filters'}</label>
-                <div className="flex flex-wrap gap-2 rtl:flex-row-reverse">
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => handleFastDateFilter('all')}
@@ -1360,7 +1360,7 @@ export default function InventoryLogs() {
       {showBillDetails && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between rtl:flex-row-reverse">
+            <div className="p-6 border-b flex items-center justify-between">
               <div className="flex items-center space-x-3 rtl:space-x-reverse">
                 <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
                   {t('soldBills.billDetails')} - {selectedBill.bill_number}
@@ -1387,19 +1387,19 @@ export default function InventoryLogs() {
                 <div>
                   <h3 className="text-lg font-medium text-gray-900 mb-4 rtl:text-right">{t('soldBills.billInformation')}</h3>
                   <div className="space-y-2">
-                    <div className="flex justify-between rtl:flex-row-reverse">
+                    <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.billNumber')}:</span>
                       <span className="font-medium rtl:text-right">{selectedBill.bill_number}</span>
                     </div>
-                    <div className="flex justify-between rtl:flex-row-reverse">
+                    <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.date')}:</span>
                       <span className="font-medium rtl:text-right">{new Date(selectedBill.bill_date).toLocaleString()}</span>
                     </div>
-                    <div className="flex justify-between rtl:flex-row-reverse">
+                    <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.customer')}:</span>
                       <span className="font-medium rtl:text-right">{getCustomerName(selectedBill.customer_id)}</span>
                     </div>
-                    <div className="flex justify-between rtl:flex-row-reverse">
+                    <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.paymentMethod')}:</span>
                       <span className="font-medium rtl:text-right capitalize">{t(`soldBills.${selectedBill.payment_method}`)}</span>
                     </div>
@@ -1409,20 +1409,20 @@ export default function InventoryLogs() {
                 <div>
                   <h3 className="text-lg font-medium text-gray-900 mb-4 rtl:text-right">{t('soldBills.paymentInformation')}</h3>
                   <div className="space-y-2">
-                    <div className="flex justify-between rtl:flex-row-reverse">
+                    <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.subtotal')}:</span>
                       <span className="font-medium rtl:text-right">{formatCurrency(selectedBill.subtotal)}</span>
                     </div>
-                    <div className="flex justify-between border-t pt-2 rtl:flex-row-reverse">
+                    <div className="flex justify-between border-t pt-2">
                       <span className="text-gray-900 font-semibold rtl:text-right">{t('soldBills.total')}:</span>
                       <span className="font-bold text-lg rtl:text-right">{formatCurrency(selectedBill.total_amount)}</span>
                     </div>
-                    <div className="flex justify-between rtl:flex-row-reverse">
+                    <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.amountPaid')}:</span>
                       <span className="font-medium text-green-600 rtl:text-right">{formatCurrency(selectedBill.amount_paid)}</span>
                     </div>
                     {selectedBill.total_amount - selectedBill.amount_paid > 0 && (
-                      <div className="flex justify-between rtl:flex-row-reverse">
+                      <div className="flex justify-between">
                         <span className="text-gray-600 rtl:text-right">{t('soldBills.amountDue')}:</span>
                         <span className="font-medium text-red-600 rtl:text-right">{formatCurrency(selectedBill.total_amount - selectedBill.amount_paid)}</span>
                       </div>
@@ -1479,7 +1479,7 @@ export default function InventoryLogs() {
       {showEditBill && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between rtl:flex-row-reverse">
+            <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
                 {t('soldBills.editBill')} - {selectedBill.bill_number}
               </h2>
@@ -1559,7 +1559,7 @@ export default function InventoryLogs() {
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-center justify-between rtl:flex-row-reverse">
+                <div className="flex items-center justify-between">
                   <h3 className="text-lg font-medium text-gray-900 rtl:text-right">{t('soldBills.lineItems')}</h3>
                 </div>
                 {billLineItems.length > 0 ? (
@@ -1768,7 +1768,7 @@ export default function InventoryLogs() {
       {showAuditTrail && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between rtl:flex-row-reverse">
+            <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
                 {t('soldBills.auditTrail')} - {selectedBill.bill_number}
               </h2>

@@ -53,12 +53,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   due_date DATE NOT NULL,
   remind_before_days INTEGER[] DEFAULT ARRAY[1, 0], -- Array: [7, 3, 1, 0] = remind 7, 3, 1 days before and on due date
   
-  -- Recurrence (for recurring reminders like monthly reviews)
-  is_recurring BOOLEAN DEFAULT FALSE,
-  recurrence_pattern TEXT CHECK (recurrence_pattern IN ('daily', 'weekly', 'monthly', 'quarterly', 'yearly') OR recurrence_pattern IS NULL),
-  recurrence_interval INTEGER DEFAULT 1, -- e.g., every 2 weeks
-  recurrence_end_date DATE, -- When to stop recurring
-  
+
   -- Status tracking
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'dismissed', 'overdue', 'snoozed')),
   completed_at TIMESTAMP WITH TIME ZONE,
@@ -125,7 +120,6 @@ CREATE INDEX idx_reminders_due_date ON reminders(due_date) WHERE deleted_at IS N
 CREATE INDEX idx_reminders_entity ON reminders(entity_type, entity_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_reminders_type ON reminders(type) WHERE deleted_at IS NULL;
 CREATE INDEX idx_reminders_created_by ON reminders(created_by) WHERE deleted_at IS NULL;
-CREATE INDEX idx_reminders_recurring ON reminders(is_recurring) WHERE deleted_at IS NULL AND is_recurring = TRUE;
 
 -- Composite index for common queries (due reminders for a store)
 CREATE INDEX idx_reminders_store_status_due ON reminders(store_id, status, due_date) WHERE deleted_at IS NULL;
@@ -140,8 +134,6 @@ COMMENT ON COLUMN reminders.type IS 'Type of reminder (supplier_advance_review, 
 COMMENT ON COLUMN reminders.entity_type IS 'Type of entity this reminder is about';
 COMMENT ON COLUMN reminders.entity_id IS 'ID of the entity (polymorphic relationship)';
 COMMENT ON COLUMN reminders.remind_before_days IS 'Array of days before due date to send notifications. [7,3,1,0] = notify 7,3,1 days before and on due date';
-COMMENT ON COLUMN reminders.is_recurring IS 'Whether this reminder repeats automatically';
-COMMENT ON COLUMN reminders.recurrence_pattern IS 'How often reminder recurs (daily, weekly, monthly, quarterly, yearly)';
 COMMENT ON COLUMN reminders.metadata IS 'Flexible JSON field for type-specific data (amounts, references, etc.)';
 COMMENT ON COLUMN reminders.notification_channels IS 'Which channels to use for notifications (in_app, email, sms, push)';
 COMMENT ON COLUMN reminders.send_via_cloud IS 'FUTURE: Enable cloud-based notifications (email, SMS, push) - Currently inactive';
@@ -186,24 +178,7 @@ RETURNS TRIGGER AS $$
 DECLARE
   next_due_date DATE;
 BEGIN
-  -- Only process if reminder was just completed and is recurring
-  IF NEW.status = 'completed' AND OLD.status = 'pending' AND NEW.is_recurring = TRUE THEN
-    
-    -- Calculate next due date based on recurrence pattern
-    CASE NEW.recurrence_pattern
-      WHEN 'daily' THEN
-        next_due_date := NEW.due_date + (NEW.recurrence_interval || ' days')::INTERVAL;
-      WHEN 'weekly' THEN
-        next_due_date := NEW.due_date + (NEW.recurrence_interval * 7 || ' days')::INTERVAL;
-      WHEN 'monthly' THEN
-        next_due_date := NEW.due_date + (NEW.recurrence_interval || ' months')::INTERVAL;
-      WHEN 'quarterly' THEN
-        next_due_date := NEW.due_date + (NEW.recurrence_interval * 3 || ' months')::INTERVAL;
-      WHEN 'yearly' THEN
-        next_due_date := NEW.due_date + (NEW.recurrence_interval || ' years')::INTERVAL;
-      ELSE
-        RETURN NEW;
-    END CASE;
+
     
     -- Only create next occurrence if before recurrence_end_date (or no end date)
     IF NEW.recurrence_end_date IS NULL OR next_due_date <= NEW.recurrence_end_date THEN
@@ -216,10 +191,7 @@ BEGIN
         entity_name,
         due_date,
         remind_before_days,
-        is_recurring,
-        recurrence_pattern,
-        recurrence_interval,
-        recurrence_end_date,
+
         status,
         title,
         description,
@@ -239,10 +211,7 @@ BEGIN
         NEW.entity_name,
         next_due_date,
         NEW.remind_before_days,
-        NEW.is_recurring,
-        NEW.recurrence_pattern,
-        NEW.recurrence_interval,
-        NEW.recurrence_end_date,
+   
         'pending',
         NEW.title,
         NEW.description,
@@ -345,7 +314,6 @@ BEGIN
   RAISE NOTICE 'Features:';
   RAISE NOTICE '  ✓ Multi-type reminder support (supplier reviews, payments, etc.)';
   RAISE NOTICE '  ✓ Flexible notification timing (remind X days before)';
-  RAISE NOTICE '  ✓ Recurring reminders (daily, weekly, monthly, etc.)';
   RAISE NOTICE '  ✓ Status tracking (pending, completed, overdue, dismissed)';
   RAISE NOTICE '  ✓ Automatic overdue detection';
   RAISE NOTICE '  ✓ Flexible metadata storage';

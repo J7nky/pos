@@ -627,6 +627,21 @@ export interface NotificationHistoryEntry {
   clicked_at?: string;
 }
 
+// Employee Attendance interface for check-in/check-out tracking
+export interface EmployeeAttendance {
+  id: string;
+  store_id: string;
+  employee_id: string;
+  check_in_at: string; // ISO datetime string
+  check_out_at?: string | null; // ISO datetime string, null if still checked in
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
 export interface Reminder {
   // Primary key and store relationship
   id: string;
@@ -644,11 +659,6 @@ export interface Reminder {
   due_date: string; // ISO date string
   remind_before_days: number[]; // [7, 3, 1, 0] = remind 7, 3, 1 days before and on due date
   
-  // Recurrence (for recurring reminders)
-  is_recurring: boolean;
-  recurrence_pattern?: RecurrencePattern;
-  recurrence_interval?: number; // e.g., every 2 weeks
-  recurrence_end_date?: string; // ISO date string
   
   // Status tracking
   status: ReminderStatus;

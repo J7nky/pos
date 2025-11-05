@@ -666,7 +666,7 @@ export default function ReceivedBills({
 
   return (
     <div>
-      <div className="flex justify-between items-center rtl:flex-row-reverse">
+      <div className="flex justify-between items-center ">
         <div className="rtl:text-right">
           <h2 className="text-xl font-semibold text-gray-900">{t('receivedBills.title')}</h2>
           <p className="mt-1"></p>
@@ -689,7 +689,7 @@ export default function ReceivedBills({
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pb-4">
         <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <div className="flex items-center justify-between rtl:flex-row-reverse">
+          <div className="flex items-center justify-between ">
             <div className="rtl:text-right">
               <p className="text-sm text-gray-600">{t('receivedBills.totalBills')}</p>
               <p className="text-2xl font-bold text-gray-900">{groupedReceivedBills.length}</p>
@@ -700,7 +700,7 @@ export default function ReceivedBills({
           </div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <div className="flex items-center justify-between rtl:flex-row-reverse">
+          <div className="flex items-center justify-between ">
             <div className="rtl:text-right">
               <p className="text-sm text-gray-600">{t('receivedBills.inProgress')}</p>
               <p className="text-2xl font-bold text-blue-600">{groupedReceivedBills.filter(bill => bill.status === 'in-progress').length}</p>
@@ -711,7 +711,7 @@ export default function ReceivedBills({
           </div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <div className="flex items-center justify-between rtl:flex-row-reverse">
+          <div className="flex items-center justify-between ">
             <div className="rtl:text-right">
               <p className="text-sm text-gray-600">{t('receivedBills.completed')}</p>
               <p className="text-2xl font-bold text-green-600">{groupedReceivedBills.filter(bill => bill.status === 'completed').length}</p>
@@ -722,7 +722,7 @@ export default function ReceivedBills({
           </div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <div className="flex items-center justify-between rtl:flex-row-reverse">
+          <div className="flex items-center justify-between ">
             <div className="rtl:text-right">
               <p className="text-sm text-gray-600">{t('receivedBills.totalRevenue')}</p>
               <p className="text-2xl font-bold text-green-600">{formatCurrency(groupedReceivedBills.reduce((sum, g) => sum + (g.totalRevenue || 0), 0))}</p>
@@ -975,7 +975,7 @@ export default function ReceivedBills({
                     <tr className="bg-gray-50">
                       <td colSpan={9} className="px-6 py-4">
                         <div className="border rounded-lg overflow-hidden">
-                          <div className="bg-gray-100 px-4 py-2 text-sm text-gray-700 flex items-center justify-between rtl:flex-row-reverse">
+                          <div className="bg-gray-100 px-4 py-2 text-sm text-gray-700 flex items-center justify-between ">
                             <div className="rtl:text-right">
                               {group.items.length} {group.items.length === 1 ? t('receivedBills.item') : t('receivedBills.items')} {t('receivedBills.inThis')} {group.isBatch ? t('receivedBills.batch') : t('receivedBills.bill')}
                             </div>
@@ -1086,7 +1086,7 @@ export default function ReceivedBills({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
-              <div className="flex items-center justify-between rtl:flex-row-reverse">
+              <div className="flex items-center justify-between ">
                 <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">{t('receivedBills.receivedBillDetails')}</h2>
                 <button onClick={() => setShowReceivedBillDetails(false)} className="text-gray-400 hover:text-gray-600">
                   <X className="w-6 h-6" />

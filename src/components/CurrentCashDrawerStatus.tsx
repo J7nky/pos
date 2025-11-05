@@ -408,7 +408,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
             </div>
             
             {/* Close Cash Drawer Button */}
-            <div className="mt-6 flex justify-between items-center rtl:flex-row-reverse">
+            <div className="mt-6 flex justify-between items-center ">
                 <button
                   onClick={async () => {
                     // Check if inventory verification has already been completed for this session

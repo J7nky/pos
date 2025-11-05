@@ -11,8 +11,7 @@ import { Reminder, ReminderType, ReminderStatus, NotificationType, CreateReminde
  * 
  * Features:
  * - Multi-type reminder support (supplier reviews, payments, follow-ups, etc.)
- * - Flexible notification timing (remind X days before due date)
- * - Recurring reminders (daily, weekly, monthly, etc.)
+ * - Flexible notification timing (remind X days before due date
  * - Smart notification tracking (avoid spam)
  * - Status management (pending, overdue, completed, dismissed)
  * - Cloud notification ready (infrastructure in place but inactive)
@@ -352,10 +351,6 @@ export class ReminderMonitoringService {
       entity_name: input.entity_name,
       due_date: input.due_date,
       remind_before_days: input.remind_before_days || [1, 0], // Default: remind 1 day before and on due date
-      is_recurring: input.is_recurring || false,
-      recurrence_pattern: input.recurrence_pattern,
-      recurrence_interval: input.recurrence_interval,
-      recurrence_end_date: input.recurrence_end_date,
       status: input.status || 'pending',
       completed_at: input.completed_at,
       completed_by: input.completed_by,

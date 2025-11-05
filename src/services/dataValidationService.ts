@@ -298,9 +298,10 @@ export class DataValidationService {
     }
 
     if (tableName === 'bill_audit_logs') {
+      // Remove fields that don't exist in database schema
       delete cleanRecord.ip_address;
       delete cleanRecord.user_agent;
-      delete cleanRecord.updated_at;
+      // Keep updated_at - it exists in the schema
     }
 
     if (tableName === 'transactions') {

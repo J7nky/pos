@@ -17,12 +17,13 @@ import {
   DollarSign,
   Printer,
   Building,
-  Phone,
-  MapPin,
 } from 'lucide-react';
 
 export default function Settings() {
   const { userProfile } = useSupabaseAuth();
+  
+  // Check if user is admin or manager
+  const isAdminOrManager = userProfile?.role === 'admin' || userProfile?.role === 'manager';
   
   // Use offline context for all settings (offline-first approach)
   const offlineData = useOfflineData();  
@@ -400,14 +401,16 @@ export default function Settings() {
         </div>
 
 
-        {/* Receipt Settings */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <SettingsIcon className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">Receipt Settings</h2>
+        {/* Receipt Settings - Admin/Manager Only */}
+        {isAdminOrManager && (
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center mb-4">
+              <SettingsIcon className="w-6 h-6 text-gray-600 mr-3" />
+              <h2 className="text-xl font-semibold text-gray-900">Receipt Settings</h2>
+            </div>
+            <ReceiptSettings />
           </div>
-          <ReceiptSettings />
-        </div>
+        )}
 
         {/* Language */}
         <div className="bg-white rounded-lg shadow-sm p-6">
@@ -435,7 +438,11 @@ export default function Settings() {
 
 // Receipt Settings Component
 function ReceiptSettings() {
+  const { userProfile } = useSupabaseAuth();
   const offlineData = useOfflineData();
+  
+  // Check if user is admin or manager (defensive check)
+  const isAdminOrManager = userProfile?.role === 'admin' || userProfile?.role === 'manager';
   
   // Get receipt settings from offline context (with defaults)
   const receiptSettings = offlineData?.receiptSettings || {
@@ -473,14 +480,14 @@ function ReceiptSettings() {
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setTempSettings(prev => ({
+    setTempSettings((prev: typeof receiptSettings) => ({
       ...prev,
       [field]: value
     }));
   };
 
   const handleCheckboxChange = (field: string, checked: boolean) => {
-    setTempSettings(prev => ({
+    setTempSettings((prev: typeof receiptSettings) => ({
       ...prev,
       [field]: checked
     }));
@@ -518,7 +525,8 @@ function ReceiptSettings() {
               type="text"
               value={tempSettings.storeName}
               onChange={(e) => handleInputChange('storeName', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
               placeholder="KIWI VEGETABLES MARKET"
             />
           </div>
@@ -531,7 +539,8 @@ function ReceiptSettings() {
               type="text"
               value={tempSettings.address}
               onChange={(e) => handleInputChange('address', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
               placeholder="63-B2-Whole Sale Market, Tripoli - Lebanon"
             />
           </div>
@@ -546,7 +555,8 @@ function ReceiptSettings() {
               type="text"
               value={tempSettings.phone1Name}
               onChange={(e) => handleInputChange('phone1Name', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
               placeholder="Samir"
             />
           </div>
@@ -559,7 +569,8 @@ function ReceiptSettings() {
               type="text"
               value={tempSettings.phone1}
               onChange={(e) => handleInputChange('phone1', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
               placeholder="+961 70 123 456"
             />
           </div>
@@ -574,7 +585,8 @@ function ReceiptSettings() {
               type="text"
               value={tempSettings.phone2Name}
               onChange={(e) => handleInputChange('phone2Name', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
               placeholder="Mohammad"
             />
           </div>
@@ -587,7 +599,8 @@ function ReceiptSettings() {
               type="text"
               value={tempSettings.phone2}
               onChange={(e) => handleInputChange('phone2', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
               placeholder="03 123 456"
             />
           </div>
@@ -610,7 +623,8 @@ function ReceiptSettings() {
               type="text"
               value={tempSettings.thankYouMessage}
               onChange={(e) => handleInputChange('thankYouMessage', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
               placeholder="Thank You!"
             />
           </div>
@@ -623,7 +637,8 @@ function ReceiptSettings() {
               type="text"
               value={tempSettings.billNumberPrefix}
               onChange={(e) => handleInputChange('billNumberPrefix', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
               placeholder="000"
             />
           </div>
@@ -636,7 +651,8 @@ function ReceiptSettings() {
               type="number"
               value={tempSettings.receiptWidth}
               onChange={(e) => handleInputChange('receiptWidth', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
               placeholder="32"
               min="20"
               max="48"
@@ -651,7 +667,8 @@ function ReceiptSettings() {
               id="showPreviousBalance"
               checked={tempSettings.showPreviousBalance}
               onChange={(e) => handleCheckboxChange('showPreviousBalance', e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              disabled={!isAdminOrManager}
+              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <label htmlFor="showPreviousBalance" className="ml-2 block text-sm text-gray-900">
               Show Previous Balance
@@ -664,7 +681,8 @@ function ReceiptSettings() {
               id="showItemCount"
               checked={tempSettings.showItemCount}
               onChange={(e) => handleCheckboxChange('showItemCount', e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              disabled={!isAdminOrManager}
+              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <label htmlFor="showItemCount" className="ml-2 block text-sm text-gray-900">
               Show Total Items Count
@@ -674,15 +692,17 @@ function ReceiptSettings() {
       </div>
 
       {/* Save Button */}
-      <div className="flex justify-end">
-        <button
-          onClick={handleSave}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-        >
-          <Save className="w-4 h-4 mr-2" />
-          Save Receipt Settings
-        </button>
-      </div>
+      {isAdminOrManager && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleSave}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+          >
+            <Save className="w-4 h-4 mr-2" />
+            Save Receipt Settings
+          </button>
+        </div>
+      )}
     </div>
   );
 }

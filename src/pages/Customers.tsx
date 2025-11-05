@@ -2,13 +2,14 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
-import { Plus, Search, Edit, CheckCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText, Banknote } from 'lucide-react';
+import { Plus, Search, Edit, CheckCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText, Banknote, UserCheck } from 'lucide-react';
 import { Customer, Supplier } from '../types';
 import Toast from '../components/common/Toast';
 import SearchableSelect from '../components/common/SearchableSelect';
 import SupplierFormModal from '../components/common/SupplierFormModal';
 import AccountStatementModal from '../components/AccountStatementModal';
 import SupplierAdvances from '../components/accountingPage/tabs/SupplierAdvances';
+import EmployeePayments from '../components/accountingPage/tabs/EmployeePayments';
 import { useCurrency } from '../hooks/useCurrency';
 import { Pagination } from '../components/common/Pagination';
 
@@ -79,7 +80,7 @@ export default function Customers() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'customers' | 'suppliers' | 'supplier-advances'>('customers');
+  const [activeTab, setActiveTab] = useState<'customers' | 'suppliers' | 'supplier-advances' | 'employee-payments'>('customers');
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [showSupplierForm, setShowSupplierForm] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -434,7 +435,7 @@ export default function Customers() {
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('customers.title')}</h1>
-        {activeTab !== 'supplier-advances' && (
+        {(activeTab !== 'supplier-advances' && activeTab !== 'employee-payments') && (
           <button
             onClick={activeTab === 'customers' ? handleAddCustomerClick : handleAddSupplierClick}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
@@ -482,12 +483,23 @@ export default function Customers() {
               <Banknote className="w-5 h-5 inline mr-2" />
               {t('customers.supplierAdvances') || 'Supplier Advances'}
             </button>
+            <button
+              onClick={() => setActiveTab('employee-payments')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'employee-payments'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <UserCheck className="w-5 h-5 inline mr-2" />
+              Employee Payments
+            </button>
           </nav>
         </div>
       </div>
 
       {/* Search */}
-      {activeTab !== 'supplier-advances' && (
+      {activeTab !== 'supplier-advances' && activeTab !== 'employee-payments' && (
         <div className="bg-white p-4 rounded-lg shadow-sm mb-6">
           <div className="relative">
             <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -1270,6 +1282,18 @@ export default function Customers() {
           }}
           addSupplier={addSupplier}
           refreshData={raw.refreshData}
+        />
+      )}
+
+      {/* Employee Payments Tab */}
+      {activeTab === 'employee-payments' && (
+        <EmployeePayments
+          employees={raw.employees || []}
+          showToast={showToast}
+          refreshData={raw.refreshData}
+          processEmployeePayment={raw.processEmployeePayment || (async () => ({ success: false, error: 'Not available' }))}
+          formatCurrency={formatCurrency}
+          formatCurrencyWithSymbol={formatCurrencyWithSymbol}
         />
       )}
 

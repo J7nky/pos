@@ -142,7 +142,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_, session) => {
+      async (event, session) => {
         clearTimeout(timeoutId);
         const currentUser = session?.user ?? null;
         setUser(currentUser);
@@ -154,6 +154,22 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
           if (cachedProfile) {
             setUserProfile(cachedProfile);
             setLoading(false);
+            
+            // Record check-in if signing in (not on initial load)
+            if (event === 'SIGNED_IN' && cachedProfile.store_id) {
+              try {
+                const { EmployeeAttendanceService } = await import('../services/employeeAttendanceService');
+                // Check if already checked in
+                const currentStatus = await EmployeeAttendanceService.getCurrentStatus(currentUser.id);
+                if (!currentStatus) {
+                  await EmployeeAttendanceService.checkIn(currentUser.id, cachedProfile.store_id);
+                  console.log('✅ Employee check-in recorded on sign-in');
+                }
+              } catch (attendanceError) {
+                console.warn('Failed to record employee check-in:', attendanceError);
+              }
+            }
+            
             // Load fresh profile in background
             loadUserProfile(currentUser.id).catch(err => {
               console.error('Background profile update failed:', err);
@@ -166,8 +182,22 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
             }, 3000);
             
             try {
-              await loadUserProfile(currentUser.id);
+              const profile = await loadUserProfile(currentUser.id);
               clearTimeout(profileTimeout);
+              
+              // Record check-in if signing in
+              if (event === 'SIGNED_IN' && profile?.store_id) {
+                try {
+                  const { EmployeeAttendanceService } = await import('../services/employeeAttendanceService');
+                  const currentStatus = await EmployeeAttendanceService.getCurrentStatus(currentUser.id);
+                  if (!currentStatus) {
+                    await EmployeeAttendanceService.checkIn(currentUser.id, profile.store_id);
+                    console.log('✅ Employee check-in recorded on sign-in');
+                  }
+                } catch (attendanceError) {
+                  console.warn('Failed to record employee check-in:', attendanceError);
+                }
+              }
             } catch (error) {
               clearTimeout(profileTimeout);
               console.error('Profile loading failed:', error);
@@ -213,6 +243,19 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         setUserProfile(cachedProfile);
         setLoading(false);
       }
+      
+      // Record check-in for employee attendance tracking
+      if (cachedProfile?.store_id) {
+        try {
+          const { EmployeeAttendanceService } = await import('../services/employeeAttendanceService');
+          await EmployeeAttendanceService.checkIn(data.user.id, cachedProfile.store_id);
+          console.log('✅ Employee check-in recorded');
+        } catch (attendanceError) {
+          // Don't fail login if attendance check-in fails
+          console.warn('Failed to record employee check-in:', attendanceError);
+        }
+      }
+      
       // Note: onAuthStateChange will handle loading fresh profile
       
       return { success: true };
@@ -272,6 +315,19 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const signOut = async (): Promise<void> => {
     try {
       setError(null);
+      
+      // Record check-out for employee attendance tracking before signing out
+      if (userProfile?.id && userProfile?.store_id) {
+        try {
+          const { EmployeeAttendanceService } = await import('../services/employeeAttendanceService');
+          await EmployeeAttendanceService.checkOut(userProfile.id);
+          console.log('✅ Employee check-out recorded');
+        } catch (attendanceError) {
+          // Don't fail logout if attendance check-out fails
+          console.warn('Failed to record employee check-out:', attendanceError);
+        }
+      }
+      
       await supabase.auth.signOut();
       setUserProfile(null);
       

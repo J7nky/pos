@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { Plus, Search, Edit, Trash2, Users as UsersIcon, Clock, DollarSign, Phone, MapPin, User } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Users as UsersIcon, Clock, DollarSign, Phone, MapPin, User, Calendar } from 'lucide-react';
 import { Employee } from '../types';
 import { EmployeeService } from '../services/employeeService';
 import Toast from '../components/common/Toast';
@@ -33,6 +33,7 @@ export default function Employees() {
   const [password, setPassword] = useState<string>('');
   const [salaryCurrency, setSalaryCurrency] = useState<'LBP' | 'USD'>('LBP');
   const [salaryValue, setSalaryValue] = useState<string>('');
+  const [showWorkingDaysModal, setShowWorkingDaysModal] = useState(false);
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [roleCounts, setRoleCounts] = useState({ cashier: 0, manager: 0 });
@@ -508,17 +509,82 @@ console.log(userProfile,123123123);
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Working Days
                   </label>
-                  <input
-                    type="text"
-                    value={formData.working_days || ''}
-                    onChange={(e) => setFormData({ ...formData, working_days: e.target.value })}
-                    placeholder="e.g., Monday,Tuesday,Wednesday"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      readOnly
+                      value={formData.working_days ? formData.working_days.split(',').filter(d => d.trim()).join(', ') : ''}
+                      onClick={() => setShowWorkingDaysModal(true)}
+                      placeholder="Click to select working days"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                  </div>
+                  {formData.working_days && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {formData.working_days.split(',').filter(d => d.trim()).length} day(s) selected
+                    </p>
+                  )}
                 </div>
+
+                {/* Working Days Selection Modal */}
+                {showWorkingDaysModal && (
+                  <div 
+                    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+                    onClick={(e) => {
+                      if (e.target === e.currentTarget) {
+                        setShowWorkingDaysModal(false);
+                      }
+                    }}
+                  >
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                      <div className="p-6 border-b">
+                        <h3 className="text-lg font-semibold text-gray-900">Select Working Days</h3>
+                      </div>
+                      <div className="p-6">
+                        <div className=" gap-3">
+                          {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => {
+                            const currentDays = formData.working_days ? formData.working_days.split(',').map(d => d.trim()) : [];
+                            const isChecked = currentDays.includes(day);
+                            return (
+                              <label key={day} className="flex items-center space-x-2 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={(e) => {
+                                    let updatedDays = [...currentDays];
+                                    if (e.target.checked) {
+                                      if (!updatedDays.includes(day)) {
+                                        updatedDays.push(day);
+                                      }
+                                    } else {
+                                      updatedDays = updatedDays.filter(d => d !== day);
+                                    }
+                                    setFormData({ ...formData, working_days: updatedDays.join(',') });
+                                  }}
+                                  className="w-4 h-4 text-blue-600 text-lg  border-gray-300 rounded focus:ring-blue-500 ml-2"
+                                />
+                                <span className="text-sm text-gray-700 mr-2">{day}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="p-6 border-t flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setShowWorkingDaysModal(false)}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
