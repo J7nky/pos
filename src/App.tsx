@@ -3,6 +3,7 @@ import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthCo
 import { OfflineDataProvider } from './contexts/OfflineDataContext';
 import SupabaseLogin from './components/SupabaseLogin';
 import { I18nProvider, useI18n } from './i18n';
+import OnScreenKeyboard from './components/common/OnScreenKeyboard';
 import ErrorBoundary from './components/ErrorBoundary';
 import I18nErrorBoundary from './components/I18nErrorBoundary';
 import { Outlet, useLocation } from 'react-router-dom';
@@ -42,7 +43,12 @@ function AppContent() {
   }
   
   // Render the nested routes (which will be the Login page or Layout and its children)
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <OnScreenKeyboard />
+    </>
+  );
 }
 
 export default function App() {

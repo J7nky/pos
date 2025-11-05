@@ -154,6 +154,7 @@ export default function MoneyInput({
         onChange={handleInputChange}
         onFocus={handleInputFocus}
         onBlur={handleInputBlur}
+        data-onscreen-keyboard="force"
         className={`w-full border border-gray-300 rounded px-3 py-1.5 mb-2 pr-16 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${className}`}
         placeholder={placeholder}
         disabled={disabled}
