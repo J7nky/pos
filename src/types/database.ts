@@ -198,6 +198,7 @@ export interface Database {
           category: string;
           image: string;
           store_id: string;
+          is_global: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -207,6 +208,7 @@ export interface Database {
           category: string;
           image: string;
           store_id: string;
+          is_global?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -215,6 +217,7 @@ export interface Database {
           name?: string;
           category?: string;
           image?: string;
+          is_global?: boolean;
           updated_at?: string;
         };
       };
@@ -318,6 +321,7 @@ export interface Database {
           created_at: string;
           received_quantity: number;
           batch_id: string | null;
+          sku: string | null;
         };
         Insert:{
           id: string;
@@ -331,6 +335,7 @@ export interface Database {
           created_at?: string;
           received_quantity?: number;
           batch_id?: string | null;
+          sku?: string | null;
         };
         Update: {
           id: string;
@@ -344,6 +349,7 @@ export interface Database {
           created_at?: string;
           received_quantity?: number;
           batch_id?: string | null;
+          sku?: string | null;
         };
       };
       bills: {

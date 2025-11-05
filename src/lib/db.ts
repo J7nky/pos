@@ -106,7 +106,7 @@ class POSDatabase extends Dexie {
       
       // Core tables with comprehensive indexing for performance
       // Tables WITH updated_at: products, suppliers, customers, users
-      products: 'id, store_id, name, category, updated_at, _synced, _deleted',
+      products: 'id, store_id, name, category, is_global, updated_at, _synced, _deleted',
       suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
       customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
       users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
@@ -143,7 +143,7 @@ class POSDatabase extends Dexie {
       
       // Core tables with comprehensive indexing for performance
       // Tables WITH updated_at: products, suppliers, customers, users
-      products: 'id, store_id, name, category, updated_at, _synced, _deleted',
+      products: 'id, store_id, name, category, is_global, updated_at, _synced, _deleted',
       suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
       customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
       users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
@@ -192,7 +192,7 @@ class POSDatabase extends Dexie {
       
       // Core tables with comprehensive indexing for performance
       // Tables WITH updated_at: products, suppliers, customers, users
-      products: 'id, store_id, name, category, updated_at, _synced, _deleted',
+      products: 'id, store_id, name, category, is_global, updated_at, _synced, _deleted',
       suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
       customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
       users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
@@ -233,7 +233,7 @@ class POSDatabase extends Dexie {
       
       // Core tables with comprehensive indexing for performance
       // Tables WITH updated_at: products, suppliers, customers, users
-      products: 'id, store_id, name, category, updated_at, _synced, _deleted',
+      products: 'id, store_id, name, category, is_global, updated_at, _synced, _deleted',
       suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
       customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
       users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
@@ -365,6 +365,106 @@ class POSDatabase extends Dexie {
       console.log('🔄 Running migration v24: Adding employee attendance tracking table');
       console.log('✅ Employee attendance table created for check-in/check-out tracking');
       // No data migration needed for new table
+    });
+
+    // Migration for version 25 - add is_global field to products for predefined global products
+    this.version(25).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
+      
+      // Core tables with comprehensive indexing for performance
+      products: 'id, store_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, customer_id, supplier_id, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, customer_id, payment_method, created_by, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Cash drawer management
+      missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification management
+      notifications: 'id, store_id, type, read, created_at, priority',
+      notification_preferences: 'store_id',
+      
+      // Reminder management
+      reminders: 'id, store_id, status, type, due_date, entity_type, [entity_type+entity_id], created_by, updated_at, _synced, _deleted',
+      
+      // Employee attendance tracking
+      employee_attendance: 'id, store_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted'
+    }).upgrade(trans => {
+      console.log('🔄 Running migration v25: Adding is_global field to products table');
+      console.log('   This field allows predefined global products visible across all stores');
+      
+      // Update existing products to set is_global = false (they are store-specific)
+      return trans.table('products').toCollection().modify((product: any) => {
+        if (product.is_global === undefined || product.is_global === null) {
+          product.is_global = false; // Existing products are store-specific
+        }
+      });
+    });
+
+    // Migration for version 26 - add sku field to inventory_items for barcode tracking
+    this.version(26).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
+      
+      // Core tables with comprehensive indexing for performance
+      products: 'id, store_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables - added sku field for barcode tracking
+      inventory_items: 'id, store_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, customer_id, supplier_id, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, customer_id, payment_method, created_by, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Cash drawer management
+      missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification management
+      notifications: 'id, store_id, type, read, created_at, priority',
+      notification_preferences: 'store_id',
+      
+      // Reminder management
+      reminders: 'id, store_id, status, type, due_date, entity_type, [entity_type+entity_id], created_by, updated_at, _synced, _deleted',
+      
+      // Employee attendance tracking
+      employee_attendance: 'id, store_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted'
+    }).upgrade(trans => {
+      console.log('🔄 Running migration v26: Adding sku field to inventory_items table');
+      console.log('   This field stores barcodes for inventory items, generated from inventory item ID');
+      // No data migration needed - new field will be null for existing items
     });
 
     // Migration for version 5 - update existing records to match new schema
@@ -1002,6 +1102,116 @@ class POSDatabase extends Dexie {
     }
     
     return cleaned;
+  }
+
+  // ==================== GLOBAL PRODUCTS HELPER METHODS ====================
+  
+  /**
+   * Get all products available to a specific store (both global and store-specific)
+   * @param storeId - The store ID to get products for
+   * @returns Array of products (global + store-specific)
+   */
+  async getAvailableProducts(storeId: string): Promise<Product[]> {
+    // Get global products
+    const globalProducts = await this.products
+      .where('is_global')
+      .equals(1) // Dexie stores boolean as 0 or 1
+      .filter(p => !p._deleted)
+      .toArray();
+    
+    // Get store-specific products
+    const storeProducts = await this.products
+      .where('store_id')
+      .equals(storeId)
+      .filter(p => !p._deleted && !p.is_global)
+      .toArray();
+    
+    // Combine and return
+    return [...globalProducts, ...storeProducts];
+  }
+
+  /**
+   * Get only global predefined products
+   * @returns Array of global products
+   */
+  async getGlobalProducts(): Promise<Product[]> {
+    return await this.products
+      .where('is_global')
+      .equals(1)
+      .filter(p => !p._deleted)
+      .toArray();
+  }
+
+  /**
+   * Get only store-specific products (excluding global)
+   * @param storeId - The store ID
+   * @returns Array of store-specific products
+   */
+  async getStoreSpecificProducts(storeId: string): Promise<Product[]> {
+    return await this.products
+      .where('store_id')
+      .equals(storeId)
+      .filter(p => !p._deleted && !p.is_global)
+      .toArray();
+  }
+
+  /**
+   * Create a global product (accessible to all stores)
+   * @param productData - Product data without store_id
+   * @returns The created product ID
+   */
+  async createGlobalProduct(productData: Omit<Product, 'id' | 'createdAt' | 'is_global'>): Promise<string> {
+    const now = new Date().toISOString();
+    const productId = uuidv4();
+    
+    const globalProduct: any = {
+      id: productId,
+      ...productData,
+      store_id: 'global', // Use 'global' as a special store_id for global products
+      is_global: true,
+      created_at: now,
+      updated_at: now,
+      _synced: false,
+      _deleted: false
+    };
+    
+    await this.products.add(globalProduct);
+    return productId;
+  }
+
+  /**
+   * Create a store-specific product
+   * @param storeId - The store ID
+   * @param productData - Product data
+   * @returns The created product ID
+   */
+  async createStoreProduct(storeId: string, productData: Omit<Product, 'id' | 'createdAt' | 'is_global'>): Promise<string> {
+    const now = new Date().toISOString();
+    const productId = uuidv4();
+    
+    const storeProduct: any = {
+      id: productId,
+      ...productData,
+      store_id: storeId,
+      is_global: false,
+      created_at: now,
+      updated_at: now,
+      _synced: false,
+      _deleted: false
+    };
+    
+    await this.products.add(storeProduct);
+    return productId;
+  }
+
+  /**
+   * Check if a product is global
+   * @param productId - The product ID
+   * @returns True if the product is global, false otherwise
+   */
+  async isProductGlobal(productId: string): Promise<boolean> {
+    const product = await this.products.get(productId);
+    return product?.is_global === true;
   }
 
   // Bill management methods
@@ -1779,6 +1989,9 @@ class POSDatabase extends Dexie {
 
 
 export const db = new POSDatabase();
+
+// Re-export Bill type for convenience
+export type { Bill } from '../types';
 
 
 

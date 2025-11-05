@@ -57,7 +57,10 @@ export interface Product {
   name: string;
   category: string;
   image: string;
+  is_global?: boolean; // True for predefined global products, false/undefined for store-specific
   createdAt: string;
+  _synced?: boolean;
+  _deleted?: boolean;
 }
 
 export interface Supplier {
@@ -114,6 +117,31 @@ export interface inventory_bills { id: string;
   plastic_fee?:string;
   type:string
   }
+
+// Bill interface - maps directly to bills table (snake_case for db compatibility)
+export interface Bill {
+  id: string;
+  store_id: string;
+  bill_number: string;
+  customer_id: string | null;
+  subtotal: number;
+  total_amount: number;
+  payment_method: 'cash' | 'card' | 'credit';
+  payment_status: 'paid' | 'partial' | 'pending';
+  amount_paid: number;
+  amount_due: number;
+  bill_date: string;
+  notes: string | null;
+  status: 'active' | 'cancelled' | 'refunded';
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  last_modified_by: string | null;
+  last_modified_at: string | null;
+  _synced?: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
 
 // BillLineItem interface - maps directly to bill_line_items table (snake_case for db compatibility)
 export interface BillLineItem {

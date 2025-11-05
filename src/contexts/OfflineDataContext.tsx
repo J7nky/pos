@@ -2195,6 +2195,37 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       await db.inventory_items.bulkAdd(mappedItems);
       
+      // Generate SKU/barcode for each inventory item using inventory item ID
+      // Format: [CATEGORY_PREFIX]-#[INVENTORY_ITEM_ID_LAST4]
+      const allProducts = await db.products.toArray();
+      const productMap = new Map(allProducts.map(p => [p.id, p]));
+      
+      for (const item of mappedItems) {
+        const product = productMap.get(item.product_id);
+        if (product) {
+          // Get category prefix (first 3 letters uppercase)
+          const category = product.category || 'UNK';
+          const categoryPrefix = category.length >= 3 
+            ? category.substring(0, 3).toUpperCase() 
+            : category.toUpperCase().padEnd(3, 'X');
+          
+          // Get inventory item ID and format as #0001 (last 4 characters)
+          const itemIdStr = item.id;
+          let itemIdPart = '';
+          if (itemIdStr.length >= 4) {
+            itemIdPart = itemIdStr.substring(itemIdStr.length - 4);
+          } else {
+            itemIdPart = itemIdStr.padStart(4, '0');
+          }
+          
+          // Format: [CATEGORY_PREFIX]-#[INVENTORY_ITEM_ID_LAST4]
+          const sku = `${categoryPrefix}-#${itemIdPart}`;
+          
+          // Update inventory item with generated SKU
+          await db.inventory_items.update(item.id, { sku });
+        }
+      }
+      
       // Store the created item IDs for undo
       const itemIds = mappedItems.map(item => item.id);
       

@@ -760,6 +760,33 @@ ${dashSeparator}`;
     });
   };
 
+  // Search inventory items by SKU/barcode
+  const findInventoryItemBySku = (sku: string) => {
+    if (!sku || !sku.trim()) return null;
+    const normalizedSku = sku.trim().toUpperCase();
+    return inventory.find(item => 
+      item.sku && item.sku.toUpperCase() === normalizedSku && !item._deleted
+    );
+  };
+
+  // Handle barcode scan - automatically add to cart if found
+  useEffect(() => {
+    if (searchTerm && searchTerm.length > 5) { // Barcodes are typically longer than 5 chars
+      const scannedItem = findInventoryItemBySku(searchTerm);
+      if (scannedItem) {
+        // Find the product for this inventory item
+        const product = products.find(p => p.id === scannedItem.product_id);
+        if (product && getProductStock(product.id) > 0) {
+          // Add to cart automatically
+          addToCart(product.id, scannedItem.id);
+          // Clear search term after adding
+          setTimeout(() => setSearchTerm(''), 100);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm]);
+
   const filteredProducts = (products || []).filter(product => {
     if (getProductStock(product.id) === 0) return false;
 
@@ -776,7 +803,12 @@ ${dashSeparator}`;
       item.supplierName.toLowerCase().includes(searchLower)
     );
 
-    return hasMatchingSupplier;
+    // Search by SKU/barcode for inventory items of this product
+    const hasMatchingSku = productInventoryItems.some(item => 
+      item.sku && item.sku.toLowerCase().includes(searchLower)
+    );
+
+    return hasMatchingSupplier || hasMatchingSku;
   });
 
   // In addToCart, add specific inventory item to cart respecting temporary reservations across all tabs

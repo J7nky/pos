@@ -1,6 +1,6 @@
 # 🚀 Future Implementations TODO List
 
-> **Last Updated:** November 1, 2025  
+> **Last Updated:** November 5, 2025  
 > **System:** Wholesale Produce Market ERP/POS  
 > **Architecture:** Offline-First, React + TypeScript + Supabase
 
@@ -392,7 +392,7 @@
 **Files to Modify:**
 - `src/types/index.ts` - Enhance category types
 - `src/pages/Settings.tsx` - Category management
-- `src/components/CategoryManager.tsx` (new)
+- `src/components/CategoryManager.tsx` fatal: unable to access 'https://github.com/J7nky/pos.git/': Could not resolve host: github.com(new)
 
 ---
 

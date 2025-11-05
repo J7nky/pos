@@ -3,8 +3,11 @@ export interface Product {
   name: string;
   category: 'Fruits' | 'Vegetables' | 'Herbs' | 'Nuts' | 'Others';
   image: string;
+  is_global?: boolean; // True for predefined global products, false/undefined for store-specific
   created_at: string;
   createdAt: string;
+  _synced?: boolean;
+  _deleted?: boolean;
 }
 
 export interface Supplier {

@@ -50,7 +50,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen'; 
     price?: string; 
     selling_price?: string;
-    weight?: string 
+    weight?: string;
   }>>({});
   const selectRef = useRef<HTMLDivElement | null>(null);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
