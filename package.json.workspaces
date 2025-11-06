@@ -1,0 +1,28 @@
+{
+  "name": "pos-platform",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:store": "npm run dev --workspace=store-app",
+    "dev:admin": "npm run dev --workspace=admin-app",
+    "dev:all": "npm run dev --workspaces",
+    "build:store": "npm run build --workspace=store-app",
+    "build:admin": "npm run build --workspace=admin-app",
+    "build:all": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces",
+    "clean": "npm run clean --workspaces",
+    "setup": "npm install"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

@@ -1,0 +1,96 @@
+{
+  "name": "vite-react-typescript-starter",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "setup-dev": "node setup-dev.js",
+    "dev": "node dev-windows.js",
+    "dev:simple": "node dev-simple.js",
+    "dev:advanced": "concurrently \"npm run vite:dev\" \"npm run dev:electron\" --kill-others --prefix-colors cyan,blue",
+    "vite:dev": "vite",
+    "dev:electron": "wait-on http://localhost:5175 && npm run build:electron && npx electron-reloader dist-electron/main.cjs --watch dist-electron --exec \"node_modules\\electron\\dist\\electron.exe .\"",
+    "dev:electron:watch": "nodemon --watch electron --ext ts --exec \"npm run build:electron\"",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "electron": "node_modules\\electron\\dist\\electron.exe .",
+    "build:electron": "tsc -p tsconfig_electron.json && node -e \"require('fs').copyFileSync('dist-electron/main.js','dist-electron/main.cjs');require('fs').copyFileSync('dist-electron/preload.js','dist-electron/preload.cjs')\"",
+    "build": "vite build && npm run build:electron",
+    "build:production": "vite build --mode production",
+    "build:netlify": "vite build --mode production",
+    "preview": "vite preview",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@pos-platform/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.51.0",
+    "@types/iconv-lite": "^0.0.1",
+    "@types/node": "^24.1.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react-router-dom": "^5.3.3",
+    "@types/uuid": "^10.0.0",
+    "canvas": "^3.2.0",
+    "dexie": "^4.0.11",
+    "escpos": "^3.0.0-alpha.6",
+    "iconv-lite": "^0.7.0",
+    "lucide-react": "^0.540.0",
+    "node-thermal-printer": "^4.5.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.9.1",
+    "serialport": "^13.0.0",
+    "usb": "^2.9.0",
+    "uuid": "^11.1.0",
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.9.1",
+    "@types/jest": "^30.0.0",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.1",
+    "electron": "^38.1.2",
+    "electron-builder": "^26.0.12",
+    "electron-reloader": "^1.2.3",
+    "eslint": "^9.9.1",
+    "eslint-plugin-react-hooks": "^5.1.0-rc.0",
+    "eslint-plugin-react-refresh": "^0.4.11",
+    "globals": "^15.9.0",
+    "jest": "^30.1.1",
+    "jest-environment-jsdom": "^30.1.2",
+    "nodemon": "^3.1.10",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "terser": "^5.44.0",
+    "ts-jest": "^29.4.4",
+    "typescript": "^5.5.3",
+    "typescript-eslint": "^8.3.0",
+    "vite": "^7.0.5",
+    "wait-on": "^9.0.1"
+  },
+  "build": {
+    "productName": "Souq POS",
+    "appId": "com.souqtrablous.pos",
+    "files": [
+      "dist",
+      "dist-electron"
+    ],
+    "directories": {
+      "buildResources": "assets"
+    },
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "assets/app-icon.ico"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://souq-trablous.com/updates/"
+      }
+    ]
+  }
+}

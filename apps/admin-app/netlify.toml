@@ -1,0 +1,37 @@
+[build]
+  # Directory to change to before starting a build
+  base = "."
+  
+  # Directory that contains the deploy-ready HTML files and assets
+  publish = "dist"
+  
+  # Build command - builds shared package first, then admin app
+  command = "cd ../../packages/shared && pnpm build && cd ../../apps/admin-app && pnpm install && pnpm build"
+
+[build.environment]
+  # Node.js version (use 20 for better Vite compatibility)
+  NODE_VERSION = "20"
+  # Ensure dev dependencies are installed
+  NPM_FLAGS = "--include=dev"
+
+# Redirect rules for SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers for security and performance
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Cache static assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
