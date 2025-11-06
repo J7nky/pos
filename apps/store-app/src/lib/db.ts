@@ -1,7 +1,7 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { Database } from '../types/database';
-import { generateBillReference } from '@pos-platform/shared';
+import { generateBillReference } from '../utils/referenceGenerator';
 import { 
   Product, 
   Supplier, 

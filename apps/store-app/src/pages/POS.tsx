@@ -25,7 +25,7 @@ import { Customer, BillLineItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
 import { useQRCodeGeneration } from '../hooks/useQRCodeGeneration';
-import { generateBillReference } from '@pos-platform/shared';
+import { generateBillReference } from '../utils/referenceGenerator';
 
 
 interface BillTab {

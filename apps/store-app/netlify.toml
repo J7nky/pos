@@ -5,9 +5,8 @@
   # Directory that contains the deploy-ready HTML files and assets
   publish = "dist"
   
-  # Build command - installs pnpm, installs all dependencies, builds shared package, then store app
-  # Using workspace filters to ensure proper build order
-  command = "npm install -g pnpm && cd ../.. && pnpm install && pnpm --filter @pos-platform/shared build && pnpm --filter store-app build:netlify"
+  # Default build command
+  command = "npm install --include=dev && npm run build:netlify"
 
 [build.environment]
   # Node.js version (use 20 for better Vite compatibility)

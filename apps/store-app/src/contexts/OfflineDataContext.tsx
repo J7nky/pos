@@ -20,7 +20,7 @@ import {
   generateSaleReference, 
   generateAdvanceReference,
   generateReversalReference
-} from '@pos-platform/shared';
+} from '../utils/referenceGenerator';
 // Removed SupabaseService import - using offline-first approach only
 
 type Tables = Database['public']['Tables'];
