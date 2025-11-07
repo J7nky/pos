@@ -10,7 +10,8 @@
   # Build command: Install from root, build shared package, then build admin-app
   # This handles pnpm workspace dependencies correctly
   # Note: We start from apps/admin-app (base directory), so cd ../.. goes to root
-  command = "cd ../.. && corepack enable && corepack prepare pnpm@10.20.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @pos-platform/shared build && pnpm --filter admin-app build"
+  # Netlify auto-detects pnpm from pnpm-lock.yaml, so we don't need corepack
+  command = "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @pos-platform/shared build && pnpm --filter admin-app build"
 
 [build.environment]
   # Node.js version (use 20 for better Vite compatibility)
