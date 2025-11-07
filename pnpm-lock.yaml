@@ -69,9 +69,6 @@ importers:
 
   apps/store-app:
     dependencies:
-      '@pos-platform/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       '@supabase/supabase-js':
         specifier: ^2.51.0
         version: 2.79.0
