@@ -1,0 +1,20 @@
+# Root-level netlify.toml
+# This file exists to prevent builds from the root directory
+# 
+# IMPORTANT: This is a monorepo. Each app has its own netlify.toml:
+# - apps/store-app/netlify.toml
+# - apps/admin-app/netlify.toml
+#
+# Netlify MUST be configured with a base directory for each site:
+# - Store App: Base directory = "apps/store-app"
+# - Admin App: Base directory = "apps/admin-app"
+#
+# If you see this message, it means Netlify is trying to build from the root.
+# Go to Netlify Dashboard → Site Settings → Build & Deploy → Build Settings
+# and set the "Base directory" to either "apps/store-app" or "apps/admin-app"
+
+[build]
+  # This will fail intentionally to alert that base directory is not set
+  command = "echo 'ERROR: Cannot build from root. Please set Base directory in Netlify dashboard to apps/store-app or apps/admin-app' && exit 1"
+  publish = "dist"
+

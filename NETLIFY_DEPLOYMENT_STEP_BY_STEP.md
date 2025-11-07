@@ -208,42 +208,83 @@ Both sites will automatically deploy when you push to your repository:
 
 **Note:** If you have a build command set in the Netlify dashboard, it will override the `netlify.toml` file. Clear it and let the `netlify.toml` handle the build.
 
-#### 2. Build Fails - "Cannot find module"
+#### 2. Build Fails - "Build script returned non-zero exit code: 2" / "Deploy directory 'dist' does not exist"
+
+**This error occurs when Netlify tries to build from the root directory instead of the app directory.**
+
+**Symptoms:**
+- Build script returned non-zero exit code: 2
+- Deploy directory 'dist' does not exist
+- Netlify is configured to publish `/opt/build/repo/dist` (root level)
+
+**Cause:** Netlify is running the build from the root directory, but this is a monorepo. The build must run from `apps/store-app` or `apps/admin-app`.
+
+**Solution:**
+1. **Go to Netlify Dashboard** → Site settings → Build & deploy → Build settings
+2. **Set Base directory:**
+   - For Store App: `apps/store-app`
+   - For Admin App: `apps/admin-app`
+3. **Set Publish directory:**
+   - For Store App: `apps/store-app/dist`
+   - For Admin App: `apps/admin-app/dist`
+4. **Clear Build command:** (Leave empty - let `netlify.toml` handle it)
+5. **Save and redeploy**
+
+**Why this happens:**
+- The root `package.json` has a `build` script that intentionally fails with a helpful error message
+- The root `netlify.toml` also fails intentionally to alert that base directory is not set
+- This prevents accidental builds from the root and guides you to set the correct base directory
+
+**To verify locally:**
+```bash
+# This should fail with a helpful error message
+npm run build
+
+# This should work (from root)
+cd apps/store-app
+npm run build:netlify
+
+# Or for admin-app
+cd apps/admin-app
+npm run build
+```
+
+#### 3. Build Fails - "Cannot find module"
 
 **Solution:**
 - Ensure `base directory` is set correctly in Netlify dashboard
 - Check that all dependencies are in `package.json`
 - Verify Node version is set to 20
 
-#### 3. Build Fails - "Command not found"
+#### 4. Build Fails - "Command not found"
 
 **Solution:**
 - Ensure build command includes `npm install --include=dev`
 - Check that scripts exist in `package.json`
 - Verify you're in the correct base directory
 
-#### 4. Environment Variables Not Working
+#### 5. Environment Variables Not Working
 
 **Solution:**
 - Ensure variables start with `VITE_` for client-side access
 - Redeploy after adding new variables
 - Check variable names match exactly (case-sensitive)
 
-#### 5. Routing Issues (404 on refresh)
+#### 6. Routing Issues (404 on refresh)
 
 **Solution:**
 - Verify `netlify.toml` has redirect rules
 - Check that `_redirects` file is in dist folder (if used)
 - Ensure SPA redirect is configured
 
-#### 6. Wrong App Deploys
+#### 7. Wrong App Deploys
 
 **Solution:**
 - Double-check `base directory` setting
 - Verify `publish directory` points to correct app's dist folder
 - Check build command is for the correct app
 
-#### 7. pnpm Lockfile Mismatch Error
+#### 8. pnpm Lockfile Mismatch Error
 
 **If you see: "pnpm install failure due to frozen-lockfile mismatch"**
 
@@ -277,7 +318,7 @@ This error occurs when `pnpm-lock.yaml` is out of sync with `package.json` files
 
 **Note:** The admin-app's `netlify.toml` uses a custom build command that installs from the root to properly resolve workspace dependencies.
 
-#### 8. "Missing script: build:netlify" Error (Local Testing)
+#### 9. "Missing script: build:netlify" Error (Local Testing)
 
 **If you see this error when testing locally from the root directory:**
 
