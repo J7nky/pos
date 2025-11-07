@@ -1,11 +1,14 @@
 [build]
   # Directory to change to before starting a build
+  # Note: Netlify should set base directory to apps/store-app in dashboard
+  # If base directory is not set, this will fail - ensure it's set in Netlify dashboard
   base = "."
   
   # Directory that contains the deploy-ready HTML files and assets
   publish = "dist"
   
-  # Default build command
+  # Build command - runs from apps/store-app directory (when base directory is set correctly)
+  # If you see "Missing script: build:netlify" error, check that base directory is set to apps/store-app in Netlify dashboard
   command = "npm install --include=dev && npm run build:netlify"
 
 [build.environment]

@@ -19,20 +19,40 @@ This guide will walk you through deploying the **admin-app** to Netlify. The **s
 
 If you need to update your existing store app site settings, ensure:
 
-- **Base directory:** `apps/store-app`
-- **Build command:** `npm install --include=dev && npm run build:netlify`
+- **Base directory:** `apps/store-app` ⚠️ **CRITICAL - Must be set correctly**
+- **Build command:** (Leave empty - the `netlify.toml` file will handle this)
 - **Publish directory:** `apps/store-app/dist`
 - **Node version:** `20`
 - **Custom domain:** `souq-trablous.com` (already configured)
 
-**Note:** If your existing site doesn't have the correct base directory set, you may need to update it in Site Settings → Build & deploy → Build settings.
+### ⚠️ Important: Fix "Missing script: build:netlify" Error
 
-**Important:** If you test `npm run build:netlify` locally from the root directory, you'll get an error because the script is in `apps/store-app/package.json`. This is **not a problem** for Netlify deployment because:
-- Netlify will set the base directory to `apps/store-app`
-- The build will run from `apps/store-app` where the script exists
-- The `netlify.toml` file will be found and used correctly
+**If you see the error "Missing script: 'build:netlify'"**, it means:
 
-To test locally, run:
+1. **The base directory is NOT set correctly** in Netlify dashboard, OR
+2. **The build command in Netlify dashboard is overriding** the `netlify.toml` file
+
+**Solution:**
+
+1. **Go to Netlify Dashboard** → Your store app site → **Site settings** → **Build & deploy** → **Build settings**
+
+2. **Set Base directory:**
+   - **Base directory:** `apps/store-app` (must be exactly this)
+   - This tells Netlify to run the build from the `apps/store-app` directory
+
+3. **Clear the Build command:**
+   - **Build command:** (Leave empty or delete the value)
+   - The `netlify.toml` file in `apps/store-app/` will automatically be used
+   - If you have a build command set in the dashboard, it will override `netlify.toml`
+
+4. **Save and redeploy**
+
+**Why this happens:**
+- The `build:netlify` script exists in `apps/store-app/package.json`, not the root `package.json`
+- If Netlify runs from the root directory, it can't find the script
+- Setting the base directory to `apps/store-app` ensures the build runs from the correct location
+
+**To test locally:**
 ```bash
 cd apps/store-app
 npm run build:netlify
@@ -174,42 +194,56 @@ Both sites will automatically deploy when you push to your repository:
 
 ### Common Issues
 
-#### 1. Build Fails - "Cannot find module"
+#### 1. Build Fails - "Missing script: 'build:netlify'"
+
+**This is the most common error!**
+
+**Cause:** Netlify is running the build from the root directory, but the script is in `apps/store-app/package.json`.
+
+**Solution:**
+1. **Go to Netlify Dashboard** → Site settings → Build & deploy → Build settings
+2. **Set Base directory:** `apps/store-app` (must be exactly this)
+3. **Clear Build command:** (Leave empty - let `netlify.toml` handle it)
+4. **Save and redeploy**
+
+**Note:** If you have a build command set in the Netlify dashboard, it will override the `netlify.toml` file. Clear it and let the `netlify.toml` handle the build.
+
+#### 2. Build Fails - "Cannot find module"
 
 **Solution:**
 - Ensure `base directory` is set correctly in Netlify dashboard
 - Check that all dependencies are in `package.json`
 - Verify Node version is set to 20
 
-#### 2. Build Fails - "Command not found"
+#### 3. Build Fails - "Command not found"
 
 **Solution:**
 - Ensure build command includes `npm install --include=dev`
 - Check that scripts exist in `package.json`
 - Verify you're in the correct base directory
 
-#### 3. Environment Variables Not Working
+#### 4. Environment Variables Not Working
 
 **Solution:**
 - Ensure variables start with `VITE_` for client-side access
 - Redeploy after adding new variables
 - Check variable names match exactly (case-sensitive)
 
-#### 4. Routing Issues (404 on refresh)
+#### 5. Routing Issues (404 on refresh)
 
 **Solution:**
 - Verify `netlify.toml` has redirect rules
 - Check that `_redirects` file is in dist folder (if used)
 - Ensure SPA redirect is configured
 
-#### 5. Wrong App Deploys
+#### 6. Wrong App Deploys
 
 **Solution:**
 - Double-check `base directory` setting
 - Verify `publish directory` points to correct app's dist folder
 - Check build command is for the correct app
 
-#### 6. pnpm Lockfile Mismatch Error
+#### 7. pnpm Lockfile Mismatch Error
 
 **If you see: "pnpm install failure due to frozen-lockfile mismatch"**
 
@@ -220,8 +254,10 @@ This error occurs when `pnpm-lock.yaml` is out of sync with `package.json` files
 1. **Update the lockfile locally:**
    ```bash
    # From the root directory
-   corepack enable
-   corepack prepare pnpm@10.20.0 --activate
+   # Install pnpm if not already installed
+   npm install -g pnpm@10.20.0
+   
+   # Update the lockfile
    pnpm install
    
    # Commit the updated lockfile
@@ -229,6 +265,8 @@ This error occurs when `pnpm-lock.yaml` is out of sync with `package.json` files
    git commit -m "chore: update pnpm-lock.yaml to match package.json"
    git push
    ```
+   
+   **Note:** If you see corepack signature errors, install pnpm directly via npm instead of using corepack.
 
 2. **Verify the shared package exists:**
    - Check that `packages/shared/package.json` exists
@@ -239,7 +277,7 @@ This error occurs when `pnpm-lock.yaml` is out of sync with `package.json` files
 
 **Note:** The admin-app's `netlify.toml` uses a custom build command that installs from the root to properly resolve workspace dependencies.
 
-#### 7. "Missing script: build:netlify" Error (Local Testing)
+#### 8. "Missing script: build:netlify" Error (Local Testing)
 
 **If you see this error when testing locally from the root directory:**
 
@@ -272,11 +310,16 @@ npm run build
 
 ### Store App Settings
 ```
-Base directory: apps/store-app
-Build command: npm install --include=dev && npm run build:netlify
+Base directory: apps/store-app (CRITICAL - must be set)
+Build command: (Leave empty - netlify.toml handles it)
 Publish directory: apps/store-app/dist
 Node version: 20
 ```
+
+**⚠️ Important:** If you see "Missing script: build:netlify" error:
+1. Check that **Base directory** is set to `apps/store-app` in Netlify dashboard
+2. **Clear the Build command** in Netlify dashboard (let `netlify.toml` handle it)
+3. The `netlify.toml` file in `apps/store-app/` will automatically be used
 
 ### Admin App Settings
 ```
