@@ -13,9 +13,9 @@
 
 [build]
   base = "apps/store-app"
-  # Build command - runs from apps/store-app directory (base changes to this directory first)
-  command = "npm install --include=dev && npm run build:netlify"
-  publish = "dist"
+  # Build command - explicitly change to apps/store-app directory and run build
+  command = "cd apps/store-app && npm install --include=dev && npm run build:netlify"
+  publish = "apps/store-app/dist"
 
 [build.environment]
   NODE_VERSION = "20"
