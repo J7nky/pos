@@ -13,13 +13,15 @@
 
 [build]
   base = "apps/store-app"
-  # Build command - explicitly change to apps/store-app directory and run build
-  command = "cd apps/store-app && npm install --include=dev && npm run build:netlify"
+  # Build command - install from root (for workspace dependencies), then build store-app
+  # Since base is set to apps/store-app, we need to go to root first
+  # This ensures all workspace dependencies are properly installed before building
+  command = "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter store-app run build:netlify"
   publish = "apps/store-app/dist"
 
 [build.environment]
   NODE_VERSION = "20"
-  NPM_FLAGS = "--include=dev"
+  PNPM_VERSION = "10.20.0"
 
 # Redirect rules for SPA routing
 [[redirects]]
