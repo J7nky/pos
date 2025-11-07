@@ -1,20 +1,55 @@
 # Root-level netlify.toml
-# This file exists to prevent builds from the root directory
+# This file configures builds to run from apps/store-app by default
 # 
 # IMPORTANT: This is a monorepo. Each app has its own netlify.toml:
 # - apps/store-app/netlify.toml
 # - apps/admin-app/netlify.toml
 #
-# Netlify MUST be configured with a base directory for each site:
-# - Store App: Base directory = "apps/store-app"
-# - Admin App: Base directory = "apps/admin-app"
+# For best results, configure each Netlify site with a base directory:
+# - Store App: Base directory = "apps/store-app" (uses this root config or app-specific config)
+# - Admin App: Base directory = "apps/admin-app" (uses app-specific config)
 #
-# If you see this message, it means Netlify is trying to build from the root.
-# Go to Netlify Dashboard → Site Settings → Build & Deploy → Build Settings
-# and set the "Base directory" to either "apps/store-app" or "apps/admin-app"
+# If base directory is not set in Netlify dashboard, this root config will build store-app
 
 [build]
-  # This will fail intentionally to alert that base directory is not set
-  command = "echo 'ERROR: Cannot build from root. Please set Base directory in Netlify dashboard to apps/store-app or apps/admin-app' && exit 1"
+  base = "apps/store-app"
+  command = "npm install --include=dev && npm run build:netlify"
   publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--include=dev"
+
+# Redirect rules for SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Specific redirect for public customer statement routes
+[[redirects]]
+  from = "/public/customer-statement/*"
+  to = "/index.html"
+  status = 200
+
+# Headers for security and performance
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Cache static assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Cache service worker
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
 
