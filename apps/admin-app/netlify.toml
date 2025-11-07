@@ -1,0 +1,41 @@
+[build]
+  # Directory to change to before starting a build
+  # Note: Netlify will set base directory to apps/admin-app in dashboard
+  # But we need to install from root for workspace dependencies
+  base = "."
+  
+  # Directory that contains the deploy-ready HTML files and assets
+  publish = "dist"
+  
+  # Build command: Install from root, build shared package, then build admin-app
+  # This handles pnpm workspace dependencies correctly
+  # Note: We start from apps/admin-app (base directory), so cd ../.. goes to root
+  command = "cd ../.. && corepack enable && corepack prepare pnpm@10.20.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @pos-platform/shared build && pnpm --filter admin-app build"
+
+[build.environment]
+  # Node.js version (use 20 for better Vite compatibility)
+  NODE_VERSION = "20"
+  # Use pnpm
+  PNPM_VERSION = "10.20.0"
+
+# Redirect rules for SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers for security and performance
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Cache static assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
