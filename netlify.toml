@@ -13,8 +13,9 @@
 
 [build]
   # Build command - run from repo root (Netlify's default base directory)
-  # Install all workspace dependencies, then build store-app using pnpm workspace filter
-  command = "pnpm install --frozen-lockfile && pnpm --filter store-app run build:netlify"
+  # Install all workspace dependencies, then build store-app using directory path filter
+  # Using ./apps/store-app instead of package name since package name is "vite-react-typescript-starter"
+  command = "pnpm install --frozen-lockfile && pnpm --filter ./apps/store-app run build:netlify"
   publish = "apps/store-app/dist"
 
 [build.environment]
