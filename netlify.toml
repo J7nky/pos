@@ -12,11 +12,9 @@
 # If base directory is not set in Netlify dashboard, this root config will build store-app
 
 [build]
-  base = "apps/store-app"
-  # Build command - install from root (for workspace dependencies), then build store-app
-  # Since base is set to apps/store-app, we need to go to root first
-  # This ensures all workspace dependencies are properly installed before building
-  command = "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter store-app run build:netlify"
+  # Build command - run from repo root (Netlify's default base directory)
+  # Install all workspace dependencies, then build store-app using pnpm workspace filter
+  command = "pnpm install --frozen-lockfile && pnpm --filter store-app run build:netlify"
   publish = "apps/store-app/dist"
 
 [build.environment]
