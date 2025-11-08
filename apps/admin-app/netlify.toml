@@ -11,7 +11,8 @@
   # This handles pnpm workspace dependencies correctly
   # Note: We start from apps/admin-app (base directory), so cd ../.. goes to root
   # Netlify auto-detects pnpm from pnpm-lock.yaml, so we don't need corepack
-  command = "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @pos-platform/shared build && pnpm --filter admin-app build"
+  # Safety check: Verify we're in apps/admin-app directory (fail fast if base directory is wrong)
+  command = "if [ ! -f package.json ] || [ ! -d src ] || [ ! -f vite.config.ts ]; then echo 'ERROR: Base directory must be apps/admin-app! Current directory:' && pwd && exit 1; fi && cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @pos-platform/shared build && pnpm --filter admin-app build"
 
 [build.environment]
   # Node.js version (use 20 for better Vite compatibility)
