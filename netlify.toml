@@ -10,13 +10,19 @@
 # - Admin App: Base directory = "apps/admin-app" (uses app-specific config)
 #
 # If base directory is not set in Netlify dashboard, this root config will build store-app
+# WORKAROUND: Check site name to determine which app to build
 
 [build]
-  # Build command - run from repo root (Netlify's default base directory)
-  # Install all workspace dependencies, then build store-app using directory path filter
-  # Using ./apps/store-app instead of package name since package name is "vite-react-typescript-starter"
-  command = "pnpm install --frozen-lockfile && pnpm --filter ./apps/store-app run build:netlify"
-  publish = "apps/store-app/dist"
+  # Build command - detect which app to build based on site name or URL
+  # Check NETLIFY_SITE_NAME, URL, or site ID to determine which site is being built
+  # If site name/URL contains "admin" or "super", build admin-app
+  # Otherwise, build store-app (default)
+  command = "SITE_NAME=\"${NETLIFY_SITE_NAME:-${NETLIFY_SITE_ID:-unknown}}\"; URL=\"${URL:-${DEPLOY_PRIME_URL:-unknown}}\"; if echo \"$SITE_NAME $URL\" | grep -qiE '(admin|super)'; then echo '🔧 Building admin-app for site: $SITE_NAME ($URL)' && pnpm install --frozen-lockfile && pnpm --filter @pos-platform/shared build && pnpm --filter admin-app build; else echo '🔧 Building store-app for site: $SITE_NAME ($URL)' && pnpm install --frozen-lockfile && pnpm --filter ./apps/store-app run build:netlify; fi"
+  # Publish directory - will be set based on which app is built
+  # For admin-app: apps/admin-app/dist
+  # For store-app: apps/store-app/dist
+  # Default to admin-app/dist (can be overridden in Netlify dashboard)
+  publish = "apps/admin-app/dist"
 
 [build.environment]
   NODE_VERSION = "20"
