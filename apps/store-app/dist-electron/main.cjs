@@ -16,6 +16,7 @@ if (process.env.NODE_ENV === 'development') {
         console.log('electron-reloader not available');
     }
 }
+
 let mainWindow = null;
 const createWindow = () => {
     mainWindow = new BrowserWindow({
