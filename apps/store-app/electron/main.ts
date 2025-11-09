@@ -80,24 +80,10 @@ app.on("ready", () => {
       autoUpdater.autoInstallOnAppQuit = true; // Install on quit (non-intrusive)
       autoUpdater.allowPrerelease = false; // Only stable releases
       
-      // Set update server URL explicitly
-      const updateServerUrl = 'https://souq-trablous.com/updates/';
-      console.log('[autoUpdater] Update server URL:', updateServerUrl);
-      
       // Configure update check interval (check every 4 hours)
-      // Delay initial check to ensure app is fully loaded
-      setTimeout(() => {
-        console.log('[autoUpdater] Starting initial update check...');
-        autoUpdater.checkForUpdatesAndNotify().catch((err: any) => {
-          console.error('[autoUpdater] Initial check failed:', err?.message || err);
-        });
-      }, 5000); // Wait 5 seconds after app ready
-      
+      autoUpdater.checkForUpdatesAndNotify();
       setInterval(() => {
-        console.log('[autoUpdater] Periodic update check...');
-        autoUpdater.checkForUpdatesAndNotify().catch((err: any) => {
-          console.error('[autoUpdater] Periodic check failed:', err?.message || err);
-        });
+        autoUpdater.checkForUpdatesAndNotify();
       }, 4 * 60 * 60 * 1000); // 4 hours in milliseconds
       
       autoUpdater.logger = {
@@ -137,29 +123,11 @@ app.on("ready", () => {
       });
 
       autoUpdater.on('error', (err: any) => {
-        const errorMessage = err?.message || 'Unknown error';
-        const errorStack = err?.stack || '';
-        
-        console.error('[autoUpdater] error:', errorMessage);
-        console.error('[autoUpdater] error details:', {
-          message: errorMessage,
-          stack: errorStack,
-          code: err?.code,
-          errno: err?.errno
-        });
-        
-        // Check for specific error: invalid semver version
-        if (errorMessage.includes('semver') || errorMessage.includes('version') || errorMessage.includes('undefined')) {
-          console.error('[autoUpdater] ⚠️ VERSION ERROR: latest.yml might be missing or have invalid version');
-          console.error('[autoUpdater] Check: https://souq-trablous.com/updates/latest.yml');
-          console.error('[autoUpdater] The file should contain a valid "version" field (e.g., "0.0.1")');
-        }
-        
+        console.error('[autoUpdater] error', err && err.message);
         if (mainWindow) {
           mainWindow.webContents.send('update-error', {
-            message: errorMessage,
-            stack: errorStack,
-            code: err?.code
+            message: err?.message || 'Unknown error',
+            stack: err?.stack
           });
         }
       });
