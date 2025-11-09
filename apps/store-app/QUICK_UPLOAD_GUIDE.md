@@ -31,24 +31,33 @@ cd updates
 netlify deploy --prod --dir=.
 ```
 
-## Alternative: Git-Based (Automated)
+## Alternative: Git-Based (Automated) - RECOMMENDED
+
+This method ensures files are in the right place and will be deployed automatically:
 
 ```bash
-# 1. Create public/updates folder
-mkdir -p apps/store-app/public/updates
+# 1. Build the app first
+cd apps/store-app
+npm run dist
 
-# 2. After building, copy files
-cp apps/store-app/dist/latest.yml apps/store-app/public/updates/
-cp apps/store-app/dist/*.nupkg apps/store-app/public/updates/
-cp apps/store-app/dist/*.exe apps/store-app/public/updates/
+# 2. Create public/updates folder (this gets copied to dist during build)
+mkdir -p public/updates
 
-# 3. Commit and push
-git add apps/store-app/public/updates/
-git commit -m "Add update files v0.0.2"
+# 3. Copy update files to public/updates (will be in dist/updates after build)
+cp dist/latest.yml public/updates/
+cp dist/*.nupkg public/updates/
+cp dist/*.exe public/updates/
+
+# 4. Commit and push
+git add public/updates/ public/_redirects netlify.toml
+git commit -m "Add update files v0.0.2 and fix redirects"
 git push
 
 # Netlify will auto-deploy!
+# Files will be at: https://souq-trablous.com/updates/latest.yml
 ```
+
+**Important:** The `public/` folder contents are copied to `dist/` during build, so files in `public/updates/` will be in `dist/updates/` after build.
 
 ## Verify Upload
 
@@ -57,33 +66,42 @@ After uploading, test these URLs in your browser:
 1. ✅ `https://souq-trablous.com/updates/latest.yml` - Should show YAML content
 2. ✅ `https://souq-trablous.com/updates/Souq POS-0.0.2-full.nupkg` - Should download file
 
-**⚠️ Important:** If the URLs don't work, you need to:
-1. **Update `netlify.toml`** - Make sure `/updates/*` is excluded from SPA redirects (see below)
-2. **Redeploy the site** - Commit and push the `netlify.toml` changes, or redeploy via Netlify dashboard
-3. **Check file paths** - Ensure files are in `dist/updates/` folder
+**⚠️ Important:** If the URLs don't work, check these:
 
-**Fix for URLs not working:**
+1. **Files must exist in `dist/updates/` folder** - If files don't exist, Netlify will redirect to index.html
+2. **Redirect rules must be updated** - The `_redirects` file in `public/` must exclude `/updates/*` BEFORE the catch-all
+3. **Redeploy after changes** - Commit and push changes, or redeploy via Netlify dashboard
 
-The issue is that Netlify's SPA redirect rule (`/*` → `/index.html`) catches all routes including `/updates/*`. 
+**The Error Explained:**
 
-**Solution:** Update `apps/store-app/netlify.toml` to exclude `/updates/*` from SPA redirects:
+The error "Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of 'text/html'" means:
+- The browser requested `/updates/latest.yml`
+- Netlify redirected it to `/index.html` (the SPA catch-all)
+- The browser received HTML instead of YAML
+- The browser tried to parse HTML as YAML/JavaScript, causing the error
 
-```toml
-# Exclude updates folder from SPA redirect (MUST come before catch-all)
-[[redirects]]
-  from = "/updates/*"
-  to = "/updates/:splat"
-  status = 200
-  force = true
+**Solution Steps:**
 
-# Catch-all SPA redirect (must come after specific routes)
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-```
+1. **Ensure files are in the right place:**
+   ```bash
+   # Files should be in: apps/store-app/public/updates/
+   # They will be copied to: apps/store-app/dist/updates/ during build
+   ```
 
-Then commit and push, or redeploy via Netlify dashboard.
+2. **Verify redirect rules are correct:**
+   - `public/_redirects` must have `/updates/*` rule BEFORE `/*`
+   - `netlify.toml` must have the same rule
+
+3. **Redeploy:**
+   ```bash
+   git add public/updates/ public/_redirects netlify.toml
+   git commit -m "Fix: Exclude /updates/* from SPA redirects"
+   git push
+   ```
+
+4. **Verify after deployment:**
+   - Check `https://souq-trablous.com/updates/latest.yml` in browser
+   - Should see YAML content, NOT HTML
 
 ## Complete Workflow (All Steps)
 

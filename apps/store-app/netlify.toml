@@ -22,11 +22,14 @@
 # The /updates/* rule must come BEFORE the catch-all /* rule
 
 # Exclude updates folder from SPA redirect (must come before catch-all)
+# This allows update files to be served directly without redirecting to index.html
 [[redirects]]
   from = "/updates/*"
   to = "/updates/:splat"
   status = 200
   force = true
+  # Don't redirect if file exists
+  conditions = {}
 
 # Catch-all SPA redirect (must come after specific routes)
 [[redirects]]
@@ -62,8 +65,25 @@
     Cache-Control = "public, max-age=0, must-revalidate"
 
 # Headers for update files (allow CORS and proper content types)
+# Note: Content-Type is set automatically by Netlify based on file extension
 [[headers]]
-  for = "/updates/*"
+  for = "/updates/*.yml"
+  [headers.values]
+    Content-Type = "text/yaml"
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, HEAD, OPTIONS"
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/updates/*.nupkg"
+  [headers.values]
+    Content-Type = "application/octet-stream"
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, HEAD, OPTIONS"
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/updates/*.exe"
   [headers.values]
     Content-Type = "application/octet-stream"
     Access-Control-Allow-Origin = "*"

@@ -1,2 +1,6 @@
+# Exclude /updates/* from SPA redirect (MUST come before catch-all)
+/updates/*    /updates/:splat    200
+
+# Catch-all SPA redirect (must come after specific routes)
 /*    /index.html   200
 

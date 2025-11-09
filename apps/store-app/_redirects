@@ -1,6 +1,10 @@
 # Netlify redirects file (backup for netlify.toml)
 # This ensures SPA routing works correctly
 
+# IMPORTANT: Exclude /updates/* from SPA redirect (MUST come before catch-all)
+# This allows update files to be served directly
+/updates/*    /updates/:splat    200
+
 # Redirect all routes to index.html for SPA routing
 /*    /index.html   200
 

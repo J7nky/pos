@@ -97,6 +97,10 @@
       }
     ],
     "npmRebuild": false,
-    "beforeBuild": null
+    "beforeBuild": null,
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }
