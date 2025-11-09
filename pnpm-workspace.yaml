@@ -1,4 +1,12 @@
 packages:
-  - 'apps/*'
-  - 'packages/*'
+  - apps/*
+  - packages/*
 
+ignoredBuiltDependencies:
+  - '@serialport/bindings-cpp'
+  - canvas
+  - electron
+  - electron-winstaller
+  - esbuild
+  - unrs-resolver
+  - usb

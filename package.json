@@ -11,11 +11,14 @@
     "build:store": "pnpm --filter store-app build",
     "build:admin": "pnpm --filter admin-app build",
     "build:all": "pnpm --filter \"./apps/*\" build",
+    "dist:store": "pnpm --filter store-app dist",
+    "pack:store": "pnpm --filter store-app pack",
     "lint": "pnpm --filter \"./apps/*\" lint",
     "clean": "pnpm --recursive exec rm -rf node_modules dist dist-electron",
     "setup": "pnpm install"
   },
   "devDependencies": {
+    "electron-builder": "^26.0.12",
     "typescript": "^5.5.3"
   },
   "engines": {
@@ -24,4 +27,3 @@
   },
   "packageManager": "pnpm@10.20.0"
 }
-
