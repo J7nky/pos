@@ -18,6 +18,7 @@
     "setup": "pnpm install"
   },
   "devDependencies": {
+    "electron": "38.5.0",
     "electron-builder": "^26.0.12",
     "typescript": "^5.5.3"
   },

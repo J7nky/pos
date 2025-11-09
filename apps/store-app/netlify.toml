@@ -18,6 +18,17 @@
   NPM_FLAGS = "--include=dev"
 
 # Redirect rules for SPA routing
+# IMPORTANT: Exclude /updates/* from SPA redirects so update files are accessible
+# The /updates/* rule must come BEFORE the catch-all /* rule
+
+# Exclude updates folder from SPA redirect (must come before catch-all)
+[[redirects]]
+  from = "/updates/*"
+  to = "/updates/:splat"
+  status = 200
+  force = true
+
+# Catch-all SPA redirect (must come after specific routes)
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -49,3 +60,12 @@
   for = "/sw.js"
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
+
+# Headers for update files (allow CORS and proper content types)
+[[headers]]
+  for = "/updates/*"
+  [headers.values]
+    Content-Type = "application/octet-stream"
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, HEAD, OPTIONS"
+    Cache-Control = "public, max-age=3600"

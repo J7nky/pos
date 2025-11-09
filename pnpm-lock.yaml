@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      electron:
+        specifier: 38.5.0
+        version: 38.5.0
       electron-builder:
         specifier: ^26.0.12
         version: 26.0.12(electron-builder-squirrel-windows@26.0.12)

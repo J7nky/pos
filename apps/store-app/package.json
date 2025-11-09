@@ -73,6 +73,7 @@
     "wait-on": "^9.0.1"
   },
   "build": {
+    "electronVersion": "38.5.0",
     "productName": "Souq POS",
     "appId": "com.souqtrablous.pos",
     "files": [
