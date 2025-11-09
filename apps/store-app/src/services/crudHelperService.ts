@@ -165,11 +165,12 @@ export class CRUDHelperService {
         }
         const storeProducts = await storeProductsQuery.toArray();
 
-        // Get global products (is_global = true or store_id is NULL)
-        let globalProductsQuery = table.where('is_global').equals(1); // Dexie stores boolean as 0 or 1
-        if (!includeDeleted) {
-          globalProductsQuery = globalProductsQuery.filter((item: any) => !item._deleted);
-        }
+        // Get global products (is_global = true or 1)
+        // Handle both boolean true and number 1 (for backwards compatibility)
+        let globalProductsQuery = table.filter((item: any) => {
+          const isGlobal = item.is_global === true || item.is_global === 1;
+          return isGlobal && (includeDeleted || !item._deleted);
+        });
         const globalProducts = await globalProductsQuery.toArray();
 
         // Combine and return

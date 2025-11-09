@@ -25,57 +25,57 @@ const SYNC_CONFIG = {
 
 // Table sync order (respects foreign key dependencies)
 const SYNC_TABLES = [
-'stores',
-'products',
-'suppliers', 
-'customers',
-'users', // Employees with auth accounts - synced to Supabase
-'cash_drawer_accounts',
-'inventory_bills',
+  'stores',
+  'products',
+  'suppliers',
+  'customers',
+  'users', // Employees with auth accounts - synced to Supabase
+  'cash_drawer_accounts',
+  'inventory_bills',
   'inventory_items',
-'transactions',
-'bills',
+  'transactions',
+  'bills',
   'bill_line_items',
   'bill_audit_logs',
-'cash_drawer_sessions',
-'missed_products',
-'reminders'
+  'cash_drawer_sessions',
+  'missed_products',
+  'reminders'
 ] as const;
 
 type SyncTable = typeof SYNC_TABLES[number];
 
 const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
-'products': [],
-'stores': [],
-'suppliers': [],
-'customers': [],
-'users': ['stores'],
-'cash_drawer_accounts': [],
-'inventory_bills': ['suppliers'],
+  'products': [],
+  'stores': [],
+  'suppliers': [],
+  'customers': [],
+  'users': ['stores'],
+  'cash_drawer_accounts': [],
+  'inventory_bills': ['suppliers'],
   // supplier_id was removed from inventory_items; depend on batch linkage only
   'inventory_items': ['products', 'inventory_bills'],
-'transactions': [],
-'bills': ['customers'],
-'bill_line_items': ['bills', 'products', 'suppliers', 'inventory_items'],
-'bill_audit_logs': ['bills'],
-'cash_drawer_sessions': ['cash_drawer_accounts'],
-'missed_products': ['cash_drawer_sessions', 'inventory_items'],
-'reminders': ['users'] // Reminders reference users (created_by, completed_by)
+  'transactions': [],
+  'bills': ['customers'],
+  'bill_line_items': ['bills', 'products', 'suppliers', 'inventory_items'],
+  'bill_audit_logs': ['bills'],
+  'cash_drawer_sessions': ['cash_drawer_accounts'],
+  'missed_products': ['cash_drawer_sessions', 'inventory_items'],
+  'reminders': ['users'] // Reminders reference users (created_by, completed_by)
 };
 
 export interface SyncResult {
-success: boolean;
-errors: string[];
-synced: {
-uploaded: number;
-downloaded: number;
-};
-conflicts: number;
+  success: boolean;
+  errors: string[];
+  synced: {
+    uploaded: number;
+    downloaded: number;
+  };
+  conflicts: number;
 }
 
 export class SyncService {
-private isRunning = false;
-private lastSyncAttempt: Date | null = null;
+  private isRunning = false;
+  private lastSyncAttempt: Date | null = null;
 
   /**
    * Classifies errors to determine if they are unrecoverable.
@@ -116,7 +116,7 @@ private lastSyncAttempt: Date | null = null;
       'bad value',
     ];
 
-    if (constraintKeywords.some(keyword => 
+    if (constraintKeywords.some(keyword =>
       errorMessage.includes(keyword) || errorDetails.includes(keyword)
     )) {
       return true;
@@ -129,7 +129,7 @@ private lastSyncAttempt: Date | null = null;
 
     // 400 Bad Request errors that indicate data validation issues
     if (error?.code === '400' && (
-      errorMessage.includes('overflow') || 
+      errorMessage.includes('overflow') ||
       errorMessage.includes('out of range') ||
       errorDetails.includes('precision') ||
       errorDetails.includes('scale')
@@ -147,7 +147,7 @@ private lastSyncAttempt: Date | null = null;
   private tryFixRecord(tableName: string, record: any, error: any): any | null {
     const errorMessage = (error?.message || '').toLowerCase();
     const errorDetails = (error?.details || '').toLowerCase();
-    
+
     // Fix foreign key violations by nullifying optional foreign keys
     if (error?.code === '23503' || errorMessage.includes('foreign key')) {
       // For bill_line_items, inventory_item_id is nullable, so we can nullify it
@@ -263,7 +263,7 @@ private lastSyncAttempt: Date | null = null;
         .where('table_name')
         .equals(tableName)
         .toArray();
-      
+
       const matchingSyncs = allPendingSyncs.filter((sync: any) => sync.record_id === recordId);
       for (const pendingSync of matchingSyncs) {
         await db.removePendingSync(pendingSync.id);
@@ -275,41 +275,41 @@ private lastSyncAttempt: Date | null = null;
     }
   }
 
-async sync(storeId: string): Promise<SyncResult> {
-if (this.isRunning) {
-throw new Error('Sync already in progress');
-}
+  async sync(storeId: string): Promise<SyncResult> {
+    if (this.isRunning) {
+      throw new Error('Sync already in progress');
+    }
 
-this.isRunning = true;
-this.lastSyncAttempt = new Date();
-const syncStartTime = performance.now();
+    this.isRunning = true;
+    this.lastSyncAttempt = new Date();
+    const syncStartTime = performance.now();
 
-const result: SyncResult = {
-success: true,
-errors: [],
-synced: { uploaded: 0, downloaded: 0 },
-conflicts: 0
-};
+    const result: SyncResult = {
+      success: true,
+      errors: [],
+      synced: { uploaded: 0, downloaded: 0 },
+      conflicts: 0
+    };
 
-try {
-const setupStart = performance.now();
-await this.ensureStoreExists(storeId);
+    try {
+      const setupStart = performance.now();
+      await this.ensureStoreExists(storeId);
       await this.initializeSyncMetadata(storeId);
       const setupTime = performance.now() - setupStart;
       console.log(`⏱️  Setup time: ${setupTime.toFixed(2)}ms`);
 
       // Check connectivity
-const connectivityStart = performance.now();
-const { error: connectivityError } = await supabase
-.from('products')
-.select('id')
-.limit(1);
-const connectivityTime = performance.now() - connectivityStart;
-console.log(`⏱️  Connectivity check: ${connectivityTime.toFixed(2)}ms`);
+      const connectivityStart = performance.now();
+      const { error: connectivityError } = await supabase
+        .from('products')
+        .select('id')
+        .limit(1);
+      const connectivityTime = performance.now() - connectivityStart;
+      console.log(`⏱️  Connectivity check: ${connectivityTime.toFixed(2)}ms`);
 
-if (connectivityError) {
-throw new Error(`Connection failed: ${connectivityError.message}`);
-}
+      if (connectivityError) {
+        throw new Error(`Connection failed: ${connectivityError.message}`);
+      }
 
       // Refresh validation cache once
       const cacheStart = performance.now();
@@ -325,191 +325,191 @@ throw new Error(`Connection failed: ${connectivityError.message}`);
       result.synced.uploaded = uploadResult.uploaded;
       result.errors.push(...uploadResult.errors);
 
-const downloadStart = performance.now();
-const downloadResult = await this.downloadRemoteChanges(storeId);
-const downloadTime = performance.now() - downloadStart;
-console.log(`⏱️  Download time: ${downloadTime.toFixed(2)}ms (${downloadResult.downloaded} records)`);
-result.synced.downloaded = downloadResult.downloaded;
-result.conflicts += downloadResult.conflicts;
-result.errors.push(...downloadResult.errors);
+      const downloadStart = performance.now();
+      const downloadResult = await this.downloadRemoteChanges(storeId);
+      const downloadTime = performance.now() - downloadStart;
+      console.log(`⏱️  Download time: ${downloadTime.toFixed(2)}ms (${downloadResult.downloaded} records)`);
+      result.synced.downloaded = downloadResult.downloaded;
+      result.conflicts += downloadResult.conflicts;
+      result.errors.push(...downloadResult.errors);
 
-const pendingStart = performance.now();
-await this.processPendingSyncs();
-const pendingTime = performance.now() - pendingStart;
-console.log(`⏱️  Pending syncs processing: ${pendingTime.toFixed(2)}ms`);
+      const pendingStart = performance.now();
+      await this.processPendingSyncs();
+      const pendingTime = performance.now() - pendingStart;
+      console.log(`⏱️  Pending syncs processing: ${pendingTime.toFixed(2)}ms`);
 
-const totalTime = performance.now() - syncStartTime;
-console.log(`⏱️  Total sync time: ${totalTime.toFixed(2)}ms (${(totalTime / 1000).toFixed(2)}s)`);
+      const totalTime = performance.now() - syncStartTime;
+      console.log(`⏱️  Total sync time: ${totalTime.toFixed(2)}ms (${(totalTime / 1000).toFixed(2)}s)`);
 
-result.success = result.errors.length === 0;
+      result.success = result.errors.length === 0;
 
-} catch (error) {
-const totalTime = performance.now() - syncStartTime;
-console.error(`⏱️  Sync failed after ${totalTime.toFixed(2)}ms:`, error);
-result.success = false;
-result.errors.push(error instanceof Error ? error.message : 'Unknown sync error');
-} finally {
-this.isRunning = false;
-}
+    } catch (error) {
+      const totalTime = performance.now() - syncStartTime;
+      console.error(`⏱️  Sync failed after ${totalTime.toFixed(2)}ms:`, error);
+      result.success = false;
+      result.errors.push(error instanceof Error ? error.message : 'Unknown sync error');
+    } finally {
+      this.isRunning = false;
+    }
 
-return result;
-}
+    return result;
+  }
 
   private async uploadLocalChanges(storeId: string) {
-const result = { uploaded: 0, errors: [] as string[] };
+    const result = { uploaded: 0, errors: [] as string[] };
 
     for (const tableName of SYNC_TABLES) {
       const tableStart = performance.now();
       try {
         // console.log(`📤 Processing table: ${tableName}`);
-        
+
         if (!await this.validateDependencies(tableName, storeId)) {
           console.log(`⏳ Skipping ${tableName} - dependencies not met`);
           continue;
-}
+        }
 
-         const table = (db as any)[tableName];
-         const activeRecords = await table.filter((record: any) => !record._synced && !record._deleted).toArray();
-         const deletedRecords = await table.filter((record: any) => record._deleted && !record._synced).toArray();
+        const table = (db as any)[tableName];
+        const activeRecords = await table.filter((record: any) => !record._synced && !record._deleted).toArray();
+        const deletedRecords = await table.filter((record: any) => record._deleted && !record._synced).toArray();
 
-         if (activeRecords.length === 0 && deletedRecords.length === 0) {
-           console.log(`  ⏭️  No unsynced records for ${tableName}`);
-           continue;
-         }
+        if (activeRecords.length === 0 && deletedRecords.length === 0) {
+          console.log(`  ⏭️  No unsynced records for ${tableName}`);
+          continue;
+        }
 
-         // Process deleted records first if there are any (they don't need dependency validation)
-         // This ensures deletions happen even if active records can't be synced due to dependencies
-         if (deletedRecords.length > 0) {
-           console.log(`  🗑️  Processing ${deletedRecords.length} deleted records for ${tableName}`);
-         }
-         
+        // Process deleted records first if there are any (they don't need dependency validation)
+        // This ensures deletions happen even if active records can't be synced due to dependencies
+        if (deletedRecords.length > 0) {
+          console.log(`  🗑️  Processing ${deletedRecords.length} deleted records for ${tableName}`);
+        }
+
         console.log(`  📊 Found ${activeRecords.length} active and ${deletedRecords.length} deleted unsynced records`);
 
         // CRITICAL: For inventory_items with batch_id, check if parent batch exists
-         if (tableName === 'inventory_items') {
+        if (tableName === 'inventory_items') {
           const recordsWithBatch = activeRecords.filter((r: any) => r.batch_id);
-          
+
           if (recordsWithBatch.length > 0) {
             const batchIds = [...new Set(recordsWithBatch.map((record: any) => record.batch_id))];
-            
+
             try {
               const { data: batchesData, error: batchesError } = await supabase
                 .from('inventory_bills')
                 .select('id')
                 .in('id', batchIds);
-              
+
               if (batchesError) {
                 console.warn(`Failed to validate batch IDs for inventory_items:`, batchesError);
               } else {
                 const validBatchIds = new Set(batchesData?.map((b: any) => b.id) || []);
-                
+
                 // Also check local batches
-           const localBatches = await db.inventory_bills
-             .where('store_id')
-             .equals(storeId)
+                const localBatches = await db.inventory_bills
+                  .where('store_id')
+                  .equals(storeId)
                   .filter((batch: any) => !batch._deleted)
-             .toArray();
+                  .toArray();
                 const localBatchIds = new Set(localBatches.map((batch: any) => batch.id));
-                
+
                 // Filter records to only include those with valid batch references
                 const validRecords: any[] = [];
                 const invalidRecords: any[] = [];
-                
+
                 for (const record of activeRecords) {
-                  if (!record.batch_id || 
-                      validBatchIds.has(record.batch_id) || 
-                      localBatchIds.has(record.batch_id)) {
+                  if (!record.batch_id ||
+                    validBatchIds.has(record.batch_id) ||
+                    localBatchIds.has(record.batch_id)) {
                     validRecords.push(record);
-               } else {
+                  } else {
                     invalidRecords.push(record);
                     console.warn(`⏳ Inventory item ${record.id} skipped - batch ${record.batch_id} not yet synced`);
                   }
                 }
-           
-           if (invalidRecords.length > 0) {
+
+                if (invalidRecords.length > 0) {
                   console.log(`⏳ ${invalidRecords.length} inventory_items skipped - waiting for parent batches`);
                 }
-                
+
                 // Update activeRecords
                 activeRecords.length = 0;
                 activeRecords.push(...validRecords);
-                
+
                 if (activeRecords.length === 0) {
                   console.log(`⏳ No inventory_items ready to sync (all waiting for parent batches)`);
-                 continue;
-               }
+                  continue;
+                }
               }
-           } catch (error) {
+            } catch (error) {
               console.warn(`Failed to validate batch IDs for inventory_items:`, error);
             }
           }
         }
-        
+
         // CRITICAL: For bill_line_items and bill_audit_logs, check if parent bills exist in Supabase
         // NOTE: Only validate activeRecords - deleted records don't need parent bill validation
         if ((tableName === 'bill_line_items' || tableName === 'bill_audit_logs') && activeRecords.length > 0) {
           const billIds = [...new Set(activeRecords.map((record: any) => record.bill_id))];
-           
-           try {
-             const { data: billsData, error: billsError } = await supabase
-               .from('bills')
-               .select('id')
-               .in('id', billIds);
-             
-             if (billsError) {
+
+          try {
+            const { data: billsData, error: billsError } = await supabase
+              .from('bills')
+              .select('id')
+              .in('id', billIds);
+
+            if (billsError) {
               console.warn(`Failed to validate bill IDs for ${tableName}:`, billsError);
               console.log(`⏳ Skipping ${tableName} active records sync - cannot validate bill dependencies (deleted records will still be processed)`);
               // Don't continue - still process deleted records
               activeRecords.length = 0; // Clear active records but continue to process deleted records
-             } else {
-            const validBillIds = new Set(billsData?.map((b: any) => b.id) || []);
-            
-            // Filter out records whose parent bills don't exist in Supabase yet
-            const recordsWithValidBills: any[] = [];
-            const recordsWithMissingBills: any[] = [];
-            
-            for (const record of activeRecords) {
-              if (validBillIds.has(record.bill_id)) {
-                recordsWithValidBills.push(record);
-             } else {
-                recordsWithMissingBills.push(record);
+            } else {
+              const validBillIds = new Set(billsData?.map((b: any) => b.id) || []);
+
+              // Filter out records whose parent bills don't exist in Supabase yet
+              const recordsWithValidBills: any[] = [];
+              const recordsWithMissingBills: any[] = [];
+
+              for (const record of activeRecords) {
+                if (validBillIds.has(record.bill_id)) {
+                  recordsWithValidBills.push(record);
+                } else {
+                  recordsWithMissingBills.push(record);
+                }
               }
+
+              if (recordsWithMissingBills.length > 0) {
+                console.log(`⏳ ${recordsWithMissingBills.length} ${tableName} active records skipped - parent bills not yet synced (will retry next sync)`);
+              }
+
+              // Update activeRecords to only include those with valid parent bills
+              // Note: We don't continue here even if no valid records - we still want to process deleted records
+              activeRecords.length = 0;
+              activeRecords.push(...recordsWithValidBills);
             }
-            
-            if (recordsWithMissingBills.length > 0) {
-              console.log(`⏳ ${recordsWithMissingBills.length} ${tableName} active records skipped - parent bills not yet synced (will retry next sync)`);
-            }
-             
-            // Update activeRecords to only include those with valid parent bills
-            // Note: We don't continue here even if no valid records - we still want to process deleted records
-            activeRecords.length = 0;
-            activeRecords.push(...recordsWithValidBills);
-           }
-           } catch (error) {
+          } catch (error) {
             console.warn(`Failed to validate bill IDs for ${tableName}:`, error);
             console.log(`⏳ Skipping ${tableName} active records sync - cannot validate bill dependencies (deleted records will still be processed)`);
             // Don't continue - still process deleted records
             activeRecords.length = 0; // Clear active records but continue to process deleted records
-           }
+          }
         }
 
         // Validate records
         const validation = await dataValidationService.validateRecords(tableName, activeRecords, storeId);
-        
+
         // Remove invalid records from sync queue
         for (const invalid of validation.errors) {
           console.warn(`🚫 Removing invalid ${tableName} record: ${invalid.reason}`, invalid.record);
-               await db.markAsSynced(tableName, invalid.record.id);
+          await db.markAsSynced(tableName, invalid.record.id);
         }
 
-        const validRecords = activeRecords.filter((r: any) => 
+        const validRecords = activeRecords.filter((r: any) =>
           !validation.errors.some(e => e.record.id === r.id)
         );
 
         // Upload in batches
         for (let i = 0; i < validRecords.length; i += SYNC_CONFIG.batchSize) {
           const batch = validRecords.slice(i, i + SYNC_CONFIG.batchSize);
-          let cleanedBatch = batch.map((record: any) => 
+          let cleanedBatch = batch.map((record: any) =>
             dataValidationService.cleanRecordForUpload(record, tableName)
           );
 
@@ -545,12 +545,12 @@ const result = { uploaded: 0, errors: [] as string[] };
           if (error) {
             console.error(`❌ Upload failed for ${tableName}:`, error);
             result.errors.push(`Upload failed for ${tableName}: ${error.message}`);
-            
+
             // Check if this is an unrecoverable error
-            const hasUnrecoverableError = cleanedBatch.some((record, idx) => 
+            const hasUnrecoverableError = cleanedBatch.some((record, idx) =>
               this.isUnrecoverableError(error, tableName, record)
             );
-            
+
             // Try individual uploads for constraint/FK errors or batch errors
             if (error.code === '23503' || error.message.includes('foreign key') || hasUnrecoverableError) {
               await this.handleFailedBatch(tableName, cleanedBatch, batch);
@@ -571,7 +571,7 @@ const result = { uploaded: 0, errors: [] as string[] };
         const tableTime = performance.now() - tableStart;
         console.log(`  ⏱️  ${tableName} upload: ${tableTime.toFixed(2)}ms`);
 
-                 // Handle deleted records
+        // Handle deleted records
         for (const record of deletedRecords as any[]) {
           try {
             // Special handling for inventory_items with foreign key constraints
@@ -638,22 +638,22 @@ const result = { uploaded: 0, errors: [] as string[] };
             result.errors.push(`Delete error for ${tableName}/${record.id}: ${error}`);
           }
         }
-        
+
         if (deletedRecords.length > 0) {
           const deleteTime = performance.now() - tableStart;
           console.log(`  🗑️  ${tableName} deletions processed: ${deleteTime.toFixed(2)}ms`);
         }
 
-} catch (error) {
+      } catch (error) {
         const tableTime = performance.now() - tableStart;
         console.error(`  ⏱️  ${tableName} upload failed after ${tableTime.toFixed(2)}ms:`, error);
         result.errors.push(`Table ${tableName} upload error: ${error}`);
-}
-}
+      }
+    }
 
     console.log(`📊 Sync upload summary: ${result.uploaded} records uploaded`);
-return result;
-}
+    return result;
+  }
 
   private async handleFailedBatch(tableName: string, cleanedBatch: any[], originalBatch: any[]) {
     console.log(`🔍 Attempting individual uploads to identify problem records...`);
@@ -664,19 +664,19 @@ return result;
         const { error: individualError } = await supabase
           .from(tableName as any)
           .upsert([record], { onConflict: 'id' });
-        
+
         if (individualError) {
           // Check if error is unrecoverable
           if (this.isUnrecoverableError(individualError, tableName, record)) {
             // Try to fix the record once by nullifying optional foreign keys
             const fixedRecord = this.tryFixRecord(tableName, record, individualError);
-            
+
             if (fixedRecord) {
               // Try once more with the fixed record
               const { error: retryError } = await supabase
                 .from(tableName as any)
                 .upsert([fixedRecord], { onConflict: 'id' });
-              
+
               if (!retryError) {
                 // Success! Update local record and mark as synced
                 await (db as any)[tableName].update(original.id, {
@@ -687,7 +687,7 @@ return result;
                 console.log(`✅ Fixed and synced ${tableName} record ${original.id}`);
                 continue;
               }
-              
+
               // Fix didn't work, delete the record
               await this.deleteProblematicRecord(tableName, original.id, retryError || individualError);
             } else {
@@ -714,16 +714,16 @@ return result;
     }
   }
 
-private async downloadRemoteChanges(storeId: string) {
-const result = { downloaded: 0, conflicts: 0, errors: [] as string[] };
+  private async downloadRemoteChanges(storeId: string) {
+    const result = { downloaded: 0, conflicts: 0, errors: [] as string[] };
 
-for (const tableName of SYNC_TABLES) {
-const tableStart = performance.now();
-try {
+    for (const tableName of SYNC_TABLES) {
+      const tableStart = performance.now();
+      try {
         if (!await this.validateDependencies(tableName, storeId)) {
-console.log(`⏳ Skipping download for ${tableName} - dependencies not met`);
-continue;
-}
+          console.log(`⏳ Skipping download for ${tableName} - dependencies not met`);
+          continue;
+        }
 
         const syncMetadata = await db.getSyncMetadata(tableName);
         let lastSyncAt = syncMetadata?.last_synced_at || '1970-01-01T00:00:00.000Z';
@@ -757,18 +757,115 @@ continue;
         const localRecordCount = await table.filter((record: any) => !record._deleted).count();
         const shouldDoFullSync = isFirstSync || localRecordCount === 0;
 
-        if (!shouldDoFullSync) {
-          query = query.gte(timestampField, lastSyncAt);
-          console.log(`📊 Incremental sync for ${tableName} since ${lastSyncAt} (${localRecordCount} local records)`);
+        // Special handling for products: always include global products even in incremental syncs
+        // Global products might not have been updated recently, so we need to fetch them separately
+        let remoteRecords: any[] = [];
+        let error: any = null;
+        
+        if (tableName === 'products' && !shouldDoFullSync) {
+          // For incremental sync, fetch store-specific and global products separately
+          // 1. Store-specific products updated since lastSyncAt
+          const storeSpecificQuery = supabase
+            .from('products')
+            .select('*')
+            .eq('store_id', storeId)
+            .gte(timestampField, lastSyncAt)
+            .order(timestampField, { ascending: true })
+            .limit(SYNC_CONFIG.maxRecordsPerSync);
+          
+          // 2. All global products (regardless of update time)
+          const globalProductsQuery = supabase
+            .from('products')
+            .select('*')
+            .eq('is_global', true)
+            .order(timestampField, { ascending: true })
+            .limit(SYNC_CONFIG.maxRecordsPerSync);
+          
+          console.log(`📊 Incremental sync for ${tableName} since ${lastSyncAt} (${localRecordCount} local records) - fetching store-specific and global products separately`);
+          
+          // Execute both queries in parallel
+          const [storeSpecificResult, globalProductsResult] = await Promise.all([
+            storeSpecificQuery,
+            globalProductsQuery
+          ]);
+          
+          // Log detailed results for debugging
+          console.log(`🔍 Store-specific products query result:`, {
+            count: storeSpecificResult.data?.length || 0,
+            error: storeSpecificResult.error,
+            hasData: !!storeSpecificResult.data
+          });
+          
+          console.log(`🔍 Global products query result:`, {
+            count: globalProductsResult.data?.length || 0,
+            error: globalProductsResult.error,
+            hasData: !!globalProductsResult.data,
+            data: globalProductsResult.data?.slice(0, 2) // Log first 2 for debugging
+          });
+          
+          // Log errors but continue processing successful results
+          if (storeSpecificResult.error) {
+            console.error(`⚠️ Failed to fetch store-specific products:`, storeSpecificResult.error);
+            result.errors.push(`Download failed for ${tableName} (store-specific): ${storeSpecificResult.error.message}`);
+          }
+          
+          if (globalProductsResult.error) {
+            console.error(`⚠️ Failed to fetch global products:`, globalProductsResult.error);
+            console.error(`⚠️ Global products error details:`, {
+              message: globalProductsResult.error.message,
+              details: globalProductsResult.error.details,
+              hint: globalProductsResult.error.hint,
+              code: globalProductsResult.error.code
+            });
+            result.errors.push(`Download failed for ${tableName} (global): ${globalProductsResult.error.message}`);
+          } else if (!globalProductsResult.data || globalProductsResult.data.length === 0) {
+            // No error but no data - might be RLS blocking or no global products exist
+            console.warn(`⚠️ Global products query returned no data (no error). Possible causes:`);
+            console.warn(`   - RLS policies might be blocking access`);
+            console.warn(`   - No global products exist in database`);
+            console.warn(`   - Try running: SELECT * FROM products WHERE is_global = true;`);
+          }
+          
+          // Set error only if both queries failed
+          if (storeSpecificResult.error && globalProductsResult.error) {
+            error = storeSpecificResult.error; // Use first error
+          }
+          
+          // Combine results and remove duplicates (even if one query failed)
+          const allRecords = [
+            ...(storeSpecificResult.data || []),
+            ...(globalProductsResult.data || [])
+          ];
+          
+          // Remove duplicates by id and normalize is_global field
+          const uniqueRecords = Array.from(
+            new Map(allRecords.map(record => {
+              // Normalize is_global: convert boolean to 0/1 for Dexie compatibility
+              const normalized = { ...record };
+              if (normalized.is_global !== undefined) {
+                normalized.is_global = normalized.is_global === true ? 1 : 0;
+              }
+              return [record.id, normalized];
+            })).values()
+          );
+          
+          remoteRecords = uniqueRecords;
         } else {
-          console.log(`📊 Full sync for ${tableName} (${isFirstSync ? 'first sync' : 'no local records found'}, ${localRecordCount} local)`);
+          if (!shouldDoFullSync) {
+            query = query.gte(timestampField, lastSyncAt);
+            console.log(`📊 Incremental sync for ${tableName} since ${lastSyncAt} (${localRecordCount} local records)`);
+          } else {
+            console.log(`📊 Full sync for ${tableName} (${isFirstSync ? 'first sync' : 'no local records found'}, ${localRecordCount} local)`);
+          }
+
+          query = query
+            .order(timestampField, { ascending: true })
+            .limit(SYNC_CONFIG.maxRecordsPerSync);
+
+          const queryResult = await query;
+          remoteRecords = queryResult.data || [];
+          error = queryResult.error;
         }
-
-        query = query
-          .order(timestampField, { ascending: true })
-          .limit(SYNC_CONFIG.maxRecordsPerSync);
-
-        const { data: remoteRecords, error } = await query;
 
         if (error) {
           result.errors.push(`Download failed for ${tableName}: ${error.message}`);
@@ -779,7 +876,7 @@ continue;
         if (!remoteRecords || remoteRecords.length === 0) {
           const tableTime = performance.now() - tableStart;
           console.log(`📊 No records found for ${tableName} (${tableTime.toFixed(2)}ms) - query: store_id=${storeId}, ${!shouldDoFullSync ? `${timestampField}>=${lastSyncAt}` : 'full sync'}`);
-          
+
           // For inventory_items specifically, log diagnostic info
           if (tableName === 'inventory_items') {
             const allRemoteQuery = supabase.from('inventory_items').select('id, store_id, created_at').eq('store_id', storeId).limit(5);
@@ -789,121 +886,134 @@ continue;
           continue;
         }
 
-console.log(`📊 Found ${remoteRecords.length} records for ${tableName}`);
+        console.log(`📊 Found ${remoteRecords.length} records for ${tableName}`);
 
-for (const remoteRecord of remoteRecords) {
-try {
-const localRecord = await (db as any)[tableName].get(remoteRecord.id);
+        for (const remoteRecord of remoteRecords) {
+          try {
+            const localRecord = await (db as any)[tableName].get(remoteRecord.id);
 
-if (!localRecord) {
-await (db as any)[tableName].put({
-...remoteRecord,
-_synced: true,
-_lastSyncedAt: new Date().toISOString()
-});
-result.downloaded++;
-} else {
-const conflict = await this.resolveConflict(tableName, localRecord, remoteRecord);
-if (conflict) {
-result.conflicts++;
-} else {
-result.downloaded++;
-}
-}
-} catch (error) {
-result.errors.push(`Record process error ${tableName}/${remoteRecord.id}: ${error}`);
-}
-}
+            // Normalize is_global field: convert boolean to 0/1 for Dexie compatibility
+            // Supabase returns boolean, but Dexie stores it as 0/1
+            const normalizedRecord = { ...remoteRecord };
+            if (tableName === 'products' && normalizedRecord.is_global !== undefined) {
+              normalizedRecord.is_global = normalizedRecord.is_global === true ? 1 : 0;
+            }
 
-const latestRecord = remoteRecords[remoteRecords.length - 1];
-const latestTimestamp = latestRecord?.[timestampField] || new Date().toISOString();
-await db.updateSyncMetadata(tableName, latestTimestamp);
+            if (!localRecord) {
+              await (db as any)[tableName].put({
+                ...normalizedRecord,
+                _synced: true,
+                _lastSyncedAt: new Date().toISOString()
+              });
+              result.downloaded++;
+            } else {
+              const conflict = await this.resolveConflict(tableName, localRecord, normalizedRecord);
+              if (conflict) {
+                result.conflicts++;
+              } else {
+                result.downloaded++;
+              }
+            }
+          } catch (error) {
+            result.errors.push(`Record process error ${tableName}/${remoteRecord.id}: ${error}`);
+          }
+        }
 
-const tableTime = performance.now() - tableStart;
-console.log(`  ⏱️  ${tableName} download: ${tableTime.toFixed(2)}ms (${remoteRecords.length} records)`);
+        const latestRecord = remoteRecords[remoteRecords.length - 1];
+        const latestTimestamp = latestRecord?.[timestampField] || new Date().toISOString();
+        await db.updateSyncMetadata(tableName, latestTimestamp);
 
-} catch (error) {
-const tableTime = performance.now() - tableStart;
-console.error(`  ⏱️  ${tableName} download failed after ${tableTime.toFixed(2)}ms:`, error);
-result.errors.push(`Table ${tableName} download error: ${error}`);
-}
-}
+        const tableTime = performance.now() - tableStart;
+        console.log(`  ⏱️  ${tableName} download: ${tableTime.toFixed(2)}ms (${remoteRecords.length} records)`);
 
-return result;
-}
+      } catch (error) {
+        const tableTime = performance.now() - tableStart;
+        console.error(`  ⏱️  ${tableName} download failed after ${tableTime.toFixed(2)}ms:`, error);
+        result.errors.push(`Table ${tableName} download error: ${error}`);
+      }
+    }
 
-private async resolveConflict(tableName: string, localRecord: any, remoteRecord: any): Promise<boolean> {
-if (localRecord._synced) {
-await (db as any)[tableName].put({
-...remoteRecord,
-_synced: true,
-_lastSyncedAt: new Date().toISOString()
-});
+    return result;
+  }
+
+  private async resolveConflict(tableName: string, localRecord: any, remoteRecord: any): Promise<boolean> {
+    // Normalize is_global field if it's a product (remoteRecord is already normalized, but ensure it)
+    const normalizedRemote = { ...remoteRecord };
+    if (tableName === 'products' && normalizedRemote.is_global !== undefined) {
+      normalizedRemote.is_global = normalizedRemote.is_global === true ? 1 : 0;
+    }
+
+    if (localRecord._synced) {
+      await (db as any)[tableName].put({
+        ...normalizedRemote,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
       return false;
-}
+    }
 
     // Financial-specific conflict resolution
-if (tableName === 'cash_drawer_accounts') {
-return await this.resolveCashDrawerAccountConflict(localRecord, remoteRecord);
-}
+    if (tableName === 'cash_drawer_accounts') {
+      return await this.resolveCashDrawerAccountConflict(localRecord, normalizedRemote);
+    }
 
     if (tableName === 'customers' || tableName === 'suppliers') {
-      return await this.resolveBalanceConflict(tableName, localRecord, remoteRecord);
+      return await this.resolveBalanceConflict(tableName, localRecord, normalizedRemote);
     }
 
     // Default: timestamp-based resolution
-const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
-const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
+    const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
+    const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
 
-const localModifiedAt = new Date(localRecord[timestampField] || localRecord.created_at);
-const remoteModifiedAt = new Date(remoteRecord[timestampField] || remoteRecord.created_at);
+    const localModifiedAt = new Date(localRecord[timestampField] || localRecord.created_at);
+    const remoteModifiedAt = new Date(normalizedRemote[timestampField] || normalizedRemote.created_at);
 
-if (remoteModifiedAt >= localModifiedAt) {
-await db.addPendingSync(tableName, localRecord.id, 'update', localRecord);
-await (db as any)[tableName].put({
-...remoteRecord,
-_synced: true,
-_lastSyncedAt: new Date().toISOString()
-});
-} else {
-await (db as any)[tableName].update(localRecord.id, {
-_lastSyncedAt: new Date().toISOString()
-});
-}
+    if (remoteModifiedAt >= localModifiedAt) {
+      await db.addPendingSync(tableName, localRecord.id, 'update', localRecord);
+      await (db as any)[tableName].put({
+        ...normalizedRemote,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    } else {
+      await (db as any)[tableName].update(localRecord.id, {
+        _lastSyncedAt: new Date().toISOString()
+      });
+    }
 
     return true;
-}
+  }
 
-private async resolveCashDrawerAccountConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
-const localBalance = Number(localRecord.current_balance || 0);
-const remoteBalance = Number(remoteRecord.current_balance || 0);
+  private async resolveCashDrawerAccountConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
+    const localBalance = Number(localRecord.current_balance || 0);
+    const remoteBalance = Number(remoteRecord.current_balance || 0);
 
-if (Math.abs(localBalance - remoteBalance) > 0.01) {
+    if (Math.abs(localBalance - remoteBalance) > 0.01) {
       console.warn(`💰 Cash drawer balance conflict: Local: $${localBalance.toFixed(2)}, Remote: $${remoteBalance.toFixed(2)}`);
-      
+
       // For cash drawer conflicts, recalculate balance from transactions instead of using max
       // This ensures accuracy and prevents balance inflation
       try {
         const { cashDrawerUpdateService } = await import('./cashDrawerUpdateService');
         const calculatedBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(localRecord.store_id);
-        
+
         console.log(`💰 Recalculated balance from transactions: $${calculatedBalance.toFixed(2)}`);
-        
+
         await db.cash_drawer_accounts.update(localRecord.id, {
           current_balance: calculatedBalance,
           updated_at: new Date().toISOString(),
           _synced: true,
           _lastSyncedAt: new Date().toISOString()
         });
-        
+
         return true;
       } catch (error) {
         console.error('Error recalculating cash drawer balance:', error);
-        
+
         // Fallback to timestamp-based resolution
         const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
         const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
-        
+
         if (remoteTimestamp >= localTimestamp) {
           await db.cash_drawer_accounts.put({
             ...remoteRecord,
@@ -916,152 +1026,152 @@ if (Math.abs(localBalance - remoteBalance) > 0.01) {
             _lastSyncedAt: new Date().toISOString()
           });
         }
-        
+
         return true;
       }
     }
 
-const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
-const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
+    const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
+    const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
 
-if (remoteTimestamp >= localTimestamp) {
+    if (remoteTimestamp >= localTimestamp) {
       await db.cash_drawer_accounts.put({
-...remoteRecord,
-_synced: true,
-_lastSyncedAt: new Date().toISOString()
-});
-} else {
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    } else {
       await db.cash_drawer_accounts.update(localRecord.id, {
-_synced: true,
-_lastSyncedAt: new Date().toISOString()
-});
-}
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    }
 
-return false;
-}
+    return false;
+  }
 
   private async resolveBalanceConflict(tableName: string, localRecord: any, remoteRecord: any): Promise<boolean> {
-const localUsdBalance = Number(localRecord.usd_balance || 0);
-const remoteUsdBalance = Number(remoteRecord.usd_balance || 0);
-const localLbpBalance = Number(localRecord.lb_balance || 0);
-const remoteLbpBalance = Number(remoteRecord.lb_balance || 0);
+    const localUsdBalance = Number(localRecord.usd_balance || 0);
+    const remoteUsdBalance = Number(remoteRecord.usd_balance || 0);
+    const localLbpBalance = Number(localRecord.lb_balance || 0);
+    const remoteLbpBalance = Number(remoteRecord.lb_balance || 0);
 
-if (Math.abs(localUsdBalance - remoteUsdBalance) > 0.01 || Math.abs(localLbpBalance - remoteLbpBalance) > 0.01) {
+    if (Math.abs(localUsdBalance - remoteUsdBalance) > 0.01 || Math.abs(localLbpBalance - remoteLbpBalance) > 0.01) {
       console.warn(`💰 Balance conflict: Local USD: $${localUsdBalance.toFixed(2)}, Remote USD: $${remoteUsdBalance.toFixed(2)}`);
 
-const finalUsdBalance = Math.max(localUsdBalance, remoteUsdBalance);
-const finalLbpBalance = Math.max(localLbpBalance, remoteLbpBalance);
+      const finalUsdBalance = Math.max(localUsdBalance, remoteUsdBalance);
+      const finalLbpBalance = Math.max(localLbpBalance, remoteLbpBalance);
 
       await (db as any)[tableName].put({
-...remoteRecord,
-usd_balance: finalUsdBalance,
-lb_balance: finalLbpBalance,
-_synced: true,
-_lastSyncedAt: new Date().toISOString()
-});
+        ...remoteRecord,
+        usd_balance: finalUsdBalance,
+        lb_balance: finalLbpBalance,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
 
-return true;
-}
+      return true;
+    }
 
-return false;
-}
+    return false;
+  }
 
-private async processPendingSyncs() {
-const pendingSyncs = await db.getPendingSyncs();
+  private async processPendingSyncs() {
+    const pendingSyncs = await db.getPendingSyncs();
 
-for (const pendingSync of pendingSyncs) {
-try {
-if (pendingSync.retry_count >= SYNC_CONFIG.maxRetries) {
-console.error(`Max retries reached for pending sync: ${pendingSync.id}`);
-// Check if it's an unrecoverable error, if so, delete the record
-// Note: last_error might not be in the type definition but is added during updates
-const lastError = (pendingSync as any).last_error || '';
-const isUnrecoverable = lastError.includes('23503') || 
-                         lastError.includes('foreign key') ||
-                         lastError.includes('constraint') ||
-                         lastError.includes('violates');
-if (isUnrecoverable && pendingSync.operation !== 'delete') {
-  await this.deleteProblematicRecord(
-    pendingSync.table_name, 
-    pendingSync.record_id, 
-    { message: lastError, code: '23503' }
-  );
-}
-await db.removePendingSync(pendingSync.id);
-continue;
-}
+    for (const pendingSync of pendingSyncs) {
+      try {
+        if (pendingSync.retry_count >= SYNC_CONFIG.maxRetries) {
+          console.error(`Max retries reached for pending sync: ${pendingSync.id}`);
+          // Check if it's an unrecoverable error, if so, delete the record
+          // Note: last_error might not be in the type definition but is added during updates
+          const lastError = (pendingSync as any).last_error || '';
+          const isUnrecoverable = lastError.includes('23503') ||
+            lastError.includes('foreign key') ||
+            lastError.includes('constraint') ||
+            lastError.includes('violates');
+          if (isUnrecoverable && pendingSync.operation !== 'delete') {
+            await this.deleteProblematicRecord(
+              pendingSync.table_name,
+              pendingSync.record_id,
+              { message: lastError, code: '23503' }
+            );
+          }
+          await db.removePendingSync(pendingSync.id);
+          continue;
+        }
 
-let success = false;
-let error: any = null;
+        let success = false;
+        let error: any = null;
 
-switch (pendingSync.operation) {
-case 'create':
-case 'update':
+        switch (pendingSync.operation) {
+          case 'create':
+          case 'update':
             const cleanedPayload = dataValidationService.cleanRecordForUpload(
-              pendingSync.payload, 
+              pendingSync.payload,
               pendingSync.table_name
             );
             if (cleanedPayload) {
-const { error: upsertError } = await supabase
-.from(pendingSync.table_name as any)
-.upsert(cleanedPayload)
-.select();
-error = upsertError;
-success = !upsertError;
-              
+              const { error: upsertError } = await supabase
+                .from(pendingSync.table_name as any)
+                .upsert(cleanedPayload)
+                .select();
+              error = upsertError;
+              success = !upsertError;
+
               // If error is unrecoverable, delete the record
               if (upsertError && this.isUnrecoverableError(upsertError, pendingSync.table_name, cleanedPayload)) {
                 await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, upsertError);
                 await db.removePendingSync(pendingSync.id);
                 continue;
               }
-}
-break;
+            }
+            break;
 
-case 'delete':
-const { error: deleteError } = await supabase
-.from(pendingSync.table_name as any)
-.delete()
-.eq('id', pendingSync.record_id);
-error = deleteError;
-success = !deleteError;
-break;
-}
+          case 'delete':
+            const { error: deleteError } = await supabase
+              .from(pendingSync.table_name as any)
+              .delete()
+              .eq('id', pendingSync.record_id);
+            error = deleteError;
+            success = !deleteError;
+            break;
+        }
 
-if (success) {
-await db.removePendingSync(pendingSync.id);
-} else {
-// Check if error is unrecoverable
-if (error && this.isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
-  // Delete the record instead of retrying
-  if (pendingSync.operation !== 'delete') {
-    await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
+        if (success) {
+          await db.removePendingSync(pendingSync.id);
+        } else {
+          // Check if error is unrecoverable
+          if (error && this.isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
+            // Delete the record instead of retrying
+            if (pendingSync.operation !== 'delete') {
+              await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
+            }
+            await db.removePendingSync(pendingSync.id);
+          } else {
+            await db.pending_syncs.update(pendingSync.id, {
+              retry_count: pendingSync.retry_count + 1,
+              last_error: error instanceof Error ? error.message : (error?.message || 'Retry failed')
+            });
+          }
+        }
+
+      } catch (error) {
+        // Check if it's an unrecoverable error
+        if (this.isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
+          if (pendingSync.operation !== 'delete') {
+            await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
+          }
+          await db.removePendingSync(pendingSync.id);
+        } else {
+          await db.pending_syncs.update(pendingSync.id, {
+            retry_count: pendingSync.retry_count + 1,
+            last_error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
+    }
   }
-  await db.removePendingSync(pendingSync.id);
-} else {
-  await db.pending_syncs.update(pendingSync.id, {
-    retry_count: pendingSync.retry_count + 1,
-    last_error: error instanceof Error ? error.message : (error?.message || 'Retry failed')
-  });
-}
-}
-
-} catch (error) {
-// Check if it's an unrecoverable error
-if (this.isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
-  if (pendingSync.operation !== 'delete') {
-    await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
-  }
-  await db.removePendingSync(pendingSync.id);
-} else {
-  await db.pending_syncs.update(pendingSync.id, {
-    retry_count: pendingSync.retry_count + 1,
-    last_error: error instanceof Error ? error.message : 'Unknown error'
-  });
-}
-}
-}
-}
 
   private async validateDependencies(tableName: SyncTable, storeId: string): Promise<boolean> {
     const dependencies = SYNC_DEPENDENCIES[tableName];
@@ -1180,38 +1290,103 @@ if (this.isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload
 
       for (const tableName of SYNC_TABLES) {
         console.log(`📥 Full resync: downloading ${tableName}...`);
-        
-        let query = supabase.from(tableName as any).select('*');
-        
-        if (tableName === 'stores') {
-          query = query.eq('id', storeId);
-        } else {
-          query = query.eq('store_id', storeId);
-        }
-        
-        query = query.limit(SYNC_CONFIG.maxRecordsPerSync);
-        
-        const { data: remoteRecords, error } = await query;
 
-        if (error) {
-          result.errors.push(`Download failed for ${tableName}: ${error.message}`);
-        } else if (remoteRecords && remoteRecords.length > 0) {
-          const recordsWithSync = remoteRecords.map(record => ({
-            ...record,
-            _synced: true,
-            _lastSyncedAt: new Date().toISOString()
-          }));
-          
-          await (db as any)[tableName].bulkPut(recordsWithSync);
-          result.synced.downloaded += remoteRecords.length;
-          
+        // Special handling for products: include both store-specific and global products
+        if (tableName === 'products') {
+          // Fetch store-specific products
+          const storeProductsQuery = supabase
+            .from('products')
+            .select('*')
+            .eq('store_id', storeId)
+            .limit(SYNC_CONFIG.maxRecordsPerSync);
+
+          // Fetch global products
+          const globalProductsQuery = supabase
+            .from('products')
+            .select('*')
+            .eq('is_global', true)
+            .limit(SYNC_CONFIG.maxRecordsPerSync);
+
+          // Execute both queries in parallel
+          const [storeProductsResult, globalProductsResult] = await Promise.all([
+            storeProductsQuery,
+            globalProductsQuery
+          ]);
+
+          if (storeProductsResult.error) {
+            result.errors.push(`Download failed for ${tableName} (store-specific): ${storeProductsResult.error.message}`);
+          }
+
+          if (globalProductsResult.error) {
+            result.errors.push(`Download failed for ${tableName} (global): ${globalProductsResult.error.message}`);
+          }
+
+          // Combine results and remove duplicates
+          const allRecords = [
+            ...(storeProductsResult.data || []),
+            ...(globalProductsResult.data || [])
+          ];
+
+          // Remove duplicates by id
+          const uniqueRecords = Array.from(
+            new Map(allRecords.map(record => [record.id, record])).values()
+          );
+
+          if (uniqueRecords.length > 0) {
+            // Normalize is_global field: convert boolean to 0/1 for Dexie compatibility
+            const recordsWithSync = uniqueRecords.map(record => {
+              const normalized = { ...record };
+              // Supabase returns boolean, but Dexie stores it as 0/1
+              if (normalized.is_global !== undefined) {
+                normalized.is_global = normalized.is_global === true ? 1 : 0;
+              }
+              return {
+                ...normalized,
+                _synced: true,
+                _lastSyncedAt: new Date().toISOString()
+              };
+            });
+
+            await (db as any)[tableName].bulkPut(recordsWithSync);
+            result.synced.downloaded += uniqueRecords.length;
+            console.log(`✅ Full resync: downloaded ${uniqueRecords.length} products (${storeProductsResult.data?.length || 0} store-specific + ${globalProductsResult.data?.length || 0} global)`);
+          }
+
           await db.updateSyncMetadata(tableName, new Date().toISOString());
+        } else {
+          // For all other tables, use standard query
+          let query = supabase.from(tableName as any).select('*');
+
+          if (tableName === 'stores') {
+            query = query.eq('id', storeId);
+          } else {
+            query = query.eq('store_id', storeId);
+          }
+
+          query = query.limit(SYNC_CONFIG.maxRecordsPerSync);
+
+          const { data: remoteRecords, error } = await query;
+
+          if (error) {
+            result.errors.push(`Download failed for ${tableName}: ${error.message}`);
+          } else if (remoteRecords && remoteRecords.length > 0) {
+            const recordsWithSync = remoteRecords.map(record => ({
+              ...record,
+              _synced: true,
+              _lastSyncedAt: new Date().toISOString()
+            }));
+
+            await (db as any)[tableName].bulkPut(recordsWithSync);
+            result.synced.downloaded += remoteRecords.length;
+
+            await db.updateSyncMetadata(tableName, new Date().toISOString());
+          }
         }
       }
 
       result.success = result.errors.length === 0;
 
-} catch (error) {
+    } catch (error) {
       result.success = false;
       result.errors.push(error instanceof Error ? error.message : 'Full resync failed');
     }
@@ -1219,67 +1394,67 @@ if (this.isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload
     return result;
   }
 
-async syncTable(storeId: string, tableName: SyncTable): Promise<SyncResult> {
-const result: SyncResult = {
-success: true,
-errors: [],
-synced: { uploaded: 0, downloaded: 0 },
-conflicts: 0
-};
+  async syncTable(storeId: string, tableName: SyncTable): Promise<SyncResult> {
+    const result: SyncResult = {
+      success: true,
+      errors: [],
+      synced: { uploaded: 0, downloaded: 0 },
+      conflicts: 0
+    };
 
-try {
-const unsyncedRecords = await db.getUnsyncedRecords(tableName);
-      
-if (unsyncedRecords.length > 0) {
-const cleanedRecords = (unsyncedRecords as any[])
+    try {
+      const unsyncedRecords = await db.getUnsyncedRecords(tableName);
+
+      if (unsyncedRecords.length > 0) {
+        const cleanedRecords = (unsyncedRecords as any[])
           .map((record: any) => dataValidationService.cleanRecordForUpload(record, tableName));
 
-const { error } = await supabase
-.from(tableName as any)
-.upsert(cleanedRecords, { onConflict: 'id' });
+        const { error } = await supabase
+          .from(tableName as any)
+          .upsert(cleanedRecords, { onConflict: 'id' });
 
-if (error) {
-result.errors.push(`Upload failed: ${error.message}`);
-} else {
-for (const record of unsyncedRecords as any[]) {
-await db.markAsSynced(tableName, record.id);
-}
-result.synced.uploaded = unsyncedRecords.length;
-}
-}
+        if (error) {
+          result.errors.push(`Upload failed: ${error.message}`);
+        } else {
+          for (const record of unsyncedRecords as any[]) {
+            await db.markAsSynced(tableName, record.id);
+          }
+          result.synced.uploaded = unsyncedRecords.length;
+        }
+      }
 
       let query = supabase.from(tableName as any).select('*');
 
-if (tableName === 'stores') {
-query = query.eq('id', storeId);
-} else {
-query = query.eq('store_id', storeId);
-}
+      if (tableName === 'stores') {
+        query = query.eq('id', storeId);
+      } else {
+        query = query.eq('store_id', storeId);
+      }
 
-const { data: remoteRecords, error } = await query;
+      const { data: remoteRecords, error } = await query;
 
-if (error) {
-result.errors.push(`Download failed: ${error.message}`);
-} else if (remoteRecords) {
-for (const record of remoteRecords as any[]) {
-await (db as any)[tableName].put({
-...record,
-_synced: true,
-_lastSyncedAt: new Date().toISOString()
-});
-}
-result.synced.downloaded = remoteRecords.length;
-}
+      if (error) {
+        result.errors.push(`Download failed: ${error.message}`);
+      } else if (remoteRecords) {
+        for (const record of remoteRecords as any[]) {
+          await (db as any)[tableName].put({
+            ...record,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString()
+          });
+        }
+        result.synced.downloaded = remoteRecords.length;
+      }
 
-result.success = result.errors.length === 0;
+      result.success = result.errors.length === 0;
 
-} catch (error) {
-result.success = false;
-result.errors.push(error instanceof Error ? error.message : 'Unknown error');
-}
+    } catch (error) {
+      result.success = false;
+      result.errors.push(error instanceof Error ? error.message : 'Unknown error');
+    }
 
-return result;
-}
+    return result;
+  }
 
   isCurrentlyRunning(): boolean {
     return this.isRunning;
@@ -1293,11 +1468,11 @@ return result;
 export const syncService = new SyncService();
 
 export async function syncWithSupabase(storeId: string): Promise<SyncResult> {
-return syncService.sync(storeId);
+  return syncService.sync(storeId);
 }
 
 export function getLastSyncedAt(): string | null {
-return localStorage.getItem('last_synced_at');
+  return localStorage.getItem('last_synced_at');
 }
 
 export function setLastSyncedAt(ts: string) {
