@@ -75,8 +75,17 @@ app.on("ready", () => {
   // Initialize auto-updater in production builds only
   try {
     if (process.env.NODE_ENV !== 'development') {
-      autoUpdater.autoDownload = true;
-      autoUpdater.autoInstallOnAppQuit = true;
+      // Configure auto-updater for background downloads without interference
+      autoUpdater.autoDownload = true; // Automatically download updates
+      autoUpdater.autoInstallOnAppQuit = true; // Install on quit (non-intrusive)
+      autoUpdater.allowPrerelease = false; // Only stable releases
+      
+      // Configure update check interval (check every 4 hours)
+      autoUpdater.checkForUpdatesAndNotify();
+      setInterval(() => {
+        autoUpdater.checkForUpdatesAndNotify();
+      }, 4 * 60 * 60 * 1000); // 4 hours in milliseconds
+      
       autoUpdater.logger = {
         info: (msg: string) => console.log('[autoUpdater]', msg),
         warn: (msg: string) => console.warn('[autoUpdater]', msg),
@@ -85,16 +94,67 @@ app.on("ready", () => {
         silly: () => {}
       } as any;
 
-      autoUpdater.on('checking-for-update', () => console.log('[autoUpdater] checking-for-update'));
-      autoUpdater.on('update-available', (info: any) => console.log('[autoUpdater] update-available', info && info.version));
-      autoUpdater.on('update-not-available', () => console.log('[autoUpdater] update-not-available'));
-      autoUpdater.on('error', (err: any) => console.error('[autoUpdater] error', err && err.message));
-      autoUpdater.on('download-progress', (p: any) => console.log('[autoUpdater] download-progress', Math.round(p.percent) + '%'));
-      autoUpdater.on('update-downloaded', () => {
-        console.log('[autoUpdater] update-downloaded, will install on quit');
+      // Broadcast update events to renderer process
+      autoUpdater.on('checking-for-update', () => {
+        console.log('[autoUpdater] checking-for-update');
+        if (mainWindow) {
+          mainWindow.webContents.send('update-checking');
+        }
       });
 
-      autoUpdater.checkForUpdatesAndNotify();
+      autoUpdater.on('update-available', (info: any) => {
+        console.log('[autoUpdater] update-available', info && info.version);
+        if (mainWindow) {
+          mainWindow.webContents.send('update-available', {
+            version: info.version,
+            releaseDate: info.releaseDate,
+            releaseNotes: info.releaseNotes
+          });
+        }
+      });
+
+      autoUpdater.on('update-not-available', (info: any) => {
+        console.log('[autoUpdater] update-not-available');
+        if (mainWindow) {
+          mainWindow.webContents.send('update-not-available', {
+            version: info?.version
+          });
+        }
+      });
+
+      autoUpdater.on('error', (err: any) => {
+        console.error('[autoUpdater] error', err && err.message);
+        if (mainWindow) {
+          mainWindow.webContents.send('update-error', {
+            message: err?.message || 'Unknown error',
+            stack: err?.stack
+          });
+        }
+      });
+
+      autoUpdater.on('download-progress', (progress: any) => {
+        const percent = Math.round(progress.percent || 0);
+        console.log('[autoUpdater] download-progress', percent + '%');
+        if (mainWindow) {
+          mainWindow.webContents.send('update-download-progress', {
+            percent: percent,
+            transferred: progress.transferred,
+            total: progress.total,
+            bytesPerSecond: progress.bytesPerSecond
+          });
+        }
+      });
+
+      autoUpdater.on('update-downloaded', (info: any) => {
+        console.log('[autoUpdater] update-downloaded, will install on quit');
+        if (mainWindow) {
+          mainWindow.webContents.send('update-downloaded', {
+            version: info.version,
+            releaseDate: info.releaseDate,
+            releaseNotes: info.releaseNotes
+          });
+        }
+      });
     }
   } catch (e) {
     console.warn('[autoUpdater] init failed', e && (e as any).message);
@@ -1348,6 +1408,108 @@ ipcMain.handle('test-image-arabic', async (_event: any, printerName: string) => 
     return {
       success: false,
       message: 'Test failed',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+});
+
+// ============================================
+// Auto-Update IPC Handlers
+// ============================================
+
+// Manual check for updates
+ipcMain.handle('check-for-updates', async () => {
+  try {
+    if (process.env.NODE_ENV === 'development') {
+      return {
+        success: false,
+        error: 'Updates are disabled in development mode'
+      };
+    }
+    
+    console.log('[autoUpdater] Manual update check requested');
+    const result = await autoUpdater.checkForUpdates();
+    
+    return {
+      success: true,
+      updateInfo: result?.updateInfo ? {
+        version: result.updateInfo.version,
+        releaseDate: result.updateInfo.releaseDate,
+        releaseNotes: result.updateInfo.releaseNotes
+      } : null,
+      cancelled: result?.cancelled || false
+    };
+  } catch (error) {
+    console.error('[autoUpdater] Manual check error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+});
+
+// Get current app version
+ipcMain.handle('get-app-version', async () => {
+  try {
+    return {
+      success: true,
+      version: app.getVersion()
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+});
+
+// Quit and install update (only if update is downloaded)
+ipcMain.handle('quit-and-install', async () => {
+  try {
+    if (process.env.NODE_ENV === 'development') {
+      return {
+        success: false,
+        error: 'Updates are disabled in development mode'
+      };
+    }
+    
+    console.log('[autoUpdater] Quit and install requested');
+    autoUpdater.quitAndInstall(false, true); // isSilent=false, isForceRunAfter=true
+    
+    return {
+      success: true,
+      message: 'App will restart to install update'
+    };
+  } catch (error) {
+    console.error('[autoUpdater] Quit and install error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+});
+
+// Get update status
+ipcMain.handle('get-update-status', async () => {
+  try {
+    if (process.env.NODE_ENV === 'development') {
+      return {
+        success: true,
+        enabled: false,
+        version: app.getVersion(),
+        message: 'Updates are disabled in development mode'
+      };
+    }
+    
+    return {
+      success: true,
+      enabled: true,
+      version: app.getVersion(),
+      updateServer: autoUpdater.getFeedURL() || 'https://souq-trablous.com/updates/'
+    };
+  } catch (error) {
+    return {
+      success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
     };
   }

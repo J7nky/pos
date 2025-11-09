@@ -6,6 +6,7 @@ import { I18nProvider, useI18n } from './i18n';
 import OnScreenKeyboard from './components/common/OnScreenKeyboard';
 import ErrorBoundary from './components/ErrorBoundary';
 import I18nErrorBoundary from './components/I18nErrorBoundary';
+import UpdateNotification from './components/UpdateNotification';
 import { Outlet, useLocation } from 'react-router-dom';
 
 function AppContent() {
@@ -47,6 +48,7 @@ function AppContent() {
     <>
       <Outlet />
       <OnScreenKeyboard />
+      <UpdateNotification />
     </>
   );
 }
