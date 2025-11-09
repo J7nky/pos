@@ -1,4 +1,5 @@
 # Exclude /updates/* from SPA redirect (MUST come before catch-all)
+# This allows update files (latest.yml, .nupkg, .exe) to be served directly
 /updates/*    /updates/:splat    200
 
 # Catch-all SPA redirect (must come after specific routes)
