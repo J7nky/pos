@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
+    "start": "electron .",
     "setup-dev": "node setup-dev.js",
     "dev": "node dev-windows.js",
     "dev:simple": "node dev-simple.js",
@@ -31,7 +32,7 @@
     "@types/uuid": "^10.0.0",
     "canvas": "^3.2.0",
     "dexie": "^4.0.11",
-    "electron-updater": "^6.3.9",
+    "electron-updater": "^6.6.2",
     "escpos": "^3.0.0-alpha.6",
     "iconv-lite": "^0.7.0",
     "lucide-react": "^0.540.0",
@@ -93,6 +94,8 @@
         "provider": "generic",
         "url": "https://souq-trablous.com/updates/"
       }
-    ]
+    ],
+    "npmRebuild": false,
+    "beforeBuild": null
   }
 }

@@ -296,16 +296,7 @@ export default function Home() {
   };
 
   const fastActions = [
-    {
-      id: 'quick-sale',
-      title: t('home.quickSale'),
-      description: t('home.quickSaleDesc'),
-      icon: ShoppingCart,
-      color: 'bg-green-500',
-      hoverColor: 'hover:bg-green-600',
-      action: () => {navigate('/pos');},
-      stats: `${todaySales.length} ${t('home.today')}`
-    },
+   
     {
       id: 'receive-products',
       title: t('home.receiveProducts'),
