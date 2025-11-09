@@ -369,8 +369,8 @@ export class WeightManagementService {
     try {
       const alerts: WeightDiscrepancyAlert[] = [];
 
-      // Get all products and suppliers
-      const products = await db.products.where('store_id').equals(storeId).toArray();
+      // Get all products and suppliers (including global products)
+      const products = await db.getAvailableProducts(storeId);
       const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
 
       // Check each product-supplier combination

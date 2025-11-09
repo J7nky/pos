@@ -16,7 +16,6 @@ if (process.env.NODE_ENV === 'development') {
         console.log('electron-reloader not available');
     }
 }
-
 let mainWindow = null;
 const createWindow = () => {
     mainWindow = new BrowserWindow({
@@ -29,7 +28,7 @@ const createWindow = () => {
         },
     });
     // Check for Vite dev server URL
-    const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5178';
+    const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5175';
     console.log('🔍 Vite URL:', viteUrl);
     if (process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL) {
         // Dev: load Vite server

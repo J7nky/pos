@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { spawn } from 'child_process';
-import { watch } from 'fs';
+import { watch, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,12 +26,40 @@ function startElectron() {
   }
   
   console.log('⚡ Starting Electron...');
-  const electronPath = path.join(__dirname, 'node_modules', 'electron', 'dist', 'electron.exe');
-  electronProcess = spawn(electronPath, ['.'], {
-    stdio: 'inherit',
-    shell: true,
-    env: { ...process.env, NODE_ENV: 'development' }
-  });
+  
+  // Find electron executable - try multiple locations for pnpm/npm compatibility
+  let electronPath;
+  const possiblePaths = [
+    path.join(__dirname, 'node_modules', 'electron', 'dist', 'electron.exe'),
+    path.join(__dirname, '..', '..', 'node_modules', '.pnpm', 'electron@38.5.0', 'node_modules', 'electron', 'dist', 'electron.exe'),
+    path.join(process.cwd(), 'node_modules', '.pnpm', 'electron@38.5.0', 'node_modules', 'electron', 'dist', 'electron.exe'),
+  ];
+  
+  for (const possiblePath of possiblePaths) {
+    if (fs.existsSync(possiblePath)) {
+      electronPath = possiblePath;
+      break;
+    }
+  }
+  
+  if (!electronPath) {
+    // Fallback to npx if direct path not found
+    electronPath = 'npx';
+    electronProcess = spawn(electronPath, ['electron', '.'], {
+      stdio: 'inherit',
+      shell: true,
+      cwd: __dirname,
+      env: { ...process.env, NODE_ENV: 'development' }
+    });
+  } else {
+    // Use direct path to electron.exe
+    electronProcess = spawn(electronPath, ['.'], {
+      stdio: 'inherit',
+      shell: true,
+      cwd: __dirname,
+      env: { ...process.env, NODE_ENV: 'development' }
+    });
+  }
 
   electronProcess.on('exit', (code) => {
     if (code !== 0) {
@@ -58,9 +87,10 @@ function startVite() {
 // Function to rebuild Electron main process
 function rebuildElectron() {
   console.log('🔨 Rebuilding Electron main process...');
-  const buildProcess = spawn('npx', ['tsc', '-p', 'tsconfig_electron.json'], {
+  const buildProcess = spawn('npm', ['run', 'build:electron'], {
     stdio: 'inherit',
-    shell: true
+    shell: true,
+    cwd: __dirname
   });
 
   buildProcess.on('exit', (code) => {

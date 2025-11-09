@@ -35,6 +35,9 @@ export default function Login() {
           <p className="mt-2 text-center text-sm text-gray-600">
             Sign in to manage the POS platform
           </p>
+          <p className="mt-1 text-center text-xs text-gray-500">
+            Super administrator access only
+          </p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           {error && (

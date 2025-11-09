@@ -739,7 +739,12 @@ continue;
         let query = supabase.from(tableName as any).select('*');
 
         if (tableName !== 'transactions' && tableName !== 'stores') {
-          query = query.eq('store_id', storeId);
+          // Special handling for products: include both store-specific and global products
+          if (tableName === 'products') {
+            query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
+          } else {
+            query = query.eq('store_id', storeId);
+          }
         } else if (tableName === 'stores') {
           query = query.eq('id', storeId);
         }

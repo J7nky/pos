@@ -142,6 +142,7 @@ export class CRUDHelperService {
 
   /**
    * Generic query by store
+   * Special handling for products: includes both store-specific and global products
    */
   async getEntitiesByStore<T extends keyof Tables>(
     tableName: T,
@@ -155,6 +156,29 @@ export class CRUDHelperService {
         return [];
       }
 
+      // Special handling for products: include both store-specific and global products
+      if (tableName === 'products') {
+        // Get store-specific products
+        let storeProductsQuery = table.where('store_id').equals(storeId);
+        if (!includeDeleted) {
+          storeProductsQuery = storeProductsQuery.filter((item: any) => !item._deleted);
+        }
+        const storeProducts = await storeProductsQuery.toArray();
+
+        // Get global products (is_global = true or store_id is NULL)
+        let globalProductsQuery = table.where('is_global').equals(1); // Dexie stores boolean as 0 or 1
+        if (!includeDeleted) {
+          globalProductsQuery = globalProductsQuery.filter((item: any) => !item._deleted);
+        }
+        const globalProducts = await globalProductsQuery.toArray();
+
+        // Combine and return
+        const results = [...storeProducts, ...globalProducts];
+        console.log(`📦 getEntitiesByStore: ${tableName} - found ${storeProducts.length} store products + ${globalProducts.length} global products = ${results.length} total for store ${storeId}`);
+        return results;
+      }
+
+      // For all other tables, use standard query
       let query = table.where('store_id').equals(storeId);
 
       if (!includeDeleted) {

@@ -152,7 +152,7 @@ importers:
         specifier: ^9.2.1
         version: 9.2.1
       electron:
-        specifier: ^38.1.2
+        specifier: 38.5.0
         version: 38.5.0
       electron-builder:
         specifier: ^26.0.12

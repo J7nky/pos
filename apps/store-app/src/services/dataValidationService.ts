@@ -103,7 +103,8 @@ export class DataValidationService {
 
     try {
       const [productsData, suppliersData, customersData, usersData, batchesData, billsData] = await Promise.all([
-        supabase.from('products').select('id').eq('store_id', storeId).limit(10000),
+        // Include both store-specific and global products
+        supabase.from('products').select('id').or(`store_id.eq.${storeId},is_global.eq.true`).limit(10000),
         supabase.from('suppliers').select('id').eq('store_id', storeId).limit(5000),
         supabase.from('customers').select('id').eq('store_id', storeId).limit(5000),
         supabase.from('users').select('id').eq('store_id', storeId).limit(1000),

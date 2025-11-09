@@ -29,7 +29,7 @@ export default defineConfig({
   define: {
     'import.meta.env.VITE_PUBLIC_URL': JSON.stringify(
       process.env.VITE_PUBLIC_URL || 
-      (process.env.NODE_ENV === 'production' ? 'https://admin.souq-trablous.com' : 'http://localhost:5176')
+      (process.env.NODE_ENV === 'production' ? 'https://super.souq-trablous.com' : 'http://localhost:5176')
     ),
     'import.meta.env.PROD': JSON.stringify(process.env.NODE_ENV === 'production'),
   },

@@ -663,11 +663,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await refreshDataAndUpdateCount();
 
       // Check if local database is empty (no essential data)
-      const [productCount, supplierCount, customerCount] = await Promise.all([
+      // For products, include both store-specific and global products
+      const [storeProductCount, globalProductCount, supplierCount, customerCount] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
         db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
       ]);
+      const productCount = storeProductCount + globalProductCount;
 
       debug(`📈 Local data counts: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
 
@@ -753,11 +756,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       // Check if local database is empty
-      const [productCount, supplierCount, customerCount] = await Promise.all([
+      // For products, include both store-specific and global products
+      const [storeProductCount, globalProductCount, supplierCount, customerCount] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        db.products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
         db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
         db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
       ]);
+      const productCount = storeProductCount + globalProductCount;
 
       const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
 

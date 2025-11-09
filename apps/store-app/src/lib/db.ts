@@ -1085,7 +1085,8 @@ class POSDatabase extends Dexie {
     // Note: For comprehensive validation, use dataValidationService.validateRecords()
     // This is a simple cleanup for obvious orphaned records
     
-    const products = await this.products.where('store_id').equals(storeId).toArray();
+    // Include both store-specific and global products (inventory can reference global products)
+    const products = await this.getAvailableProducts(storeId);
     const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
     const productIds = new Set(products.map(p => p.id));
     const supplierIds = new Set(suppliers.map(s => s.id));
