@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useI18n } from '../../i18n';
 import { Pagination } from '../common/Pagination';
+import { useProductMultilingual } from '../../hooks/useMultilingual';
 
 interface ProductTableProps {
   products: any[];
@@ -10,7 +11,8 @@ interface ProductTableProps {
 }
 
 const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete, loading = false }) => {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const { getProductName } = useProductMultilingual();
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
@@ -83,13 +85,13 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete,
                 <td className="px-6 py-4 rtl:text-right ltr:text-left">
                   <img
                     src={product.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
-                    alt={product.name}
+                    alt={getProductName(product)}
                     className="w-10 h-10 rounded-lg object-cover"
                     onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
                   />
                 </td>
                 <td className="px-6 py-4 font-medium text-gray-900 dark:text-slate-100 rtl:text-right ltr:text-left">
-                  {product.name}
+                  {getProductName(product)}
                 </td>
                 <td className="px-6 py-4 text-gray-700 dark:text-slate-300 rtl:text-right ltr:text-left">
                   {product.category}

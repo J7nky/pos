@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -15,6 +15,7 @@ import RecentReceivesTable from '../components/inventory/RecentReceivesTable';
 import ProductTable from '../components/inventory/ProductTable';
 import { Product, Supplier, InventoryItem } from '../types/inventory';
 import { useI18n } from '../i18n';
+import { getTranslatedString } from '../utils/multilingual';
 
 const Inventory: React.FC = () => {
   // Data from context
@@ -197,7 +198,31 @@ const Inventory: React.FC = () => {
       showToast('error', 'Failed to delete product.');
     }
   };
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+
+  // Filter products based on search term (handle multilingual names)
+  const filteredProducts = useMemo(() => {
+    if (!searchTerm) return products;
+    
+    const searchLower = searchTerm.toLowerCase();
+    return products.filter(p => {
+      // Handle multilingual product names - search in current language and all languages
+      const productName = typeof p.name === 'string' 
+        ? p.name 
+        : getTranslatedString(p.name, language as 'en' | 'ar' | 'fr', 'en');
+      
+      // Also check all language variants for better search
+      const allNames = typeof p.name === 'string' 
+        ? [p.name]
+        : [
+            p.name.en || '',
+            p.name.ar || '',
+            p.name.fr || ''
+          ].filter(Boolean);
+      
+      return allNames.some(name => name.toLowerCase().includes(searchLower));
+    });
+  }, [products, searchTerm, language]);
 
   return (
     <div className="p-6">
@@ -282,7 +307,7 @@ const Inventory: React.FC = () => {
 
           {/* Product Table */}
           <ProductTable
-            products={products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))}
+            products={filteredProducts}
             onEdit={openEditProduct}
             onDelete={openDeleteProduct}
           />
