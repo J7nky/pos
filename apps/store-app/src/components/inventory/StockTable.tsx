@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useProductMultilingual } from '../../hooks/useMultilingual';
 
 interface StockTableProps {
   filteredStockLevels: any[];
@@ -13,6 +14,7 @@ const StockTable: React.FC<StockTableProps> = ({
   lowStockAlertsEnabled, 
   lowStockThreshold 
 }) => {
+  const { getProductName } = useProductMultilingual();
   // Pagination state
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
@@ -95,7 +97,7 @@ const StockTable: React.FC<StockTableProps> = ({
                     <div className="flex items-center">
                       <img
                         src={product?.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
-                        alt={product?.name}
+                        alt={getProductName(product)}
                         className="w-10 h-10 rounded-lg object-cover mr-3"
                         onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
                       />

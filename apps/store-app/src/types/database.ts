@@ -197,7 +197,7 @@ export interface Database {
           name: string;
           category: string;
           image: string;
-          store_id: string;
+          store_id: string | null; // null for global products
           is_global: boolean;
           created_at: string;
           updated_at: string;
@@ -207,7 +207,7 @@ export interface Database {
           name: string;
           category: string;
           image: string;
-          store_id: string;
+          store_id: string | null; // null for global products
           is_global?: boolean;
           created_at?: string;
           updated_at?: string;

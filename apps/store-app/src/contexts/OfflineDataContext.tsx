@@ -504,16 +504,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         cashDrawerSessionsData,
         missedProductsData,
       } = await crudHelperService.loadAllStoreData(storeId);
-
+      
       console.log(`🔄 refreshData: Loaded ${customersData.length} customers, ${suppliersData.length} suppliers, ${employeesData.length} employees`);
       console.log('🔄 refreshData: Latest customers:', customersData.slice(-3));
       console.log('🔄 refreshData: Latest suppliers:', suppliersData.slice(-3));
       console.log(`🔄 refreshData: Loaded ${inventoryData.length} inventory_items, ${batchesData.length} inventory_bills`);
+      console.log(`🔄 refreshData: Loaded ${productsData.length} products (including global products)`);
+      console.log('🔄 refreshData: Products from DB:', productsData.map((p: any) => ({ id: p.id, name: p.name, is_global: p.is_global, store_id: p.store_id })));
+      
+      // Count global vs store products
+      const globalCount = productsData.filter((p: any) => p.is_global === true || p.is_global === 1).length;
+      const storeCount = productsData.length - globalCount;
+      console.log(`🔄 refreshData: Breakdown - ${storeCount} store products + ${globalCount} global products`);
 
       debug(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${employeesData.length} employees, ${inventoryData.length} inventory items, ${batchesData.length} inventory bills, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
 
       // Transform data for offline-first structure
+      console.log('🔄 refreshData: About to set products in state, count:', productsData.length);
       setProducts(productsData as Tables['products']['Row'][]);
+      console.log('🔄 refreshData: Products state updated');
       setSuppliers(suppliersData.map((s: any) => ({ ...s, lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0 })) as Tables['suppliers']['Row'][]);
       setCustomers(customersData.map((c: any) => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
       setEmployees(employeesData.map((e: any) => ({ ...e, lbp_balance: e.lbp_balance || 0, usd_balance: e.usd_balance || 0 })) as Tables['users']['Row'][]);

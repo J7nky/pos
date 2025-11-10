@@ -81,8 +81,9 @@ export class RealTimeSyncService {
       // Subscribe to bill changes for real-time sales updates
       await this.subscribeToBillUpdates(storeId);
       
-      // Subscribe to product updates for real-time product changes
-      await this.subscribeToProductUpdates(storeId);
+      // Product updates are handled by periodic sync (30-second interval)
+      // Real-time subscription removed to reduce costs and complexity
+      // await this.subscribeToProductUpdates(storeId);
       
       this.isConnected = true;
       this.reconnectAttempts = 0;
@@ -374,38 +375,40 @@ export class RealTimeSyncService {
 
   /**
    * Subscribe to product changes for real-time product updates
+   * DISABLED: Products are now handled by periodic sync (30-second interval)
+   * This reduces Supabase Realtime costs and complexity
    */
-  private async subscribeToProductUpdates(storeId: string): Promise<void> {
-    const channelName = `products_${storeId}`;
-    
-    if (this.subscriptions.has(channelName)) {
-      return; // Already subscribed
-    }
+  // private async subscribeToProductUpdates(storeId: string): Promise<void> {
+  //   const channelName = `products_${storeId}`;
+  //   
+  //   if (this.subscriptions.has(channelName)) {
+  //     return; // Already subscribed
+  //   }
 
-    const subscription = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'products',
-          filter: `store_id=eq.${storeId}`
-        },
-        async (payload) => {
-          console.log('🛍️ Real-time product update:', payload);
-          await this.handleProductUpdate(payload, storeId);
-        }
-      )
-      .subscribe((status) => {
-        console.log(`📡 Product subscription status: ${status}`);
-        if (status === 'SUBSCRIBED') {
-          this.subscriptions.set(channelName, subscription);
-        }
-      });
+  //   const subscription = supabase
+  //     .channel(channelName)
+  //     .on(
+  //       'postgres_changes',
+  //       {
+  //         event: '*',
+  //         schema: 'public',
+  //         table: 'products',
+  //         filter: `store_id=eq.${storeId}`
+  //       },
+  //       async (payload) => {
+  //         console.log('🛍️ Real-time product update:', payload);
+  //         await this.handleProductUpdate(payload, storeId);
+  //       }
+  //     )
+  //     .subscribe((status) => {
+  //       console.log(`📡 Product subscription status: ${status}`);
+  //       if (status === 'SUBSCRIBED') {
+  //         this.subscriptions.set(channelName, subscription);
+  //       }
+  //     });
 
-    this.subscriptions.set(channelName, subscription);
-  }
+  //   this.subscriptions.set(channelName, subscription);
+  // }
 
   /**
    * Handle inventory updates from other devices
@@ -505,51 +508,52 @@ export class RealTimeSyncService {
 
   /**
    * Handle product updates from other devices
+   * DISABLED: Products are now handled by periodic sync (30-second interval)
    */
-  private async handleProductUpdate(payload: any, storeId: string): Promise<void> {
-    try {
-      const { eventType, new: newRecord, old: oldRecord } = payload;
+  // private async handleProductUpdate(payload: any, storeId: string): Promise<void> {
+  //   try {
+  //     const { eventType, new: newRecord, old: oldRecord } = payload;
 
-      if (eventType === 'INSERT' && newRecord) {
-        // Check if record already exists (may have been created locally)
-        const existing = await db.products.get(newRecord.id);
-        if (existing) {
-          // Update existing record
-          await db.products.update(newRecord.id, {
-            ...newRecord,
-            _synced: true,
-            _lastSyncedAt: new Date().toISOString()
-          });
-        } else {
-          // Add new product to local database
-          await db.products.add({
-            ...newRecord,
-            _synced: true,
-            _lastSyncedAt: new Date().toISOString()
-          });
-        }
-      } else if (eventType === 'UPDATE' && newRecord) {
-        // Update existing product
-        await db.products.update(newRecord.id, {
-          ...newRecord,
-          _synced: true,
-          _lastSyncedAt: new Date().toISOString()
-        });
-      } else if (eventType === 'DELETE' && oldRecord) {
-        // Mark as deleted in local database
-        await db.products.update(oldRecord.id, {
-          _deleted: true,
-          _synced: true,
-          _lastSyncedAt: new Date().toISOString()
-        });
-      }
+  //     if (eventType === 'INSERT' && newRecord) {
+  //       // Check if record already exists (may have been created locally)
+  //       const existing = await db.products.get(newRecord.id);
+  //       if (existing) {
+  //         // Update existing record
+  //         await db.products.update(newRecord.id, {
+  //           ...newRecord,
+  //           _synced: true,
+  //           _lastSyncedAt: new Date().toISOString()
+  //         });
+  //       } else {
+  //         // Add new product to local database
+  //         await db.products.add({
+  //           ...newRecord,
+  //           _synced: true,
+  //           _lastSyncedAt: new Date().toISOString()
+  //         });
+  //       }
+  //     } else if (eventType === 'UPDATE' && newRecord) {
+  //       // Update existing product
+  //       await db.products.update(newRecord.id, {
+  //         ...newRecord,
+  //         _synced: true,
+  //         _lastSyncedAt: new Date().toISOString()
+  //       });
+  //     } else if (eventType === 'DELETE' && oldRecord) {
+  //       // Mark as deleted in local database
+  //       await db.products.update(oldRecord.id, {
+  //         _deleted: true,
+  //         _synced: true,
+  //         _lastSyncedAt: new Date().toISOString()
+  //       });
+  //     }
 
-      // Notify UI components
-      this.notifyProductUpdate(storeId);
-    } catch (error) {
-      console.error('Error handling product update:', error);
-    }
-  }
+  //     // Notify UI components
+  //     this.notifyProductUpdate(storeId);
+  //   } catch (error) {
+  //     console.error('Error handling product update:', error);
+  //   }
+  // }
 
   /**
    * Notify UI components about inventory updates
@@ -591,22 +595,23 @@ export class RealTimeSyncService {
 
   /**
    * Notify UI components about product updates
+   * DISABLED: Products are now handled by periodic sync (30-second interval)
    */
-  private notifyProductUpdate(storeId: string): void {
-    try {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('products-realtime-update', {
-          detail: {
-            storeId,
-            timestamp: new Date().toISOString(),
-            source: 'realtime'
-          }
-        }));
-      }
-    } catch (error) {
-      console.error('Error notifying product update:', error);
-    }
-  }
+  // private notifyProductUpdate(storeId: string): void {
+  //   try {
+  //     if (typeof window !== 'undefined') {
+  //       window.dispatchEvent(new CustomEvent('products-realtime-update', {
+  //         detail: {
+  //           storeId,
+  //           timestamp: new Date().toISOString(),
+  //           source: 'realtime'
+  //         }
+  //       }));
+  //     }
+  //   } catch (error) {
+  //     console.error('Error notifying product update:', error);
+  //   }
+  // }
 
   /**
    * Notify local UI components about real-time updates

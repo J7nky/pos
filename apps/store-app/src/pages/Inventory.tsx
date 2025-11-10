@@ -15,12 +15,14 @@ import RecentReceivesTable from '../components/inventory/RecentReceivesTable';
 import ProductTable from '../components/inventory/ProductTable';
 import { Product, Supplier, InventoryItem } from '../types/inventory';
 import { useI18n } from '../i18n';
-import { getTranslatedString } from '../utils/multilingual';
+import { parseMultilingualString } from '../utils/multilingual';    
 
 const Inventory: React.FC = () => {
   // Data from context
   const raw = useOfflineData();
   const products = raw.products.map(p => ({ ...p, createdAt: p.created_at })) as Product[];
+  console.log('📦 Inventory page: Received products from context:', products.length);
+  console.log('📦 Inventory page: Products details:', products.map(p => ({ id: p.id, name: p.name, is_global: p.is_global })));
   const suppliers = raw.suppliers.map(s => ({ ...s, createdAt: s.created_at, type: 'commission' as const })) as Supplier[];
   const inventoryBills = raw.inventoryBills || [];
   // Create batch map for supplier lookup
@@ -202,31 +204,37 @@ const Inventory: React.FC = () => {
 
   // Filter products based on search term (handle multilingual names)
   const filteredProducts = useMemo(() => {
-    if (!searchTerm) return products;
+    console.log('📦 Inventory page: useMemo recalculating, products.length:', products.length);
+    console.log('📦 Inventory page: Products in useMemo:', products.map(p => ({ id: p.id, name: p.name, is_global: p.is_global })));
+    
+    if (!searchTerm) {
+      console.log('📦 Inventory page: No search term, returning all products:', products.length);
+      return products;
+    }
     
     const searchLower = searchTerm.toLowerCase();
-    return products.filter(p => {
-      // Handle multilingual product names - search in current language and all languages
-      const productName = typeof p.name === 'string' 
-        ? p.name 
-        : getTranslatedString(p.name, language as 'en' | 'ar' | 'fr', 'en');
+    const filtered = products.filter(p => {
+      // Parse stringified JSON if needed
+      const parsedName = parseMultilingualString(p.name);
       
-      // Also check all language variants for better search
-      const allNames = typeof p.name === 'string' 
-        ? [p.name]
+      if (!parsedName) return false;
+      
+      // Check all language variants for better search
+      const allNames = typeof parsedName === 'string' 
+        ? [parsedName]
         : [
-            p.name.en || '',
-            p.name.ar || '',
-            p.name.fr || ''
+            parsedName.en || '',
+            parsedName.ar || '',
+            parsedName.fr || ''
           ].filter(Boolean);
       
       return allNames.some(name => name.toLowerCase().includes(searchLower));
     });
-
     
+    console.log('📦 Inventory page: Filtered products:', filtered.length);
+    return filtered;
   }, [products, searchTerm, language]);
-
-  return (
+return (
     <div className="p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">

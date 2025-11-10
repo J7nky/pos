@@ -232,13 +232,24 @@ export class DataValidationService {
         record.quantity = 0;
       }
 
-      // Fix missing product - use first available
+      // Fix missing product - use first available (include global products)
       if (!await db.products.get(record.product_id)) {
-        const validProduct = await db.products
+        // Try store-specific products first
+        let validProduct = await db.products
           .where('store_id')
           .equals(storeId)
           .filter(p => !p._deleted)
           .first();
+        
+        // If no store products, try global products
+        if (!validProduct) {
+          validProduct = await db.products
+            .where('is_global')
+            .equals(1)
+            .filter(p => !p._deleted)
+            .first();
+        }
+        
         if (validProduct) {
           record.product_id = validProduct.id;
         } else {

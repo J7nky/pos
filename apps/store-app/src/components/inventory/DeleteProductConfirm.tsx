@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
+import { useProductMultilingual } from '../../hooks/useMultilingual';
 
 interface DeleteProductConfirmProps {
   open: boolean;
@@ -11,6 +12,7 @@ interface DeleteProductConfirmProps {
 const DeleteProductConfirm: React.FC<DeleteProductConfirmProps> = ({ open, onClose, onDelete, product }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { getProductName } = useProductMultilingual();
 
   if (!open) return null;
 
@@ -34,7 +36,7 @@ const DeleteProductConfirm: React.FC<DeleteProductConfirmProps> = ({ open, onClo
         
         <div className="p-6">
           <p className="text-gray-800 dark:text-slate-200">
-            Are you sure you want to delete <b>{product?.name}</b>?
+            Are you sure you want to delete <b>{getProductName(product)}</b>?
           </p>
           {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
           

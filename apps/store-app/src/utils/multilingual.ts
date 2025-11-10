@@ -12,6 +12,30 @@ export type SupportedLanguage = 'en' | 'ar' | 'fr';
 export type MultilingualString = string | Record<SupportedLanguage, string> | Partial<Record<SupportedLanguage, string>>;
 
 /**
+ * Parse stringified JSON multilingual data back to object
+ * Handles the case where multilingual objects are stored as JSON strings in the database
+ * @param data - Multilingual data that might be stringified
+ * @returns Parsed multilingual data
+ */
+export function parseMultilingualString(data: MultilingualString | null | undefined): MultilingualString | null | undefined {
+  if (!data) return data;
+  
+  // If it's a string that looks like JSON, try to parse it
+  if (typeof data === 'string' && data.startsWith('{')) {
+    try {
+      return JSON.parse(data) as Record<SupportedLanguage, string>;
+    } catch (e) {
+      // If parsing fails, return the original string
+      console.warn('Failed to parse multilingual string:', data, e);
+      return data;
+    }
+  }
+  
+  // Return as-is if it's already an object or a regular string
+  return data;
+}
+
+/**
  * Get the translated string for the current language
  * @param multilingualData - Can be a string or multilingual object
  * @param language - The language code to retrieve
@@ -173,4 +197,3 @@ export function mergeMultilingual(
 
   return result;
 }
-

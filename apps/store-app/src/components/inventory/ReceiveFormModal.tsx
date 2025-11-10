@@ -3,6 +3,7 @@ import { Plus, X, Package, Eye, Upload, Truck } from 'lucide-react';
 import SearchableSelect from '../common/SearchableSelect';
 import SupplierFormModal from '../common/SupplierFormModal';
 import { useI18n } from '../../i18n';
+import { useProductMultilingual } from '../../hooks/useMultilingual';
 interface ReceiveFormModalProps {
   open: boolean;
   onClose: () => void;
@@ -141,6 +142,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     return () => window.removeEventListener('keydown', handleEsc);
   }, [open, onClose]);
   const { t } = useI18n();
+  const { getProductName } = useProductMultilingual();
 
   // Get selected supplier for context display
   const selectedSupplier = form.type === 'cash' 
@@ -727,7 +729,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                   <SearchableSelect
                                     options={products.map((product: any) => ({
                                       id: product.id,
-                                      label: product.name,
+                                      label: getProductName(product),
                                       value: product.id,
                                       category: product.category
                                     }))}

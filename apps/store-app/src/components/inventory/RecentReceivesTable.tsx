@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useI18n } from '../../i18n';
 import { Pagination } from '../common/Pagination';
+import { useProductMultilingual } from '../../hooks/useMultilingual';
 
 interface RecentReceivesTableProps {
   recentReceives: any[];
@@ -20,6 +21,7 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
   onDelete 
 }) => {
   const { t } = useI18n();
+  const { getProductName } = useProductMultilingual();
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
@@ -112,12 +114,12 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                     <div className="flex items-center">
                       <img
                         src={product?.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
-                        alt={product?.name}
+                        alt={getProductName(product)}
                         className="w-10 h-10 rounded-lg object-cover mr-3"
                         onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
                       />
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-slate-100">{product?.name}</p>
+                        <p className="font-medium text-gray-900 dark:text-slate-100">{getProductName(product)}</p>
                         <p className="text-sm text-gray-500 dark:text-slate-400">{product?.category}</p>
                       </div>
                     </div>
