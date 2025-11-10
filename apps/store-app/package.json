@@ -20,6 +20,7 @@
     "build": "vite build && npm run build:electron",
     "build:production": "vite build --mode production",
     "build:netlify": "vite build --mode production",
+    "prepare-updates": "node prepare-updates.js",
     "preview": "vite preview",
     "lint": "eslint ."
   },
