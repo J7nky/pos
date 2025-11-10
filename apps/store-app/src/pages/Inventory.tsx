@@ -222,6 +222,8 @@ const Inventory: React.FC = () => {
       
       return allNames.some(name => name.toLowerCase().includes(searchLower));
     });
+
+    
   }, [products, searchTerm, language]);
 
   return (
