@@ -32,3 +32,6 @@ dist-electron
 
 # Update files
 apps/store-app/public/updates/
+
+# Local Netlify folder
+.netlify
