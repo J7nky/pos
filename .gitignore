@@ -23,3 +23,12 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Electron build outputs
+dist-electron
+*.exe
+*.dmg
+*.AppImage
+
+# Update files
+apps/store-app/public/updates/
