@@ -14,7 +14,7 @@
     "dev:electron": "wait-on http://localhost:5175 && npm run build:electron && npx electron-reloader dist-electron/main.cjs --watch dist-electron --exec \"node_modules\\electron\\dist\\electron.exe .\"",
     "dev:electron:watch": "nodemon --watch electron --ext ts --exec \"npm run build:electron\"",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "dist": "npm run build && electron-builder",
     "electron": "node_modules\\electron\\dist\\electron.exe .",
     "build:electron": "tsc -p tsconfig_electron.json && node -e \"require('fs').copyFileSync('dist-electron/main.js','dist-electron/main.cjs');require('fs').copyFileSync('dist-electron/preload.js','dist-electron/preload.cjs')\"",
     "build": "vite build && npm run build:electron",
