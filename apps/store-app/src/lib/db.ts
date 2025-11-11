@@ -94,6 +94,11 @@ class POSDatabase extends Dexie {
   notification_preferences!: Table<NotificationPreferences, string>;
   reminders!: Table<Reminder, string>;
   employee_attendance!: Table<EmployeeAttendance, string>;
+  
+  // Database initialization state
+  private _isInitialized = false;
+  private _initPromise: Promise<void> | null = null;
+  
   constructor() {
     super('POSDatabase');
     
@@ -599,46 +604,107 @@ class POSDatabase extends Dexie {
       // Remove sale_items table and migrate to bill_line_items
     });
   }
+
+  /**
+   * Ensures the database is properly initialized before any operations
+   * This prevents "DatabaseClosedError" by guaranteeing the database is open
+   */
+  async ensureOpen(): Promise<void> {
+    // If already initialized, return immediately
+    if (this._isInitialized && this.isOpen()) {
+      return;
+    }
+
+    // If initialization is in progress, wait for it
+    if (this._initPromise) {
+      return this._initPromise;
+    }
+
+    // Start initialization
+    this._initPromise = (async () => {
+      try {
+        // Check if database is already open
+        if (!this.isOpen()) {
+          console.log('🔄 Opening IndexedDB database...');
+          await this.open();
+          console.log('✅ IndexedDB database opened successfully');
+        }
+        this._isInitialized = true;
+      } catch (error) {
+        console.error('❌ Failed to open database:', error);
+        this._isInitialized = false;
+        this._initPromise = null;
+        throw error;
+      }
+    })();
+
+    return this._initPromise;
+  }
+
+  /**
+   * Wraps a database operation with automatic initialization and error recovery
+   */
+  private async withDb<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      await this.ensureOpen();
+      return await operation();
+    } catch (error: any) {
+      // If we get a DatabaseClosedError, try to recover by reopening
+      if (error?.name === 'DatabaseClosedError' || error?.message?.includes('backing store')) {
+        console.warn('⚠️ Database closed unexpectedly, attempting to reopen...');
+        this._isInitialized = false;
+        this._initPromise = null;
+        
+        try {
+          await this.ensureOpen();
+          return await operation();
+        } catch (retryError) {
+          console.error('❌ Failed to recover from database error:', retryError);
+          throw retryError;
+        }
+      }
+      throw error;
+    }
+  }
+
   async getCashDrawerAccount(storeId: string): Promise<CashDrawerAccount | null> {
-  
-    
- 
-    // Prefer an explicitly active account; treat undefined as active to support older records
-    let account = await this.cash_drawer_accounts
-      .where('store_id')
-      .equals(storeId)
-      .filter(acc => {
-        // Don't include deleted accounts
-        if (acc._deleted) return false;
-        
-        // Check is_active field (primary field in interface)
-        if ((acc as any).is_active === false) return false;
-        
-        // Also check legacy isActive field for backward compatibility
-        if ((acc as any).isActive === false) return false;
-        
-        // If neither field is explicitly false, consider it active
-        return true;
-      })
-      .first();
-   
-    
-    if (account) return account;
+    return this.withDb(async () => {
+      // Prefer an explicitly active account; treat undefined as active to support older records
+      let account = await this.cash_drawer_accounts
+        .where('store_id')
+        .equals(storeId)
+        .filter(acc => {
+          // Don't include deleted accounts
+          if (acc._deleted) return false;
+          
+          // Check is_active field (primary field in interface)
+          if ((acc as any).is_active === false) return false;
+          
+          // Also check legacy isActive field for backward compatibility
+          if ((acc as any).isActive === false) return false;
+          
+          // If neither field is explicitly false, consider it active
+          return true;
+        })
+        .first();
+     
+      if (account) return account;
 
-
-
-    console.log('❌ No cash drawer account found for store:', storeId);
-    return null;
+      console.log('❌ No cash drawer account found for store:', storeId);
+      return null;
+    });
   }
 
   async getCurrentCashDrawerSession(storeId: string): Promise<CashDrawerSession | null> {
-    // Fetch all sessions for the store
-    const all = await this.cash_drawer_sessions.where('store_id').equals(storeId).toArray();
-    // console.log('DEBUG: All sessions for store', storeId, all);
-    // Find open sessions, robust to whitespace/case issues
-    const open = all.filter(sess => String(sess.status).trim().toLowerCase() === 'open');
-    // console.log('DEBUG: Open sessions for store', storeId, open);
-    return open[0] || null;
+    return this.withDb(async () => {
+      // Fetch all sessions for the store
+      const all = await this.cash_drawer_sessions.where('store_id').equals(storeId).toArray();
+      // console.log('DEBUG: All sessions for store', storeId, all);
+      // Find open sessions, robust to whitespace/case issues
+      const open = all.filter(sess => String(sess.status).trim().toLowerCase() === 'open');
+      // console.log('DEBUG: Open sessions for store', storeId, open);
+      return open[0] || null;
+    });
   }
 
   async openCashDrawerSession(
@@ -1071,39 +1137,43 @@ class POSDatabase extends Dexie {
   // Use dataValidationService.validateRecords() and dataValidationService.autoFixRecord() instead
   
   async cleanupInvalidInventoryItems(): Promise<number> {
-    // Simple cleanup for truly invalid rows (negative quantities)
-    const invalidItems = await this.inventory_items.filter(item => item.quantity < 0).toArray();
-    
-    if (invalidItems.length > 0) {
-      await this.inventory_items.bulkDelete(invalidItems.map(item => item.id));
-    }
-    
-    return invalidItems.length;
+    return this.withDb(async () => {
+      // Simple cleanup for truly invalid rows (negative quantities)
+      const invalidItems = await this.inventory_items.filter(item => item.quantity < 0).toArray();
+      
+      if (invalidItems.length > 0) {
+        await this.inventory_items.bulkDelete(invalidItems.map(item => item.id));
+      }
+      
+      return invalidItems.length;
+    });
   }
 
   async cleanupOrphanedRecords(storeId: string): Promise<number> {
-    // Note: For comprehensive validation, use dataValidationService.validateRecords()
-    // This is a simple cleanup for obvious orphaned records
-    
-    // Include both store-specific and global products (inventory can reference global products)
-    const products = await this.getAvailableProducts(storeId);
-    const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
-    const productIds = new Set(products.map(p => p.id));
-    const supplierIds = new Set(suppliers.map(s => s.id));
-    
-    // Clean up orphaned inventory items
-    const orphanedInventory = await this.inventory_items
-      .where('store_id').equals(storeId)
-      .filter(item => !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id))
-      .toArray();
-    
-    let cleaned = 0;
-    if (orphanedInventory.length > 0) {
-      await this.inventory_items.bulkDelete(orphanedInventory.map(item => item.id));
-      cleaned += orphanedInventory.length;
-    }
-    
-    return cleaned;
+    return this.withDb(async () => {
+      // Note: For comprehensive validation, use dataValidationService.validateRecords()
+      // This is a simple cleanup for obvious orphaned records
+      
+      // Include both store-specific and global products (inventory can reference global products)
+      const products = await this.getAvailableProducts(storeId);
+      const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
+      const productIds = new Set(products.map(p => p.id));
+      const supplierIds = new Set(suppliers.map(s => s.id));
+      
+      // Clean up orphaned inventory items
+      const orphanedInventory = await this.inventory_items
+        .where('store_id').equals(storeId)
+        .filter(item => !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id))
+        .toArray();
+      
+      let cleaned = 0;
+      if (orphanedInventory.length > 0) {
+        await this.inventory_items.bulkDelete(orphanedInventory.map(item => item.id));
+        cleaned += orphanedInventory.length;
+      }
+      
+      return cleaned;
+    });
   }
 
   // ==================== GLOBAL PRODUCTS HELPER METHODS ====================
@@ -1114,22 +1184,24 @@ class POSDatabase extends Dexie {
    * @returns Array of products (global + store-specific)
    */
   async getAvailableProducts(storeId: string): Promise<Product[]> {
-    // Get global products
-    const globalProducts = await this.products
-      .where('is_global')
-      .equals(1) // Dexie stores boolean as 0 or 1
-      .filter(p => !p._deleted)
-      .toArray();
-    
-    // Get store-specific products
-    const storeProducts = await this.products
-      .where('store_id')
-      .equals(storeId)
-      .filter(p => !p._deleted && !p.is_global)
-      .toArray();
-    
-    // Combine and return
-    return [...globalProducts, ...storeProducts];
+    return this.withDb(async () => {
+      // Get global products
+      const globalProducts = await this.products
+        .where('is_global')
+        .equals(1) // Dexie stores boolean as 0 or 1
+        .filter(p => !p._deleted)
+        .toArray();
+      
+      // Get store-specific products
+      const storeProducts = await this.products
+        .where('store_id')
+        .equals(storeId)
+        .filter(p => !p._deleted && !p.is_global)
+        .toArray();
+      
+      // Combine and return
+      return [...globalProducts, ...storeProducts];
+    });
   }
 
   /**
@@ -1991,6 +2063,11 @@ class POSDatabase extends Dexie {
 
 
 export const db = new POSDatabase();
+
+// Initialize database immediately to prevent race conditions
+db.ensureOpen().catch(err => {
+  console.error('Failed to initialize database on load:', err);
+});
 
 // Re-export Bill type for convenience
 export type { Bill } from '../types';

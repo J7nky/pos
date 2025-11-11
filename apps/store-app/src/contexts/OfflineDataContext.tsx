@@ -2300,54 +2300,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return { batchId, financialResult };
   };
 
-  // Helper function to get or create Trade supplier
-  const getOrCreateTradeSupplier = async (): Promise<string> => {
-    if (!storeId) throw new Error('No store ID available');
-
-    try {
-      // Ensure database is open
-      await db.open();
-
-      // Look for existing "Trade" supplier
-      const existingSupplier = await db.suppliers
-        .where('name')
-        .equals('Trade')
-        .and(s => s.store_id === storeId)
-        .first();
-
-      if (existingSupplier) {
-        return existingSupplier.id;
-      }
-
-      // Create new "Trade" supplier
-      const tradeSupplierId = createId();
-      const tradeSupplier = {
-        id: tradeSupplierId,
-        name: 'Trade',
-        email: '',
-        phone: '',
-        address: '',
-        store_id: storeId,
-        usd_balance: 0,
-        lb_balance: 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        _synced: false
-      };
-
-      await db.suppliers.add(tradeSupplier);
-      return tradeSupplierId;
-    } catch (error) {
-      console.error('Error getting/creating Trade supplier:', error);
-      console.error('Database state:', {
-        isOpen: db.isOpen(),
-        tables: db.tables.map(t => t.name),
-        version: db.verno
-      });
-      throw new Error('Failed to get or create Trade supplier');
-    }
-  };
-
   const addSale = async (
     items: any[]
   ): Promise<void> => {

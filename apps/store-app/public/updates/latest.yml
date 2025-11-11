@@ -1,8 +1,8 @@
-version: 0.0.4
+version: 0.0.5
 files:
-  - url: Souq POS Setup 0.0.4.exe
-    sha512: S7LXNOvN+QDufrQEWAbT57LDaU/F23tJh+EaqKwPRWhcLQ8uyX9IU+Bnp0Gn/hP+/4J5kpjCSAwjRTWFz8HDpg==
-    size: 216607262
-path: Souq POS Setup 0.0.4.exe
-sha512: S7LXNOvN+QDufrQEWAbT57LDaU/F23tJh+EaqKwPRWhcLQ8uyX9IU+Bnp0Gn/hP+/4J5kpjCSAwjRTWFz8HDpg==
-releaseDate: '2025-11-11T00:32:15.861Z'
+  - url: Souq POS Setup 0.0.5.exe
+    sha512: 96pnlWASMPSV+A2wc6KRuE8QvP3CrG05sx1AKsT3dMx9HIMLS+r1o+KQ9eymQzTMUeKbCkQKL14itR9OtYxIPQ==
+    size: 217892241
+path: Souq POS Setup 0.0.5.exe
+sha512: 96pnlWASMPSV+A2wc6KRuE8QvP3CrG05sx1AKsT3dMx9HIMLS+r1o+KQ9eymQzTMUeKbCkQKL14itR9OtYxIPQ==
+releaseDate: '2025-11-11T01:48:25.210Z'
