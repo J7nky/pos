@@ -1185,18 +1185,22 @@ class POSDatabase extends Dexie {
    */
   async getAvailableProducts(storeId: string): Promise<Product[]> {
     return this.withDb(async () => {
-      // Get global products
+      // Get global products - defensive approach to handle different value types
       const globalProducts = await this.products
         .where('is_global')
-        .equals(1) // Dexie stores boolean as 0 or 1
+        .anyOf(1, true, '1', 'true')
         .filter(p => !p._deleted)
         .toArray();
       
-      // Get store-specific products
+      // Get store-specific products (excluding global)
       const storeProducts = await this.products
         .where('store_id')
         .equals(storeId)
-        .filter(p => !p._deleted && !p.is_global)
+        .filter(p => {
+          const notDeleted = !p._deleted;
+          const notGlobal = !(p.is_global === 1 || p.is_global === true || p.is_global === '1' || p.is_global === 'true');
+          return notDeleted && notGlobal;
+        })
         .toArray();
       
       // Combine and return
@@ -1209,9 +1213,10 @@ class POSDatabase extends Dexie {
    * @returns Array of global products
    */
   async getGlobalProducts(): Promise<Product[]> {
+    // Defensive approach to handle different value types for is_global
     return await this.products
       .where('is_global')
-      .equals(1)
+      .anyOf(1, true, '1', 'true')
       .filter(p => !p._deleted)
       .toArray();
   }
@@ -1225,7 +1230,11 @@ class POSDatabase extends Dexie {
     return await this.products
       .where('store_id')
       .equals(storeId)
-      .filter(p => !p._deleted && !p.is_global)
+      .filter(p => {
+        const notDeleted = !p._deleted;
+        const notGlobal = !(p.is_global === 1 || p.is_global === true || p.is_global === '1' || p.is_global === 'true');
+        return notDeleted && notGlobal;
+      })
       .toArray();
   }
 

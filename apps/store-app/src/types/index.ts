@@ -91,6 +91,9 @@ export interface InventoryItem {
   createdAt: string;
   batchId?: string;
   sku?: string | null;
+  _synced?: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
 }
 
 export interface Customer {

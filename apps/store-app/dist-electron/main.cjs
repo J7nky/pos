@@ -67,78 +67,87 @@ app.on("ready", () => {
     // Initialize auto-updater in production builds only
     try {
         if (process.env.NODE_ENV !== 'development') {
-            // Configure auto-updater for background downloads without interference
-            autoUpdater.autoDownload = true; // Automatically download updates
-            autoUpdater.autoInstallOnAppQuit = true; // Install on quit (non-intrusive)
-            autoUpdater.allowPrerelease = false; // Only stable releases
-            // Configure update check interval (check every 4 hours)
-            autoUpdater.checkForUpdatesAndNotify();
-            setInterval(() => {
+            if (process.env.NODE_ENV !== 'development') {
+                autoUpdater.setFeedURL({
+                    provider: 'github',
+                    owner: 'J7nky', // your GitHub username/org
+                    repo: 'pos', // repository name
+                    private: true, // true if repo is private
+                    token: process.env.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 // use your environment variable
+                });
+                // Configure auto-updater for background downloads without interference
+                autoUpdater.autoDownload = true; // Automatically download updates
+                autoUpdater.autoInstallOnAppQuit = true; // Install on quit (non-intrusive)
+                autoUpdater.allowPrerelease = false; // Only stable releases
+                // Configure update check interval (check every 4 hours)
                 autoUpdater.checkForUpdatesAndNotify();
-            }, 4 * 60 * 60 * 1000); // 4 hours in milliseconds
-            autoUpdater.logger = {
-                info: (msg) => console.log('[autoUpdater]', msg),
-                warn: (msg) => console.warn('[autoUpdater]', msg),
-                error: (msg) => console.error('[autoUpdater]', msg),
-                debug: (msg) => console.debug('[autoUpdater]', msg),
-                silly: () => { }
-            };
-            // Broadcast update events to renderer process
-            autoUpdater.on('checking-for-update', () => {
-                console.log('[autoUpdater] checking-for-update');
-                if (mainWindow) {
-                    mainWindow.webContents.send('update-checking');
-                }
-            });
-            autoUpdater.on('update-available', (info) => {
-                console.log('[autoUpdater] update-available', info && info.version);
-                if (mainWindow) {
-                    mainWindow.webContents.send('update-available', {
-                        version: info.version,
-                        releaseDate: info.releaseDate,
-                        releaseNotes: info.releaseNotes
-                    });
-                }
-            });
-            autoUpdater.on('update-not-available', (info) => {
-                console.log('[autoUpdater] update-not-available');
-                if (mainWindow) {
-                    mainWindow.webContents.send('update-not-available', {
-                        version: info?.version
-                    });
-                }
-            });
-            autoUpdater.on('error', (err) => {
-                console.error('[autoUpdater] error', err && err.message);
-                if (mainWindow) {
-                    mainWindow.webContents.send('update-error', {
-                        message: err?.message || 'Unknown error',
-                        stack: err?.stack
-                    });
-                }
-            });
-            autoUpdater.on('download-progress', (progress) => {
-                const percent = Math.round(progress.percent || 0);
-                console.log('[autoUpdater] download-progress', percent + '%');
-                if (mainWindow) {
-                    mainWindow.webContents.send('update-download-progress', {
-                        percent: percent,
-                        transferred: progress.transferred,
-                        total: progress.total,
-                        bytesPerSecond: progress.bytesPerSecond
-                    });
-                }
-            });
-            autoUpdater.on('update-downloaded', (info) => {
-                console.log('[autoUpdater] update-downloaded, will install on quit');
-                if (mainWindow) {
-                    mainWindow.webContents.send('update-downloaded', {
-                        version: info.version,
-                        releaseDate: info.releaseDate,
-                        releaseNotes: info.releaseNotes
-                    });
-                }
-            });
+                setInterval(() => {
+                    autoUpdater.checkForUpdatesAndNotify();
+                }, 4 * 60 * 60 * 1000); // 4 hours in milliseconds
+                autoUpdater.logger = {
+                    info: (msg) => console.log('[autoUpdater]', msg),
+                    warn: (msg) => console.warn('[autoUpdater]', msg),
+                    error: (msg) => console.error('[autoUpdater]', msg),
+                    debug: (msg) => console.debug('[autoUpdater]', msg),
+                    silly: () => { }
+                };
+                // Broadcast update events to renderer process
+                autoUpdater.on('checking-for-update', () => {
+                    console.log('[autoUpdater] checking-for-update');
+                    if (mainWindow) {
+                        mainWindow.webContents.send('update-checking');
+                    }
+                });
+                autoUpdater.on('update-available', (info) => {
+                    console.log('[autoUpdater] update-available', info && info.version);
+                    if (mainWindow) {
+                        mainWindow.webContents.send('update-available', {
+                            version: info.version,
+                            releaseDate: info.releaseDate,
+                            releaseNotes: info.releaseNotes
+                        });
+                    }
+                });
+                autoUpdater.on('update-not-available', (info) => {
+                    console.log('[autoUpdater] update-not-available');
+                    if (mainWindow) {
+                        mainWindow.webContents.send('update-not-available', {
+                            version: info?.version
+                        });
+                    }
+                });
+                autoUpdater.on('error', (err) => {
+                    console.error('[autoUpdater] error', err && err.message);
+                    if (mainWindow) {
+                        mainWindow.webContents.send('update-error', {
+                            message: err?.message || 'Unknown error',
+                            stack: err?.stack
+                        });
+                    }
+                });
+                autoUpdater.on('download-progress', (progress) => {
+                    const percent = Math.round(progress.percent || 0);
+                    console.log('[autoUpdater] download-progress', percent + '%');
+                    if (mainWindow) {
+                        mainWindow.webContents.send('update-download-progress', {
+                            percent: percent,
+                            transferred: progress.transferred,
+                            total: progress.total,
+                            bytesPerSecond: progress.bytesPerSecond
+                        });
+                    }
+                });
+                autoUpdater.on('update-downloaded', (info) => {
+                    console.log('[autoUpdater] update-downloaded, will install on quit');
+                    if (mainWindow) {
+                        mainWindow.webContents.send('update-downloaded', {
+                            version: info.version,
+                            releaseDate: info.releaseDate,
+                            releaseNotes: info.releaseNotes
+                        });
+                    }
+                });
+            }
         }
     }
     catch (e) {

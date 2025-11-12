@@ -165,18 +165,36 @@ export class CRUDHelperService {
         }
         const storeProducts = await storeProductsQuery.toArray();
 
-        // Get global products using indexed query (is_global = 1)
-        // Note: Dexie stores boolean as 0/1, and syncService normalizes true -> 1
-        // Using indexed query for better performance and reliability
-        let globalProductsQuery = table.where('is_global').equals(1);
+        // Get global products - use a more defensive approach
+        // The is_global field could be boolean, 0/1, or even string "true"/"false"
+        // We'll query by index first, then filter to catch all possible truthy values
+        let globalProductsQuery = table.where('is_global').anyOf(1, true, '1', 'true');
         if (!includeDeleted) {
           globalProductsQuery = globalProductsQuery.filter((item: any) => !item._deleted);
         }
         const globalProducts = await globalProductsQuery.toArray();
 
-        // Combine and return
-        const results = [...storeProducts, ...globalProducts];
-        console.log(`📦 getEntitiesByStore: ${tableName} - found ${storeProducts.length} store products + ${globalProducts.length} global products = ${results.length} total for store ${storeId}`);
+        // Additional fallback: check entire table for any missed global products
+        // This handles edge cases where is_global might have unexpected values
+        const allProducts = await table.toArray();
+        const missedGlobalProducts = allProducts.filter((p: any) => {
+          // Check if it's global and not already in our results
+          const isTrulyGlobal = p.is_global === 1 || p.is_global === true || p.is_global === '1' || p.is_global === 'true';
+          const notInStoreProducts = !storeProducts.find((sp: any) => sp.id === p.id);
+          const notInGlobalProducts = !globalProducts.find((gp: any) => gp.id === p.id);
+          const notDeleted = includeDeleted || !p._deleted;
+          return isTrulyGlobal && notInStoreProducts && notInGlobalProducts && notDeleted;
+        });
+
+        // Combine all results
+        const results = [...storeProducts, ...globalProducts, ...missedGlobalProducts];
+        console.log(`📦 getEntitiesByStore: ${tableName} - found ${storeProducts.length} store products + ${globalProducts.length} global products + ${missedGlobalProducts.length} recovered global products = ${results.length} total for store ${storeId}`);
+        
+        if (missedGlobalProducts.length > 0) {
+          console.warn(`⚠️ Found ${missedGlobalProducts.length} global products with unexpected is_global values:`, 
+            missedGlobalProducts.map((p: any) => ({ id: p.id, name: p.name, is_global: p.is_global, typeof: typeof p.is_global })));
+        }
+        
         return results;
       }
 

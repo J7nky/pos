@@ -75,6 +75,14 @@ app.on("ready", () => {
   // Initialize auto-updater in production builds only
   try {
     if (process.env.NODE_ENV !== 'development') {
+         if (process.env.NODE_ENV !== 'development') {
+        autoUpdater.setFeedURL({
+        provider: 'github',
+        owner: 'J7nky',                // your GitHub username/org
+        repo: 'pos',                    // repository name
+        private: true,                  // true if repo is private
+        token: process.env.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    // use your environment variable
+      });
       // Configure auto-updater for background downloads without interference
       autoUpdater.autoDownload = true; // Automatically download updates
       autoUpdater.autoInstallOnAppQuit = true; // Install on quit (non-intrusive)
@@ -156,7 +164,7 @@ app.on("ready", () => {
         }
       });
     }
-  } catch (e) {
+  }} catch (e) {
     console.warn('[autoUpdater] init failed', e && (e as any).message);
   }
 });

@@ -840,10 +840,18 @@ export class SyncService {
           // Remove duplicates by id and normalize is_global field
           const uniqueRecords = Array.from(
             new Map(allRecords.map(record => {
-              // Normalize is_global: convert boolean to 0/1 for Dexie compatibility
+              // Normalize is_global: convert any truthy value to 1, any falsy to 0 for Dexie compatibility
               const normalized = { ...record };
-              if (normalized.is_global !== undefined) {
-                normalized.is_global = normalized.is_global === true ? 1 : 0;
+              if (normalized.is_global !== undefined && normalized.is_global !== null) {
+                // Handle boolean, string, or number values
+                const isGlobal = normalized.is_global === true || 
+                                 normalized.is_global === 1 || 
+                                 normalized.is_global === '1' || 
+                                 normalized.is_global === 'true';
+                normalized.is_global = isGlobal ? 1 : 0;
+              } else {
+                // Default to 0 if undefined or null
+                normalized.is_global = 0;
               }
               return [record.id, normalized];
             })).values()
@@ -892,11 +900,19 @@ export class SyncService {
           try {
             const localRecord = await (db as any)[tableName].get(remoteRecord.id);
 
-            // Normalize is_global field: convert boolean to 0/1 for Dexie compatibility
+            // Normalize is_global field: convert any truthy value to 1, any falsy to 0 for Dexie compatibility
             // Supabase returns boolean, but Dexie stores it as 0/1
             const normalizedRecord = { ...remoteRecord };
-            if (tableName === 'products' && normalizedRecord.is_global !== undefined) {
-              normalizedRecord.is_global = normalizedRecord.is_global === true ? 1 : 0;
+            if (tableName === 'products' && normalizedRecord.is_global !== undefined && normalizedRecord.is_global !== null) {
+              // Handle boolean, string, or number values
+              const isGlobal = normalizedRecord.is_global === true || 
+                               normalizedRecord.is_global === 1 || 
+                               normalizedRecord.is_global === '1' || 
+                               normalizedRecord.is_global === 'true';
+              normalizedRecord.is_global = isGlobal ? 1 : 0;
+            } else if (tableName === 'products') {
+              // Default to 0 if undefined or null
+              normalizedRecord.is_global = 0;
             }
 
             if (!localRecord) {
@@ -937,10 +953,18 @@ export class SyncService {
   }
 
   private async resolveConflict(tableName: string, localRecord: any, remoteRecord: any): Promise<boolean> {
-    // Normalize is_global field if it's a product (remoteRecord is already normalized, but ensure it)
+    // Normalize is_global field if it's a product (remoteRecord is already normalized, but double-check)
     const normalizedRemote = { ...remoteRecord };
-    if (tableName === 'products' && normalizedRemote.is_global !== undefined) {
-      normalizedRemote.is_global = normalizedRemote.is_global === true ? 1 : 0;
+    if (tableName === 'products' && normalizedRemote.is_global !== undefined && normalizedRemote.is_global !== null) {
+      // Handle boolean, string, or number values
+      const isGlobal = normalizedRemote.is_global === true || 
+                       normalizedRemote.is_global === 1 || 
+                       normalizedRemote.is_global === '1' || 
+                       normalizedRemote.is_global === 'true';
+      normalizedRemote.is_global = isGlobal ? 1 : 0;
+    } else if (tableName === 'products') {
+      // Default to 0 if undefined or null
+      normalizedRemote.is_global = 0;
     }
 
     if (localRecord._synced) {

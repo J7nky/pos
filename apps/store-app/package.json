@@ -1,7 +1,7 @@
 {
   "name": "vite-react-typescript-starter",
   "private": true,
-  "version": "0.0.7",
+  "version": "0.0.18",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
@@ -14,7 +14,8 @@
     "dev:electron": "wait-on http://localhost:5175 && npm run build:electron && npx electron-reloader dist-electron/main.cjs --watch dist-electron --exec \"node_modules\\electron\\dist\\electron.exe .\"",
     "dev:electron:watch": "nodemon --watch electron --ext ts --exec \"npm run build:electron\"",
     "pack": "electron-builder --dir",
-    "dist": "npm run build && electron-builder",
+    "dist": "npm run build && electron-builder --publish=always",
+    "dist:publish": "electron-builder --publish=always",
     "electron": "node_modules\\electron\\dist\\electron.exe .",
     "build:electron": "tsc -p tsconfig_electron.json && node -e \"require('fs').copyFileSync('dist-electron/main.js','dist-electron/main.cjs');require('fs').copyFileSync('dist-electron/preload.js','dist-electron/preload.cjs')\"",
     "build": "vite build && npm run build:electron",
@@ -73,12 +74,21 @@
     "vite": "^7.0.5",
     "wait-on": "^9.0.1"
   },
+  "repository": "https://github.com/J7nky/pos",
+  "publish":{
+    "provider": "github",
+    "owner": "J7nky",
+    "repo": "pos",
+    "releaseType":"release"
+  },
   "build": {
     "electronVersion": "38.5.0",
     "productName": "Souq POS",
+    "asar": true,
     "appId": "com.souqtrablous.pos",
     "files": [
-      "dist",
+      "dist/**",
+      "package.json",
       "dist-electron"
     ],
     "directories": {
@@ -88,7 +98,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/app-icon.ico"
@@ -100,12 +112,6 @@
       "createStartMenuShortcut": true,
       "differentialPackage": true
     },
-    "publish": [
-      {
-        "provider": "generic",
-        "url": "https://souq-trablous.com/updates/"
-      }
-    ],
     "npmRebuild": false,
     "beforeBuild": null
   }
