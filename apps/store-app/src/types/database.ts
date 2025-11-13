@@ -322,6 +322,7 @@ export interface Database {
           received_quantity: number;
           batch_id: string | null;
           sku: string | null;
+          updated_at: string;
         };
         Insert:{
           id: string;
@@ -336,6 +337,7 @@ export interface Database {
           received_quantity?: number;
           batch_id?: string | null;
           sku?: string | null;
+          updated_at?: string;
         };
         Update: {
           id: string;
@@ -350,6 +352,7 @@ export interface Database {
           received_quantity?: number;
           batch_id?: string | null;
           sku?: string | null;
+          updated_at?: string;
         };
       };
       bills: {

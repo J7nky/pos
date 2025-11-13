@@ -272,7 +272,7 @@ export class InventoryPurchaseService {
   /**
    * Get or create the "Trade" supplier for cash purchases
    */
-  private async getOrCreateTradeSupplier(storeId: string): Promise<string> {
+  public async getOrCreateTradeSupplier(storeId: string): Promise<string> {
     try {
       // Look for existing "Trade" supplier
       const existingSupplier = await db.suppliers

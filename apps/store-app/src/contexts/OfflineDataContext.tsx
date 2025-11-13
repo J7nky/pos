@@ -2,16 +2,14 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback, Re
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
-import { BillLineItem, BillLineItemTransforms, NotificationRecord, NotificationType, NotificationPreferences } from '../types';
+import { BillLineItem, BillLineItemTransforms, NotificationRecord, NotificationType, NotificationPreferences, InventoryItem, Transaction } from '../types';
 import {
   db,
-  InventoryItem,
-  Transaction,
   createId,
 } from '../lib/db';
+import { InventoryPurchaseService } from '../services/inventoryPurchaseService';
 import { syncService, SyncResult } from '../services/syncService';
 import { crudHelperService } from '../services/crudHelperService';
-import { realTimeSyncService } from '../services/realTimeSyncService';
 import { notificationService } from '../services/notificationService';
 import { receivedBillMonitoringService } from '../services/receivedBillMonitoringService';
 import { reminderMonitoringService } from '../services/reminderMonitoringService';
@@ -21,6 +19,7 @@ import {
   generateAdvanceReference,
   generateReversalReference
 } from '../utils/referenceGenerator';
+
 // Removed SupabaseService import - using offline-first approach only
 
 type Tables = Database['public']['Tables'];
@@ -294,6 +293,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const { isOnline, justCameOnline } = useNetworkStatus();
   const storeId = userProfile?.store_id;
   const hasLoggedNoProfile = useRef(false);
+  const autoSyncTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   debug('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline, 'justCameOnline:', justCameOnline);
 
@@ -339,9 +339,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // Debounced sync to prevent excessive sync calls during rapid changes
   const [debouncedSyncTimeout, setDebouncedSyncTimeout] = useState<NodeJS.Timeout | null>(null);
-
-  // Auto-sync timer ref for reset-based approach
-  const autoSyncTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Undo state - check localStorage on initialization
   const [canUndo, setCanUndo] = useState(() => {
@@ -443,17 +440,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // initializeExchangeRates();
       // Check undo validity after data is loaded
       setTimeout(() => checkUndoValidity(), 1000);
-      
-      // Initialize real-time sync for cash drawer updates and data refresh
-      if (isOnline) {
-        realTimeSyncService.initializeRealTimeSync(storeId);
-      }
     }
     
     // Cleanup real-time sync when storeId changes or component unmounts
     return () => {
       if (storeId) {
-        realTimeSyncService.disconnect();
       }
     };
   }, [storeId, isOnline]);
@@ -613,32 +604,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isOnline || !storeId) return;
 
-    // Listen for real-time updates to refresh data
-    const handleInventoryUpdate = () => {
-      debug('📦 Real-time inventory update received, refreshing data...');
-      refreshData();
-    };
-    
-    const handleBillUpdate = () => {
-      debug('🧾 Real-time bill update received, refreshing data...');
-      refreshData();
-    };
-    
-    const handleProductUpdate = () => {
-      debug('🛍️ Real-time product update received, refreshing data...');
-      refreshData();
-    };
-    
-    window.addEventListener('inventory-realtime-update', handleInventoryUpdate);
-    window.addEventListener('bills-realtime-update', handleBillUpdate);
-    window.addEventListener('products-realtime-update', handleProductUpdate);
-    
-    // Cleanup listeners
-    return () => {
-      window.removeEventListener('inventory-realtime-update', handleInventoryUpdate);
-      window.removeEventListener('bills-realtime-update', handleBillUpdate);
-      window.removeEventListener('products-realtime-update', handleProductUpdate);
-    };
   }, [storeId, isOnline, refreshData]);
   const initializeData = async () => {
     if (!storeId) return;
@@ -977,7 +942,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         } else {
           const supplier = suppliers.find(s => s.id === item.supplier_id);
           acc.push({
-            supplierId: item.supplier_id,
+            supplierId: item.supplier_id || '',
             supplierName: supplier?.name || 'Unknown Supplier',
             quantity: item.quantity
           });
@@ -1427,7 +1392,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               
               if (newValue) {
                 const newCustomer = await db.customers.get(newValue);
-                newValueDisplay = newCustomer?.name || newValue;
+                newValueDisplay = newCustomer?.name || newValue as string;
               } else {
                 newValueDisplay = 'Walk-in Customer';
               }
@@ -2149,7 +2114,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const batchId = createId();
 
     // Get the actual supplier ID before processing
-    const actualSupplierId = supplier_id === 'trade' ? await getOrCreateTradeSupplier() : supplier_id;
+    const actualSupplierId = supplier_id === 'trade' ? await InventoryPurchaseService.getInstance().getOrCreateTradeSupplier(storeId) : supplier_id;
 
     // Process financial transactions for cash and credit purchases
     let financialResult = null;
@@ -2213,12 +2178,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await db.inventory_bills.add(batchRecord);
       debug(batchRecord, 'batchrecord')
       const now = new Date().toISOString();
+const allowedUnits = ["box", "kg", "piece", "bag","bundle"] as const;
 
       const mappedItems = items.map((it) => ({
         id: createId(),
         product_id: it.product_id ?? '',
         quantity: it.quantity ?? 0,
-        unit: it.unit ?? '',
+        unit:allowedUnits.includes(it.unit as any)
+    ? (it.unit as "box" | "kg" | "piece" | "bag"|"bundle")
+    : "box", // fallback default
         store_id: storeId,
         created_at: now,
         _synced: false,
@@ -2228,7 +2196,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         selling_price: it.selling_price ?? null,
         received_quantity: it.received_quantity ?? 0,
         batch_id: batchId as string | null,
-        sku: (it as any).sku ?? null // Use provided SKU or null
+        sku: (it as any).sku ?? null, // Use provided SKU or null
+        updated_at: now
       }));
 
       await db.inventory_items.bulkAdd(mappedItems);
@@ -4542,11 +4511,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       } else {
         // Create new inventory item if none exists
         const newInventoryItem: InventoryItem = {
-
           id: createId(),
           store_id: storeId,
           product_id: productId,
-          supplier_id: supplierId,
           quantity: quantity,
           _synced: false,
           unit: 'box',
@@ -4585,6 +4552,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return (
       <OfflineDataContext.Provider value={{
         // Minimal context with empty data
+        receiptSettings: {},
+        updateReceiptSettings: async () => { },
         storeId: null,
         products: [],
         suppliers: [],

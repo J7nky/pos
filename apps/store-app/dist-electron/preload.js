@@ -6,8 +6,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     printDocument: (options) => ipcRenderer.invoke('print-document', options),
     testPrinter: (printerName) => ipcRenderer.invoke('test-printer', printerName),
     getPrinterStatus: (printerName) => ipcRenderer.invoke('get-printer-status', printerName),
-    testArabicCodePages: (printerName) => ipcRenderer.invoke('test-arabic-codepages', printerName),
-    testImageArabic: (printerName) => ipcRenderer.invoke('test-image-arabic', printerName),
+    // Test functions removed - not needed in production
     // Update API
     checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),

@@ -4,7 +4,7 @@ const path = require("path");
 const { exec } = require("child_process");
 const { ThermalPrinter, PrinterTypes } = require("node-thermal-printer");
 const fs = require("fs");
-const iconv = require("iconv-lite");
+// iconv-lite removed - not used after removing test functions
 const { createCanvas } = require("canvas");
 const { autoUpdater } = require("electron-updater");
 // Enable hot reloading in development
@@ -205,8 +205,16 @@ function getWindowsPrinters() {
     });
 }
 ipcMain.handle('print-document', async (_event, options) => {
+    console.log('🔵 [FUNCTION CALL] print-document IPC handler - START');
     try {
         const { content, printerName, printOptions, qrCodeData, qrCodeUrl } = options;
+        console.log('🔵 [FUNCTION CALL] print-document - Parameters:', {
+            printerName,
+            contentLength: content?.length,
+            hasQrCodeData: !!qrCodeData,
+            hasQrCodeUrl: !!qrCodeUrl,
+            printOptions: Object.keys(printOptions || {})
+        });
         console.log('🖨️ Starting print job to:', printerName);
         console.log('📄 Content length:', content.length);
         console.log('📱 QR Code Data:', qrCodeData ? 'Available' : 'Not available');
@@ -218,19 +226,25 @@ ipcMain.handle('print-document', async (_event, options) => {
             printerName.toLowerCase().includes('receipt') ||
             printerName.toLowerCase().includes('pos'))) {
             console.log('🔄 Using ESC/POS thermal printing for:', printerName);
+            console.log('🔵 [FUNCTION CALL] Calling printDirectToThermalPrinter');
             return await printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl);
         }
         // Fallback to Electron's print system for regular printers
         console.log('🔄 Using Electron print system for:', printerName);
+        console.log('🔵 [FUNCTION CALL] Calling printWithElectron');
         return await printWithElectron(content, printerName, printOptions);
     }
     catch (error) {
         console.error('Error printing document:', error);
+        console.log('🔴 [FUNCTION CALL] print-document IPC handler - ERROR:', error);
         return {
             success: false,
             message: 'Failed to print document',
             error: error instanceof Error ? error.message : 'Unknown error'
         };
+    }
+    finally {
+        console.log('🔵 [FUNCTION CALL] print-document IPC handler - END');
     }
 });
 // Helper function: Render Arabic text to bitmap image
@@ -292,7 +306,7 @@ function renderTextToBitmap(text, options = {}) {
 }
 // Helper function: Create ESC/POS bitmap command
 function createBitmapCommand(bitmapData, width, height) {
-    const GS = '\x1D';
+    // GS command is embedded directly in the buffer below
     const bytesPerLine = Math.ceil(width / 8);
     // GS v 0 command for printing raster bitmap
     // GS v 0 m xL xH yL yH d1...dk
@@ -307,164 +321,34 @@ function createBitmapCommand(bitmapData, width, height) {
     ]);
     return Buffer.concat([header, bitmapData]);
 }
-// Test function for image-based Arabic printing
-async function testImageBasedArabicPrinting(printerName) {
-    console.log('');
-    console.log('╔════════════════════════════════════════╗');
-    console.log('║  IMAGE-BASED ARABIC PRINTING TEST      ║');
-    console.log('╚════════════════════════════════════════╝');
-    console.log('');
-    const ESC = '\x1B';
-    const GS = '\x1D';
-    const INIT = ESC + '@';
-    const ALIGN_CENTER = ESC + 'a' + '1';
-    const ALIGN_LEFT = ESC + 'a' + '0';
-    const CUT_PAPER = GS + 'V' + '\x00';
-    const LINE_FEED = '\n';
-    try {
-        // Start ESC/POS data
-        let escposData = Buffer.from(INIT, 'binary');
-        escposData = Buffer.concat([escposData, Buffer.from(ALIGN_CENTER + 'IMAGE-BASED ARABIC TEST' + LINE_FEED, 'binary')]);
-        escposData = Buffer.concat([escposData, Buffer.from('='.repeat(32) + LINE_FEED + LINE_FEED, 'binary')]);
-        escposData = Buffer.concat([escposData, Buffer.from(ALIGN_LEFT, 'binary')]);
-        // Test texts
-        const testTexts = [
-            { text: 'مرحبا (Hello)', fontSize: 24, bold: false },
-            { text: 'شكراً لك (Thank You)', fontSize: 24, bold: true },
-            { text: 'متجر الخضروات', fontSize: 20, bold: false },
-            { text: 'الإجمالي: 50.000 ل.ل', fontSize: 22, bold: true },
-        ];
-        for (const testItem of testTexts) {
-            console.log(`📝 Rendering: "${testItem.text}" (${testItem.fontSize}px, ${testItem.bold ? 'bold' : 'normal'})`);
-            // Render text to bitmap
-            const bitmapData = renderTextToBitmap(testItem.text, {
-                fontSize: testItem.fontSize,
-                width: 576, // 80mm paper width
-                bold: testItem.bold,
-                align: 'left'
-            });
-            // Create bitmap command
-            const bitmapCommand = createBitmapCommand(bitmapData, 576, Math.ceil(testItem.fontSize * 1.5 + 20));
-            // Add to ESC/POS data
-            escposData = Buffer.concat([escposData, bitmapCommand]);
-            escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED, 'binary')]);
-            console.log(`✅ Rendered successfully (${bitmapData.length} bytes)`);
-        }
-        // Add footer
-        escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED + '='.repeat(32) + LINE_FEED, 'binary')]);
-        escposData = Buffer.concat([escposData, Buffer.from(ALIGN_CENTER + 'End of test' + LINE_FEED, 'binary')]);
-        escposData = Buffer.concat([escposData, Buffer.from(LINE_FEED + LINE_FEED + LINE_FEED, 'binary')]);
-        escposData = Buffer.concat([escposData, Buffer.from(CUT_PAPER, 'binary')]);
-        // Write to file
-        const tempFile = path.join(process.cwd(), 'temp-arabic-image-test.bin');
-        fs.writeFileSync(tempFile, escposData);
-        console.log('📝 Created test file:', tempFile);
-        console.log('📦 Total size:', escposData.length, 'bytes');
-        // Send to printer
-        const copyCommand = `copy /B "${tempFile}" "\\\\localhost\\${printerName}"`;
-        console.log('📤 Sending to printer...');
-        return new Promise((resolve, reject) => {
-            exec(copyCommand, (error) => {
-                try {
-                    fs.unlinkSync(tempFile);
-                }
-                catch (e) { }
-                if (error) {
-                    console.error('❌ Print failed:', error);
-                    reject(error);
-                }
-                else {
-                    console.log('✅ Image-based Arabic test printed successfully!');
-                    console.log('📋 Check the receipt - Arabic should be perfectly readable!');
-                    resolve({ success: true, message: 'Image-based Arabic printing test completed' });
-                }
-            });
-        });
-    }
-    catch (error) {
-        console.error('❌ Test failed:', error);
-        return { success: false, message: 'Test failed', error: error instanceof Error ? error.message : 'Unknown error' };
-    }
-}
-// Test function to print with all code pages for debugging
-async function testAllArabicCodePages(printerName) {
-    console.log('');
-    console.log('╔════════════════════════════════════════╗');
-    console.log('║  ARABIC CODE PAGE TEST MODE            ║');
-    console.log('╚════════════════════════════════════════╝');
-    console.log('');
-    const testText = 'Test Arabic: مرحبا شكرا';
-    const ESC = '\x1B';
-    const GS = '\x1D';
-    const INIT = ESC + '@';
-    const ALIGN_CENTER = ESC + 'a' + '1';
-    const ALIGN_LEFT = ESC + 'a' + '0';
-    const CUT_PAPER = GS + 'V' + '\x00';
-    const codePagesToTest = [
-        { num: 221, hex: '\xDD', name: 'CP221 (Xprinter Arabic!)', encoding: 'win1256' },
-        { num: 22, hex: '\x16', name: 'CP22 (Xprinter Arabic Alt)', encoding: 'win1256' },
-        { num: 0, hex: '\x00', name: 'CP0 (Default)', encoding: 'utf8' },
-        { num: 16, hex: '\x10', name: 'CP16', encoding: 'cp864' },
-        { num: 17, hex: '\x11', name: 'CP17', encoding: 'cp864' },
-        { num: 28, hex: '\x1C', name: 'CP28', encoding: 'iso-8859-6' },
-    ];
-    let escposData = INIT;
-    escposData += ALIGN_CENTER;
-    escposData += 'ARABIC CODE PAGE TEST\n';
-    escposData += '====================\n\n';
-    escposData += ALIGN_LEFT;
-    for (const cp of codePagesToTest) {
-        console.log(`Testing ${cp.name}...`);
-        escposData += `\nCode Page ${cp.num} (${cp.name}):\n`;
-        escposData += ESC + 't' + cp.hex; // Set code page
-        escposData += testText + '\n';
-        escposData += '--------------------\n';
-    }
-    escposData += '\n\n\n';
-    escposData += CUT_PAPER;
-    const tempFile = path.join(process.cwd(), 'temp-test-codepages.bin');
-    try {
-        const dataToWrite = iconv.encode(escposData, 'cp864');
-        fs.writeFileSync(tempFile, dataToWrite);
-        const copyCommand = `copy /B "${tempFile}" "\\\\localhost\\${printerName}"`;
-        console.log('📤 Sending test to printer...');
-        return new Promise((resolve, reject) => {
-            exec(copyCommand, (error) => {
-                try {
-                    fs.unlinkSync(tempFile);
-                }
-                catch (e) { }
-                if (error) {
-                    reject(error);
-                }
-                else {
-                    console.log('✅ Test printed! Check which code page shows Arabic correctly.');
-                    resolve({ success: true, message: 'Code page test completed' });
-                }
-            });
-        });
-    }
-    catch (error) {
-        console.error('❌ Test failed:', error);
-        return { success: false, message: 'Test failed' };
-    }
-}
+// Test functions removed - moved to development tools
+// If you need to test Arabic printing or code pages, use the Settings page test buttons
 // Direct printing function for thermal printers using ESC/POS
 async function printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl) {
+    console.log('🔵 [FUNCTION CALL] printDirectToThermalPrinter - START');
+    console.log('📊 [FUNCTION CALL] printDirectToThermalPrinter - Parameters:', {
+        printerName,
+        contentLength: content?.length,
+        hasQrCodeData: !!qrCodeData,
+        hasQrCodeUrl: !!qrCodeUrl
+    });
     try {
         console.log('🔄 Using ESC/POS thermal printing...');
         console.log('🖨️ Printer:', printerName);
         console.log('📱 QR Code available:', !!qrCodeData);
         // Try ESC/POS printing first
         try {
+            console.log('🔵 [FUNCTION CALL] Calling printWithESCPOS');
             return await printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl);
         }
         catch (escposError) {
             console.log('⚠️ ESC/POS print failed, trying HTML fallback...', escposError);
             // Fallback to HTML-based printing
+            console.log('🔵 [FUNCTION CALL] Calling convertTextToHTML');
             const htmlContent = convertTextToHTML(content, qrCodeData, qrCodeUrl);
             try {
                 console.log('🔄 Trying Electron print system...');
+                console.log('🔵 [FUNCTION CALL] Calling printWithElectron (fallback)');
                 return await printWithElectron(htmlContent, printerName, {
                     margins: {
                         marginType: 'none',
@@ -484,21 +368,27 @@ async function printDirectToThermalPrinter(content, printerName, qrCodeData, qrC
             catch (electronError) {
                 console.log('⚠️ Electron print failed, trying Windows print fallback...', electronError);
                 // Fallback to Windows printing with HTML content
+                console.log('🔵 [FUNCTION CALL] Calling printHTMLWithWindows');
                 return await printHTMLWithWindows(htmlContent, printerName);
             }
         }
     }
     catch (error) {
         console.error('❌ Error in thermal printing:', error);
+        console.log('🔴 [FUNCTION CALL] printDirectToThermalPrinter - ERROR:', error);
         return {
             success: false,
             message: 'Thermal print failed',
             error: error instanceof Error ? error.message : 'Unknown error'
         };
     }
+    finally {
+        console.log('🔵 [FUNCTION CALL] printDirectToThermalPrinter - END');
+    }
 }
 // Print using raw ESC/POS commands directly to Windows printer
-async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
+async function printWithRawESCPOS(content, printerName, _qrCodeData, qrCodeUrl) {
+    console.log('🔵 [FUNCTION CALL] printWithRawESCPOS - START');
     return new Promise((resolve, reject) => {
         try {
             console.log('🔧 Building raw ESC/POS commands...');
@@ -514,15 +404,7 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
             const SIZE_DOUBLE = GS + '!' + '\x11';
             const CUT_PAPER = GS + 'V' + '\x00';
             const LINE_FEED = '\n';
-            // Code page selection for Arabic support
-            // Try multiple code pages - Xprinter models vary
-            const CODE_PAGES = {
-                CP0: { cmd: ESC + 't' + '\x00', name: 'CP0 (USA/Europe)', encoding: 'ascii' },
-                CP16: { cmd: ESC + 't' + '\x10', name: 'CP16 (Arabic Alt)', encoding: 'cp864' },
-                CP17: { cmd: ESC + 't' + '\x11', name: 'CP17 (CP864)', encoding: 'cp864' },
-                CP23: { cmd: ESC + 't' + '\x17', name: 'CP23 (Windows-1256)', encoding: 'win1256' },
-                CP28: { cmd: ESC + 't' + '\x1C', name: 'CP28 (Arabic Standard)', encoding: 'iso-8859-6' },
-            };
+            // Code pages not needed - using image-based rendering for Arabic
             // Check if content contains Arabic characters
             const hasArabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(content);
             // Build ESC/POS command - using Buffer for binary data
@@ -665,7 +547,7 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
             ];
             const copyCommand = `copy /B "${tempFile}" ${printerPaths[0]}`;
             console.log('🖨️ Sending to printer:', copyCommand);
-            exec(copyCommand, (error, stdout, stderr) => {
+            exec(copyCommand, (error) => {
                 // Clean up temp file
                 try {
                     fs.unlinkSync(tempFile);
@@ -676,10 +558,12 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
                 }
                 if (error) {
                     console.error('❌ Raw ESC/POS print failed:', error.message);
+                    console.log('🔴 [FUNCTION CALL] printWithRawESCPOS - ERROR:', error.message);
                     reject(error);
                 }
                 else {
                     console.log('✅ Raw ESC/POS print successful');
+                    console.log('🔵 [FUNCTION CALL] printWithRawESCPOS - SUCCESS');
                     resolve({
                         success: true,
                         message: 'Receipt printed successfully via raw ESC/POS'
@@ -689,18 +573,25 @@ async function printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
         }
         catch (error) {
             console.error('❌ Raw ESC/POS error:', error);
+            console.log('🔴 [FUNCTION CALL] printWithRawESCPOS - ERROR:', error);
             reject(error);
+        }
+        finally {
+            console.log('🔵 [FUNCTION CALL] printWithRawESCPOS - END');
         }
     });
 }
 // Print using ESC/POS commands for proper thermal printing
 async function printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
+    console.log('🔵 [FUNCTION CALL] printWithESCPOS - START');
     return new Promise(async (resolve, reject) => {
         try {
             console.log('🔧 Initializing thermal printer with ESC/POS...');
             // Try raw ESC/POS approach first (better Windows compatibility)
             try {
+                console.log('🔵 [FUNCTION CALL] Calling printWithRawESCPOS');
                 const result = await printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl);
+                console.log('🔵 [FUNCTION CALL] printWithESCPOS - SUCCESS (via raw ESC/POS)');
                 resolve(result);
                 return;
             }
@@ -826,6 +717,7 @@ async function printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
             console.log('🖨️ Executing ESC/POS print...');
             await printer.execute();
             console.log('✅ ESC/POS print successful');
+            console.log('🔵 [FUNCTION CALL] printWithESCPOS - SUCCESS (via node-thermal-printer)');
             resolve({
                 success: true,
                 message: 'Receipt printed successfully via ESC/POS'
@@ -833,12 +725,21 @@ async function printWithESCPOS(content, printerName, qrCodeData, qrCodeUrl) {
         }
         catch (error) {
             console.error('❌ ESC/POS print error:', error);
+            console.log('🔴 [FUNCTION CALL] printWithESCPOS - ERROR:', error);
             reject(error);
+        }
+        finally {
+            console.log('🔵 [FUNCTION CALL] printWithESCPOS - END');
         }
     });
 }
 // Print HTML content using Windows system
 async function printHTMLWithWindows(htmlContent, printerName) {
+    console.log('🔵 [FUNCTION CALL] printHTMLWithWindows - START');
+    console.log('📊 [FUNCTION CALL] printHTMLWithWindows - Parameters:', {
+        printerName,
+        contentLength: htmlContent?.length
+    });
     return new Promise((resolve) => {
         try {
             const fs = require('fs');
@@ -895,7 +796,7 @@ async function printHTMLWithWindows(htmlContent, printerName) {
                 }
                 const command = approaches[currentApproach];
                 console.log(`🔄 Trying Windows print approach ${currentApproach + 1}:`, command);
-                exec(command, (error, stdout, stderr) => {
+                exec(command, (error) => {
                     if (error) {
                         console.log(`⚠️ Approach ${currentApproach + 1} failed:`, error.message);
                         currentApproach++;
@@ -903,6 +804,7 @@ async function printHTMLWithWindows(htmlContent, printerName) {
                     }
                     else {
                         console.log(`✅ Approach ${currentApproach + 1} successful`);
+                        console.log('🔵 [FUNCTION CALL] printHTMLWithWindows - SUCCESS');
                         resolve({
                             success: true,
                             message: `HTML printed successfully via Windows approach ${currentApproach + 1}`
@@ -930,16 +832,21 @@ async function printHTMLWithWindows(htmlContent, printerName) {
         }
         catch (error) {
             console.error('❌ Error in Windows HTML printing:', error);
+            console.log('🔴 [FUNCTION CALL] printHTMLWithWindows - ERROR:', error);
             resolve({
                 success: false,
                 message: 'Windows HTML print setup failed',
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
         }
+        finally {
+            console.log('🔵 [FUNCTION CALL] printHTMLWithWindows - END');
+        }
     });
 }
 // Convert text receipt to HTML for better printing
 function convertTextToHTML(content, qrCodeData, qrCodeUrl) {
+    console.log('🔵 [FUNCTION CALL] convertTextToHTML - START');
     console.log('🔍 QR Code data received:', { qrCodeData: !!qrCodeData, qrCodeUrl, hasPlaceholder: content.includes('[QR_CODE_PLACEHOLDER]') });
     // Replace QR code placeholder with actual QR code image if available
     let htmlContent = content;
@@ -1018,6 +925,7 @@ function convertTextToHTML(content, qrCodeData, qrCodeUrl) {
         // Default formatting
         return `<div style="margin: 2px 0; font-family: 'Courier New', monospace;">${line}</div>`;
     });
+    console.log('🔵 [FUNCTION CALL] convertTextToHTML - END');
     return `
     <!DOCTYPE html>
     <html>
@@ -1059,6 +967,12 @@ function convertTextToHTML(content, qrCodeData, qrCodeUrl) {
 }
 // Electron print system (fallback)
 async function printWithElectron(content, printerName, printOptions) {
+    console.log('🔵 [FUNCTION CALL] printWithElectron - START');
+    console.log('📊 [FUNCTION CALL] printWithElectron - Parameters:', {
+        printerName,
+        contentLength: content?.length,
+        isHTML: content.includes('<!DOCTYPE html>')
+    });
     try {
         // Create a new window for printing
         const printWindow = new BrowserWindow({
@@ -1134,6 +1048,7 @@ async function printWithElectron(content, printerName, printOptions) {
         await printWindow.webContents.print(printOptions_);
         // Close the print window
         printWindow.close();
+        console.log('🔵 [FUNCTION CALL] printWithElectron - SUCCESS');
         return {
             success: true,
             message: 'Print job submitted successfully'
@@ -1141,7 +1056,11 @@ async function printWithElectron(content, printerName, printOptions) {
     }
     catch (error) {
         console.error('❌ Electron print failed:', error);
+        console.log('🔴 [FUNCTION CALL] printWithElectron - ERROR:', error);
         throw error;
+    }
+    finally {
+        console.log('🔵 [FUNCTION CALL] printWithElectron - END');
     }
 }
 // Get available printers with better detection
@@ -1231,36 +1150,8 @@ ipcMain.handle('get-printer-status', async (_event, printerName) => {
         };
     }
 });
-// Handle Arabic code page test - prints with all code pages to find which works
-ipcMain.handle('test-arabic-codepages', async (_event, printerName) => {
-    try {
-        console.log('🧪 Arabic code page test requested for printer:', printerName);
-        return await testAllArabicCodePages(printerName);
-    }
-    catch (error) {
-        console.error('❌ Test error:', error);
-        return {
-            success: false,
-            message: 'Test failed',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        };
-    }
-});
-// Handle image-based Arabic printing test
-ipcMain.handle('test-image-arabic', async (_event, printerName) => {
-    try {
-        console.log('🖼️ Image-based Arabic test requested for printer:', printerName);
-        return await testImageBasedArabicPrinting(printerName);
-    }
-    catch (error) {
-        console.error('❌ Test error:', error);
-        return {
-            success: false,
-            message: 'Test failed',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        };
-    }
-});
+// Test IPC handlers removed - not needed in production
+// Arabic printing works correctly with image-based rendering in printWithRawESCPOS
 // ============================================
 // Auto-Update IPC Handlers
 // ============================================

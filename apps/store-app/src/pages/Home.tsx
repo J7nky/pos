@@ -197,13 +197,6 @@ export default function Home() {
       if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
       debouncedLoadCashDrawerStatus();
     };
-
-    // Real-time updates from other devices - use debounced version
-    const handleRealTimeUpdate = (e: any) => {
-      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
-      console.log('💰 Real-time cash drawer update received on Home page:', e.detail);
-      debouncedLoadCashDrawerStatus();
-    };
     
     // Handle undo completion events - use debounced version
     const handleUndoCompleted = (e: any) => {
@@ -212,7 +205,6 @@ export default function Home() {
     };
     
     window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
-    window.addEventListener('cash-drawer-realtime-update', handleRealTimeUpdate as any);
     window.addEventListener('undo-completed', handleUndoCompleted as any);
 
     // Refresh every 60 seconds as a fallback (reduced frequency)
@@ -220,7 +212,6 @@ export default function Home() {
     return () => {
       clearInterval(interval);
       window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
-      window.removeEventListener('cash-drawer-realtime-update', handleRealTimeUpdate as any);
       window.removeEventListener('undo-completed', handleUndoCompleted as any);
     };
   }, [raw.storeId, loadCashDrawerStatus, debouncedLoadCashDrawerStatus]);

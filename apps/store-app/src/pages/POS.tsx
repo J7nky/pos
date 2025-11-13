@@ -114,6 +114,13 @@ export default function POS() {
 
   // Receipt printing function
   const printReceipt = async (billData: any, lineItemsData: any[], entity: any, qrCodeData?: any) => {
+    console.log('🔵 [FUNCTION CALL] printReceipt - START');
+    console.log('📊 [FUNCTION CALL] printReceipt - Parameters:', {
+      billDataId: billData?.id,
+      lineItemsCount: lineItemsData?.length,
+      entityId: entity?.id,
+      hasQrCode: !!qrCodeData
+    });
     try {
       setIsPrinting(true);
       
@@ -184,9 +191,11 @@ export default function POS() {
 
         if (result.success) {
           console.log('✅ Receipt printed successfully');
+          console.log('🔵 [FUNCTION CALL] printReceipt - SUCCESS');
           showToast('success', 'Receipt printed successfully');
         } else {
           console.error('❌ Receipt printing failed:', result.message);
+          console.log('🔴 [FUNCTION CALL] printReceipt - FAILED:', result.message);
           showToast('error', 'Receipt printing failed: ' + result.message);
         }
       } else {
@@ -195,14 +204,24 @@ export default function POS() {
       }
     } catch (error) {
       console.error('❌ Error printing receipt:', error);
+      console.log('🔴 [FUNCTION CALL] printReceipt - ERROR:', error);
       showToast('error', 'Failed to print receipt');
     } finally {
       setIsPrinting(false);
+      console.log('🔵 [FUNCTION CALL] printReceipt - END');
     }
   };
 
   // Generate receipt content
   const generateReceiptContent = async (billData: any, lineItemsData: any[], entity: any, products: any[], qrCodeData?: any) => {
+    console.log('🔵 [FUNCTION CALL] generateReceiptContent - START');
+    console.log('📊 [FUNCTION CALL] generateReceiptContent - Parameters:', {
+      billNumber: billData?.bill_number,
+      lineItemsCount: lineItemsData?.length,
+      entityName: entity?.name,
+      productsCount: products?.length,
+      hasQrCode: !!qrCodeData
+    });
     // Get receipt settings from offline context
     const receiptSettings = raw.receiptSettings || {
       storeName: 'KIWI VEGETABLES MARKET',
@@ -320,6 +339,8 @@ ${t('receipt.billNumber')}: ${billData.bill_number}
 ${dashSeparator}`;
     }
 
+    console.log('🔵 [FUNCTION CALL] generateReceiptContent - END');
+    console.log('📊 [FUNCTION CALL] generateReceiptContent - Content length:', content.length);
     return content;
   };
 

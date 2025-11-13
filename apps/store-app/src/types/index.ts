@@ -77,19 +77,26 @@ export interface Supplier {
   advance_lb_balance?: number ; // Advance payments in LBP
   advance_usd_balance?: number ; // Advance payments in USD
   createdAt: string;
+  _synced?: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
 }
 
 export interface InventoryItem {
   id: string;
-  productId: string;
-  // supplierId REMOVED: must get supplier from inventory_bills via batchId
+  store_id: string;
+  product_id: string;
+  supplier_id?: string; // Optional: can be obtained from inventory_bills via batch_id, but may exist for legacy data
   quantity: number;
-  receivedQuantity: number;
-  unit: 'kg' | 'piece' | 'box' | 'bag';
-  weight?: number;
-  price?: number;
-  createdAt: string;
-  batchId?: string;
+  received_quantity: number;
+  unit: 'kg' | 'piece' | 'box' | 'bag'|'bundle';
+  weight?: number | null;
+  price?: number | null;
+  selling_price?: number | null;
+  type?: string | null;
+  created_at: string;
+  received_at?: string | null;
+  batch_id?: string | null;
   sku?: string | null;
   _synced?: boolean;
   _lastSyncedAt?: string;
@@ -108,6 +115,9 @@ export interface Customer {
   usd_max_balance?: number; // Maximum allowed balance in USD
   is_active: boolean;
   createdAt: string;
+  _synced?: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
 }
 
 export interface inventory_bills { id: string;
@@ -123,6 +133,9 @@ export interface inventory_bills { id: string;
   commission_rate?:number | null;
   plastic_fee?:string;
   type:string
+  _synced?: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
   }
 
 // Bill interface - maps directly to bills table (snake_case for db compatibility)

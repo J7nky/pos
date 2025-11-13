@@ -21,7 +21,34 @@ const SYNC_CONFIG = {
   maxConcurrentBatches: 3, // Limit concurrent batch operations
   connectionTimeout: 10000, // Connection timeout in ms
   idleSyncInterval: 60000, // Sync interval when idle (1 minute)
+  // Deletion detection
+  enableDeletionDetection: true, // Enable detection of remote deletions
+  deletionDetectionInterval: 300000, // Run full deletion check every 5 minutes
 };
+
+// Tables that have updated_at field for incremental sync
+// Based on db.ts schema comments and indexes
+const TABLES_WITH_UPDATED_AT = [
+  'products',
+  'suppliers', 
+  'customers',
+  'users',
+  'stores',
+  'cash_drawer_accounts',
+  'cash_drawer_sessions',
+  'inventory_bills',
+  'bills',
+  'bill_line_items',
+  'bill_audit_logs',
+  'missed_products',
+  'reminders'
+] as const;
+
+// Tables that only have created_at (no updated_at)
+const TABLES_WITH_CREATED_AT_ONLY = [
+  'inventory_items',
+  'transactions'
+] as const;
 
 // Table sync order (respects foreign key dependencies)
 const SYNC_TABLES = [
@@ -76,6 +103,7 @@ export interface SyncResult {
 export class SyncService {
   private isRunning = false;
   private lastSyncAttempt: Date | null = null;
+  private lastDeletionCheck: Date | null = null;
 
   /**
    * Classifies errors to determine if they are unrecoverable.
@@ -337,6 +365,21 @@ export class SyncService {
       await this.processPendingSyncs();
       const pendingTime = performance.now() - pendingStart;
       console.log(`⏱️  Pending syncs processing: ${pendingTime.toFixed(2)}ms`);
+
+      // Check if we should run deletion detection
+      const shouldCheckDeletions = SYNC_CONFIG.enableDeletionDetection && (
+        !this.lastDeletionCheck ||
+        Date.now() - this.lastDeletionCheck.getTime() > SYNC_CONFIG.deletionDetectionInterval
+      );
+
+      if (shouldCheckDeletions) {
+        const deletionStart = performance.now();
+        const deletionResult = await this.detectAndSyncDeletions(storeId);
+        const deletionTime = performance.now() - deletionStart;
+        console.log(`⏱️  Deletion detection: ${deletionTime.toFixed(2)}ms (${deletionResult.deleted} records removed)`);
+        result.errors.push(...deletionResult.errors);
+        this.lastDeletionCheck = new Date();
+      }
 
       const totalTime = performance.now() - syncStartTime;
       console.log(`⏱️  Total sync time: ${totalTime.toFixed(2)}ms (${(totalTime / 1000).toFixed(2)}s)`);
@@ -733,8 +776,11 @@ export class SyncService {
           lastSyncAt = '1970-01-01T00:00:00.000Z';
         }
 
-        const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
+        // Determine which timestamp field to use based on table schema
+        const hasUpdatedAt = TABLES_WITH_UPDATED_AT.includes(tableName as any);
         const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
+        
+        console.log(`📊 Sync ${tableName}: using ${timestampField} field (hasUpdatedAt: ${hasUpdatedAt})`);
 
         let query = supabase.from(tableName as any).select('*');
 
@@ -952,6 +998,89 @@ export class SyncService {
     return result;
   }
 
+  /**
+   * Detects and removes records that exist locally but were deleted from Supabase
+   * This handles the case where an admin deletes records directly in Supabase
+   */
+  private async detectAndSyncDeletions(storeId: string) {
+    const result = { deleted: 0, errors: [] as string[] };
+    
+    console.log('🔍 Starting deletion detection...');
+    
+    for (const tableName of SYNC_TABLES) {
+      try {
+        const table = (db as any)[tableName];
+        
+        // Get all synced local records (only check synced records, as unsynced are local-only)
+        const localRecords = await table
+          .filter((record: any) => record._synced && !record._deleted)
+          .toArray();
+        
+        if (localRecords.length === 0) {
+          continue;
+        }
+        
+        // Fetch all remote IDs for this table
+        let query = supabase.from(tableName as any).select('id');
+        
+        if (tableName !== 'transactions' && tableName !== 'stores') {
+          if (tableName === 'products') {
+            // Include both store-specific and global products
+            query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
+          } else {
+            query = query.eq('store_id', storeId);
+          }
+        } else if (tableName === 'stores') {
+          query = query.eq('id', storeId);
+        }
+        
+        const { data: remoteRecords, error } = await query;
+        
+        if (error) {
+          result.errors.push(`Failed to fetch remote IDs for ${tableName}: ${error.message}`);
+          continue;
+        }
+        
+        // Create a Set of remote IDs for fast lookup
+        const remoteIds = new Set((remoteRecords || []).map((r: any) => r.id));
+        
+        // Find local records that don't exist remotely
+        const deletedLocally: any[] = [];
+        for (const localRecord of localRecords) {
+          if (!remoteIds.has(localRecord.id)) {
+            deletedLocally.push(localRecord);
+          }
+        }
+        
+        if (deletedLocally.length > 0) {
+          console.log(`🗑️  Found ${deletedLocally.length} remotely deleted ${tableName} records`);
+          
+          for (const record of deletedLocally) {
+            try {
+              // Undo any side effects before deletion
+              await this.undoRecordEffects(tableName, record);
+              
+              // Delete from local database
+              await table.delete(record.id);
+              result.deleted++;
+              
+              console.log(`✅ Removed remotely deleted ${tableName} record: ${record.id.substring(0, 8)}...`);
+            } catch (deleteError) {
+              console.error(`❌ Failed to delete ${tableName}/${record.id}:`, deleteError);
+              result.errors.push(`Failed to delete ${tableName}/${record.id}: ${deleteError}`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Deletion detection failed for ${tableName}:`, error);
+        result.errors.push(`Deletion detection error for ${tableName}: ${error}`);
+      }
+    }
+    
+    console.log(`🗑️  Deletion detection complete: ${result.deleted} records removed`);
+    return result;
+  }
+
   private async resolveConflict(tableName: string, localRecord: any, remoteRecord: any): Promise<boolean> {
     // Normalize is_global field if it's a product (remoteRecord is already normalized, but double-check)
     const normalizedRemote = { ...remoteRecord };
@@ -985,8 +1114,23 @@ export class SyncService {
       return await this.resolveBalanceConflict(tableName, localRecord, normalizedRemote);
     }
 
+    // Employee balance conflict resolution
+    if (tableName === 'users') {
+      return await this.resolveEmployeeBalanceConflict(localRecord, normalizedRemote);
+    }
+
+    // Transaction conflict resolution (immutable - remote always wins)
+    if (tableName === 'transactions') {
+      return await this.resolveTransactionConflict(localRecord, normalizedRemote);
+    }
+
+    // Bill and bill line items conflict resolution
+    if (tableName === 'bills' || tableName === 'bill_line_items') {
+      return await this.resolveBillConflict(tableName, localRecord, normalizedRemote);
+    }
+
     // Default: timestamp-based resolution
-    const hasUpdatedAt = ['products', 'suppliers', 'customers'].includes(tableName);
+    const hasUpdatedAt = TABLES_WITH_UPDATED_AT.includes(tableName as any);
     const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
 
     const localModifiedAt = new Date(localRecord[timestampField] || localRecord.created_at);
@@ -1098,6 +1242,95 @@ export class SyncService {
     }
 
     return false;
+  }
+
+  private async resolveEmployeeBalanceConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
+    const localUsdBalance = Number(localRecord.usd_balance || 0);
+    const remoteUsdBalance = Number(remoteRecord.usd_balance || 0);
+    const localLbpBalance = Number(localRecord.lbp_balance || 0);
+    const remoteLbpBalance = Number(remoteRecord.lbp_balance || 0);
+
+    if (Math.abs(localUsdBalance - remoteUsdBalance) > 0.01 || Math.abs(localLbpBalance - remoteLbpBalance) > 0.01) {
+      console.warn(`💰 Employee balance conflict: Local USD: $${localUsdBalance.toFixed(2)}, Remote USD: $${remoteUsdBalance.toFixed(2)}`);
+
+      // For employees, use max balance (similar to customers/suppliers)
+      const finalUsdBalance = Math.max(localUsdBalance, remoteUsdBalance);
+      const finalLbpBalance = Math.max(localLbpBalance, remoteLbpBalance);
+
+      await db.users.put({
+        ...remoteRecord,
+        usd_balance: finalUsdBalance,
+        lbp_balance: finalLbpBalance,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+
+      return true;
+    }
+
+    // No conflict, use timestamp-based resolution
+    const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
+    const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
+
+    if (remoteTimestamp >= localTimestamp) {
+      await db.users.put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    } else {
+      await db.users.update(localRecord.id, {
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+    }
+
+    return false;
+  }
+
+  private async resolveTransactionConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
+    // Transactions are immutable - remote version is authoritative
+    // If there's a conflict, it means the transaction was modified in Supabase (rare but possible)
+    console.warn(`⚠️ Transaction conflict detected for ${localRecord.id} - remote version takes precedence`);
+    
+    await db.transactions.put({
+      ...remoteRecord,
+      _synced: true,
+      _lastSyncedAt: new Date().toISOString()
+    });
+
+    return true;
+  }
+
+  private async resolveBillConflict(tableName: string, localRecord: any, remoteRecord: any): Promise<boolean> {
+    // Bills and bill line items should prefer remote version if there's a conflict
+    // This is because bill modifications are typically done through proper channels
+    const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
+    const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
+
+    if (remoteTimestamp >= localTimestamp) {
+      console.warn(`📄 Bill conflict: Remote version is newer, accepting remote changes for ${tableName}/${localRecord.id}`);
+      
+      await (db as any)[tableName].put({
+        ...remoteRecord,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+
+      // If local had changes, add to pending syncs for review
+      if (!localRecord._synced) {
+        await db.addPendingSync(tableName, localRecord.id, 'update', localRecord);
+      }
+
+      return true;
+    } else {
+      // Local is newer, keep local but mark as synced
+      await (db as any)[tableName].update(localRecord.id, {
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString()
+      });
+      return false;
+    }
   }
 
   private async processPendingSyncs() {

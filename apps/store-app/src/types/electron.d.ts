@@ -6,8 +6,7 @@ declare global {
       printDocument: (options: any) => Promise<any>;
       testPrinter: (printerName: string) => Promise<any>;
       getPrinterStatus: (printerName: string) => Promise<any>;
-      testArabicCodePages: (printerName: string) => Promise<any>;
-      testImageArabic: (printerName: string) => Promise<any>;
+      // Test functions removed - not needed in production
       
       // Update API
       checkForUpdates: () => Promise<{
