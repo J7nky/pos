@@ -114,12 +114,12 @@ const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
   const [isExpanded, setIsExpanded] = useState(true);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Focus search input when filters open
-  useEffect(() => {
-    if (isVisible && searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-  }, [isVisible]);
+  // // Focus search input when filters open
+  // useEffect(() => {
+  //   if (isVisible && searchInputRef.current) {
+  //     searchInputRef.current.focus();
+  //   }
+  // }, [isVisible]);
 
   const updateFilter = useCallback((key: keyof FilterState, value: any) => {
     onFiltersChange({ ...filters, [key]: value });

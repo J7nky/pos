@@ -116,6 +116,7 @@ export default function InventoryLogs() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [selectedBill, setSelectedBill] = useState<BillDetails | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true); // Track initial load separately
   const [showBillDetails, setShowBillDetails] = useState(false);
   const [showEditBill, setShowEditBill] = useState(false);
   const [showAuditTrail, setShowAuditTrail] = useState(false);
@@ -494,20 +495,13 @@ export default function InventoryLogs() {
     },
   }), [t]);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
-  };
+  }, []);
 
-  // Load bills from offline context
-  useEffect(() => {
-    if (storeId) {
-      loadBills();
-      setCurrentPage(1); // Reset to first page when filters change
-    }
-  }, [storeId, debouncedSearchTerm, dateFrom, dateTo, paymentStatusFilter, statusFilter]);
-
-  const loadBills = async () => {
+  // Load bills from offline context - wrapped in useCallback to prevent re-creation
+  const loadBills = useCallback(async () => {
     if (!storeId) return;
 
     setLoading(true);
@@ -544,8 +538,16 @@ export default function InventoryLogs() {
       setTimeout(() => setSyncStatus('idle'), 5000);
     } finally {
       setLoading(false);
+      setIsInitialLoad(false); // Mark initial load as complete
     }
-  };
+  }, [storeId, debouncedSearchTerm, dateFrom, dateTo, paymentStatusFilter, statusFilter, raw, showToast]);
+
+  useEffect(() => {
+    if (storeId) {
+      loadBills();
+      setCurrentPage(1); // Reset to first page when filters change
+    }
+  }, [storeId, loadBills]);
 
   const loadBillDetails = async (billId: string) => {
     try {
@@ -1003,7 +1005,8 @@ export default function InventoryLogs() {
   // // Calculate analytics
 
 
-  if (loading) {
+  // Only show full loading screen on initial load, not during search/filter updates
+  if (isInitialLoad && loading) {
     return (
       <div className="flex items-center justify-center py-8">
         <RefreshCw className="w-6 h-6 animate-spin text-gray-400 rtl:ml-2 ltr:mr-2" />
@@ -1074,8 +1077,13 @@ export default function InventoryLogs() {
                 placeholder={t('soldBills.searchPlaceholder')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 rtl:pl-4 rtl:pr-10"
+                autoFocus={false}
+                className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 rtl:pl-10 rtl:pr-10"
               />
+              {/* Show subtle loading indicator while fetching */}
+              {loading && !isInitialLoad && (
+                <RefreshCw className="w-4 h-4 absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 animate-spin rtl:right-auto rtl:left-3" />
+              )}
             </div>
           </div>
 

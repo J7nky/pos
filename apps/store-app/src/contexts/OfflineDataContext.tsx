@@ -1579,26 +1579,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const dateTo = filters.dateTo || filters.date_to;
       
       // Normalize date filters to handle date-only strings (YYYY-MM-DD)
-      // If dateFrom is date-only, treat as start of day (00:00:00)
-      // If dateTo is date-only, treat as end of day (23:59:59.999)
-      let normalizedDateFrom = dateFrom;
-      let normalizedDateTo = dateTo;
-      
-      if (dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
-        // Date-only format (YYYY-MM-DD), treat as start of day
-        normalizedDateFrom = `${dateFrom}T00:00:00.000Z`;
+      // Compare dates by extracting the date portion only (YYYY-MM-DD)
+      if (dateFrom) {
+        query = query.and(bill => {
+          if (!bill.bill_date) return false;
+          // Extract date portion from bill_date (handles both ISO strings and date-only formats)
+          const billDateStr = typeof bill.bill_date === 'string' 
+            ? bill.bill_date.split('T')[0] 
+            : new Date(bill.bill_date).toISOString().split('T')[0];
+          return billDateStr >= dateFrom;
+        });
       }
-      
-      if (dateTo && /^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
-        // Date-only format (YYYY-MM-DD), treat as end of day
-        normalizedDateTo = `${dateTo}T23:59:59.999Z`;
-      }
-      
-      if (normalizedDateFrom) {
-        query = query.and(bill => bill.bill_date >= normalizedDateFrom);
-      }
-      if (normalizedDateTo) {
-        query = query.and(bill => bill.bill_date <= normalizedDateTo);
+      if (dateTo) {
+        query = query.and(bill => {
+          if (!bill.bill_date) return false;
+          // Extract date portion from bill_date (handles both ISO strings and date-only formats)
+          const billDateStr = typeof bill.bill_date === 'string' 
+            ? bill.bill_date.split('T')[0] 
+            : new Date(bill.bill_date).toISOString().split('T')[0];
+          return billDateStr <= dateTo;
+        });
       }
       if (filters.paymentStatus) {
         query = query.and(bill => bill.payment_status === filters.paymentStatus);
