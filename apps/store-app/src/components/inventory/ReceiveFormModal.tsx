@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Plus, X, Package, Eye, Upload, Truck } from 'lucide-react';
 import SearchableSelect from '../common/SearchableSelect';
 import SupplierFormModal from '../common/SupplierFormModal';
+import CurrencySwitch from '../common/CurrencySwitch';
+import MoneyInput from '../common/MoneyInput';
 import { useI18n } from '../../i18n';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
 interface ReceiveFormModalProps {
@@ -11,6 +13,7 @@ interface ReceiveFormModalProps {
   products: any[];
   suppliers: any[];
   defaultCommissionRate: number;
+  preferredCurrency?: 'USD' | 'LBP';
   recentSuppliers: string[];
   setRecentSuppliers: (suppliers: string[]) => void;
   form: any;
@@ -31,6 +34,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   products,
   suppliers,
   defaultCommissionRate,
+  preferredCurrency = 'USD',
   recentSuppliers,
   setRecentSuppliers,
   form,
@@ -49,8 +53,10 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     product_id?: string; 
     quantity: string; 
     unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen'; 
-    price?: string; 
+    price?: string;
+    price_currency?: 'USD' | 'LBP';
     selling_price?: string;
+    selling_price_currency?: 'USD' | 'LBP';
     weight?: string;
     sku?: string;
   }>>({});
@@ -77,23 +83,40 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     }
   }, [open]);
 
-  // Set today's date when modal opens
+  // Set today's date and auto-set currencies when modal opens
   useEffect(() => {
     if (open) {
       const today = new Date().toISOString().split('T')[0];
+      const updates: any = {};
+      
       if (form.received_at !== today) {
-        setForm({ ...form, received_at: today });
+        updates.received_at = today;
+      }
+      
+      // Auto-set currency fields to store's preferred currency if not already set
+      if (!form.porterage_currency || form.porterage_currency !== preferredCurrency) {
+        updates.porterage_currency = preferredCurrency;
+      }
+      if (!form.transfer_currency || form.transfer_currency !== preferredCurrency) {
+        updates.transfer_currency = preferredCurrency;
+      }
+      if (!form.plastic_currency || form.plastic_currency !== preferredCurrency) {
+        updates.plastic_currency = preferredCurrency;
       }
       
       // Ensure Trade supplier is set for cash purchases
       if (form.type === 'cash') {
         const tradeSupplier = suppliers.find((s: any) => s.name === t('inventory.trade'));
         if (tradeSupplier && form.supplier_id !== tradeSupplier.id) {
-          setForm({ ...form, supplier_id: tradeSupplier.id });
+          updates.supplier_id = tradeSupplier.id;
         }
       }
+      
+      if (Object.keys(updates).length > 0) {
+        setForm({ ...form, ...updates });
+      }
     }
-  }, [open, suppliers, form.type]);
+  }, [open, suppliers, form.type, preferredCurrency]);
 
   // Capture original form values when modal opens in edit mode
   useEffect(() => {
@@ -117,13 +140,15 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         newBulkItems[productId] = {
           product_id: item.product_id || '',
           quantity: (item.received_quantity || item.quantity || '').toString(),
-          unit: item.unit || 'kg',
+          unit: item.unit || 'box',
           price: item.price ? item.price.toString() : '',
           selling_price: item.selling_price ? item.selling_price.toString() : '',
           weight: item.weight ? item.weight.toString() : '',
-          sku: (item as any).sku || ''
+          sku: (item as any).sku || '',
+          
         };
       });
+
       
       setBulkProducts(newBulkProducts);
       setBulkItems(newBulkItems);
@@ -264,6 +289,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           type: form.type,
           plastic_fee: plasticFee,
           received_at: form.received_at,
+          currency: form.porterage_currency || preferredCurrency || 'USD',
           items
         }
       });
@@ -302,7 +328,16 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     setBulkProducts(prev => [...prev, newProductId]);
     setBulkItems(prev => ({
       ...prev,
-      [newProductId]: { product_id: '', quantity: '', unit: 'kg', price: '', selling_price: '', weight: '' }
+      [newProductId]: { 
+        product_id: '', 
+        quantity: '', 
+        unit: 'box', 
+        price: '', 
+        price_currency: preferredCurrency,
+        selling_price: '', 
+        selling_price_currency: preferredCurrency,
+        weight: '' 
+      }
     }));
   };
 
@@ -387,13 +422,37 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         {/* Enhanced Header with Visual Context */}
         <div className="p-6 border-b border-gray-200 dark:border-slate-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800">
           <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
-                {isEditMode ? `${t('inventory.editBatch')}` : `${t('inventory.receiveProducts')}`}
-              </h2>
-              <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">
-                {isEditMode ? `${t('inventory.updateBatchInformationAndInventoryItems')}` : `${t('inventory.addNewInventoryItemsToYourStock')}`}
-              </p>
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
+                    {isEditMode ? `${t('inventory.editBatch')}` : `${t('inventory.receiveProducts')}`}
+                  </h2>
+                  <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">
+                    {isEditMode ? `${t('inventory.updateBatchInformationAndInventoryItems')}` : `${t('inventory.addNewInventoryItemsToYourStock')}`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <CurrencySwitch
+                      value={form.porterage_currency || preferredCurrency}
+                      onChange={(currency) => setForm({ 
+                        ...form, 
+                        porterage_currency: currency,
+                        transfer_currency: currency,
+                        plastic_currency: currency
+                      })}
+                      size="md"
+                    />
+                  </div>
+                  <button
+                    onClick={onClose}
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
               {isEditMode && editingBatchId && (
                 <div className="mt-2">
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
@@ -402,12 +461,6 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                 </div>
               )}
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-            >
-              <X className="w-6 h-6" />
-            </button>
           </div>
 
           {/* Item Context Header */}
@@ -430,12 +483,12 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                       </span>
                       {form.porterage_fee && (
                         <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                          Porterage: ${form.porterage_fee}
+                          {t('receivedBills.porterage')}: {form.porterage_fee} {t(`customers.${form.porterage_currency.toLowerCase() || preferredCurrency}`)}
                         </span>
                       )}
                       {form.transfer_fee && (
                         <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                          Transfer: ${form.transfer_fee}
+                          {t('receivedBills.transferFee')}: {form.transfer_fee} {t(`customers.${form.transfer_currency.toLowerCase() || preferredCurrency}`)}
                         </span>
                       )}
                     </div>
@@ -549,29 +602,23 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('inventory.porterageFee')} </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
+                      <MoneyInput
                         value={form.porterage_fee}
-                        onChange={(e) => setForm({ ...form, porterage_fee: e.target.value })}
-                        className={`w-full border ${errors.porterage_fee ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                        placeholder={t('inventory.porterageFee')}
+                        onChange={(value) => setForm({ ...form, porterage_fee: value })}
+                        label={t('inventory.porterageFee')}
+                        placeholder="0"
+                        className={errors.porterage_fee ? 'border-red-500 ring-red-500' : ''}
                       />
                       {errors.porterage_fee && <p className="text-xs text-red-600 mt-1">{errors.porterage_fee}</p>}
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('inventory.transferFee')}</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
+                      <MoneyInput
                         value={form.transfer_fee}
-                        onChange={(e) => setForm({ ...form, transfer_fee: e.target.value })}
-                        className={`w-full border ${errors.transfer_fee ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                        placeholder={t('inventory.transferFee')}
+                        onChange={(value) => setForm({ ...form, transfer_fee: value })}
+                        label={t('inventory.transferFee')}
+                        placeholder="0"
+                        className={errors.transfer_fee ? 'border-red-500 ring-red-500' : ''}
                       />
                       {errors.transfer_fee && <p className="text-xs text-red-600 mt-1">{errors.transfer_fee}</p>}
                     </div>
@@ -594,7 +641,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         }}
                         className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
                       />
-                      <span className="text-sm font-medium text-gray-700">{t('inventory.plasticMortgage')} {!form.empty_plastic ? `(${t('common.placeholders.optional')})` : ''}</span>
+                      <span className="text-sm font-medium text-gray-700 pr-1">{t('inventory.plasticMortgage')} {!form.empty_plastic ? `(${t('common.placeholders.optional')})` : ''}</span>
                     </label>
 
                     {/* Inputs appear when checked */}
@@ -617,16 +664,13 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                           )}
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">{t('inventory.plasticPrice')} *</label>
-                          <input
-                            type="number"
-                            min="0"
+                          <MoneyInput
                             value={form.plastic_price}
-                            onChange={(e) => {
-                              setForm({ ...form, plastic_price: e.target.value });
-                            }}
-                            placeholder={t('inventory.priceOfPlastics')}
-                            className={`w-full border ${errors.plastic_price ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                            onChange={(value) => setForm({ ...form, plastic_price: value })}
+                            label={`${t('inventory.plasticPrice')} *`}
+                            placeholder="0"
+                            required
+                            className={errors.plastic_price ? 'border-red-500 ring-red-500' : ''}
                           />
                           {errors.plastic_price && (
                             <p className="text-xs text-red-600 mt-1">{errors.plastic_price}</p>
@@ -701,29 +745,28 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                   <table key={`table-instance-${modalInstanceRef.current}-${bulkProducts.length}`} className="w-full">
                     <thead className="sticky top-0 bg-gray-50 dark:bg-slate-800 z-10 shadow-sm">
                       <tr className="border-b border-gray-200">
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">{t('inventory.product')}</th>
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">{t('inventory.qty')}</th>
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">{t('inventory.unit')}</th>
-                          <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">{t('inventory.weight')}</th>
-
+                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 min-w-[200px]">{t('inventory.product')}</th>
+                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-24">{t('inventory.qty')}</th>
+                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-28">{t('inventory.unit')}</th>
+                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-24">{t('inventory.weight')}</th>
                         {form.type !== 'commission' && (
-                          <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">{t('inventory.price')}</th>
+                          <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-32">{t('inventory.price')}</th>
                         )}
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">{t('inventory.sellingPrice')}</th>
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">SKU/Barcode</th>
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2">{t('inventory.actions')}</th>
+                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 min-w-[200px]">{t('inventory.sellingPrice')}</th>
+                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-36">{t('inventory.skuBarcode')}</th>
+                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-20">{t('inventory.actions')}</th>
                       </tr>
                     </thead>
                     <tbody key={`tbody-instance-${modalInstanceRef.current}`} className="divide-y divide-gray-200">
                       {bulkProducts.map((productId) => {
-                        const item = bulkItems[productId] || { product_id: '', quantity: '', unit: 'kg', price: '', selling_price: '', weight: '', sku: '' };
+                        const item = bulkItems[productId] || { product_id: '', quantity: '', unit: 'box', price: '', selling_price: '', weight: '', sku: '' };
                         const product = products.find((p: any) => p.id === item.product_id);
                         const productName = product?.name || '';
                         
                         const isEditingExisting = isEditMode && productId.startsWith('edit_');
                         return (
                           <tr key={productId} className={`hover:bg-gray-50 transition-colors duration-150 ${isEditingExisting ? 'bg-orange-50' : ''}`}>
-                            <td className="py-3 px-2">
+                            <td className="py-3 px-2 min-w-[200px]">
                               <div ref={selectRef}>
                                 <div className="flex items-center gap-2">
                                   <SearchableSelect
@@ -763,7 +806,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 <p className="text-xs text-red-600 mt-1">{errors[`product_${productId}`]}</p>
                               )}
                             </td>
-                            <td className="py-3 px-2">
+                            <td className="py-3 px-2 w-24">
                               <input
                                 type="number"
                                 value={item.quantity}
@@ -780,7 +823,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 <p className="text-xs text-red-600 mt-1">{errors[`quantity_${productId}`]}</p>
                               )}
                             </td>
-                            <td className="py-3 px-2">
+                            <td className="py-3 px-2 w-28">
                               <select
                                 value={item.unit}
                                 onChange={(e) => setBulkItems(prev => ({
@@ -789,15 +832,15 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 }))}
                                 className="w-24 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                               >
-                                <option value="kg">{t('inventory.kg')}</option>
-                                <option value="piece">{t('inventory.piece')}</option>
-                                <option value="box">{t('inventory.box')}</option>
-                                <option value="bag">{t('inventory.bag')}</option>
-                                <option value="bundle">{t('inventory.bundle')}</option>
-                                <option value="dozen">{t('inventory.dozen')}</option>
+                                <option value="kg">{t('common.labels.kg')}</option>
+                                <option value="piece">{t('common.labels.piece')}</option>
+                                <option value="box">{t('common.labels.box')}</option>
+                                <option value="bag">{t('common.labels.bag')}</option>
+                                <option value="bundle">{t('common.labels.bundle')}</option>
+                                <option value="dozen">{t('common.labels.dozen')}</option>
                               </select>
                             </td>
-                            <td className="py-3 px-2">
+                            <td className="py-3 px-2 w-24">
                               <input
                                 type="number"
                                 step="0.01"
@@ -813,43 +856,52 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                               />
                             </td>
                             {form.type !== 'commission' && (
-                              <td className="py-3 px-2">
-                                <input
-                                  type="number"
+                              <td className="py-3 px-2 w-32">
+                                <MoneyInput
                                   value={item.price || ''}
-                                  onChange={(e) => setBulkItems(prev => ({
+                                  onChange={(value) => setBulkItems(prev => ({
                                     ...prev,
-                                    [productId]: { ...prev[productId], price: e.target.value }
+                                    [productId]: { ...prev[productId], price: value }
                                   }))}
-                                  className={`w-24 border ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                                  min="0"
-                                  step="0.01"
-                                  placeholder={t('inventory.price')}
+                                  placeholder="0"
+                                  className={`text-sm ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : ''}`}
                                 />
                                 {errors[`price_${productId}`] && (
                                   <p className="text-xs text-red-600 mt-1">{errors[`price_${productId}`]}</p>
                                 )}
                               </td>
                             )}
-                            <td className="py-3 px-2">
-                              <input
-                                type="number"
-                                value={item.selling_price || ''}
-                                onChange={(e) => setBulkItems(prev => ({
-                                  ...prev,
-                                  [productId]: { ...prev[productId], selling_price: e.target.value }
-                                }))}
-                                className={`w-24 border ${errors[`selling_price_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                                min="0"
-                                step="0.01"
-                                placeholder={t('inventory.sellingPrice')}
-                                
-                              />
+                            <td className="py-3 px-2 min-w-[200px]">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1">
+                                  <MoneyInput
+                                    value={item.selling_price || ''}
+                                    onChange={(value) => setBulkItems(prev => ({
+                                      ...prev,
+                                      [productId]: { ...prev[productId], selling_price: value }
+                                    }))}
+                                    placeholder="0"
+                                    className={`text-sm ${errors[`selling_price_${productId}`] ? 'border-red-500 ring-red-500' : ''}`}
+                                  />
+                                </div>
+                                <CurrencySwitch
+                                  value={item.price_currency || item.selling_price_currency || preferredCurrency}
+                                  onChange={(currency) => setBulkItems(prev => ({
+                                    ...prev,
+                                    [productId]: { 
+                                      ...prev[productId], 
+                                      price_currency: currency,
+                                      selling_price_currency: currency 
+                                    }
+                                  }))}
+                                  size="sm"
+                                />
+                              </div>
                               {errors[`selling_price_${productId}`] && (
                                 <p className="text-xs text-red-600 mt-1">{errors[`selling_price_${productId}`]}</p>
                               )}
                             </td>
-                            <td className="py-3 px-2">
+                            <td className="py-3 px-2 w-36">
                               <input
                                 type="text"
                                 value={item.sku || ''}
@@ -858,7 +910,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                   [productId]: { ...prev[productId], sku: e.target.value }
                                 }))}
                                 className={`w-32 border ${errors[`sku_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                                placeholder="SKU/Barcode"
+                                placeholder={t('inventory.skuBarcode')}
                                 title="Optional: Enter SKU or barcode for this item"
                               />
                               {errors[`sku_${productId}`] && (
@@ -866,7 +918,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                               )}
                             </td>
                           
-                            <td className="py-3 px-2 flex items-center gap-2 mt-2">
+                            <td className="py-3 px-2 w-20 flex items-center gap-2 mt-2">
                               {(bulkProducts.length > 1 || !bulkProducts[0]) && !isEditingExisting ? (
                                 <button
                                   type="button"

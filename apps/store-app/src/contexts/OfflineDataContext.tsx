@@ -110,6 +110,7 @@ interface OfflineDataContextType {
     commission_rate?: number,
     type: string,
     plastic_fee?: number | null;
+    currency?: 'USD' | 'LBP';
     items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
   }) => Promise<{ batchId: string; financialResult?: any }>;
   addSale: (items: any[]) => Promise<void>;
@@ -2093,6 +2094,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     commission_rate,
     type,
     plastic_fee,
+    currency: batchCurrency,
     items
   }) => {
     if (!storeId) throw new Error('No store ID available');
@@ -2147,14 +2149,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       commission_rate: commission_rate || null,
       store_id: storeId,
       created_by,
-      currency,
+      currency: batchCurrency || currency || 'USD', // Ensure currency is never null
       plastic_fee: plastic_fee ? String(plastic_fee) : undefined,
       type,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       _synced: false
     };
-
     // Query products before transaction to use for SKU generation
     const allProducts = await db.products.toArray();
     const productMap = new Map(allProducts.map(p => [p.id, p]));

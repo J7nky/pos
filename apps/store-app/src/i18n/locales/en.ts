@@ -91,6 +91,7 @@ const en = {
     cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled'
   },
   inventory: {
+    skuBarcode: 'SKU/Barcode',
     trade: 'Trade',
     porterageFee: 'Porterage Fee (Optional)',
     transferFee: 'Transfer Fee (Optional)',

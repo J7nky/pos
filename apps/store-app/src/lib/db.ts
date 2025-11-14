@@ -1767,6 +1767,56 @@ class POSDatabase extends Dexie {
       });
     });
   }
+
+  /**
+   * Recalculate bill totals from line items
+   * @private
+   */
+  private async recalculateBillTotals(billId: string): Promise<void> {
+    const lineItems = await this.bill_line_items.where('bill_id').equals(billId).toArray();
+    const subtotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
+    
+    const bill = await this.bills.get(billId);
+    if (bill) {
+      const totalAmount = subtotal;
+      
+      await this.bills.update(billId, {
+        subtotal,
+        total_amount: totalAmount,
+        amount_due: totalAmount - (bill.amount_paid || 0),
+        _synced: false
+      });
+    }
+  }
+
+  /**
+   * Update bill totals after a line item has been modified
+   * This recalculates the bill's subtotal and total_amount based on all line items
+   */
+  async updateBillsForLineItem(lineItemId: string): Promise<void> {
+    try {
+      // Find the bill line item
+      const lineItem = await this.bill_line_items.get(lineItemId);
+      if (!lineItem) {
+        console.warn('Bill line item not found for update:', lineItemId);
+        return;
+      }
+
+      // Update the line item totals
+      await this.bill_line_items.update(lineItemId, {
+        line_total: lineItem.quantity * lineItem.unit_price,
+        received_value: lineItem.quantity * lineItem.unit_price,
+        _synced: false
+      });
+
+      // Recalculate the bill totals
+      await this.recalculateBillTotals(lineItem.bill_id);
+
+      console.log(`Updated bill line item ${lineItemId} and recalculated bill totals`);
+    } catch (error) {
+      console.error('Error updating bill line item:', error);
+    }
+  }
 }
 
 

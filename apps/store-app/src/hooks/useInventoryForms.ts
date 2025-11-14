@@ -32,12 +32,15 @@ interface UseInventoryFormsReturn {
     supplier_id: string;
     type: 'commission' | 'cash';
     porterage_fee: string;
+    porterage_currency: 'USD' | 'LBP';
     transfer_fee: string;
+    transfer_currency: 'USD' | 'LBP';
     commission_rate: number | null;
     status: string;
     empty_plastic: boolean;
     plastic_count: string;
     plastic_price: string;
+    plastic_currency: 'USD' | 'LBP';
     received_at: string;
   };
   setReceiveForm: (form: any) => void;
@@ -77,12 +80,15 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
     supplier_id: lastSelectedSupplierId,
     type: lastSelectedType as 'commission' | 'cash',
     porterage_fee: '',
+    porterage_currency: 'USD' as 'USD' | 'LBP',
     transfer_fee: '',
+    transfer_currency: 'USD' as 'USD' | 'LBP',
     commission_rate: '',
     status: '',
     empty_plastic: false,
     plastic_count: '',
     plastic_price: '',
+    plastic_currency: 'USD' as 'USD' | 'LBP',
     received_at: new Date().toISOString().split('T')[0] // Today's date in YYYY-MM-DD format
   });
 
@@ -159,12 +165,15 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
       supplier_id: lastSelectedSupplierId, // Preserve last selected supplier
       type: lastSelectedType as 'commission' | 'cash', // Preserve last selected type
       porterage_fee: '',
+      porterage_currency: 'USD' as 'USD' | 'LBP',
       transfer_fee: '',
+      transfer_currency: 'USD' as 'USD' | 'LBP',
       commission_rate: '',
       status: '',
       empty_plastic: false,
       plastic_count: '',
       plastic_price: '',
+      plastic_currency: 'USD' as 'USD' | 'LBP',
       received_at: new Date().toISOString().split('T')[0] // Today's date in YYYY-MM-DD format
     });
     setReceiveErrors({});

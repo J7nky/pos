@@ -170,7 +170,8 @@ const Inventory: React.FC = () => {
       transfer_fee: batch.transfer_fee,
       items: batch.items,
       plastic_fee: batch.plastic_fee,
-      commission_rate: batch.commission_rate
+      commission_rate: batch.commission_rate,
+      currency: batch.currency
     });
 
     await raw.refreshData();
@@ -332,6 +333,7 @@ return (
         products={products}
         suppliers={suppliers}
         defaultCommissionRate={defaultCommissionRate}
+        preferredCurrency={raw.currency}
         recentSuppliers={recentSuppliers}
         setRecentSuppliers={setRecentSuppliers}
         form={receiveForm}

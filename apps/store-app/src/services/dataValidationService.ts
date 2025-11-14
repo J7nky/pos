@@ -10,6 +10,9 @@ interface ValidationCache {
   bills: Set<string>;
   lastUpdated: Date | null;
   storeId: string | null;
+  // Delta tracking for incremental updates
+  lastSyncTimestamps: Record<string, string>;
+  recordCounts: Record<string, number>;
 }
 
 interface ValidationResult {
@@ -82,48 +85,213 @@ export class DataValidationService {
     bills: new Set(),
     lastUpdated: null,
     storeId: null,
+    lastSyncTimestamps: {},
+    recordCounts: {},
   };
 
   private cacheExpiry = 900000; // 15 minutes
+  private isRefreshing = false; // Prevent concurrent refreshes
+  private refreshPromise: Promise<void> | null = null;
 
   /**
    * Refresh validation cache from Supabase
+   * OPTIMIZED: Uses delta-based refresh and pagination for large datasets
    */
-  async refreshCache(storeId: string, supabase: any): Promise<void> {
+  async refreshCache(storeId: string, supabase: any, force: boolean = false): Promise<void> {
+    // If already refreshing, wait for that operation to complete
+    if (this.isRefreshing && this.refreshPromise) {
+      console.log(`⏳ Cache refresh already in progress, waiting...`);
+      return this.refreshPromise;
+    }
+
     const cacheAge = this.cache.lastUpdated 
       ? Date.now() - this.cache.lastUpdated.getTime() 
       : Infinity;
 
-    if (cacheAge < this.cacheExpiry && this.cache.storeId === storeId) {
+    // Skip refresh if cache is still valid and not forced
+    if (!force && cacheAge < this.cacheExpiry && this.cache.storeId === storeId) {
       console.log(`💾 Using cached validation data (age: ${Math.round(cacheAge / 1000)}s)`);
       return;
     }
 
-    console.log(`🔄 Refreshing validation cache for store: ${storeId}`);
+    // Start refresh
+    this.isRefreshing = true;
+    const refreshStart = performance.now();
+    
+    this.refreshPromise = (async () => {
+      try {
+        const isFirstRefresh = !this.cache.lastUpdated || this.cache.storeId !== storeId;
+        
+        if (isFirstRefresh) {
+          console.log(`🔄 Full validation cache refresh for store: ${storeId}`);
+          await this.fullCacheRefresh(storeId, supabase);
+        } else {
+          console.log(`⚡ Delta validation cache refresh for store: ${storeId}`);
+          const deltaSuccess = await this.deltaCacheRefresh(storeId, supabase);
+          
+          // Fallback to full refresh if delta fails
+          if (!deltaSuccess) {
+            console.log(`⚠️ Delta refresh failed, falling back to full refresh`);
+            await this.fullCacheRefresh(storeId, supabase);
+          }
+        }
+        
+        this.cache.lastUpdated = new Date();
+        this.cache.storeId = storeId;
+        
+        const refreshTime = performance.now() - refreshStart;
+        console.log(`✅ Validation cache updated in ${refreshTime.toFixed(2)}ms: ${this.cache.products.size} products, ${this.cache.suppliers.size} suppliers, ${this.cache.users.size} users`);
+      } catch (error) {
+        console.warn('Failed to refresh validation cache:', error);
+      } finally {
+        this.isRefreshing = false;
+        this.refreshPromise = null;
+      }
+    })();
+    
+    return this.refreshPromise;
+  }
 
+  /**
+   * Full cache refresh with pagination for large tables
+   */
+  private async fullCacheRefresh(storeId: string, supabase: any): Promise<void> {
+    const tables = [
+      { name: 'products', cacheKey: 'products', filter: `store_id.eq.${storeId},is_global.eq.true`, useOr: true },
+      { name: 'suppliers', cacheKey: 'suppliers', filter: 'store_id', value: storeId },
+      { name: 'customers', cacheKey: 'customers', filter: 'store_id', value: storeId },
+      { name: 'users', cacheKey: 'users', filter: 'store_id', value: storeId },
+      { name: 'inventory_bills', cacheKey: 'batches', filter: 'store_id', value: storeId },
+      { name: 'bills', cacheKey: 'bills', filter: 'store_id', value: storeId },
+    ];
+
+    for (const table of tables) {
+      const ids = await this.fetchAllIds(supabase, table.name, table.filter, table.value, table.useOr);
+      (this.cache as any)[table.cacheKey] = new Set(ids);
+      this.cache.recordCounts[table.cacheKey] = ids.length;
+    }
+  }
+
+  /**
+   * Delta-based cache refresh - only fetch changes since last update
+   */
+  private async deltaCacheRefresh(storeId: string, supabase: any): Promise<boolean> {
     try {
-      const [productsData, suppliersData, customersData, usersData, batchesData, billsData] = await Promise.all([
-        // Include both store-specific and global products
-        supabase.from('products').select('id').or(`store_id.eq.${storeId},is_global.eq.true`).limit(10000),
-        supabase.from('suppliers').select('id').eq('store_id', storeId).limit(5000),
-        supabase.from('customers').select('id').eq('store_id', storeId).limit(5000),
-        supabase.from('users').select('id').eq('store_id', storeId).limit(1000),
-        supabase.from('inventory_bills').select('id').eq('store_id', storeId).limit(10000),
-        supabase.from('bills').select('id').eq('store_id', storeId).limit(10000),
-      ]);
+      const tables = [
+        { name: 'products', cacheKey: 'products', hasUpdatedAt: true },
+        { name: 'suppliers', cacheKey: 'suppliers', hasUpdatedAt: true },
+        { name: 'customers', cacheKey: 'customers', hasUpdatedAt: true },
+        { name: 'users', cacheKey: 'users', hasUpdatedAt: true },
+        { name: 'inventory_bills', cacheKey: 'batches', hasUpdatedAt: false },
+        { name: 'bills', cacheKey: 'bills', hasUpdatedAt: true },
+      ];
 
-      this.cache.products = new Set(productsData.data?.map((p: any) => p.id) || []);
-      this.cache.suppliers = new Set(suppliersData.data?.map((s: any) => s.id) || []);
-      this.cache.customers = new Set(customersData.data?.map((c: any) => c.id) || []);
-      this.cache.users = new Set(usersData.data?.map((u: any) => u.id) || []);
-      this.cache.batches = new Set(batchesData.data?.map((b: any) => b.id) || []);
-      this.cache.bills = new Set(billsData.data?.map((b: any) => b.id) || []);
-      this.cache.lastUpdated = new Date();
-      this.cache.storeId = storeId;
-
-      console.log(`✅ Validation cache updated: ${this.cache.products.size} products, ${this.cache.suppliers.size} suppliers, ${this.cache.users.size} users`);
+      for (const table of tables) {
+        const lastTimestamp = this.cache.lastSyncTimestamps[table.cacheKey] || '1970-01-01T00:00:00.000Z';
+        const timestampField = table.hasUpdatedAt ? 'updated_at' : 'created_at';
+        
+        // Fetch only records updated since last refresh
+        let query = supabase
+          .from(table.name)
+          .select('id')
+          .gte(timestampField, lastTimestamp);
+        
+        if (table.name === 'products') {
+          query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
+        } else {
+          query = query.eq('store_id', storeId);
+        }
+        
+        const { data, error } = await query.limit(5000);
+        
+        if (error) {
+          console.warn(`Delta refresh failed for ${table.name}:`, error);
+          return false;
+        }
+        
+        // Update cache with new/updated IDs
+        if (data && data.length > 0) {
+          const cacheSet = (this.cache as any)[table.cacheKey] as Set<string>;
+          data.forEach((record: any) => cacheSet.add(record.id));
+          console.log(`  ⚡ ${table.name}: Added ${data.length} new/updated IDs to cache`);
+        }
+        
+        this.cache.lastSyncTimestamps[table.cacheKey] = new Date().toISOString();
+      }
+      
+      return true;
     } catch (error) {
-      console.warn('Failed to refresh validation cache:', error);
+      console.warn('Delta cache refresh error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Fetch all IDs with pagination to avoid memory issues
+   */
+  private async fetchAllIds(
+    supabase: any,
+    tableName: string,
+    filter: string,
+    value?: string,
+    useOr: boolean = false
+  ): Promise<string[]> {
+    const allIds: string[] = [];
+    const pageSize = 1000;
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      let query = supabase.from(tableName).select('id');
+      
+      if (useOr) {
+        query = query.or(filter);
+      } else if (value) {
+        query = query.eq(filter, value);
+      }
+      
+      query = query.range(offset, offset + pageSize - 1);
+      
+      const { data, error } = await query;
+      
+      if (error) {
+        console.warn(`Error fetching ${tableName} IDs:`, error);
+        break;
+      }
+      
+      if (data && data.length > 0) {
+        allIds.push(...data.map((r: any) => r.id));
+        hasMore = data.length === pageSize;
+        offset += pageSize;
+      } else {
+        hasMore = false;
+      }
+      
+      // Safety limit
+      if (offset > 50000) {
+        console.warn(`⚠️ ${tableName}: Reached pagination limit (50k records)`);
+        break;
+      }
+    }
+    
+    return allIds;
+  }
+
+  /**
+   * Invalidate specific cache entries (event-driven)
+   */
+  invalidateCacheEntry(cacheKey: keyof ValidationCache, id: string): void {
+    if (this.cache[cacheKey] instanceof Set) {
+      (this.cache[cacheKey] as Set<string>).delete(id);
+    }
+  }
+
+  /**
+   * Add entry to cache (event-driven)
+   */
+  addCacheEntry(cacheKey: keyof ValidationCache, id: string): void {
+    if (this.cache[cacheKey] instanceof Set) {
+      (this.cache[cacheKey] as Set<string>).add(id);
     }
   }
 

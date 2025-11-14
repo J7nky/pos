@@ -128,10 +128,10 @@ export default function MoneyInput({
   }, [autoCompleteValue, stringValue, hasUsedAutoComplete, onChange]);
 
   const handleInputBlur = useCallback(() => {
-    // Hide recommendation after a short delay to allow clicking on it
+    // Hide recommendation after a longer delay to allow clicking on it
     setTimeout(() => {
       setShowRecommendation(false);
-    }, 150);
+    }, 300);
   }, []);
 
   return (
@@ -166,13 +166,20 @@ export default function MoneyInput({
 
       {/* Inline recommendation pill */}
       {showRecommendation && recommendedValue && (
-        <div className="absolute inset-y-0 right-1 flex items-center">
+        <div className="absolute inset-y-0 right-1 flex items-center pointer-events-auto">
           <button
             type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={handleRecommendationClick}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleRecommendationClick();
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
             title="Use recommended value"
-            className="px-3 py-2 text-[10px] leading-none bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-100 focus:outline-none"
+            className="px-3 py-2 text-[10px] leading-none bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-100 focus:outline-none cursor-pointer"
           >
             {recommendedValue}
           </button>

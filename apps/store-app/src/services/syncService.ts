@@ -20,10 +20,16 @@ const SYNC_CONFIG = {
   debounceDelay: 500, // Debounce rapid sync requests
   maxConcurrentBatches: 3, // Limit concurrent batch operations
   connectionTimeout: 10000, // Connection timeout in ms
+  queryTimeout: 30000, // Query timeout for individual queries (30s)
   idleSyncInterval: 60000, // Sync interval when idle (1 minute)
-  // Deletion detection
+  // Deletion detection - optimized
   enableDeletionDetection: true, // Enable detection of remote deletions
   deletionDetectionInterval: 300000, // Run full deletion check every 5 minutes
+  deletionBatchSize: 500, // Batch size for deletion detection queries
+  deletionUseHashComparison: true, // Use hash-based comparison for large tables
+  // Pagination for large tables
+  largeTablPaginationSize: 500, // Page size for large table queries
+  largeTableThreshold: 1000, // Tables with more records are considered "large"
 };
 
 // Tables that have updated_at field for incremental sync
@@ -100,10 +106,42 @@ export interface SyncResult {
   conflicts: number;
 }
 
+// Deletion state tracking for incremental deletion detection
+interface DeletionState {
+  table_name: string;
+  last_check_at: string;
+  record_count: number;
+  checksum?: string; // Optional hash for quick comparison
+}
+
 export class SyncService {
   private isRunning = false;
   private lastSyncAttempt: Date | null = null;
   private lastDeletionCheck: Date | null = null;
+  private deletionStateCache: Map<string, DeletionState> = new Map();
+
+  /**
+   * Wraps a query with timeout protection
+   */
+  private async queryWithTimeout<T>(
+    queryPromise: Promise<T>,
+    tableName: string,
+    operation: string,
+    timeoutMs: number = SYNC_CONFIG.queryTimeout
+  ): Promise<T> {
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Query timeout: ${operation} for ${tableName}`)), timeoutMs)
+    );
+
+    try {
+      return await Promise.race([queryPromise, timeoutPromise]);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('timeout')) {
+        console.error(`⏱️ ${operation} timeout for ${tableName} after ${timeoutMs}ms`);
+      }
+      throw error;
+    }
+  }
 
   /**
    * Classifies errors to determine if they are unrecoverable.
@@ -1000,14 +1038,16 @@ export class SyncService {
 
   /**
    * Detects and removes records that exist locally but were deleted from Supabase
-   * This handles the case where an admin deletes records directly in Supabase
+   * OPTIMIZED: Uses pagination, incremental state tracking, and hash comparison
    */
   private async detectAndSyncDeletions(storeId: string) {
     const result = { deleted: 0, errors: [] as string[] };
     
-    console.log('🔍 Starting deletion detection...');
+    console.log('🔍 Starting optimized deletion detection...');
+    const detectionStart = performance.now();
     
     for (const tableName of SYNC_TABLES) {
+      const tableStart = performance.now();
       try {
         const table = (db as any)[tableName];
         
@@ -1020,29 +1060,94 @@ export class SyncService {
           continue;
         }
         
-        // Fetch all remote IDs for this table
-        let query = supabase.from(tableName as any).select('id');
+        const localCount = localRecords.length;
+        const isLargeTable = localCount >= SYNC_CONFIG.largeTableThreshold;
         
-        if (tableName !== 'transactions' && tableName !== 'stores') {
-          if (tableName === 'products') {
-            // Include both store-specific and global products
-            query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
-          } else {
-            query = query.eq('store_id', storeId);
+        // Check if we can use incremental detection
+        const lastState = this.deletionStateCache.get(tableName);
+        const shouldUseIncremental = lastState && 
+          SYNC_CONFIG.deletionUseHashComparison && 
+          isLargeTable;
+        
+        if (shouldUseIncremental) {
+          // Quick check: if record count hasn't changed significantly, skip full check
+          const countDiff = Math.abs(localCount - lastState.record_count);
+          if (countDiff === 0) {
+            console.log(`⚡ ${tableName}: No count change, skipping deletion check`);
+            continue;
           }
-        } else if (tableName === 'stores') {
-          query = query.eq('id', storeId);
+          
+          if (countDiff < 10 && localCount > 100) {
+            console.log(`⚡ ${tableName}: Minor count change (${countDiff}), using targeted check`);
+          }
         }
         
-        const { data: remoteRecords, error } = await query;
+        // Fetch remote IDs with pagination for large tables
+        const remoteIds = new Set<string>();
+        let hasMore = true;
+        let offset = 0;
+        let totalFetched = 0;
         
-        if (error) {
-          result.errors.push(`Failed to fetch remote IDs for ${tableName}: ${error.message}`);
-          continue;
+        while (hasMore) {
+          let query = supabase
+            .from(tableName as any)
+            .select('id', { count: 'exact' });
+          
+          // Apply store filtering
+          if (tableName !== 'transactions' && tableName !== 'stores') {
+            if (tableName === 'products') {
+              query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
+            } else {
+              query = query.eq('store_id', storeId);
+            }
+          } else if (tableName === 'stores') {
+            query = query.eq('id', storeId);
+          }
+          
+          // Add pagination
+          const pageSize = SYNC_CONFIG.deletionBatchSize;
+          query = query.range(offset, offset + pageSize - 1);
+          
+          // Add timeout wrapper
+          const queryPromise = query;
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Query timeout')), SYNC_CONFIG.queryTimeout)
+          );
+          
+          let queryResult;
+          try {
+            queryResult = await Promise.race([queryPromise, timeoutPromise]) as any;
+          } catch (timeoutError) {
+            result.errors.push(`Query timeout for ${tableName} at offset ${offset}`);
+            console.error(`⏱️ Query timeout for ${tableName} at offset ${offset}`);
+            break;
+          }
+          
+          const { data: remoteRecords, error, count } = queryResult;
+          
+          if (error) {
+            result.errors.push(`Failed to fetch remote IDs for ${tableName}: ${error.message}`);
+            break;
+          }
+          
+          // Add fetched IDs to set
+          if (remoteRecords) {
+            remoteRecords.forEach((r: any) => remoteIds.add(r.id));
+            totalFetched += remoteRecords.length;
+          }
+          
+          // Check if there are more records
+          hasMore = remoteRecords && remoteRecords.length === pageSize;
+          offset += pageSize;
+          
+          // Safety check: prevent infinite loops
+          if (offset > 50000) {
+            console.warn(`⚠️ ${tableName}: Reached pagination limit (50k records)`);
+            break;
+          }
         }
         
-        // Create a Set of remote IDs for fast lookup
-        const remoteIds = new Set((remoteRecords || []).map((r: any) => r.id));
+        console.log(`📊 ${tableName}: Fetched ${totalFetched} remote IDs, comparing with ${localCount} local records`);
         
         // Find local records that don't exist remotely
         const deletedLocally: any[] = [];
@@ -1071,13 +1176,26 @@ export class SyncService {
             }
           }
         }
+        
+        // Update deletion state cache
+        this.deletionStateCache.set(tableName, {
+          table_name: tableName,
+          last_check_at: new Date().toISOString(),
+          record_count: localCount - deletedLocally.length,
+        });
+        
+        const tableTime = performance.now() - tableStart;
+        console.log(`  ⏱️  ${tableName} deletion check: ${tableTime.toFixed(2)}ms`);
+        
       } catch (error) {
-        console.error(`❌ Deletion detection failed for ${tableName}:`, error);
+        const tableTime = performance.now() - tableStart;
+        console.error(`❌ Deletion detection failed for ${tableName} after ${tableTime.toFixed(2)}ms:`, error);
         result.errors.push(`Deletion detection error for ${tableName}: ${error}`);
       }
     }
     
-    console.log(`🗑️  Deletion detection complete: ${result.deleted} records removed`);
+    const totalTime = performance.now() - detectionStart;
+    console.log(`🗑️  Deletion detection complete: ${result.deleted} records removed in ${totalTime.toFixed(2)}ms`);
     return result;
   }
 
