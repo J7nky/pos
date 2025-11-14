@@ -32,6 +32,7 @@ export interface InventoryItem {
   unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen';
   weight?: number;
   price?: number;
+  currency?: 'USD' | 'LBP';
   status?: string;
   batch_type: 'commission' | 'cash';
   created_at: string;

@@ -1946,6 +1946,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
       weight: itemData.weight ?? null,
       price: itemData.price ?? null,
+      currency: (itemData as any).currency ?? currency,
       selling_price: (itemData as any).selling_price ?? null,
       batch_id: itemData.batch_id ?? null,
       sku: itemData.sku ?? null
@@ -2042,39 +2043,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         .and(item => !item._deleted)
         .toArray();
 
-      console.log(`🗑️ Found ${sales.length} sales records and ${missedProducts.length} missed products to delete`);
-
-      // Build undo data
-      const undoSteps: any[] = [];
+      const hasReferences = sales.length > 0 || missedProducts.length > 0;
       const affectedRecords: any[] = [{ table: 'inventory_items', id }];
-      
-      if (sales.length > 0 || missedProducts.length > 0) {
-        await db.transaction('rw', [db.bill_line_items, db.missed_products, db.inventory_items], async () => {
-          // Delete related sales records (bill_line_items)
-          for (const sale of sales) {
-            await crudHelperService.deleteEntity('bill_line_items', sale.id);
-            affectedRecords.push({ table: 'bill_line_items', id: sale.id });
-            undoSteps.push({ op: 'update', table: 'bill_line_items', id: sale.id, changes: { _deleted: false, _synced: false } });
-          }
+      const undoSteps: any[] = [];
 
-          // Delete missed_products records (inventory_item_id has NOT NULL constraint)
-          for (const missedProduct of missedProducts) {
-            await crudHelperService.deleteEntity('missed_products', missedProduct.id);
-            affectedRecords.push({ table: 'missed_products', id: missedProduct.id });
-            undoSteps.push({ op: 'update', table: 'missed_products', id: missedProduct.id, changes: { _deleted: false, _synced: false } });
-          }
-          
-          // Delete the inventory item
-          await crudHelperService.deleteEntity('inventory_items', id);
-        });
+      if (hasReferences) {
+        // Soft-delete when referenced
+        await crudHelperService.updateEntity('inventory_items', id, { _deleted: true } as any);
+        undoSteps.push({ op: 'update', table: 'inventory_items', id, changes: { _deleted: false, _synced: false } });
         
-        console.log(`🗑️ Deleted ${sales.length} sales records and ${missedProducts.length} variance records before deleting inventory item ${id}`);
+        // Track affected references
+        for (const s of sales) affectedRecords.push({ table: 'bill_line_items', id: s.id });
+        for (const m of missedProducts) affectedRecords.push({ table: 'missed_products', id: m.id });
       } else {
         await crudHelperService.deleteEntity('inventory_items', id);
+        undoSteps.push({ op: 'update', table: 'inventory_items', id, changes: { _deleted: false, _synced: false } });
       }
       
       // Add inventory item restoration to undo steps (last step so it runs first on undo)
-      undoSteps.unshift({ op: 'update', table: 'inventory_items', id, changes: { _deleted: false, _synced: false } });
+      // Already added above per flow
       
       // Store undo data
       pushUndo({
@@ -2160,6 +2147,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       commission_rate: commission_rate || null,
       store_id: storeId,
       created_by,
+      currency,
       plastic_fee: plastic_fee ? String(plastic_fee) : undefined,
       type,
       created_at: new Date().toISOString(),
@@ -2178,7 +2166,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await db.inventory_bills.add(batchRecord);
       debug(batchRecord, 'batchrecord')
       const now = new Date().toISOString();
-const allowedUnits = ["box", "kg", "piece", "bag","bundle"] as const;
+      const allowedUnits = ["box", "kg", "piece", "bag","bundle"] as const;
 
       const mappedItems = items.map((it) => ({
         id: createId(),
@@ -2193,6 +2181,7 @@ const allowedUnits = ["box", "kg", "piece", "bag","bundle"] as const;
         // supplier_id REMOVED: accessed via inventory_bills -> batch_id
         weight: it.weight ?? null,
         price: it.price ?? null,
+        currency: (it as any).currency ?? currency,
         selling_price: it.selling_price ?? null,
         received_quantity: it.received_quantity ?? 0,
         batch_id: batchId as string | null,

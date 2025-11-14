@@ -92,6 +92,7 @@ export interface InventoryItem {
   unit: 'kg' | 'piece' | 'box' | 'bag'|'bundle';
   weight?: number | null;
   price?: number | null;
+  currency?: 'USD' | 'LBP';
   selling_price?: number | null;
   type?: string | null;
   created_at: string;
@@ -120,10 +121,12 @@ export interface Customer {
   _deleted?: boolean;
 }
 
-export interface inventory_bills { id: string;
+export interface inventory_bills { 
+  id: string;
   supplier_id: string;
   porterage_fee?: number | null;
   transfer_fee?: number | null;
+  currency?: 'USD' | 'LBP';
   received_at: string;
   store_id: string;
   created_by: string;
@@ -136,7 +139,8 @@ export interface inventory_bills { id: string;
   _synced?: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
-  }
+  updated_at?: string;
+}
 
 // Bill interface - maps directly to bills table (snake_case for db compatibility)
 export interface Bill {

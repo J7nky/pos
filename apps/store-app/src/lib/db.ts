@@ -473,10 +473,72 @@ class POSDatabase extends Dexie {
       // No data migration needed - new field will be null for existing items
     });
 
+    // Migration for version 27 - add currency field to inventory tables
+    this.version(27).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
+      
+      // Core tables with comprehensive indexing for performance
+      products: 'id, store_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables - add currency index
+      inventory_items: 'id, store_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, customer_id, supplier_id, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, currency, _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, supplier_id, customer_id, payment_method, created_by, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Cash drawer management
+      missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification management
+      notifications: 'id, store_id, type, read, created_at, priority',
+      notification_preferences: 'store_id',
+      
+      // Reminder management
+      reminders: 'id, store_id, status, type, due_date, entity_type, [entity_type+entity_id], created_by, updated_at, _synced, _deleted',
+      
+      // Employee attendance tracking
+      employee_attendance: 'id, store_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted'
+    }).upgrade(trans => {
+      console.log('🔄 Running migration v27: Adding currency fields to inventory tables');
+      return (trans as any).table('stores').toArray().then((stores: any[]) => {
+        const storeCurrency: Record<string, 'USD' | 'LBP'> = {};
+        stores.forEach(s => { storeCurrency[s.id] = (s.preferred_currency || 'USD'); });
+        return Promise.all([
+          (trans as any).table('inventory_bills').toCollection().modify((bill: any) => {
+            if (bill.currency === undefined || bill.currency === null) {
+              bill.currency = storeCurrency[bill.store_id] || 'USD';
+            }
+          }),
+          (trans as any).table('inventory_items').toCollection().modify((item: any) => {
+            if (item.currency === undefined || item.currency === null) {
+              item.currency = storeCurrency[item.store_id] || 'USD';
+            }
+          })
+        ]);
+      });
+    });
+
     // Migration for version 5 - update existing records to match new schema
     this.version(5).upgrade(trans => {
       console.log('🔄 Running migration v5: Updating existing records to match new schema');
       
+      // ... (rest of the code remains the same)
       // Update suppliers to ensure type field exists
       trans.table('suppliers').toCollection().modify(supplier => {
         if (!supplier.type) {
@@ -1377,8 +1439,9 @@ class POSDatabase extends Dexie {
         change_reason: 'Bill created from POS sale',
         changed_by: billData.created_by!,
         ip_address: null,
+        user_agent: null,
       });
-      
+
       return billId;
     });
   }
@@ -1395,9 +1458,9 @@ class POSDatabase extends Dexie {
         ...updates,
         last_modified_by: changedBy,
         last_modified_at: now,
-        _synced: false
+        _synced: false,
       });
-      
+
       // Log each changed field
       for (const [field, newValue] of Object.entries(updates)) {
         if (field !== 'last_modified_by' && field !== 'last_modified_at' && field !== '_synced') {
@@ -1417,375 +1480,11 @@ class POSDatabase extends Dexie {
               change_reason: changeReason || 'Bill updated',
               changed_by: changedBy,
               ip_address: null,
+              user_agent: null,
             });
           }
         }
       }
-    });
-  }
-
-  async deleteBill(billId: string, deletedBy: string, deleteReason?: string, softDelete: boolean = true): Promise<void> {
-    const bill = await this.bills.get(billId);
-    if (!bill) throw new Error('Bill not found');
-    
-    return await this.transaction('rw', [this.bills, this.bill_line_items, this.bill_audit_logs, this.inventory_items], async () => {
-      const now = new Date().toISOString();
-      
-      if (softDelete) {
-        // Soft delete - mark as deleted but keep in database
-        await this.bills.update(billId, {
-          status: 'cancelled',
-          last_modified_by: deletedBy,
-          last_modified_at: now,
-          _synced: false,
-          _deleted: true
-        });
-      } else {
-        // Hard delete - remove from database
-        await this.bills.delete(billId);
-        await this.bill_line_items.where('bill_id').equals(billId).delete();
-      }
-      
-      // Restore inventory quantities for deleted bill
-      const lineItems = await this.bill_line_items.where('bill_id').equals(billId).toArray();
-      for (const lineItem of lineItems) {
-        if (lineItem.inventory_item_id) {
-          const inventoryItem = await this.inventory_items.get(lineItem.inventory_item_id);
-          if (inventoryItem) {
-            await this.inventory_items.update(lineItem.inventory_item_id, {
-              quantity: inventoryItem.quantity + lineItem.quantity,
-              _synced: false
-            });
-          }
-        }
-      }
-      
-      // Create audit log entry
-      await this.bill_audit_logs.add({
-        id: uuidv4(),
-        store_id: bill.store_id,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        bill_id: billId,
-        action: 'deleted',
-        field_changed: 'status',
-        old_value: bill.status,
-        new_value: softDelete ? 'cancelled' : 'deleted',
-        change_reason: deleteReason || 'Bill deleted',
-        changed_by: deletedBy,
-        ip_address: null,
-      });
-    });
-  }
-
-  async getBillsWithDetails(storeId: string, includeDeleted: boolean = false): Promise<any[]> {
-    const bills = await this.bills
-      .where('store_id')
-      .equals(storeId)
-      .filter(bill => includeDeleted || !bill._deleted)
-      .toArray();
-    
-    const billsWithDetails = await Promise.all(bills.map(async (bill) => {
-      const lineItems = await this.bill_line_items.where('bill_id').equals(bill.id).toArray();
-      const auditLogs = await this.bill_audit_logs.where('bill_id').equals(bill.id).toArray();
-      
-      return {
-        ...bill,
-        lineItems,
-        auditLogs: auditLogs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      };
-    }));
-    
-    return billsWithDetails.sort((a, b) => new Date(b.bill_date).getTime() - new Date(a.bill_date).getTime());
-  }
-
-  async addBillLineItem(billId: string, lineItem: Omit<BillLineItem, 'id' | 'bill_id' | keyof BaseEntity>, addedBy: string): Promise<void> {
-    const bill = await this.bills.get(billId);
-    if (!bill) throw new Error('Bill not found');
-    
-    return await this.transaction('rw', [this.bill_line_items, this.bills, this.bill_audit_logs], async () => {
-      const now = new Date().toISOString();
-      const lineItemId = uuidv4();
-      
-      // Get next line order
-      const existingItems = await this.bill_line_items.where('bill_id').equals(billId).toArray();
-      const nextOrder = Math.max(0, ...existingItems.map(item => item.line_order)) + 1;
-      
-      const newLineItem: BillLineItem = {
-        id: lineItemId,
-        store_id: bill.store_id,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        bill_id: billId,
-        ...lineItem,
-        line_order: nextOrder
-      };
-      
-      await this.bill_line_items.add(newLineItem);
-      
-      // Recalculate bill totals
-      await this.recalculateBillTotals(billId);
-      
-      // Create audit log
-      await this.bill_audit_logs.add({
-        id: uuidv4(),
-        store_id: bill.store_id,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        bill_id: billId,
-        action: 'item_added',
-        field_changed: 'line_items',
-        old_value: null,
-        new_value: JSON.stringify(newLineItem),
-        change_reason: 'Line item added to bill',
-        changed_by: addedBy,
-        ip_address: null,
-      });
-    });
-  }
-
-  async updateBillLineItem(lineItemId: string, updates: Partial<BillLineItem>, updatedBy: string): Promise<void> {
-    const originalItem = await this.bill_line_items.get(lineItemId);
-    if (!originalItem) throw new Error('Line item not found');
-    
-    return await this.transaction('rw', [this.bill_line_items, this.bills, this.bill_audit_logs], async () => {
-      const now = new Date().toISOString();
-      
-      // Update line item
-      await this.bill_line_items.update(lineItemId, {
-        ...updates,
-        _synced: false
-      });
-      
-      // Recalculate bill totals
-      await this.recalculateBillTotals(originalItem.bill_id);
-      
-      // Create audit log for each changed field
-      for (const [field, newValue] of Object.entries(updates)) {
-        if (field !== '_synced') {
-          const oldValue = (originalItem as any)[field];
-          if (oldValue !== newValue) {
-            await this.bill_audit_logs.add({
-              id: uuidv4(),
-              store_id: originalItem.store_id,
-              created_at: now,
-              updated_at: now,
-              _synced: false,
-              bill_id: originalItem.bill_id,
-              action: 'item_modified',
-              field_changed: field,
-              old_value: JSON.stringify(oldValue),
-              new_value: JSON.stringify(newValue),
-              change_reason: 'Line item updated',
-              changed_by: updatedBy,
-              ip_address: null,
-            });
-          }
-        }
-      }
-    });
-  }
-
-  async removeBillLineItem(lineItemId: string, removedBy: string): Promise<void> {
-    const lineItem = await this.bill_line_items.get(lineItemId);
-    if (!lineItem) throw new Error('Line item not found');
-    
-    return await this.transaction('rw', [this.bill_line_items, this.bills, this.bill_audit_logs, this.inventory_items], async () => {
-      const now = new Date().toISOString();
-      
-      // Restore inventory if applicable
-      if (lineItem.inventory_item_id) {
-        const inventoryItem = await this.inventory_items.get(lineItem.inventory_item_id);
-        if (inventoryItem) {
-          await this.inventory_items.update(lineItem.inventory_item_id, {
-            quantity: inventoryItem.quantity + lineItem.quantity,
-            _synced: false
-          });
-        }
-      }
-      
-      // Remove line item
-      await this.bill_line_items.delete(lineItemId);
-      
-      // Recalculate bill totals
-      await this.recalculateBillTotals(lineItem.bill_id);
-      
-      // Create audit log
-      await this.bill_audit_logs.add({
-        id: uuidv4(),
-        store_id: lineItem.store_id,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        bill_id: lineItem.bill_id,
-        action: 'item_removed',
-        field_changed: 'line_items',
-        old_value: JSON.stringify(lineItem),
-        new_value: null,
-        change_reason: 'Line item removed from bill',
-        changed_by: removedBy,
-        ip_address: null,
-      });
-    });
-  }
-
-  private async recalculateBillTotals(billId: string): Promise<void> {
-    const lineItems = await this.bill_line_items.where('bill_id').equals(billId).toArray();
-    const subtotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
-    
-    const bill = await this.bills.get(billId);
-    if (bill) {
-      const totalAmount = subtotal;
-      
-      await this.bills.update(billId, {
-        subtotal,
-        total_amount: totalAmount,
-        amount_due: totalAmount - (bill.amount_paid || 0),
-        _synced: false
-      });
-    }
-  }
-
-  // New method to find and update bills related to a bill line item
-  async updateBillsForLineItem(lineItemId: string): Promise<void> {
-    try {
-      // Find the bill line item
-      const lineItem = await this.bill_line_items.get(lineItemId);
-      if (!lineItem) {
-        console.warn('Bill line item not found for update:', lineItemId);
-        return;
-      }
-
-      // Update the line item totals
-      await this.bill_line_items.update(lineItemId, {
-        line_total: lineItem.quantity * lineItem.unit_price,
-        received_value: lineItem.quantity * lineItem.unit_price,
-        _synced: false
-      });
-
-      // Recalculate the bill totals
-      await this.recalculateBillTotals(lineItem.bill_id);
-
-      console.log(`Updated bill line item ${lineItemId} and recalculated bill totals`);
-    } catch (error) {
-      console.error('Error updating bill line item:', error);
-    }
-  }
-
-  async getBillAuditTrail(billId: string): Promise<BillAuditLog[]> {
-    return await this.bill_audit_logs
-      .where('bill_id')
-      .equals(billId)
-      .reverse()
-      .sortBy('created_at');
-  }
-
-  async searchBills(storeId: string, searchTerm: string, filters: {
-    dateFrom?: string;
-    dateTo?: string;
-    paymentStatus?: string;
-    customerId?: string;
-    status?: string;
-  } = {}): Promise<any[]> {
-    let bills = await this.bills
-      .where('store_id')
-      .equals(storeId)
-      .filter(bill => !bill._deleted)
-      .toArray();
-    
-    // Apply search term
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
-      bills = bills.filter(bill => 
-        bill.bill_number.toLowerCase().includes(searchLower) ||
-        (bill.id && bill.id.toLowerCase().includes(searchLower)) ||
-        (bill.notes && bill.notes.toLowerCase().includes(searchLower))
-      );
-    }
-    
-    // Apply filters
-    if (filters.dateFrom) {
-      bills = bills.filter(bill => bill.bill_date >= filters.dateFrom!);
-    }
-    if (filters.dateTo) {
-      bills = bills.filter(bill => bill.bill_date <= filters.dateTo!);
-    }
-    if (filters.paymentStatus) {
-      bills = bills.filter(bill => bill.payment_status === filters.paymentStatus);
-    }
-    if (filters.customerId) {
-      bills = bills.filter(bill => bill.customer_id === filters.customerId);
-    }
-    if (filters.status) {
-      bills = bills.filter(bill => bill.status === filters.status);
-    }
-    
-    // Get line items for each bill
-    const billsWithDetails = await Promise.all(bills.map(async (bill) => {
-      const lineItems = await this.bill_line_items.where('bill_id').equals(bill.id).toArray();
-      return { ...bill, lineItems };
-    }));
-    
-    return billsWithDetails.sort((a, b) => new Date(b.bill_date).getTime() - new Date(a.bill_date).getTime());
-  }
-
-  // Enhanced bill management methods for offline support
-  async createBillWithLineItems(
-    billData: any,
-    lineItems: Omit<BillLineItem, 'id' | 'bill_id' | keyof BaseEntity>[]
-  ): Promise<string> {
-    const billId = uuidv4();
-    const now = new Date().toISOString();
-    
-    return await this.transaction('rw', [this.bills, this.bill_line_items, this.bill_audit_logs], async () => {
-      // Create the bill
-      const bill: Bill = {
-        id: billId,
-        store_id: billData?.store_id,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        ...billData
-      };
-      
-      await this.bills.add(bill);
-      
-      // Create bill line items
-      const billLineItems: BillLineItem[] = lineItems.map((item, index) => ({
-        id: uuidv4(),
-        store_id: billData.store_id,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        bill_id: billId,
-        ...item,
-        line_order: index + 1,
-
-      }));
-      
-      await this.bill_line_items.bulkAdd(billLineItems);
-      
-      // Create audit log entry
-      await this.bill_audit_logs.add({
-        id: uuidv4(),
-        store_id: billData.store_id,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        bill_id: billId,
-        action: 'created',
-        field_changed: null,
-        old_value: null,
-        new_value: JSON.stringify(bill),
-        change_reason: 'Bill created from POS transaction',
-        changed_by: billData.created_by,
-        ip_address: null,
-      });
-      
-      return billId;
     });
   }
 
@@ -1963,37 +1662,37 @@ class POSDatabase extends Dexie {
 
             // Resolve product_id to product name
             if (field === 'product_id') {
-              if (oldValue) {
+              if (oldValue && typeof oldValue === 'string') {
                 const oldProduct = await this.products.get(oldValue);
                 oldValueDisplay = oldProduct?.name || oldValue;
               }
-              if (newValue) {
+              if (newValue && typeof newValue === 'string') {
                 const newProduct = await this.products.get(newValue);
-                newValueDisplay = newProduct?.name || newValue;
+                newValueDisplay = newProduct?.name || String(newValue);
               }
             }
 
             // Resolve supplier_id to supplier name
             if (field === 'supplier_id') {
-              if (oldValue) {
+              if (oldValue && typeof oldValue === 'string') {
                 const oldSupplier = await this.suppliers.get(oldValue);
                 oldValueDisplay = oldSupplier?.name || oldValue;
               }
-              if (newValue) {
+              if (newValue && typeof newValue === 'string') {
                 const newSupplier = await this.suppliers.get(newValue);
-                newValueDisplay = newSupplier?.name || newValue;
+                newValueDisplay = newSupplier?.name || String(newValue);
               }
             }
 
             // Resolve customer_id to customer name
             if (field === 'customer_id') {
-              if (oldValue) {
+              if (oldValue && typeof oldValue === 'string') {
                 const oldCustomer = await this.customers.get(oldValue);
                 oldValueDisplay = oldCustomer?.name || oldValue;
               } else {
                 oldValueDisplay = 'None';
               }
-              if (newValue) {
+              if (newValue && typeof newValue === 'string') {
                 const newCustomer = await this.customers.get(newValue);
                 newValueDisplay = newCustomer?.name || newValue;
               } else {
