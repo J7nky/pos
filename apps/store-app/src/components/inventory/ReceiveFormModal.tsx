@@ -781,7 +781,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                       const selectedId = value as string;
                                       setBulkItems(prev => ({
                                         ...prev,
-                                        [productId]: { ...prev[productId], product_id: selectedId, unit: 'kg' }
+                                        [productId]: { ...prev[productId], product_id: selectedId }
                                       }));
                                     }}
                                     placeholder={t('inventory.selectProduct')}

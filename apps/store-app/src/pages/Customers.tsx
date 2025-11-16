@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
+import { useCustomerForm } from '../contexts/CustomerFormContext';
+
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { Plus, Search, Edit, CheckCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText, Banknote, UserCheck } from 'lucide-react';
@@ -15,6 +17,8 @@ import { Pagination } from '../components/common/Pagination';
 
 export default function Customers() {
   const raw = useOfflineData();
+  const { addCustomerRequestedFromPOS, clearAddCustomerRequest } = useCustomerForm();
+
   const { t } = useI18n();
   const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({
     ...c, 
@@ -430,6 +434,15 @@ export default function Customers() {
     setSuppliersPage(1);
   }, [searchTerm]);
 
+  // If POS requested adding a customer, open the add-customer form here
+  useEffect(() => {
+    if (addCustomerRequestedFromPOS) {
+      handleAddCustomerClick();
+      clearAddCustomerRequest();
+    }
+  }, [addCustomerRequestedFromPOS, clearAddCustomerRequest]);
+
+
   return (
     <div className="p-6">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
@@ -809,19 +822,19 @@ export default function Customers() {
                     onChange={handleCustomerCheckboxChange}
                     className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
-                  <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">Is Active</label>
+                  <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">{t('pos.isActive')}</label>
                 </div>
               </div>
               
               {/* Balance Fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-200">
-                <h3 className="md:col-span-2 text-lg font-semibold text-gray-900">Balance Settings</h3>
+                <h3 className="md:col-span-2 text-lg font-semibold text-gray-900">{t('customers.balanceSettings')}</h3>
                 
                 {/* Initial Balance Fields - Only show when adding new customer */}
                 {!editingCustomer && (
                   <>
                     <div>
-                      <label htmlFor="lb_balance" className="block text-sm font-medium text-gray-700">Initial LBP Balance</label>
+                      <label htmlFor="lb_balance" className="block text-sm font-medium text-gray-700">{t('customers.initialLBPBalance')}</label>
                       <input
                         type="number"
                         id="lb_balance"
@@ -835,7 +848,7 @@ export default function Customers() {
                     </div>
                     
                     <div>
-                      <label htmlFor="usd_balance" className="block text-sm font-medium text-gray-700">Initial USD Balance</label>
+                      <label htmlFor="usd_balance" className="block text-sm font-medium text-gray-700">{t('customers.initialUSDBalance')}</label>
                       <input
                         type="number"
                         id="usd_balance"
@@ -852,7 +865,7 @@ export default function Customers() {
                 
                 {/* Max Balance Fields - Always show */}
                 <div>
-                  <label htmlFor="lb_max_balance" className="block text-sm font-medium text-gray-700">Max LBP Balance (Optional)</label>
+                  <label htmlFor="lb_max_balance" className="block text-sm font-medium text-gray-700">{t('customers.maxLBPBalance')}</label>
                   <input
                     type="number"
                     id="lb_max_balance"
@@ -862,12 +875,12 @@ export default function Customers() {
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     step="0.01"
                     min="0"
-                    placeholder="No limit"
+                    placeholder={t('customers.noLimit')}
                   />
                 </div>
                 
                 <div>
-                  <label htmlFor="usd_max_balance" className="block text-sm font-medium text-gray-700">Max USD Balance (Optional)</label>
+                  <label htmlFor="usd_max_balance" className="block text-sm font-medium text-gray-700">{t('customers.maxUSDBalance')}</label>
                   <input
                     type="number"
                     id="usd_max_balance"
@@ -877,7 +890,7 @@ export default function Customers() {
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     step="0.01"
                     min="0"
-                    placeholder="No limit"
+                    placeholder={t('customers.noLimit')}
                   />
                 </div>
               </div>

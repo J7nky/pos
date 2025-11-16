@@ -20,6 +20,8 @@ const en = {
     },
     labels: {
       bill:'Bill',
+      addNewCustomerSupplier: 'Add New Customer',
+      
       available: 'Available',
       walkInCustomer: 'Walk-in Customer',
       customerName: 'Customer Name',
@@ -252,6 +254,13 @@ const en = {
   },
   customers: {
     noActiveAdvances: 'No active advances',
+    balanceSettings: 'Balance Settings',
+    initialLBPBalance: 'Initial LBP Balance',
+    initialUSDBalance: 'Initial USD Balance',
+    maxLBPBalance: 'Max LBP Balance (Optional)',
+    maxUSDBalance: 'Max USD Balance (Optional)',
+    noLimit: 'No Limit',
+    
     reviewDate: 'Review Date',
     reviewDateHint: 'Set a date to review or settle this advance',
     recordAdvancePayment: 'Record Advance Payment',

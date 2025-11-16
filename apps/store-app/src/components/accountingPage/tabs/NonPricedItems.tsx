@@ -4,7 +4,6 @@ import {
   X,
   Search,
   AlertCircle,
-  Edit,
   CheckCircle,
   Trash2,
 } from "lucide-react";
@@ -56,7 +55,6 @@ interface NonPricedItemsProps {
   getCurrentValue: (item: NonPricedItem, field: string) => any;
   handleMarkPriced: (item: NonPricedItem) => void;
   handleDeleteNonPriced: (item: NonPricedItem) => void;
-  setShowEditNonPriced: (item: NonPricedItem) => void;
   showToast: (message: string, type: "success" | "error") => void;
 }
 
@@ -88,7 +86,6 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
   getCurrentValue,
   handleMarkPriced,
   handleDeleteNonPriced,
-  setShowEditNonPriced,
   showToast,
 }) => {
   const { t } = useI18n();
@@ -403,13 +400,7 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex space-x-2 rtl:space-x-reverse">
-                          <button
-                            onClick={() => setShowEditNonPriced(item)}
-                            className="text-blue-600 hover:text-blue-800"
-                            title={t('nonPriced.editDetails')}
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
+                         
                           <button
                             onClick={() => handleMarkPriced(item)}
                             disabled={item.status !== "ready"}

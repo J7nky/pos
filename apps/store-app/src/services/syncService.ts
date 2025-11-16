@@ -1632,15 +1632,31 @@ export class SyncService {
   private async initializeSyncMetadata(storeId: string) {
     const hasAnySyncMetadata = await db.sync_metadata.count() > 0;
 
+    const currentTime = new Date().toISOString();
+
     if (!hasAnySyncMetadata) {
       console.log('🔄 Initializing sync metadata for first sync...');
-      const currentTime = new Date().toISOString();
 
       for (const tableName of SYNC_TABLES) {
         try {
           await db.updateSyncMetadata(tableName, currentTime);
         } catch (error) {
           console.warn(`Failed to initialize sync metadata for ${tableName}:`, error);
+        }
+      }
+    } else {
+      // Ensure all tables have sync metadata rows; backfill any missing ones without overwriting existing entries
+      for (const tableName of SYNC_TABLES) {
+        try {
+          const existing = await db.sync_metadata
+            .where('table_name')
+            .equals(tableName)
+            .first();
+          if (!existing) {
+            await db.updateSyncMetadata(tableName, currentTime);
+          }
+        } catch (error) {
+          console.warn(`Failed to backfill sync metadata for ${tableName}:`, error);
         }
       }
     }

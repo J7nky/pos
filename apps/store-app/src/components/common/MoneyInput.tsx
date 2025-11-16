@@ -149,6 +149,7 @@ export default function MoneyInput({
         inputMode="decimal"
         pattern="[0-9]*[.,]?[0-9]*"
         step={step}
+        max="9999999999"
         min={min}
         value={stringValue}
         onChange={handleInputChange}

@@ -159,7 +159,6 @@ const Inventory: React.FC = () => {
   };
 
   const handleReceiveSuccess = async (data: any) => {
-    console.log('batch123', data);
     const { batch } = data;
     await raw.addInventoryBatch({
       type: batch.type,

@@ -580,6 +580,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const batch = item.batch_id ? batchById[item.batch_id] : null;
         return {
           ...item,
+          supplier_name: item.supplier_name,
           commission_rate: batch ? batch.commission_rate : null,
           batch_type: batch ? batch.type : null,
           batch_porterage: batch ? batch.porterage_fee : null,
@@ -2163,6 +2164,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Both batch and items are persisted locally and will be synced to Supabase.
     // The sync service ensures inventory_bills are uploaded before inventory_items
     // to maintain foreign key constraints.
+    console.log('batch123', batchRecord);
+
     await db.transaction('rw', [db.inventory_bills, db.inventory_items], async () => {
       await db.inventory_bills.add(batchRecord);
       debug(batchRecord, 'batchrecord')

@@ -496,16 +496,12 @@ export class DataValidationService {
       if (!cleanRecord.type) {
         cleanRecord.type = 'commission';
       }
-      // Remove local-only currency field (not in Supabase schema)
-      delete (cleanRecord as any).currency;
       // Remove fields that don't exist in the database schema
       delete cleanRecord.plastic_count;
       delete cleanRecord.plastic_price;
     }
 
     if (tableName === 'inventory_items') {
-      // Remove local-only currency field (not in Supabase schema)
-      delete (cleanRecord as any).currency;
       // CRITICAL: Remove supplier_id from inventory_items - it was removed from schema
       // Supplier is now accessed via inventory_bills -> batch_id
       delete cleanRecord.supplier_id;

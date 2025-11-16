@@ -449,11 +449,10 @@ export class CashDrawerUpdateService {
     try {
       // Use the centralized method to get or create account
       const account = await this.getOrCreateCashDrawerAccount(storeId);
-      // if (!account) {
-        
-      //   console.error('Failed to create or retrieve cash drawer account');
-      //   return 0;
-      // }
+      if (!account) {
+        console.warn('No cash drawer account exists for store', storeId);
+        return 0;
+      }
 
       // SINGLE SOURCE OF TRUTH: Calculate balance from transactions
       const calculatedBalance = await this.calculateBalanceFromTransactions(storeId);

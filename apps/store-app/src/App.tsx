@@ -1,6 +1,8 @@
 // src/App.jsx
 import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthContext';
 import { OfflineDataProvider } from './contexts/OfflineDataContext';
+import { CustomerFormProvider } from './contexts/CustomerFormContext';
+
 import SupabaseLogin from './components/SupabaseLogin';
 import { I18nProvider, useI18n } from './i18n';
 import OnScreenKeyboard from './components/common/OnScreenKeyboard';
@@ -60,7 +62,9 @@ export default function App() {
         <OfflineDataProvider>
           <I18nErrorBoundary>
             <I18nProvider>
-              <AppContent />
+              <CustomerFormProvider>
+                <AppContent />
+              </CustomerFormProvider>
             </I18nProvider>
           </I18nErrorBoundary>
         </OfflineDataProvider>

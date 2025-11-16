@@ -15,7 +15,6 @@ import {
 } from '../utils/referenceGenerator';
 import { 
   TrendingUp,
-  AlertCircle,
   CheckCircle,
   Clock,
   Activity,
@@ -29,7 +28,6 @@ import DashboardOverview from '../components/accountingPage/tabs/DashboardOvervi
 import ExpenseManagement from '../components/accountingPage/tabs/PaymentsManagement';
 import NonPricedItems from '../components/accountingPage/tabs/NonPricedItems';
 import SupplierAdvances from '../components/accountingPage/tabs/SupplierAdvances';
-import EditNonPricedModal from '../components/accountingPage/modals/EditNonPricedModal';
 import { PaymentsModal } from '../components/accountingPage/modals/PaymentsModal';
 import ReceivedBillDetailsModal from '../components/accountingPage/modals/ReceivedBillDetailsModal';
 import EditSaleModal from '../components/accountingPage/modals/EditSaleModal';
@@ -490,7 +488,6 @@ export default function Accounting() {
 
   // Add to Accounting component state:
   const [nonPricedItems, setNonPricedItems] = useState<any[]>([]);
-  const [showEditNonPriced, setShowEditNonPriced] = useState<any | null>(null);
   const [stagedNonPricedChanges, setStagedNonPricedChanges] = useState<{[key: string]: any}>({});
   const [nonPricedSearch, setNonPricedSearch] = useLocalStorage('accounting_nonPricedSearch', '');
   const [nonPricedSort, setNonPricedSort] = useLocalStorage<'customer'|'product'|'date'|'value'>('accounting_nonPricedSort', 'date');
@@ -552,7 +549,6 @@ export default function Accounting() {
         // Don't show error to user as the sale was updated successfully
       }
 
-      setShowEditNonPriced(null);
       showToast(t('accounting.itemUpdatedSuccessfully'), 'success');
     } catch (error) {
       console.error('Error updating non-priced item:', error);
@@ -2000,7 +1996,6 @@ export default function Accounting() {
               setSelectedNonPriced={setSelectedNonPriced}
               setShowBulkActions={setShowBulkActions}
               setStagedNonPricedChanges={setStagedNonPricedChanges}
-              setShowEditNonPriced={setShowEditNonPriced}
               stageChange={stageChange}
               getCurrentValue={getCurrentValue}
               showToast={showToast}
@@ -2078,17 +2073,7 @@ export default function Accounting() {
         />
       )}
 
-      {/* Enhanced Edit Modal for Non-Priced Items */}
-      {showEditNonPriced && (
-        <EditNonPricedModal
-          isOpen={!!showEditNonPriced}
-          customers={customers}
-          suppliers={suppliers}
-          initialData={showEditNonPriced}
-          onClose={() => setShowEditNonPriced(null)}
-          onSave={(data) => handleSaveNonPriced(data)}
-        />
-      )}
+    
 
       {/* Forms Modal */}
       {showForm && (

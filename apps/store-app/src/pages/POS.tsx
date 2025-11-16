@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { usePOSKeyboard } from '../hooks/usePOSKeyboard';
-import AccessibleModal from '../components/common/AccessibleModal';
 import AccessibleButton from '../components/common/AccessibleButton';
 import { useOfflineData } from '../contexts/OfflineDataContext';
+import { useCustomerForm } from '../contexts/CustomerFormContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import SearchableSelect from '../components/common/SearchableSelect';
@@ -10,6 +10,7 @@ import MoneyInput from '../components/common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import EnhancedProductCard from '../components/EnhancedProductCard';
 import CashDrawerOpeningModal from '../components/common/CashDrawerOpeningModal';
+import { useNavigate } from 'react-router-dom';
 
 import { 
   Search, 
@@ -41,6 +42,8 @@ interface BillTab {
 
 export default function POS() {
   const raw = useOfflineData();
+  const { requestAddCustomerFromPOS } = useCustomerForm();
+  const navigate = useNavigate();
 
   // Refs for keyboard navigation
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -53,7 +56,6 @@ export default function POS() {
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
   const inventoryBills = (raw.inventoryBills || []) as Array<any>;
-  const addCustomer = raw.addCustomer;
 
   const { userProfile } = useSupabaseAuth();
   const { formatCurrency } = useCurrency();
@@ -64,23 +66,12 @@ export default function POS() {
   const [activeTabs, setActiveTabs] = useLocalStorage<BillTab[]>('pos_active_tabs', []);
   const [activeTabId, setActiveTabId] = useLocalStorage<string>('pos_active_tab_id', '');
   const [searchTerm, setSearchTerm] = useState('');
-  const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
-  // Add customer form state
-  const [customerForm, setCustomerForm] = useState<Partial<Customer>>({
-    name: '',
-    phone: '',
-    email: '',
-    address: '',
-    isActive: true,
-  });
-  const [isAddingCustomer, setIsAddingCustomer] = useState(false);
   // Add isProcessing state for async checkout
   const [isProcessing, setIsProcessing] = useState(false);
   // Add toast state
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   // Add customer validation state
   const [customerError, setCustomerError] = useState<string | null>(null);
-  const [customerFormError, setCustomerFormError] = useState<string | null>(null);
   // Add printing state
   const [isPrinting, setIsPrinting] = useState(false);
   // Add cash drawer opening modal state
@@ -850,29 +841,26 @@ ${dashSeparator}`;
       // No need for separate sale_items creation since bill_line_items now contains all sale data
       // Inventory deductions and cash drawer updates are handled in the createBill function
 
-      // Generate QR code for customer/supplier account statement if entity is selected
+      // Generate QR code for customer account statement if a customer is selected
+      // IMPORTANT: Tokens are only valid for real customers (public_access_tokens.customer_id FK)
       let qrCodeData = null;
       if (activeTab.selectedCustomer) {
         try {
           // First try to find as customer
-          let entity = customers.find(c => c.id === activeTab.selectedCustomer);
-          let entityType = 'customer';
-          
-          // If not found as customer, try as supplier
-          if (!entity) {
-            entity = suppliers.find(s => s.id === activeTab.selectedCustomer);
-            entityType = 'supplier';
-          }
-          
-          if (entity) {
+          const customerEntity = customers.find(c => c.id === activeTab.selectedCustomer);
+
+          if (customerEntity) {
             // Don't pass billId since bill is only local at this point (not synced to Supabase yet)
-            // Token will give entity access to their full statement
+            // Token will give the customer access to their full statement
             qrCodeData = await generateQRCodeForReceipt(
-              entity.id,
-              null, // Bill not in Supabase yet - use entity-level token
+              customerEntity.id,
+              null, // Bill not in Supabase yet - use customer-level token
               billData.bill_number,
-              entity.name
+              customerEntity.name
             );
+          } else {
+            // Selected entity is not a customer (likely a supplier) -> skip QR token generation
+            console.log('Skipping QR token generation: selected entity is not a customer');
           }
         } catch (qrError) {
           console.warn('Failed to generate QR code:', qrError);
@@ -918,59 +906,7 @@ ${dashSeparator}`;
     setIsProcessing(false);
   };
 
-  // Add customer form handlers
-  const handleCustomerFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type } = e.target;
-    setCustomerForm(prev => ({
-      ...prev,
-      [name]: type === 'number' ? parseFloat(value) : value,
-    }));
-  };
-  const handleCustomerCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setCustomerForm(prev => ({
-      ...prev,
-      isActive: e.target.checked,
-    }));
-  };
-  const handleCustomerFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!customerForm.name || !customerForm.phone) {
-      setCustomerFormError(`${t('common.labels.nameAndPhoneAreRequired')}.`);
-      return;
-    }
-    // Check for duplicate customer (case-insensitive, trimmed)
-    const exists = customers.some(c => c.name.trim().toLowerCase() === customerForm.name!.trim().toLowerCase() && c.phone.trim() === customerForm.phone!.trim());
-    if (exists) {
-      setCustomerFormError(`${t('common.labels.thisCustomerAlreadyExists')}.`);
-      return;
-    }
-    setCustomerFormError(null);
-    setIsAddingCustomer(true);
-    try {
-      await addCustomer({
-        name: customerForm.name,
-        phone: customerForm.phone,
-        email: customerForm.email || '',
-        address: customerForm.address || '',
-        is_active: customerForm.isActive ?? true,
-        lb_balance: 0,
-        usd_balance: 0,
-      });
-      await raw.refreshData();
-      // Find the new customer by name and phone (best effort)
-      const newCustomer = raw.customers.find(
-        c => c.name === customerForm.name && c.phone === customerForm.phone
-      );
-      if (newCustomer) {
-        updateActiveTab({ selectedCustomer: newCustomer.id });
-      }
-      setShowAddCustomerForm(false);
-      setCustomerForm({ name: '', phone: '', email: '', address: '', isActive: true });
-    } catch (error) {
-      setCustomerFormError(`${t('common.labels.failedToAddCustomer')}.`);
-    }
-    setIsAddingCustomer(false);
-  };
+  // Add customer form handlers are centralized in the Customers page via CustomerFormContext
 
   return (
     <div className="p-6 pt-3">
@@ -1035,117 +971,6 @@ ${dashSeparator}`;
         </div>
       )}
 
-      {/* Add Customer Modal */}
-      <AccessibleModal
-        isOpen={showAddCustomerForm}
-        onClose={() => setShowAddCustomerForm(false)}
-        title={t('common.labels.addNewCustomer')}
-        size="md"
-      >
-        <form onSubmit={handleCustomerFormSubmit} className="p-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="customer-name" className="block text-sm font-medium text-gray-700">
-                {t('common.labels.name')} *
-              </label>
-              <input
-                type="text"
-                id="customer-name"
-                name="name"
-                value={customerForm.name}
-                onChange={handleCustomerFormChange}
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                required
-                tabIndex={1}
-                autoFocus
-              />
-            </div>
-            <div>
-              <label htmlFor="customer-phone" className="block text-sm font-medium text-gray-700">
-                {t('common.labels.phone')} *
-              </label>
-              <input
-                type="text"
-                id="customer-phone"
-                name="phone"
-                value={customerForm.phone}
-                onChange={handleCustomerFormChange}
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                required
-                tabIndex={2}
-              />
-            </div>
-            <div>
-              <label htmlFor="customer-email" className="block text-sm font-medium text-gray-700">
-                Email
-              </label>
-              <input
-                type="email"
-                id="customer-email"
-                name="email"
-                value={customerForm.email || ''}
-                onChange={handleCustomerFormChange}
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                tabIndex={3}
-              />
-            </div>
-            <div>
-              <label htmlFor="customer-address" className="block text-sm font-medium text-gray-700">
-                Address
-              </label>
-              <input
-                type="text"
-                id="customer-address"
-                name="address"
-                value={customerForm.address || ''}
-                onChange={handleCustomerFormChange}
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                tabIndex={4}
-              />
-            </div>
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="customer-active"
-                name="isActive"
-                checked={customerForm.isActive}
-                onChange={handleCustomerCheckboxChange}
-                className="h-4 w-4 text-blue-600 focus:ring-2 focus:ring-blue-500 border-gray-300 rounded"
-                tabIndex={5}
-              />
-              <label htmlFor="customer-active" className="ml-2 block text-sm text-gray-900">
-                {t('common.labels.isActive')}
-              </label>
-            </div>
-          </div>
-          {customerFormError && (
-            <div className="text-red-600 text-sm font-medium pt-2" role="alert">
-              {customerFormError}
-            </div>
-          )}
-          <div className="flex justify-end space-x-3 pt-4">
-            <AccessibleButton
-              type="button"
-              variant="secondary"
-              onClick={() => setShowAddCustomerForm(false)}
-              disabled={isAddingCustomer}
-              tabIndex={7}
-            >
-              {t('common.labels.cancel')}
-            </AccessibleButton>
-            <AccessibleButton
-              type="submit"
-              variant="primary"
-              loading={isAddingCustomer}
-              tabIndex={6}
-              touchOptimized
-            >
-              {isAddingCustomer ? `${t('common.labels.adding')}...` : `${t('common.labels.addCustomer')}`}
-            </AccessibleButton>
-          </div>
-        </form>
-      </AccessibleModal>
-
       {/* Cash Drawer Opening Modal */}
       <CashDrawerOpeningModal
         isOpen={showCashDrawerModal}
@@ -1198,7 +1023,7 @@ ${dashSeparator}`;
             formatCurrency={formatCurrency} 
             inventory={inventory}
             products={products}
-
+            suppliers={suppliers}
           />
 
           {/* Totals and Payment */}
@@ -1215,7 +1040,7 @@ ${dashSeparator}`;
               {/* Customer Selection (moved here) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Customer/Supplier {(activeTab.paymentMethod === 'credit' || ((activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && parseFloat(activeTab.amountReceived || '0') < total)) ? <span className="text-red-500">*</span> : null}
+                 {t("payments.customer")} {(activeTab.paymentMethod === 'credit' || ((activeTab.paymentMethod === 'cash' || activeTab.paymentMethod === 'card') && parseFloat(activeTab.amountReceived || '0') < total)) ? <span className="text-red-500">*</span> : null}
                 </label>
                 <div ref={customerSelectRef}>
                   <SearchableSelect
@@ -1256,14 +1081,18 @@ ${dashSeparator}`;
                     updateActiveTab({ selectedCustomer: value as string });
                     setCustomerError(null);
                   }}
-                  searchPlaceholder="Search customers and suppliers..."
-                  placeholder={activeTab.paymentMethod === 'credit' ? "Select Customer/Supplier" : "Walk-in Customer"}
+                  searchPlaceholder={t("pos.searchCustomers")}
+                  placeholder={activeTab.paymentMethod === 'credit' ? t("common.labels.selectCustomer") : t("common.labels.walkInCustomer")}
 
                   recentSelections={recentCustomers}
                   onRecentUpdate={setRecentCustomers}
                   showAddOption={true}
-                  addOptionText="Add New Customer/Supplier"
-                  onAddNew={() => setShowAddCustomerForm(true)}
+                  addOptionText={t("common.labels.addNewCustomerSupplier")}
+                  onAddNew={() => {
+                    // Signal Customers page to open its add-customer form, then navigate there
+                    requestAddCustomerFromPOS();
+                    navigate('/customers');
+                  }}
                   className={`w-full ${customerError ? 'border border-red-500' : ''}`}
                   tabIndex={10000}
                   />
@@ -1498,7 +1327,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
     </div>
   );
 };
-const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, products }: any) => {
+const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, products, suppliers }: any) => {
   const { t } = useI18n();
   return (
     <div className="bg-white rounded-lg shadow-sm relative">
@@ -1540,6 +1369,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
             const product = products.find((p: any) => p.id === item.productId);
+            const supplier = suppliers?.find((s: any) => s.id === item.supplierId);
             
             // Skip rendering if product not found (data might be syncing)
             if (!product) {
@@ -1560,7 +1390,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     </div>
                     <p className="text-sm text-gray-600 flex items-center">
                       <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
-                      {product?.supplierName || 'Unknown Supplier'}
+                      {supplier?.name || 'Unknown Supplier'}
                     </p>
 
                   </div>
@@ -1577,7 +1407,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                 </div>
 
                 {/* Enhanced Input Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-[1fr_2fr_3fr_3fr] gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-[2fr_2fr_3fr_3fr] gap-3">
                   {/* Quantity */}
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">{t('common.labels.quantity')}</label>
@@ -1616,6 +1446,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       <input
                         type="number"
                         step="0.5"
+                        min="0"
                         value={item.weight ?? ''}
                         onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
                         className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
@@ -1642,7 +1473,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       min="0"
                       value={item.unitPrice ?? ''}
                       onChange={(value) => updateCartItem(item.id, 'unitPrice', value ? parseFloat(value) : undefined)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
+                      className="w-full border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white px-0 py-0 mb-0"
                       placeholder="0.00"
                       tabIndex={200 + index * 4 + 3}
                       ariaLabel={`Price for ${product?.name || 'product'}`}

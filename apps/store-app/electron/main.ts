@@ -223,17 +223,9 @@ function getWindowsPrinters(): Promise<any[]> {
 
 
 ipcMain.handle('print-document', async (_event: any, options: any) => {
-  console.log('🔵 [FUNCTION CALL] print-document IPC handler - START');
   try {
     const { content, printerName, printOptions, qrCodeData, qrCodeUrl } = options;
     
-    console.log('🔵 [FUNCTION CALL] print-document - Parameters:', {
-      printerName,
-      contentLength: content?.length,
-      hasQrCodeData: !!qrCodeData,
-      hasQrCodeUrl: !!qrCodeUrl,
-      printOptions: Object.keys(printOptions || {})
-    });
     console.log('🖨️ Starting print job to:', printerName);
     console.log('📄 Content length:', content.length);
     console.log('📱 QR Code Data:', qrCodeData ? 'Available' : 'Not available');
@@ -246,25 +238,20 @@ ipcMain.handle('print-document', async (_event: any, options: any) => {
                        printerName.toLowerCase().includes('receipt') ||
                        printerName.toLowerCase().includes('pos'))) {
       console.log('🔄 Using ESC/POS thermal printing for:', printerName);
-      console.log('🔵 [FUNCTION CALL] Calling printDirectToThermalPrinter');
       return await printDirectToThermalPrinter(content, printerName, qrCodeData, qrCodeUrl);
     }
     
     // Fallback to Electron's print system for regular printers
     console.log('🔄 Using Electron print system for:', printerName);
-    console.log('🔵 [FUNCTION CALL] Calling printWithElectron');
     return await printWithElectron(content, printerName, printOptions);
     
   } catch (error) {
     console.error('Error printing document:', error);
-    console.log('🔴 [FUNCTION CALL] print-document IPC handler - ERROR:', error);
     return {
       success: false,
       message: 'Failed to print document',
       error: error instanceof Error ? error.message : 'Unknown error'
     };
-  } finally {
-    console.log('🔵 [FUNCTION CALL] print-document IPC handler - END');
   }
 });
 
@@ -370,13 +357,6 @@ function createBitmapCommand(bitmapData: Buffer, width: number, height: number):
 
 // Direct printing function for thermal printers using ESC/POS
 async function printDirectToThermalPrinter(content: string, printerName: string, qrCodeData?: string, qrCodeUrl?: string): Promise<any> {
-  console.log('🔵 [FUNCTION CALL] printDirectToThermalPrinter - START');
-  console.log('📊 [FUNCTION CALL] printDirectToThermalPrinter - Parameters:', {
-    printerName,
-    contentLength: content?.length,
-    hasQrCodeData: !!qrCodeData,
-    hasQrCodeUrl: !!qrCodeUrl
-  });
   try {
     console.log('🔄 Using ESC/POS thermal printing...');
     console.log('🖨️ Printer:', printerName);
@@ -414,26 +394,21 @@ async function printDirectToThermalPrinter(content: string, printerName: string,
       } catch (electronError) {
         console.log('⚠️ Electron print failed, trying Windows print fallback...', electronError);
         // Fallback to Windows printing with HTML content
-        console.log('🔵 [FUNCTION CALL] Calling printHTMLWithWindows');
         return await printHTMLWithWindows(htmlContent, printerName);
       }
     }
   } catch (error) {
     console.error('❌ Error in thermal printing:', error);
-    console.log('🔴 [FUNCTION CALL] printDirectToThermalPrinter - ERROR:', error);
     return {
       success: false,
       message: 'Thermal print failed',
       error: error instanceof Error ? error.message : 'Unknown error'
     };
-  } finally {
-    console.log('🔵 [FUNCTION CALL] printDirectToThermalPrinter - END');
   }
 }
 
 // Print using raw ESC/POS commands directly to Windows printer
 async function printWithRawESCPOS(content: string, printerName: string, _qrCodeData?: string, qrCodeUrl?: string): Promise<any> {
-  console.log('🔵 [FUNCTION CALL] printWithRawESCPOS - START');
   return new Promise((resolve, reject) => {
     try {
       console.log('🔧 Building raw ESC/POS commands...');
@@ -637,11 +612,9 @@ async function printWithRawESCPOS(content: string, printerName: string, _qrCodeD
         
         if (error) {
           console.error('❌ Raw ESC/POS print failed:', error.message);
-          console.log('🔴 [FUNCTION CALL] printWithRawESCPOS - ERROR:', error.message);
           reject(error);
         } else {
           console.log('✅ Raw ESC/POS print successful');
-          console.log('🔵 [FUNCTION CALL] printWithRawESCPOS - SUCCESS');
           resolve({
             success: true,
             message: 'Receipt printed successfully via raw ESC/POS'
@@ -651,26 +624,20 @@ async function printWithRawESCPOS(content: string, printerName: string, _qrCodeD
       
     } catch (error) {
       console.error('❌ Raw ESC/POS error:', error);
-      console.log('🔴 [FUNCTION CALL] printWithRawESCPOS - ERROR:', error);
       reject(error);
-    } finally {
-      console.log('🔵 [FUNCTION CALL] printWithRawESCPOS - END');
     }
   });
 }
 
 // Print using ESC/POS commands for proper thermal printing
 async function printWithESCPOS(content: string, printerName: string, qrCodeData?: string, qrCodeUrl?: string): Promise<any> {
-  console.log('🔵 [FUNCTION CALL] printWithESCPOS - START');
   return new Promise(async (resolve, reject) => {
     try {
       console.log('🔧 Initializing thermal printer with ESC/POS...');
       
       // Try raw ESC/POS approach first (better Windows compatibility)
       try {
-        console.log('🔵 [FUNCTION CALL] Calling printWithRawESCPOS');
         const result = await printWithRawESCPOS(content, printerName, qrCodeData, qrCodeUrl);
-        console.log('🔵 [FUNCTION CALL] printWithESCPOS - SUCCESS (via raw ESC/POS)');
         resolve(result);
         return;
       } catch (rawError) {
@@ -812,7 +779,6 @@ async function printWithESCPOS(content: string, printerName: string, qrCodeData?
       console.log('🖨️ Executing ESC/POS print...');
       await printer.execute();
       console.log('✅ ESC/POS print successful');
-      console.log('🔵 [FUNCTION CALL] printWithESCPOS - SUCCESS (via node-thermal-printer)');
       
       resolve({
         success: true,
@@ -821,21 +787,13 @@ async function printWithESCPOS(content: string, printerName: string, qrCodeData?
       
     } catch (error) {
       console.error('❌ ESC/POS print error:', error);
-      console.log('🔴 [FUNCTION CALL] printWithESCPOS - ERROR:', error);
       reject(error);
-    } finally {
-      console.log('🔵 [FUNCTION CALL] printWithESCPOS - END');
     }
   });
 }
 
 // Print HTML content using Windows system
 async function printHTMLWithWindows(htmlContent: string, printerName: string): Promise<any> {
-  console.log('🔵 [FUNCTION CALL] printHTMLWithWindows - START');
-  console.log('📊 [FUNCTION CALL] printHTMLWithWindows - Parameters:', {
-    printerName,
-    contentLength: htmlContent?.length
-  });
   return new Promise((resolve) => {
     try {
       const fs = require('fs');
@@ -909,7 +867,6 @@ async function printHTMLWithWindows(htmlContent: string, printerName: string): P
              tryNextApproach();
            } else {
              console.log(`✅ Approach ${currentApproach + 1} successful`);
-             console.log('🔵 [FUNCTION CALL] printHTMLWithWindows - SUCCESS');
              resolve({ 
                success: true, 
                message: `HTML printed successfully via Windows approach ${currentApproach + 1}` 
@@ -938,21 +895,17 @@ async function printHTMLWithWindows(htmlContent: string, printerName: string): P
       
     } catch (error) {
       console.error('❌ Error in Windows HTML printing:', error);
-      console.log('🔴 [FUNCTION CALL] printHTMLWithWindows - ERROR:', error);
       resolve({
         success: false,
         message: 'Windows HTML print setup failed',
         error: error instanceof Error ? error.message : 'Unknown error'
       });
-    } finally {
-      console.log('🔵 [FUNCTION CALL] printHTMLWithWindows - END');
     }
   });
 }
 
 // Convert text receipt to HTML for better printing
 function convertTextToHTML(content: string, qrCodeData?: string, qrCodeUrl?: string): string {
-  console.log('🔵 [FUNCTION CALL] convertTextToHTML - START');
   console.log('🔍 QR Code data received:', { qrCodeData: !!qrCodeData, qrCodeUrl, hasPlaceholder: content.includes('[QR_CODE_PLACEHOLDER]') });
   
   // Replace QR code placeholder with actual QR code image if available
@@ -1042,7 +995,6 @@ function convertTextToHTML(content: string, qrCodeData?: string, qrCodeUrl?: str
     return `<div style="margin: 2px 0; font-family: 'Courier New', monospace;">${line}</div>`;
   });
   
-  console.log('🔵 [FUNCTION CALL] convertTextToHTML - END');
   return `
     <!DOCTYPE html>
     <html>
@@ -1086,12 +1038,6 @@ function convertTextToHTML(content: string, qrCodeData?: string, qrCodeUrl?: str
 
 // Electron print system (fallback)
 async function printWithElectron(content: string, printerName: string, printOptions: any): Promise<any> {
-  console.log('🔵 [FUNCTION CALL] printWithElectron - START');
-  console.log('📊 [FUNCTION CALL] printWithElectron - Parameters:', {
-    printerName,
-    contentLength: content?.length,
-    isHTML: content.includes('<!DOCTYPE html>')
-  });
   try {
     // Create a new window for printing
     const printWindow = new BrowserWindow({
@@ -1174,17 +1120,13 @@ async function printWithElectron(content: string, printerName: string, printOpti
     // Close the print window
     printWindow.close();
 
-    console.log('🔵 [FUNCTION CALL] printWithElectron - SUCCESS');
     return {
       success: true,
       message: 'Print job submitted successfully'
     };
   } catch (error) {
     console.error('❌ Electron print failed:', error);
-    console.log('🔴 [FUNCTION CALL] printWithElectron - ERROR:', error);
     throw error;
-  } finally {
-    console.log('🔵 [FUNCTION CALL] printWithElectron - END');
   }
 }
 

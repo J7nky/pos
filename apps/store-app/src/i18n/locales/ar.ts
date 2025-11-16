@@ -44,6 +44,7 @@ const ar = {
     labels: {
     bill:'فاتورة', saleCompletedSuccessfully: 'تم إتمام البيع بنجاح', billCreatedAndReceiptPrinted: 'تم إنشاء الفاتورة وطباعة الإيصال',
       yourCartIsEmpty: 'سلة المشتريات فارغة', startAddingProductsToBeginYourSale: 'أضف المنتجات لبدء البيع',
+      addNewCustomerSupplier: 'إضافة زبون جديد',
       walkInCustomer: 'زبون عابر',
       customerName: 'اسم الزبون',
       selectCustomer: 'اختر الزبون',
@@ -392,8 +393,12 @@ const ar = {
   },
   customers: {
     noActiveAdvances: 'لا توجد سلفات مدفوعة للموردين',
-    advanceUSD: 'سلفة بالدولار',
-    advanceLBP: 'سلفة بالليرة اللبنانية',
+    balanceSettings: 'إعدادات الرصيد',
+    initialLBPBalance: 'رصيد اولي بالليرة اللبنانية',
+    initialUSDBalance: 'رصيد اولي بالدولار',
+    maxLBPBalance: 'الحد الأقصى لرصيد بالليرة اللبنانية',
+    maxUSDBalance: 'الحد الأقصى للرصيد بالدولار',
+    noLimit: 'لا حدود',
     reviewDate: 'تاريخ المراجعة',
     reviewDateHint: 'ضبط تاريخ لمراجعة السلفة',
     allTime: 'كل الاوقات',
