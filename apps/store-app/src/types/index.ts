@@ -148,12 +148,9 @@ export interface Bill {
   store_id: string;
   bill_number: string;
   customer_id: string | null;
-  subtotal: number;
-  total_amount: number;
   payment_method: 'cash' | 'card' | 'credit';
   payment_status: 'paid' | 'partial' | 'pending';
   amount_paid: number;
-  amount_due: number;
   bill_date: string;
   notes: string | null;
   status: 'active' | 'cancelled' | 'refunded';
@@ -161,7 +158,6 @@ export interface Bill {
   created_at: string;
   updated_at: string;
   last_modified_by: string | null;
-  last_modified_at: string | null;
   _synced?: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
@@ -175,12 +171,6 @@ export interface BillLineItem {
   bill_id: string;
   inventory_item_id: string | null;
   product_id: string;
-  supplier_id: string;
-  customer_id: string | null;
-  
-  // Product/Supplier names (denormalized for performance)
-  product_name: MultilingualString; // Supports both string (backwards compatible) and multilingual object
-  supplier_name: string;
   
   // Quantity and pricing
   quantity: number;
@@ -190,14 +180,12 @@ export interface BillLineItem {
   received_value: number;
   
   // Transaction details
-  payment_method: 'cash' | 'card' | 'credit';
   notes: string | null;
   line_order: number;
   
   // Metadata
   created_at: string;
   updated_at: string;
-  created_by: string;
   
   // Sync state (for offline functionality)
   _synced: boolean;
@@ -206,11 +194,10 @@ export interface BillLineItem {
 }
 
 // Cart item - partial BillLineItem for items being added to cart
-export interface CartItem extends Omit<BillLineItem, 'id' | 'created_at' | 'created_by' | 'received_value'> {
+export interface CartItem extends Omit<BillLineItem, 'id' | 'created_at' | 'received_value'> {
   id?: string; // Optional for new cart items
   received_value?: number; // Optional until checkout
   created_at?: string;
-  created_by?: string;
 }
 
 // Database transformation types for Supabase integration
@@ -219,9 +206,6 @@ export type BillLineItemDbRow = {
   store_id: string;
   bill_id: string;
   product_id: string;
-  product_name: string;
-  supplier_id: string;
-  supplier_name: string;
   inventory_item_id: string | null;
   quantity: number;
   unit_price: number;
@@ -229,9 +213,6 @@ export type BillLineItemDbRow = {
   weight: number | null;
   notes: string | null;
   line_order: number;
-  payment_method: 'cash' | 'card' | 'credit';
-  customer_id: string | null;
-  created_by: string;
   received_value: number;
   created_at: string;
   updated_at: string;
@@ -243,7 +224,7 @@ export type BillLineItemDbInsert = Omit<BillLineItemDbRow, 'id' | 'created_at' |
   updated_at?: string;
 };
 
-export type BillLineItemDbUpdate = Partial<Omit<BillLineItemDbRow, 'id' | 'created_at' | 'updated_at' | 'store_id' | 'created_by'>>;
+export type BillLineItemDbUpdate = Partial<Omit<BillLineItemDbRow, 'id' | 'created_at' | 'updated_at' | 'store_id'>>;
 
 // Type transformation utilities
 export const BillLineItemTransforms = {
@@ -254,21 +235,15 @@ export const BillLineItemTransforms = {
     bill_id: dbRow.bill_id,
     inventory_item_id: dbRow.inventory_item_id,
     product_id: dbRow.product_id,
-    supplier_id: dbRow.supplier_id,
-    customer_id: dbRow.customer_id,
-    product_name: dbRow.product_name,
-    supplier_name: dbRow.supplier_name,
     quantity: dbRow.quantity,
     weight: dbRow.weight,
     unit_price: dbRow.unit_price,
     line_total: dbRow.line_total,
     received_value: dbRow.received_value,
-    payment_method: dbRow.payment_method,
     notes: dbRow.notes,
     line_order: dbRow.line_order,
     created_at: dbRow.created_at,
     updated_at: dbRow.updated_at,
-    created_by: dbRow.created_by,
     _synced: true,
     _lastSyncedAt: undefined,
     _deleted: false,
@@ -280,9 +255,6 @@ export const BillLineItemTransforms = {
     store_id: billLineItem.store_id,
     bill_id: billLineItem.bill_id,
     product_id: billLineItem.product_id,
-    product_name: billLineItem.product_name,
-    supplier_id: billLineItem.supplier_id,
-    supplier_name: billLineItem.supplier_name,
     inventory_item_id: billLineItem.inventory_item_id,
     quantity: billLineItem.quantity,
     unit_price: billLineItem.unit_price,
@@ -290,9 +262,6 @@ export const BillLineItemTransforms = {
     weight: billLineItem.weight,
     notes: billLineItem.notes,
     line_order: billLineItem.line_order,
-    payment_method: billLineItem.payment_method,
-    customer_id: billLineItem.customer_id,
-    created_by: billLineItem.created_by,
     received_value: billLineItem.received_value,
   }),
 
@@ -302,26 +271,22 @@ export const BillLineItemTransforms = {
     
     if (updates.inventory_item_id !== undefined) dbUpdate.inventory_item_id = updates.inventory_item_id;
     if (updates.product_id !== undefined) dbUpdate.product_id = updates.product_id;
-    if (updates.supplier_id !== undefined) dbUpdate.supplier_id = updates.supplier_id;
-    if (updates.customer_id !== undefined) dbUpdate.customer_id = updates.customer_id;
     if (updates.quantity !== undefined) dbUpdate.quantity = updates.quantity;
     if (updates.weight !== undefined) dbUpdate.weight = updates.weight;
     if (updates.unit_price !== undefined) dbUpdate.unit_price = updates.unit_price;
     if (updates.line_total !== undefined) dbUpdate.line_total = updates.line_total;
     if (updates.received_value !== undefined) dbUpdate.received_value = updates.received_value;
-    if (updates.payment_method !== undefined) dbUpdate.payment_method = updates.payment_method;
     if (updates.notes !== undefined) dbUpdate.notes = updates.notes;
     
     return dbUpdate;
   },
 
   // Convert CartItem to BillLineItem (for checkout)
-  fromCartItem: (cartItem: CartItem, id: string, billId: string, createdAt: string, createdBy: string): BillLineItem => ({
+  fromCartItem: (cartItem: CartItem, id: string, billId: string, createdAt: string): BillLineItem => ({
     ...cartItem,
     id,
     bill_id: billId,
     created_at: createdAt,
-    created_by: createdBy,
     line_total: cartItem.line_total || (cartItem.quantity * cartItem.unit_price),
     received_value: cartItem.received_value || cartItem.line_total || (cartItem.quantity * cartItem.unit_price),
     _synced: false,

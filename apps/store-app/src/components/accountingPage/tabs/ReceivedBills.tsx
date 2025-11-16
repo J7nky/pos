@@ -8,14 +8,16 @@ import {
   Trash2,
   ChevronRight,
   X,
-  Edit,
-  Scale
+  Edit
 } from 'lucide-react';
 import { Bill } from '../../../lib/db';
-import WeightComparisonReport from '../../WeightComparisonReport';
 import ReceiveFormModal from '../../inventory/ReceiveFormModal';
 import { useI18n } from '../../../i18n';
 import { Pagination } from '../../../components/common/Pagination';
+import { useModal } from '../../../hooks/useModal';
+import { ReceivedBillDetailsModal } from './receivedBills/ReceivedBillDetailsModal';
+import { ReceivedBillSalesLogsModal } from './receivedBills/ReceivedBillSalesLogsModal';
+import { ReceivedBill } from './receivedBills/types';
 
 type ReceivedBillsProps = {
   inventory: any[];
@@ -71,9 +73,8 @@ export default function ReceivedBills({
   const [receivedBillsSortDir, setReceivedBillsSortDir] = useState<'asc' | 'desc'>('desc');
   const [receivedBillsStatusFilter, setReceivedBillsStatusFilter] = useState<string>('all');
   const [receivedBillsTypeFilter, setReceivedBillsTypeFilter] = useState<string>('all');
-  const [selectedReceivedBill, setSelectedReceivedBill] = useState<any>(null);
-  const [showReceivedBillDetails, setShowReceivedBillDetails] = useState(false);
-  const [showReceivedBillSalesLogs, setShowReceivedBillSalesLogs] = useState(false);
+  const billDetailsModal = useModal<ReceivedBill>();
+  const salesLogsModal = useModal<ReceivedBill>();
   const [showBatchEdit, setShowBatchEdit] = useState(false);
   const [batchEditForm, setBatchEditForm] = useState<{
     supplier_id?: string;
@@ -92,7 +93,6 @@ export default function ReceivedBills({
   const [editingBatchStatus, setEditingBatchStatus] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [closedBillIds, setClosedBillIds] = useState<Set<string>>(new Set());
-  const [showWeightComparison, setShowWeightComparison] = useState(false);
 
   // Auto-expand group when navigating from missed products
   React.useEffect(() => {
@@ -586,14 +586,37 @@ export default function ReceivedBills({
     }
   };
 
-  const handleViewReceivedBillDetails = (bill: any) => {
-    setSelectedReceivedBill(bill);
-    setShowReceivedBillDetails(true);
+  // Helper to create enriched bill with aggregated fields from group
+  const createEnrichedBillFromGroup = (group: any) => {
+    const first = group.items[0];
+    return {
+      ...first,
+      batchId: group.batchId,
+      supplierName: group.supplierName,
+      productName: group.productName,
+      totalRevenue: group.totalRevenue || 0,
+      totalCost: group.totalCost || 0,
+      totalProfit: group.totalProfit || 0,
+      totalSoldQuantity: group.totalSoldQuantity || 0,
+      originalQuantity: group.originalQuantity || 0,
+      remainingQuantity: group.remainingQuantity || 0
+    };
   };
 
-  const handleViewReceivedBillSalesLogs = (bill: any) => {
-    setSelectedReceivedBill(bill);
-    setShowReceivedBillSalesLogs(true);
+  const handleViewReceivedBillDetails = (bill: ReceivedBill) => {
+    console.log('Bill Details - Received bill:', {
+      id: bill.id,
+      productName: bill.productName,
+      totalRevenue: bill.totalRevenue,
+      totalCost: bill.totalCost,
+      totalProfit: bill.totalProfit,
+      batchId: bill.batchId
+    });
+    billDetailsModal.open(bill);
+  };
+
+  const handleViewReceivedBillSalesLogs = (bill: ReceivedBill) => {
+    salesLogsModal.open(bill);
   };
 
   const exportReceivedBills = () => {
@@ -897,7 +920,7 @@ export default function ReceivedBills({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent row click
-                                handleViewReceivedBillDetails(group.items[0]);
+                                handleViewReceivedBillDetails(createEnrichedBillFromGroup(group));
                               }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
@@ -907,13 +930,7 @@ export default function ReceivedBills({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent row click
-                                const first = group.items[0];
-                                setSelectedReceivedBill({
-                                  ...first,
-                                  batchId: group.batchId,
-                                  supplierName: group.supplierName,
-                                  productName: group.productName
-                                });
+                                setSelectedReceivedBill(createEnrichedBillFromGroup(group));
                                 setShowReceivedBillSalesLogs(true);
                               }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
@@ -921,24 +938,13 @@ export default function ReceivedBills({
                               <Activity className="w-3.5 h-3.5 text-gray-500" />
                               <span>{t('receivedBills.salesLogs')}</span>
                             </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedReceivedBill(group.items[0]);
-                                setShowWeightComparison(true);
-                              }}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                            >
-                              <Scale className="w-3.5 h-3.5 text-gray-500" />
-                              <span>{t('receivedBills.weightAnalysis')}</span>
-                            </button>
                           </>
                         ) : (
                           <>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent row click
-                                handleViewReceivedBillDetails(group.items[0]);
+                                handleViewReceivedBillDetails(createEnrichedBillFromGroup(group));
                               }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
@@ -948,23 +954,12 @@ export default function ReceivedBills({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent row click
-                                handleViewReceivedBillSalesLogs(group.items[0]);
+                                handleViewReceivedBillSalesLogs(createEnrichedBillFromGroup(group));
                               }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >
                               <Activity className="w-3.5 h-3.5 text-gray-500" />
                               <span>{t('receivedBills.salesLogs')}</span>
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedReceivedBill(group.items[0]);
-                                setShowWeightComparison(true);
-                              }}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                            >
-                              <Scale className="w-3.5 h-3.5 text-gray-500" />
-                              <span>{t('receivedBills.weightAnalysis')}</span>
                             </button>
                           </>
                         )}
@@ -1043,16 +1038,6 @@ export default function ReceivedBills({
                                           <Activity className="w-3.5 h-3.5 text-gray-500" />
                                           <span>{t('receivedBills.salesLogs')}</span>
                                         </button>
-                                        <button
-                                          onClick={() => {
-                                            setSelectedReceivedBill(bill);
-                                            setShowWeightComparison(true);
-                                          }}
-                                          className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                                        >
-                                          <Scale className="w-3.5 h-3.5 text-gray-500" />
-                                          <span>{t('receivedBills.weightAnalysis')}</span>
-                                        </button>
                                       </div>
                                     </td>
                                   </tr>
@@ -1082,143 +1067,18 @@ export default function ReceivedBills({
         )}
       </div>
 
-      {showReceivedBillDetails && selectedReceivedBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <div className="flex items-center justify-between ">
-                <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">{t('receivedBills.receivedBillDetails')}</h2>
-                <button onClick={() => setShowReceivedBillDetails(false)} className="text-gray-400 hover:text-gray-600">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-            </div>
-            <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Basic Information</h3>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Product</label>
-                      <p className="text-sm text-gray-900">{selectedReceivedBill.productName}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Supplier</label>
-                      <p className="text-sm text-gray-900">{selectedReceivedBill.supplierName}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Type</label>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${selectedReceivedBill.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
-                        {selectedReceivedBill.type}
-                      </span>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Received Date</label>
-                      <p className="text-sm text-gray-900">{new Date(selectedReceivedBill.receivedAt).toLocaleDateString()}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Received By</label>
-                      <p className="text-sm text-gray-900">{selectedReceivedBill.receivedBy}</p>
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Quantity & Progress</h3>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Original Quantity</label>
-                      <p className="text-sm text-gray-900">{selectedReceivedBill.originalQuantity} {selectedReceivedBill.unit}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Remaining Quantity</label>
-                      <p className="text-sm text-gray-900">{selectedReceivedBill.remainingQuantity} {selectedReceivedBill.unit}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Sold Quantity</label>
-                      <p className="text-sm text-gray-900">{selectedReceivedBill.totalSoldQuantity} {selectedReceivedBill.unit}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Total Received Weight</label>
-                      <p className="text-sm text-gray-900">{selectedReceivedBill.weight ? `${selectedReceivedBill.weight} kg` : 'N/A'}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Total Sold Weight</label>
-                      <p className="text-sm text-gray-900">{selectedReceivedBill.relatedSales ? selectedReceivedBill.relatedSales.reduce((sum: number, sale: any) => sum + (sale.weight || 0), 0) : 0} kg</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Progress</label>
-                      <div className="flex items-center mt-1">
-                        <div className="w-full bg-gray-200 rounded-full h-2 mr-2">
-                          <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${selectedReceivedBill.progress}%` }}></div>
-                        </div>
-                        <span className="text-sm text-gray-900">{selectedReceivedBill.progress.toFixed(1)}%</span>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Status</label>
-                      <div className="mt-1">{getStatusBadge(selectedReceivedBill.status)}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-6">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Financial Information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-green-50 p-4 rounded-lg">
-                    <label className="block text-sm font-medium text-green-700">Total Revenue</label>
-                    <p className="text-2xl font-bold text-green-900">{formatCurrency(selectedReceivedBill.totalRevenue)}</p>
-                  </div>
-                  <div className="bg-red-50 p-4 rounded-lg">
-                    <label className="block text-sm font-medium text-red-700">Total Cost</label>
-                    <p className="text-2xl font-bold text-red-900">{formatCurrency(selectedReceivedBill.totalCost)}</p>
-                  </div>
-                  <div className="bg-blue-50 p-4 rounded-lg">
-                    <label className="block text-sm font-medium text-blue-700">Total Profit</label>
-                    <p className="text-2xl font-bold text-blue-900">{formatCurrency(selectedReceivedBill.totalProfit)}</p>
-                  </div>
-                </div>
-              </div>
-              {selectedReceivedBill.type === 'commission' && (
-                <div className="mt-6">
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Commission Details</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Porterage</label>
-                      <p className="text-sm text-gray-900">{formatCurrency(selectedReceivedBill.porterage || 0)}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Transfer Fee</label>
-                      <p className="text-sm text-gray-900">{formatCurrency(selectedReceivedBill.transferFee || 0)}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Commission Rate</label>
-                      <p className="text-sm text-gray-900">{selectedReceivedBill.commissionRate ? `${selectedReceivedBill.commissionRate}%` : 'N/A'}</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Average Unit Price</label>
-                      <p className="text-sm text-gray-900">{formatCurrency(selectedReceivedBill.avgUnitPrice)}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {selectedReceivedBill.notes && (
-                <div className="mt-6">
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Notes</h3>
-                  <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg">{selectedReceivedBill.notes}</p>
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
-              <button onClick={() => setShowWeightComparison(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
-                <Scale className="w-4 h-4" />
-                Weight Analysis
-              </button>
-              <button onClick={() => handleViewReceivedBillSalesLogs(selectedReceivedBill)} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">View Sales Logs</button>
-              <button onClick={() => setShowReceivedBillDetails(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">Close</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ReceivedBillDetailsModal
+        bill={billDetailsModal.data}
+        isOpen={billDetailsModal.isOpen}
+        onClose={billDetailsModal.close}
+        onViewSalesLogs={(bill) => {
+          billDetailsModal.close();
+          handleViewReceivedBillSalesLogs(bill);
+        }}
+        formatCurrency={formatCurrency}
+        getStatusBadge={getStatusBadge}
+        t={t}
+      />
 
       {/* Batch Edit Modal using ReceiveFormModal */}
       <ReceiveFormModal
@@ -1244,508 +1104,30 @@ export default function ReceivedBills({
         existingBatchItems={editingBatchId ? inventory.filter((item: any) => item.batch_id === editingBatchId) : []}
       />
 
-      {showReceivedBillSalesLogs && selectedReceivedBill && (
-        <ReceivedBillSalesLogsModal
-          selectedReceivedBill={selectedReceivedBill}
-          setShowReceivedBillSalesLogs={setShowReceivedBillSalesLogs}
-          inventory={inventory}
-          sales={sales}
-          customers={customers}
-          formatCurrency={formatCurrency}
-          onEditSale={onEditSale}
-          onDeleteSale={onDeleteSale}
-          onCloseBill={onCloseBill}
-          showToast={showToast}
-          onMarkBillClosed={(id: string) => {
-            setClosedBillIds(prev => {
-              const next = new Set(prev);
-              next.add(id);
-              return next;
-            });
-          }}
-        />
-      )}
-
-      {/* Weight Comparison Modal */}
-      {showWeightComparison && selectedReceivedBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Weight Analysis</h2>
-                <button onClick={() => setShowWeightComparison(false)} className="text-gray-400 hover:text-gray-600">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              <p className="text-sm text-gray-600 mt-1">
-                {selectedReceivedBill.productName} - {selectedReceivedBill.supplierName}
-              </p>
-            </div>
-            <div className="p-6">
-              <WeightComparisonReport
-                productId={selectedReceivedBill.productId}
-                supplierId={selectedReceivedBill.supplierId}
-                billId={selectedReceivedBill.batchId}
-              />
-            </div>
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-              <button
-                onClick={() => setShowWeightComparison(false)}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ReceivedBillSalesLogsModal
+        bill={salesLogsModal.data}
+        isOpen={salesLogsModal.isOpen}
+        onClose={salesLogsModal.close}
+        inventory={inventory}
+        sales={sales}
+        bills={_bills}
+        customers={customers}
+        formatCurrency={formatCurrency}
+        onEditSale={onEditSale}
+        onDeleteSale={onDeleteSale}
+        onCloseBill={onCloseBill}
+        showToast={showToast}
+        onMarkBillClosed={(id: string) => {
+          setClosedBillIds(prev => {
+            const next = new Set(prev);
+            next.add(id);
+            return next;
+          });
+        }}
+      />
 
       {/* Removed parent-level Close Bill modal. The Sales Logs modal now manages its own confirmation modal. */}
 
-    </div>
-  );
-}
-
-function ReceivedBillSalesLogsModal({
-  selectedReceivedBill,
-  setShowReceivedBillSalesLogs,
-  inventory,
-  sales,
-  customers,
-  formatCurrency,
-  onEditSale,
-  onDeleteSale,
-  onCloseBill,
-  showToast,
-  onMarkBillClosed
-}: {
-  selectedReceivedBill: any;
-  setShowReceivedBillSalesLogs: (show: boolean) => void;
-  inventory: any[];
-  sales: any[];
-  customers: any[];
-  formatCurrency: (amount: number) => string;
-  onEditSale: (sale: any) => void;
-  onDeleteSale: (sale: any) => void;
-  onCloseBill?: (bill: any, fees: { commission: number; porterage: number; transfer: number; supplierAmount: number }) => Promise<void>;
-  showToast: (message: string, type?: 'success' | 'error') => void;
-  onMarkBillClosed: (id: string) => void;
-}) {
-  const [showCloseBillModal, setShowCloseBillModal] = useState(false);
-  const [closeBillFees, setCloseBillFees] = useState<{ commission: number; porterage: number; transfer: number; supplierAmount: number } | null>(null);
-  const processedSalesData = useMemo(() => {
-    const salesDetails: any[] = [];
-    let matchingSales: any[] = [];
-    if (selectedReceivedBill.batchId) {
-      const itemIdsInBatch = (inventory || []).filter((it: any) => it.batch_id === selectedReceivedBill.batchId).map((it: any) => it.id);
-      const itemIdSet = new Set(itemIdsInBatch);
-      matchingSales = (sales || []).filter((sale: any) => sale && sale.inventory_item_id && itemIdSet.has(sale.inventory_item_id));
-    } else {
-      matchingSales = (sales || []).filter((sale: any) => sale && sale.inventory_item_id === selectedReceivedBill.id);
-    }
-    matchingSales.forEach((sale: any) => {
-      salesDetails.push({
-        ...sale,
-        saleId: sale.id,
-        saleDate: sale.created_at,
-        customerId: sale.customer_id,
-        customerName: customers.find(c => c.id === sale.customer_id)?.name || 'Walk-in Customer',
-        quantity: sale.quantity || 1,
-        weight: sale.weight,
-        unitPrice: sale.unit_price,
-        receivedValue: sale.received_value,
-        paymentMethod: sale.payment_method || 'cash',
-        notes: sale.notes,
-        productName: selectedReceivedBill.productName,
-        supplierName: selectedReceivedBill.supplierName
-      });
-    });
-    return salesDetails.sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
-  }, [selectedReceivedBill, sales, customers, inventory]);
-
-  const closeBill = async () => {
-    try {
-      if (selectedReceivedBill.isClosed) {
-        showToast('Bill is already closed.', 'error');
-        return;
-      }
-      // Calculate total revenue from sales
-      const totalRevenue = selectedReceivedBill.totalRevenue || 0;
-
-      // Calculate fees based on bill type
-      let commissionAmount = 0;
-      let porterageAmount = 0;
-      let transferAmount = 0;
-      let supplierAmount = 0;
-
-      if (selectedReceivedBill.type === 'commission') {
-        // For commission items, calculate commission percentage
-        const commissionRate = selectedReceivedBill.commissionRate || 0;
-        commissionAmount = (totalRevenue * commissionRate) / 100;
-
-        // Porterage and transfer fees are fixed amounts
-        porterageAmount = selectedReceivedBill.porterage || selectedReceivedBill.batchPorterage || 0;
-        transferAmount = selectedReceivedBill.transferFee || selectedReceivedBill.batchTransferFee || 0;
-
-        // Supplier gets the remaining amount after deducting all fees
-        supplierAmount = totalRevenue - commissionAmount - porterageAmount - transferAmount;
-      } else {
-        // For cash items, supplier gets the full amount
-        supplierAmount = totalRevenue;
-      }
-
-      const fees = {
-        commission: commissionAmount,
-        porterage: porterageAmount,
-        transfer: transferAmount,
-        supplierAmount: supplierAmount
-      };
-
-      // Set fees and show confirmation modal
-      setCloseBillFees(fees);
-      setShowCloseBillModal(true);
-    } catch (e) {
-      console.error('Error closing bill:', e);
-      showToast('Failed to close bill. Please try again.', 'error');
-    }
-  };
-  const hasInvalidSalesLines = useMemo(() => {
-    return processedSalesData.some((item: any) => {
-      const invalidQuantity = selectedReceivedBill.originalQuantity > selectedReceivedBill.totalSoldQuantity;
-      const invalidPrice = !item.unitPrice || item.unitPrice <= 0;
-      return invalidQuantity || invalidPrice;
-
-    });
-  }, [processedSalesData]);
-
-  const exportSelectedBill = () => {
-
-    try {
-      const isBatch = !!selectedReceivedBill.batchId;
-      const billHeaders = isBatch
-        ? ['Batch ID', 'Supplier', 'Type', 'Batch Porterage', 'Batch Transfer Fee', 'Batch Notes', 'Total Items', 'Total Original Qty', 'Total Remaining Qty', 'Total Sold Qty', 'Total Revenue', 'Total Cost', 'Total Profit', 'Received Date']
-        : ['Product', 'Supplier', 'Type', 'Original Qty', 'Remaining Qty', 'Sold Qty', 'Progress %', 'Revenue', 'Cost', 'Profit', 'Status', 'Avg Unit Price', 'Received Date'];
-
-      let billRow: any[] = [];
-      if (isBatch) {
-        const batchItems = inventory.filter((i: any) => i.batch_id === selectedReceivedBill.batchId);
-        const totals = batchItems.reduce((acc: any, it: any) => {
-          const relatedSales = sales.filter((s: any) => s.product_id === it.product_id && s.supplier_id === it.supplier_id && new Date(s.created_at).getTime() >= new Date(it.received_at || it.created_at).getTime());
-          const soldQty = relatedSales.reduce((s: number, r: any) => s + (r.quantity || 0), 0);
-          const revenue = relatedSales.reduce((s: number, r: any) => s + (r.unit_price || 0) * (r.quantity || 0), 0);
-          const origQty = it.received_quantity || it.quantity || 0;
-          const cost = it.type === 'commission' ? ((it.batch_porterage || 0) + (it.batch_transfer_fee || 0)) : (it.price || 0) * origQty;
-          acc.totalItems += 1;
-          acc.totalOriginal += origQty;
-          acc.totalRemaining += (it.quantity || 0);
-          acc.totalSold += soldQty;
-          acc.totalRevenue += revenue;
-          acc.totalCost += cost;
-          acc.totalProfit += revenue - cost;
-          return acc;
-        }, { totalItems: 0, totalOriginal: 0, totalRemaining: 0, totalSold: 0, totalRevenue: 0, totalCost: 0, totalProfit: 0 });
-        billRow = [
-          selectedReceivedBill.batchId,
-          `"${selectedReceivedBill.supplierName}"`,
-          selectedReceivedBill.type,
-          (selectedReceivedBill.batchPorterage || 0).toFixed(2),
-          (selectedReceivedBill.batchTransferFee || 0).toFixed(2),
-          selectedReceivedBill.batchNotes ? `"${String(selectedReceivedBill.batchNotes).replace(/\"/g, '"')}"` : '',
-          totals.totalItems,
-          totals.totalOriginal,
-          totals.totalRemaining,
-          totals.totalSold,
-          totals.totalRevenue.toFixed(2),
-          totals.totalCost.toFixed(2),
-          totals.totalProfit.toFixed(2),
-          new Date(selectedReceivedBill.receivedAt).toLocaleString()
-        ];
-      } else {
-        billRow = [
-          `"${selectedReceivedBill.productName}"`,
-          `"${selectedReceivedBill.supplierName}"`,
-          selectedReceivedBill.type,
-          selectedReceivedBill.originalQuantity,
-          selectedReceivedBill.remainingQuantity,
-          selectedReceivedBill.totalSoldQuantity,
-          `${selectedReceivedBill.progress.toFixed(1)}%`,
-          (selectedReceivedBill.totalRevenue || 0).toFixed(2),
-          (selectedReceivedBill.totalCost || 0).toFixed(2),
-          (selectedReceivedBill.totalProfit || 0).toFixed(2),
-          selectedReceivedBill.status,
-          (selectedReceivedBill.avgUnitPrice || 0).toFixed(2),
-          new Date(selectedReceivedBill.receivedAt).toLocaleString()
-        ];
-      }
-
-      const salesHeader = ['Date', 'Customer', 'Quantity', 'Weight', 'Unit Price', 'Total Price', 'Payment Method', 'Notes'];
-      const salesRows = processedSalesData.map((s: any) => [
-        new Date(s.saleDate).toLocaleString(),
-        `"${s.customerName}"`,
-        s.quantity ?? '',
-        s.weight ?? '',
-        (s.unitPrice ?? 0).toFixed(2),
-        (s.totalPrice ?? (s.unitPrice || 0) * (s.quantity || 0)).toFixed(2),
-        s.paymentMethod ?? '',
-        s.notes ? `"${String(s.notes).replace(/\"/g, '""')}"` : ''
-      ].join(','));
-
-      const csvContent = [
-        billHeaders.join(','),
-        billRow.join(','),
-        '',
-        'Sales Lines',
-        salesHeader.join(','),
-        ...salesRows
-      ].join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      const safeProduct = String(selectedReceivedBill.productName || '').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
-      const safeSupplier = String(selectedReceivedBill.supplierName || '').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
-      link.setAttribute('download', `received-bill-${safeProduct}-${safeSupplier}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (error) {
-      console.error('Error exporting selected bill:', error);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] flex flex-col">
-        <div className="p-6 border-b flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">Sales Logs</h2>
-              <p className="text-md text-gray-600 mt-1">{selectedReceivedBill.productName} - {selectedReceivedBill.supplierName}</p>
-            </div>
-            <button onClick={() => setShowReceivedBillSalesLogs(false)} className="text-gray-400 hover:text-gray-600">
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-        </div>
-        <div className="p-6 overflow-y-auto flex-1">
-          <div className="mb-4">
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-              <div className="bg-blue-50 p-3 rounded-lg">
-                <p className="text-sm text-blue-700">Total Sales</p>
-                <p className="text-lg font-bold text-blue-900">{processedSalesData.length}</p>
-              </div>
-              <div className="bg-green-50 p-3 rounded-lg">
-                <p className="text-sm text-green-700">Total Revenue</p>
-                <p className="text-lg font-bold text-green-900">{formatCurrency(processedSalesData.reduce((sum, item) => sum + (item.receivedValue ?? ((item.unitPrice || 0) * (item.quantity || 0))), 0))}</p>
-              </div>
-              <div className="bg-purple-50 p-3 rounded-lg">
-                <p className="text-sm text-purple-700">Sold Quantity</p>
-                <p className="text-lg font-bold text-purple-900">{processedSalesData.reduce((sum, item) => sum + (item.quantity || 0), 0)} {selectedReceivedBill.unit}</p>
-              </div>
-              <div className="bg-orange-50 p-3 rounded-lg">
-                <p className="text-sm text-orange-700">Avg Price</p>
-                <p className="text-lg font-bold text-orange-900">{formatCurrency(processedSalesData.length > 0 ? processedSalesData.reduce((sum, item) => sum + (item.unitPrice || 0), 0) / processedSalesData.length : 0)}</p>
-              </div>
-              <div className="bg-indigo-50 p-3 rounded-lg">
-                <p className="text-sm text-indigo-700">Total Received Weight</p>
-                <p className="text-lg font-bold text-indigo-900">{selectedReceivedBill.weight ? `${selectedReceivedBill.weight} kg` : 'N/A'}</p>
-              </div>
-              <div className="bg-teal-50 p-3 rounded-lg">
-                <p className="text-sm text-teal-700">Total Sold Weight</p>
-                <p className="text-lg font-bold text-teal-900">{processedSalesData.reduce((sum, item) => sum + (item.weight || 0), 0)} kg</p>
-              </div>
-            </div>
-          </div>
-
-          {processedSalesData.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weight</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Price</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Method</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {processedSalesData.map((item, index) => (
-                    <tr key={`${item.saleId}-${index}`} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{new Date(item.saleDate).toLocaleDateString()}</div>
-                        <div className="text-xs text-gray-500">{new Date(item.saleDate).toLocaleTimeString()}</div>
-                      </td>
-
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{item.customerName}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{item.quantity} {selectedReceivedBill.unit}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{item.weight ? `${item.weight} kg` : '-'}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{formatCurrency(item.unitPrice || 0)}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{formatCurrency(item.receivedValue ?? ((item.unitPrice || 0) * (item.quantity || 0)))}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.paymentMethod === 'cash' ? 'bg-green-100 text-green-800' : item.paymentMethod === 'card' ? 'bg-blue-100 text-blue-800' : item.paymentMethod === 'credit' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
-                          {item.paymentMethod}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-2">
-                          <button onClick={() => onEditSale({ ...item, id: item.id, quantity: item.quantity, weight: item.weight, unit_price: item.unitPrice, payment_method: item.paymentMethod, notes: item.notes })} className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 transition-colors" title="Edit Sale">
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => onDeleteSale({ ...item, id: item.id, saleId: item.saleId, customerName: item.customerName, totalPrice: item.unitPrice * item.quantity })} className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors" title="Delete Sale">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No Sales Recorded</h3>
-              <p className="text-gray-500 mb-4">No sales have been recorded for this inventory item yet.</p>
-            </div>
-          )}
-        </div>
-        <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center flex-shrink-0">
-          <div className="text-sm text-gray-500">Showing {processedSalesData.length} sale record{processedSalesData.length !== 1 ? 's' : ''}</div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={exportSelectedBill}
-              disabled={!selectedReceivedBill.isClosed}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={!selectedReceivedBill.isClosed ? 'Export is only available after closing the bill' : 'Export this received bill'}
-            >
-              {'Export Bill'}
-            </button>
-            <button
-              onClick={closeBill}
-              disabled={hasInvalidSalesLines || selectedReceivedBill.isClosed}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={selectedReceivedBill.isClosed ? 'Bill already closed' : hasInvalidSalesLines ? 'Cannot close bill: missing quantity or non-priced item(s) present' : 'Close this received bill'}
-            >
-              {'Close Bill'}
-            </button>
-
-            <button onClick={() => setShowReceivedBillSalesLogs(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">Close</button>
-          </div>
-        </div>
-      </div>
-
-      {showCloseBillModal && closeBillFees && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-900">Close Bill Confirmation</h2>
-                <button onClick={() => setShowCloseBillModal(false)} className="text-gray-400 hover:text-gray-600">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h3 className="text-sm font-medium text-gray-700 mb-3">Bill Summary</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span>Product:</span>
-                    <span className="font-medium">{selectedReceivedBill.productName}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Supplier:</span>
-                    <span className="font-medium">{selectedReceivedBill.supplierName}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Type:</span>
-                    <span className="font-medium capitalize">{selectedReceivedBill.type}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Total Revenue:</span>
-                    <span className="font-medium text-green-600">{formatCurrency(selectedReceivedBill.totalRevenue)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-yellow-50 p-4 rounded-lg">
-                <h3 className="text-sm font-medium text-yellow-700 mb-3">Fee Breakdown</h3>
-                <div className="space-y-2 text-sm">
-                  {selectedReceivedBill.type === 'commission' && (
-                    <>
-                      <div className="flex justify-between">
-                        <span>Commission ({selectedReceivedBill.commissionRate || 0}%):</span>
-                        <span className="font-medium text-red-600">-{formatCurrency(closeBillFees.commission)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Porterage:</span>
-                        <span className="font-medium text-red-600">-{formatCurrency(closeBillFees.porterage)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Transfer Fee:</span>
-                        <span className="font-medium text-red-600">-{formatCurrency(closeBillFees.transfer)}</span>
-                      </div>
-                    </>
-                  )}
-                  <div className="border-t pt-2 mt-2">
-                    <div className="flex justify-between font-medium">
-                      <span>Supplier Amount:</span>
-                      <span className="text-green-600">{formatCurrency(closeBillFees.supplierAmount)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-
-            </div>
-            <div className="px-6 py-4 border-t flex justify-end gap-3">
-              <button
-                onClick={() => setShowCloseBillModal(false)}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    if (onCloseBill) {
-                      await onCloseBill(selectedReceivedBill, closeBillFees);
-                      setShowCloseBillModal(false);
-                      setCloseBillFees(null);
-                      setShowReceivedBillSalesLogs(false);
-                      showToast('Bill closed successfully! Commission, porterage, and transfer fees deducted. Supplier balance updated.', 'success');
-                      // notify parent to mark as closed locally
-                      onMarkBillClosed(String(selectedReceivedBill.id));
-                    }
-                  } catch (e) {
-                    console.error('Error closing bill:', e);
-                    showToast('Failed to close bill. Please try again.', 'error');
-                  }
-                }}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-              >
-                Confirm Close Bill
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1754,4 +1136,3 @@ function ReceivedBillSalesLogsModal({
 function ClockIcon(props: any) { return <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>; }
 function TrendingUpIcon(props: any) { return <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>; }
 function TargetIcon(props: any) { return <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>; }
-

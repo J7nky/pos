@@ -65,10 +65,10 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   const [originalFormValues, setOriginalFormValues] = useState<any>(null);
   const modalInstanceRef = useRef<number>(0);
 
-  // Auto-focus first field when modal opens
-  useEffect(() => {
-    if (open && firstInputRef.current) firstInputRef.current.focus();
-  }, [open]);
+  // // Auto-focus first field when modal opens
+  // useEffect(() => {
+  //   if (open && firstInputRef.current) firstInputRef.current.focus();
+  // }, [open]);
 
   // Add default product row when modal opens - handled in the main useEffect below
 
@@ -289,7 +289,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           type: form.type,
           plastic_fee: plasticFee,
           received_at: form.received_at,
-          currency: form.porterage_currency || preferredCurrency || 'USD',
+          currency: form.porterage_currency || preferredCurrency,
           items
         }
       });
@@ -501,11 +501,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
 
         <form onSubmit={handleSubmit} className="p-6">
           {/* Hidden input for auto-focus */}
-          <input
-            ref={firstInputRef}
-            style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }}
-            tabIndex={-1}
-          />
+        
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Left Column - Basic Information */}
@@ -781,7 +777,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                       const selectedId = value as string;
                                       setBulkItems(prev => ({
                                         ...prev,
-                                        [productId]: { ...prev[productId], product_id: selectedId }
+                                        [productId]: { ...prev[productId], product_id: selectedId, unit: 'kg' }
                                       }));
                                     }}
                                     placeholder={t('inventory.selectProduct')}

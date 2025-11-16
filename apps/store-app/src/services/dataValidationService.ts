@@ -40,16 +40,19 @@ const VALIDATION_RULES: Record<string, ValidationRule[]> = {
   ],
   bills: [
     { field: 'bill_number', required: true, type: 'string' },
-    { field: 'total_amount', required: true, type: 'number', min: 0 },
+    // total_amount, subtotal, amount_due REMOVED - computed dynamically
     { field: 'payment_method', required: true, enum: ['cash', 'card', 'credit'] },
+    { field: 'amount_paid', required: true, type: 'number', min: 0 },
     { field: 'created_by', required: true, type: 'uuid', foreignKey: { table: 'users', cacheKey: 'users' } },
     { field: 'customer_id', type: 'uuid', foreignKey: { table: 'customers', cacheKey: 'customers' } },
   ],
   bill_line_items: [
     { field: 'bill_id', required: true, type: 'uuid', foreignKey: { table: 'bills', cacheKey: 'bills' } },
     { field: 'product_id', required: true, type: 'uuid', foreignKey: { table: 'products', cacheKey: 'products' } },
-    { field: 'supplier_id', required: true, type: 'uuid', foreignKey: { table: 'suppliers', cacheKey: 'suppliers' } },
+    // supplier_id, supplier_name, product_name, payment_method, customer_id, created_by REMOVED
     { field: 'quantity', required: true, type: 'number', min: 0 },
+    { field: 'unit_price', required: true, type: 'number', min: 0 },
+    { field: 'line_total', required: true, type: 'number', min: 0 },
   ],
   bill_audit_logs: [
     { field: 'bill_id', required: true, type: 'uuid', foreignKey: { table: 'bills', cacheKey: 'bills' } },
@@ -457,13 +460,19 @@ export class DataValidationService {
 
     // Table-specific cleaning
     if (tableName === 'bills') {
+      // Remove deprecated computed fields
+      delete cleanRecord.subtotal;
+      delete cleanRecord.total_amount;
+      delete cleanRecord.amount_due;
+      delete cleanRecord.last_modified_at;
+      
+      // Remove other invalid fields
       delete cleanRecord.tax_amount;
       delete cleanRecord.discount_amount;
       delete cleanRecord.inventoryItemId;
       delete cleanRecord.due_date;
       delete cleanRecord.status;
       delete cleanRecord.last_modified_by;
-      delete cleanRecord.last_modified_at;
       
       // Remove any line item fields from bills
       const lineItemFields = ['productId', 'supplierId', 'quantity', 'unitPrice', 'lineTotal', 'weight', 'line_order', 'inventory_item_id', 'product_id', 'supplier_id', 'unit_price', 'line_total'];
@@ -471,10 +480,16 @@ export class DataValidationService {
     }
 
     if (tableName === 'bill_line_items') {
-      cleanRecord.product_name = cleanRecord.product_name || 'Unknown Product';
-      cleanRecord.supplier_name = cleanRecord.supplier_name || 'Unknown Supplier';
+      // Remove deprecated denormalized fields
+      delete cleanRecord.supplier_id;
+      delete cleanRecord.supplier_name;
+      delete cleanRecord.product_name;
+      delete cleanRecord.payment_method;
+      delete cleanRecord.customer_id;
+      delete cleanRecord.created_by;
+      
+      // Ensure inventory_item_id is null if not set
       cleanRecord.inventory_item_id = cleanRecord.inventory_item_id || null;
-      cleanRecord.customer_id = cleanRecord.customer_id || null;
     }
 
     if (tableName === 'bill_audit_logs') {

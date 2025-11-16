@@ -534,21 +534,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             {
               id: item.id,
               store_id: item.store_id,
-              inventory_item_id: item.inventory_item_id || '',
+              inventory_item_id: item.inventory_item_id || null,
               product_id: item.product_id,
-              supplier_id: item.supplier_id,
-              customer_id: item.customer_id,
               quantity: item.quantity,
               weight: item.weight,
               unit_price: item.unit_price,
               received_value: item.received_value,
-              payment_method: item.payment_method as 'cash' | 'card' | 'credit',
               notes: item.notes,
               created_at: item.created_at,
-              created_by: item.created_by,
               bill_id: item.bill_id,
-              product_name: item.product_name,
-              supplier_name: item.supplier_name,
               line_total: item.line_total,
               line_order: item.line_order,
               updated_at: item.updated_at,
@@ -580,7 +574,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const batch = item.batch_id ? batchById[item.batch_id] : null;
         return {
           ...item,
-          supplier_name: item.supplier_name,
           commission_rate: batch ? batch.commission_rate : null,
           batch_type: batch ? batch.type : null,
           batch_porterage: batch ? batch.porterage_fee : null,
@@ -1146,7 +1139,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           const inventoryRecords = await db.inventory_items
             .where('product_id')
             .equals(item.product_id)
-            .and(inv => inv.supplier_id === item.supplier_id && inv.quantity > 0)
+            .and(inv => inv.quantity > 0)
             .sortBy('received_at');
 
           let qtyToDeduct = item.quantity || 1; // Default to 1 if not specified
@@ -2150,7 +2143,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       commission_rate: commission_rate || null,
       store_id: storeId,
       created_by,
-      currency: batchCurrency || currency || 'USD', // Ensure currency is never null
+      currency: batchCurrency || currency,
       plastic_fee: plastic_fee ? String(plastic_fee) : undefined,
       type,
       created_at: new Date().toISOString(),
@@ -2164,8 +2157,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Both batch and items are persisted locally and will be synced to Supabase.
     // The sync service ensures inventory_bills are uploaded before inventory_items
     // to maintain foreign key constraints.
-    console.log('batch123', batchRecord);
-
     await db.transaction('rw', [db.inventory_bills, db.inventory_items], async () => {
       await db.inventory_bills.add(batchRecord);
       debug(batchRecord, 'batchrecord')
@@ -2300,7 +2291,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       created_at: now,
       updated_at: now,
       last_modified_by: currentUserId,
-      last_modified_at: now,
       _synced: false
     };
 
@@ -2309,9 +2299,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       store_id: storeId,
       bill_id: billId,
       product_id: item.product_id,
-      product_name: item.product_name || 'Unknown Product',
-      supplier_id: item.supplier_id,
-      supplier_name: item.supplier_name || 'Unknown Supplier',
       inventory_item_id: item.inventory_item_id || null,
       quantity: item.quantity,
       unit_price: item.unit_price,
@@ -2319,9 +2306,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       weight: item.weight || null,
       notes: item.notes || null,
       line_order: index + 1,
-      payment_method: item.payment_method || 'cash',
-      customer_id: item.customer_id || null,
-      created_by: currentUserId,
       received_value: item.received_value || item.unit_price * item.quantity,
       created_at: now,
       updated_at: now,
@@ -2367,7 +2351,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           const inventoryRecords = await db.inventory_items
             .where('product_id')
             .equals(item.product_id)
-            .and(inv => inv.supplier_id === item.supplier_id && inv.quantity > 0)
+            .and(inv => inv.quantity > 0)
             .sortBy('received_at');
 
           let qtyToDeduct = item.quantity || 1; // Default to 1 if not specified
@@ -2495,13 +2479,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await db.updateBillLineItem(id, dbUpdates, currentUserId);
 
     // Handle inventory adjustments outside the transaction if quantity changed
-    if (quantityChanged && originalSale.product_id && originalSale.supplier_id) {
+    if (quantityChanged && originalSale.product_id) {
       if (quantityDifference > 0) {
         // Quantity increased - deduct additional inventory
-        await deductInventoryQuantity(originalSale.product_id, originalSale.supplier_id, quantityDifference);
+        await deductInventoryQuantity(originalSale.product_id, quantityDifference);
       } else if (quantityDifference < 0) {
         // Quantity decreased - restore inventory
-        await restoreInventoryQuantity(originalSale.product_id, originalSale.supplier_id, Math.abs(quantityDifference));
+        await restoreInventoryQuantity(originalSale.product_id, Math.abs(quantityDifference));
       }
     }
 
@@ -2525,8 +2509,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Store inventory adjustment info for undo
       metadata: {
         quantityDifference,
-        product_id: originalSale.product_id,
-        supplier_id: originalSale.supplier_id
+        product_id: originalSale.product_id
       }
     });
 
@@ -2555,7 +2538,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Restore inventory quantities outside the transaction
     if (saleItem.quantity && saleItem.quantity > 0) {
-      await restoreInventoryQuantity(saleItem.product_id, saleItem.supplier_id, saleItem.quantity);
+      await restoreInventoryQuantity(saleItem.product_id, saleItem.quantity);
     }
 
     // Store undo data - restore the deleted sale item
@@ -2566,8 +2549,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Store inventory info for undo
       metadata: {
         quantity: saleItem.quantity,
-        product_id: saleItem.product_id,
-        supplier_id: saleItem.supplier_id
+        product_id: saleItem.product_id
       }
     });
 
@@ -4433,15 +4415,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const deductInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
-    console.log('deductInventoryQuantity', productId, supplierId, quantity);
+  const deductInventoryQuantity = async (productId: string, quantity: number): Promise<void> => {
+    console.log('deductInventoryQuantity', productId, quantity);
     if (!storeId) return;
 
     try {
       const inventoryRecords = await db.inventory_items
         .where('product_id')
         .equals(productId)
-        .and(inv => inv.supplier_id === supplierId && inv.quantity > 0)
+        .and(inv => inv.quantity > 0)
         .sortBy('received_at');
 
       let qtyToDeduct = quantity;
@@ -4480,16 +4462,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const restoreInventoryQuantity = async (productId: string, supplierId: string, quantity: number): Promise<void> => {
-    console.log('restoreInventoryQuantity', productId, supplierId, quantity);
+  const restoreInventoryQuantity = async (productId: string, quantity: number): Promise<void> => {
+    console.log('restoreInventoryQuantity', productId, quantity);
     if (!storeId) return;
 
     try {
-      // Find existing inventory items for this product/supplier
+      // Find existing inventory items for this product
       const existingInventory = await db.inventory_items
         .where('product_id')
         .equals(productId)
-        .and(inv => inv.supplier_id === supplierId)
         .sortBy('received_at');
 
       if (existingInventory.length > 0) {

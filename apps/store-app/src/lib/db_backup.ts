@@ -48,27 +48,20 @@ export interface Bill extends BaseEntity {
   store_id: string;
   bill_number: string;
   customer_id: string | null;
-  subtotal: number;
-  total_amount: number;
   payment_method: 'cash' | 'card' | 'credit';
   payment_status: 'paid' | 'partial' | 'pending';
   amount_paid: number;
-  amount_due: number;
   bill_date: string;
   notes: string | null;
   status: 'active' | 'cancelled' | 'refunded';
   created_by: string;
   last_modified_by: string | null;
-  last_modified_at: string | null;
 }
 
 // Bill line items for detailed bill management
 export interface BillLineItem extends BaseEntity {
   bill_id: string;
   product_id: string;
-  product_name: string;
-  supplier_id: string;
-  supplier_name: string;
   inventory_item_id: string | null;
   quantity: number;
   unit_price: number;
@@ -76,9 +69,6 @@ export interface BillLineItem extends BaseEntity {
   weight: number | null;
   notes: string | null;
   line_order: number;
-  payment_method: 'cash' | 'card' | 'credit';
-  customer_id: string | null;
-  created_by: string;
   received_value: number;
 }
 

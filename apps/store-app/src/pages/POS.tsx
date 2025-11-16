@@ -372,15 +372,15 @@ ${dashSeparator}`;
     onQuickCredit: () => updateActiveTab({ paymentMethod: 'credit' })
   });
 
-  // Auto-focus search input on component mount
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchInputRef.current) {
-        searchInputRef.current.focus();
-      }
-    }, 100);
-    return () => clearTimeout(timer);
-  }, []);
+  // // Auto-focus search input on component mount
+  // React.useEffect(() => {
+  //   const timer = setTimeout(() => {
+  //     if (searchInputRef.current) {
+  //       searchInputRef.current.focus();
+  //     }
+  //   }, 100);
+  //   return () => clearTimeout(timer);
+  // }, []);
 
   // Initialize with first tab if no tabs exist
   React.useEffect(() => {
@@ -438,8 +438,6 @@ ${dashSeparator}`;
 
   const activeTab = activeTabs.find(tab => tab.id === activeTabId);
   if (!activeTab) return null;
-
-
 
   // Get total available stock for a product across all suppliers (subtract reservations across all tabs)
   const getProductStock = (productId: string) => {
@@ -676,6 +674,15 @@ ${dashSeparator}`;
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
   const handleCheckout = async () => {
     if (activeTab.cart.length === 0) return;
+    
+    // Check if there are non-priced items and automatically switch to credit
+    const hasNonPricedItem = activeTab.cart.some(i => (i.unitPrice ?? 0) === 0);
+    if (hasNonPricedItem && activeTab.paymentMethod !== 'credit') {
+      updateActiveTab({ paymentMethod: 'credit' });
+      // Return early to let the state update, user can click proceed again
+      return;
+    }
+    
     // Disallow completing sale if walk-in customer and any item has zero price
     if (!activeTab.selectedCustomer && activeTab.cart.some(i => (i.unitPrice ?? 0) === 0)) {
       setCustomerError('Please set a price or select a customer. Walk-in sales cannot include zero-priced items.');

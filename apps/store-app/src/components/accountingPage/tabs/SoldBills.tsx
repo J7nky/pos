@@ -5,6 +5,7 @@ import { useCurrency } from '../../../hooks/useCurrency';
 import { useI18n } from '../../../i18n';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { Pagination } from '../../common/Pagination';
+import { calculateBillTotals, BillWithTotals } from '../../../utils/billCalculations';
 
 import { 
   FileText, 
@@ -30,8 +31,6 @@ interface Bill {
   id: string;
   bill_number: string;
   customer_id: string | null;
-  subtotal: number;
-  total_amount: number;
   payment_method: 'cash' | 'card' | 'credit';
   payment_status: 'paid' | 'partial' | 'pending';
   amount_paid: number;
@@ -49,9 +48,6 @@ interface Bill {
 interface BillLineItem {
   id: string;
   product_id: string;
-  product_name: string;
-  supplier_id: string;
-  supplier_name: string;
   inventory_item_id: string | null;
   quantity: number;
   unit_price: number;
@@ -64,9 +60,6 @@ interface BillLineItem {
 
 type LineItemEditState = {
   product_id?: string;
-  product_name?: string;
-  supplier_id?: string;
-  supplier_name?: string;
   quantity?: string;
   unitPrice?: string;
   weight?: string;
@@ -85,7 +78,7 @@ interface BillAuditLog {
   users?: { name: string; email: string };
 }
 
-interface BillDetails extends Bill {
+interface BillDetails extends BillWithTotals {
   bill_line_items: BillLineItem[];
   bill_audit_logs: BillAuditLog[];
   _synced?: boolean;
@@ -245,18 +238,9 @@ export default function InventoryLogs() {
       items = Array.isArray(fallback) ? fallback : [];
     }
 
-    // Enrich items with product and supplier names if missing
-    return items.map(item => {
-      const product = products.find(p => p.id === item.product_id);
-      const supplier = suppliers.find(s => s.id === item.supplier_id);
-      
-      return {
-        ...item,
-        product_name: product?.name || item.product_name || 'Unknown Product',
-        supplier_name: supplier?.name || item.supplier_name || 'Unknown Supplier',
-      };
-    });
-  }, [selectedBill, products, suppliers]);
+    // Return items as-is - product/supplier names will be resolved in UI
+    return items;
+  }, [selectedBill]);
 
   const getInventoryContextForLineItem = useCallback((lineItem: BillLineItem) => {
     const inventoryItem = lineItem.inventory_item_id
@@ -524,7 +508,19 @@ export default function InventoryLogs() {
       };
 
       const data = await raw.getBills(filters);
-      setBills(data || []);
+      
+      // Add computed totals to each bill
+      const billsWithTotals = (data || []).map(bill => {
+        // Get line items for this bill from raw context
+        const lineItems = raw.billLineItems.filter(li => li.bill_id === bill.id);
+        const totals = calculateBillTotals(lineItems, bill.amount_paid);
+        return {
+          ...bill,
+          ...totals
+        };
+      });
+      
+      setBills(billsWithTotals as any);
       setSyncStatus('synced');
       
       // Reset sync status after 3 seconds
@@ -569,8 +565,11 @@ export default function InventoryLogs() {
           ? (data as any).audit_logs
           : [];
 
+      // Add computed totals to the bill
+      const billWithTotals = addComputedTotals(data as any, normalizedLineItems);
+      
       const normalizedBill = {
-        ...data,
+        ...billWithTotals,
         bill_line_items: normalizedLineItems,
         bill_audit_logs: normalizedAuditLogs,
       } as BillDetails;
@@ -618,28 +617,32 @@ export default function InventoryLogs() {
         const unitPriceValue = edits.unitPrice ?? item.unit_price.toString();
         const weightValue = edits.weight ?? (item.weight !== null && item.weight !== undefined ? item.weight.toString() : '');
         
+        // Get product name for error messages
+        const product = products.find(p => p.id === item.product_id);
+        const productName = product?.name || 'Unknown Product';
+        
         if (edits.quantity !== undefined) {
           if (quantityValue.trim() === '' || !Number.isFinite(Number(quantityValue)) || Number(quantityValue) <= 0) {
-            lineItemErrors.push(`${item.product_name}: ${t('accounting.pleaseEnterValidQuantity')}`);
+            lineItemErrors.push(`${productName}: ${t('accounting.pleaseEnterValidQuantity')}`);
           }
         }
         
         if (edits.unitPrice !== undefined) {
           if (unitPriceValue.trim() === '' || !Number.isFinite(Number(unitPriceValue)) || Number(unitPriceValue) <= 0) {
-            lineItemErrors.push(`${item.product_name}: ${t('accounting.pleaseEnterValidUnitPrice')}`);
+            lineItemErrors.push(`${productName}: ${t('accounting.pleaseEnterValidUnitPrice')}`);
           }
         }
         
         if (edits.weight !== undefined && weightValue !== '') {
           if (!Number.isFinite(Number(weightValue)) || Number(weightValue) < 0) {
-            lineItemErrors.push(`${item.product_name}: ${t('soldBills.invalidWeight')}`);
+            lineItemErrors.push(`${productName}: ${t('soldBills.invalidWeight')}`);
           }
         }
         
         // Check if line item is editable
         const { isEditable } = getInventoryContextForLineItem(item);
         if (!isEditable && Object.keys(edits).length > 0) {
-          lineItemErrors.push(`${item.product_name}: ${t('soldBills.inventoryBillClosed')}`);
+          lineItemErrors.push(`${productName}: ${t('soldBills.inventoryBillClosed')}`);
         }
       }
       
@@ -655,7 +658,9 @@ export default function InventoryLogs() {
       
       for (const item of billLineItems) {
         const edits = lineItemEdits[item.id] || {};
-        console.log(`🔍 Processing item ${item.id} (${item.product_name}), edits:`, edits);
+        const product = products.find(p => p.id === item.product_id);
+        const productName = product?.name || 'Unknown Product';
+        console.log(`🔍 Processing item ${item.id} (${productName}), edits:`, edits);
         
         if (Object.keys(edits).length === 0) {
           console.log(`  ⏭️ Skipping item ${item.id} - no edits`);
@@ -724,13 +729,6 @@ export default function InventoryLogs() {
         // Add product changes if edited
         if (edits.product_id !== undefined && edits.product_id !== item.product_id) {
           updates.product_id = edits.product_id;
-          updates.product_name = edits.product_name || item.product_name;
-        }
-        
-        // Add supplier changes if edited
-        if (edits.supplier_id !== undefined && edits.supplier_id !== item.supplier_id) {
-          updates.supplier_id = edits.supplier_id;
-          updates.supplier_name = edits.supplier_name || item.supplier_name;
         }
         
         // Only add notes if it actually changed
@@ -1454,18 +1452,24 @@ export default function InventoryLogs() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {billLineItems.map((item) => (
-                        <tr key={item.id}>
-                          <td className="px-4 py-3 text-sm text-gray-900">{item.product_name}</td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{item.supplier_name}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900">
-                            {item.quantity}
-                            {item.weight && <div className="text-xs text-gray-500">{item.weight}kg</div>}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-900">{formatCurrency(item.unit_price)}</td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{formatCurrency(item.line_total)}</td>
-                        </tr>
-                      ))}
+                      {billLineItems.map((item) => {
+                        const product = products.find(p => p.id === item.product_id);
+                        const inventoryItem = item.inventory_item_id ? inventoryItems.find(i => i.id === item.inventory_item_id) : null;
+                        const supplier = inventoryItem ? suppliers.find(s => s.id === inventoryItem.supplier_id) : null;
+                        
+                        return (
+                          <tr key={item.id}>
+                            <td className="px-4 py-3 text-sm text-gray-900">{product?.name || 'Unknown Product'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{supplier?.name || 'Unknown Supplier'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900">
+                              {item.quantity}
+                              {item.weight && <div className="text-xs text-gray-500">{item.weight}kg</div>}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{formatCurrency(item.unit_price)}</td>
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{formatCurrency(item.line_total)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1610,6 +1614,11 @@ export default function InventoryLogs() {
                           }
 
                           const { isEditable, batchStatus } = getInventoryContextForLineItem(item);
+                          
+                          // Resolve product and supplier names
+                          const product = products.find(p => p.id === item.product_id);
+                          const inventoryItem = item.inventory_item_id ? inventoryItems.find(i => i.id === item.inventory_item_id) : null;
+                          const supplier = inventoryItem ? suppliers.find(s => s.id === inventoryItem.supplier_id) : null;
 
                           return (
                             <tr key={item.id} className="align-top">
@@ -1617,11 +1626,7 @@ export default function InventoryLogs() {
                                 <select
                                   value={edit.product_id ?? item.product_id}
                                   onChange={(e) => {
-                                    const selectedProduct = raw.products.find(p => p.id === e.target.value);
                                     handleLineItemChange(item.id, 'product_id', e.target.value);
-                                    if (selectedProduct) {
-                                      handleLineItemChange(item.id, 'product_name', selectedProduct.name);
-                                    }
                                   }}
                                   disabled={!isEditable || isEditing}
                                   className="w-full border border-gray-300 rounded-lg px-2 py-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
@@ -1641,25 +1646,9 @@ export default function InventoryLogs() {
                                   </div>
                                 )}
                               </td>
-                              <td className="px-4 py-3">
-                                <select
-                                  value={edit.supplier_id ?? item.supplier_id}
-                                  onChange={(e) => {
-                                    const selectedSupplier = raw.suppliers.find(s => s.id === e.target.value);
-                                    handleLineItemChange(item.id, 'supplier_id', e.target.value);
-                                    if (selectedSupplier) {
-                                      handleLineItemChange(item.id, 'supplier_name', selectedSupplier.name);
-                                    }
-                                  }}
-                                  disabled={!isEditable || isEditing}
-                                  className="w-full border border-gray-300 rounded-lg px-2 py-2 focus:ring-blue-500 focus:border-blue-500"
-                                >
-                                  {raw.suppliers.map(supplier => (
-                                    <option key={supplier.id} value={supplier.id}>
-                                      {supplier.name}
-                                    </option>
-                                  ))}
-                                </select>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {/* Supplier is read-only, determined by inventory_item */}
+                                {supplier?.name || 'Unknown Supplier'}
                               </td>
                               <td className="px-4 py-3">
                                 <input

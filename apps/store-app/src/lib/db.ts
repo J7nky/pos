@@ -1381,18 +1381,14 @@ class POSDatabase extends Dexie {
         _synced: false,
         bill_number: billData.bill_number || generateBillReference(),
         customer_id: billData.customer_id || null,
-        subtotal: billData.subtotal || 0,
-        total_amount: billData.total_amount || 0,
         payment_method: billData.payment_method || 'cash',
         payment_status: billData.payment_status || 'paid',
         amount_paid: billData.amount_paid || 0,
-        amount_due: billData.amount_due || 0,
         bill_date: billData.bill_date || now,
         notes: billData.notes || null,
         status: billData.status || 'active',
         created_by: billData.created_by!,
-        last_modified_by: null,
-        last_modified_at: null
+        last_modified_by: null
       };
       
       await this.bills.add(bill);
@@ -1406,9 +1402,6 @@ class POSDatabase extends Dexie {
         _synced: false,
         bill_id: billId,
         product_id: item.product_id,
-        product_name: item.product_name,
-        supplier_id: item.supplier_id,
-        supplier_name: item.supplier_name,
         inventory_item_id: item.inventory_item_id,
         quantity: item.quantity,
         unit_price: item.unit_price,
@@ -1416,9 +1409,6 @@ class POSDatabase extends Dexie {
         weight: item.weight,
         notes: item.notes,
         line_order: item.line_order || index + 1,
-        payment_method: item.payment_method,
-        customer_id: item.customer_id,
-        created_by: item.created_by,
         received_value: item.received_value
       }));
       
@@ -1457,7 +1447,7 @@ class POSDatabase extends Dexie {
       await this.bills.update(billId, {
         ...updates,
         last_modified_by: changedBy,
-        last_modified_at: now,
+        updated_at: now,
         _synced: false,
       });
 
@@ -1603,8 +1593,12 @@ class POSDatabase extends Dexie {
     await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs], async () => {
       await this.bill_line_items.add(newLineItem);
 
+      // Resolve product name for audit log
+      const product = await this.products.get(newLineItem.product_id);
+      const productName = product?.name || 'Unknown Product';
+      
       // Create audit log with descriptive reason
-      const generatedReason = `Adding line item: ${newLineItem.product_name} (Qty: ${newLineItem.quantity}, Price: ${newLineItem.unit_price})`;
+      const generatedReason = `Adding line item: ${productName} (Qty: ${newLineItem.quantity}, Price: ${newLineItem.unit_price})`;
 
       await this.bill_audit_logs.add({
         id: uuidv4(),
@@ -1672,37 +1666,13 @@ class POSDatabase extends Dexie {
               }
             }
 
-            // Resolve supplier_id to supplier name
-            if (field === 'supplier_id') {
-              if (oldValue && typeof oldValue === 'string') {
-                const oldSupplier = await this.suppliers.get(oldValue);
-                oldValueDisplay = oldSupplier?.name || oldValue;
-              }
-              if (newValue && typeof newValue === 'string') {
-                const newSupplier = await this.suppliers.get(newValue);
-                newValueDisplay = newSupplier?.name || String(newValue);
-              }
-            }
-
-            // Resolve customer_id to customer name
-            if (field === 'customer_id') {
-              if (oldValue && typeof oldValue === 'string') {
-                const oldCustomer = await this.customers.get(oldValue);
-                oldValueDisplay = oldCustomer?.name || oldValue;
-              } else {
-                oldValueDisplay = 'None';
-              }
-              if (newValue && typeof newValue === 'string') {
-                const newCustomer = await this.customers.get(newValue);
-                newValueDisplay = newCustomer?.name || newValue;
-              } else {
-                newValueDisplay = 'None';
-              }
-            }
-
+            // Resolve product name for audit log
+            const product = await this.products.get(originalItem.product_id);
+            const productName = product?.name || 'Unknown Product';
+            
             // Generate descriptive change reason
             const fieldLabel = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            const generatedReason = `Modifying line item: ${fieldLabel} from ${oldValueDisplay} to ${newValueDisplay} (Product: ${originalItem.product_name})`;
+            const generatedReason = `Modifying line item: ${fieldLabel} from ${oldValueDisplay} to ${newValueDisplay} (Product: ${productName})`;
 
             await this.bill_audit_logs.add({
               id: uuidv4(),
@@ -1746,8 +1716,12 @@ class POSDatabase extends Dexie {
         _synced: false
       });
 
+      // Resolve product name for audit log
+      const product = await this.products.get(lineItem.product_id);
+      const productName = product?.name || 'Unknown Product';
+      
       // Create audit log with descriptive reason
-      const generatedReason = `Removing line item: ${lineItem.product_name} (Qty: ${lineItem.quantity}, Price: ${lineItem.unit_price})`;
+      const generatedReason = `Removing line item: ${productName} (Qty: ${lineItem.quantity}, Price: ${lineItem.unit_price})`;
 
       await this.bill_audit_logs.add({
         id: uuidv4(),
@@ -1769,29 +1743,9 @@ class POSDatabase extends Dexie {
   }
 
   /**
-   * Recalculate bill totals from line items
-   * @private
-   */
-  private async recalculateBillTotals(billId: string): Promise<void> {
-    const lineItems = await this.bill_line_items.where('bill_id').equals(billId).toArray();
-    const subtotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
-    
-    const bill = await this.bills.get(billId);
-    if (bill) {
-      const totalAmount = subtotal;
-      
-      await this.bills.update(billId, {
-        subtotal,
-        total_amount: totalAmount,
-        amount_due: totalAmount - (bill.amount_paid || 0),
-        _synced: false
-      });
-    }
-  }
-
-  /**
-   * Update bill totals after a line item has been modified
-   * This recalculates the bill's subtotal and total_amount based on all line items
+   * Update bill line item totals after modification
+   * Note: Bill totals (subtotal, total_amount, amount_due) are now computed dynamically,
+   * not stored in the database
    */
   async updateBillsForLineItem(lineItemId: string): Promise<void> {
     try {
@@ -1809,10 +1763,7 @@ class POSDatabase extends Dexie {
         _synced: false
       });
 
-      // Recalculate the bill totals
-      await this.recalculateBillTotals(lineItem.bill_id);
-
-      console.log(`Updated bill line item ${lineItemId} and recalculated bill totals`);
+      console.log(`Updated bill line item ${lineItemId}`);
     } catch (error) {
       console.error('Error updating bill line item:', error);
     }
