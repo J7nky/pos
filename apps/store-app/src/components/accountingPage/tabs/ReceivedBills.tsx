@@ -616,6 +616,14 @@ export default function ReceivedBills({
   };
 
   const handleViewReceivedBillSalesLogs = (bill: ReceivedBill) => {
+    console.log('Sales Logs - Sales Logs:', {
+      id: bill.id,
+      productName: bill.productName,
+      totalRevenue: bill.totalRevenue,
+      totalCost: bill.totalCost,
+      totalProfit: bill.totalProfit,
+      batchId: bill.batchId
+    });
     salesLogsModal.open(bill);
   };
 
@@ -930,8 +938,7 @@ export default function ReceivedBills({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent row click
-                                setSelectedReceivedBill(createEnrichedBillFromGroup(group));
-                                setShowReceivedBillSalesLogs(true);
+                                handleViewReceivedBillSalesLogs(createEnrichedBillFromGroup(group));
                               }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                             >

@@ -37,9 +37,8 @@ export function ReceivedBillSalesLogsModal({
   const [showCloseBillModal, setShowCloseBillModal] = useState(false);
   const [closeBillFees, setCloseBillFees] = useState<CloseBillFees | null>(null);
 
-  if (!bill) return null;
-
   const processedSalesData = useMemo(() => {
+    if (!bill) return [];
     const salesDetails: any[] = [];
     let matchingSales: any[] = [];
     
@@ -54,7 +53,7 @@ export function ReceivedBillSalesLogsModal({
     matchingSales.forEach((sale: any) => {
       const quantity = sale.quantity || 1;
       const unitPrice = sale.unit_price || 0;
-      const receivedValue = sale.received_value;
+      const receivedValue = sale.received_value ?? sale.line_total ?? (unitPrice * quantity);
       
       // Get customer_id and payment_method from parent bill
       const parentBill = bills.find((b: any) => b.id === sale.bill_id);
@@ -88,7 +87,7 @@ export function ReceivedBillSalesLogsModal({
         weight: sale.weight,
         unitPrice: unitPrice,
         receivedValue: receivedValue,
-        line_total: sale.line_total,
+        line_total: sale.line_total ?? (unitPrice * quantity),
         
         // Payment (from parent bill)
         paymentMethod: paymentMethod,
@@ -102,15 +101,43 @@ export function ReceivedBillSalesLogsModal({
     return salesDetails.sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
   }, [bill, sales, customers, inventory, bills]);
 
+  const derivedBillMetrics = useMemo(() => {
+    if (!bill) {
+      return {
+        revenue: 0,
+        totalQuantity: 0,
+        totalWeight: 0,
+        averageUnitPrice: 0
+      };
+    }
+
+    const revenue = processedSalesData.reduce((sum, item) => sum + (item.line_total || 0), 0);
+    const totalQuantity = processedSalesData.reduce((sum, item) => sum + (item.quantity || 0), 0);
+    const totalWeight = processedSalesData.reduce((sum, item) => sum + (item.weight || 0), 0);
+    const averageUnitPrice = processedSalesData.length > 0
+      ? processedSalesData.reduce((sum, item) => sum + (item.unitPrice || 0), 0) / processedSalesData.length
+      : 0;
+
+    return {
+      revenue,
+      totalQuantity,
+      totalWeight,
+      averageUnitPrice
+    };
+  }, [bill, processedSalesData]);
+
   const closeBill = async () => {
     try {
+      if (!bill) return;
       if (bill.isClosed) {
         showToast('Bill is already closed.', 'error');
         return;
       }
       
-      // Calculate total revenue from sales
-      const totalRevenue = bill.totalRevenue || 0;
+      // Calculate total revenue from sales when the bill summary is missing it
+      const totalRevenue = typeof bill.totalRevenue === 'number' && bill.totalRevenue > 0
+        ? bill.totalRevenue
+        : derivedBillMetrics.revenue;
 
       // Calculate fees based on bill type
       let commissionAmount = 0;
@@ -124,8 +151,8 @@ export function ReceivedBillSalesLogsModal({
         commissionAmount = (totalRevenue * commissionRate) / 100;
 
         // Porterage and transfer fees are fixed amounts
-        porterageAmount = (bill as any).porterage || bill.batchPorterage || 0;
-        transferAmount = (bill as any).transferFee || bill.batchTransferFee || 0;
+        porterageAmount = Number((bill as any).porterage ?? bill.batchPorterage ?? 0);
+        transferAmount = Number((bill as any).transferFee ?? bill.batchTransferFee ?? 0);
 
         // Supplier gets the remaining amount after deducting all fees
         supplierAmount = totalRevenue - commissionAmount - porterageAmount - transferAmount;
@@ -151,6 +178,7 @@ export function ReceivedBillSalesLogsModal({
   };
 
   const hasInvalidSalesLines = useMemo(() => {
+    if (!bill) return false;
     return processedSalesData.some((item: any) => {
       const invalidQuantity = bill.originalQuantity > bill.totalSoldQuantity;
       const invalidPrice = !item.unitPrice || item.unitPrice <= 0;
@@ -160,6 +188,7 @@ export function ReceivedBillSalesLogsModal({
 
   const exportSelectedBill = () => {
     try {
+      if (!bill) return;
       const isBatch = !!bill.batchId;
       const billHeaders = isBatch
         ? ['Batch ID', 'Supplier', 'Type', 'Batch Porterage', 'Batch Transfer Fee', 'Batch Notes', 'Total Items', 'Total Original Qty', 'Total Remaining Qty', 'Total Sold Qty', 'Total Revenue', 'Total Cost', 'Total Profit', 'Received Date']
@@ -169,9 +198,9 @@ export function ReceivedBillSalesLogsModal({
       if (isBatch) {
         const batchItems = inventory.filter((i: any) => i.batch_id === bill.batchId);
         const totals = batchItems.reduce((acc: any, it: any) => {
-          const relatedSales = sales.filter((s: any) => s.inventory_item_id === it.id && new Date(s.created_at).getTime() >= new Date(it.received_at || it.created_at).getTime());
+          const relatedSales = processedSalesData.filter((sale: any) => sale.inventory_item_id === it.id);
           const soldQty = relatedSales.reduce((s: number, r: any) => s + (r.quantity || 0), 0);
-          const revenue = relatedSales.reduce((s: number, r: any) => s + (r.unit_price || 0) * (r.quantity || 0), 0);
+          const revenue = relatedSales.reduce((s: number, r: any) => s + (r.line_total || 0), 0);
           const origQty = it.received_quantity || it.quantity || 0;
           const cost = it.type === 'commission' ? ((it.batch_porterage || 0) + (it.batch_transfer_fee || 0)) : (it.price || 0) * origQty;
           acc.totalItems += 1;
@@ -209,7 +238,7 @@ export function ReceivedBillSalesLogsModal({
           bill.remainingQuantity,
           bill.totalSoldQuantity,
           `${bill.progress.toFixed(1)}%`,
-          (bill.totalRevenue || 0).toFixed(2),
+          derivedBillMetrics.revenue.toFixed(2),
           (bill.totalCost || 0).toFixed(2),
           (bill.totalProfit || 0).toFixed(2),
           bill.status,
@@ -255,6 +284,8 @@ export function ReceivedBillSalesLogsModal({
     }
   };
 
+  if (!bill) return null;
+
   return (
     <>
       <Modal
@@ -277,15 +308,15 @@ export function ReceivedBillSalesLogsModal({
             </div>
             <div className="bg-green-50 p-3 rounded-lg">
               <p className="text-sm text-green-700">Total Revenue</p>
-              <p className="text-lg font-bold text-green-900">{formatCurrency(processedSalesData.reduce((sum, item) => sum + (item.line_total || 0), 0))}</p>
+              <p className="text-lg font-bold text-green-900">{formatCurrency(derivedBillMetrics.revenue)}</p>
             </div>
             <div className="bg-purple-50 p-3 rounded-lg">
               <p className="text-sm text-purple-700">Sold Quantity</p>
-              <p className="text-lg font-bold text-purple-900">{processedSalesData.reduce((sum, item) => sum + (item.quantity || 0), 0)} {bill.unit}</p>
+              <p className="text-lg font-bold text-purple-900">{derivedBillMetrics.totalQuantity} {bill.unit}</p>
             </div>
             <div className="bg-orange-50 p-3 rounded-lg">
               <p className="text-sm text-orange-700">Avg Price</p>
-              <p className="text-lg font-bold text-orange-900">{formatCurrency(processedSalesData.length > 0 ? processedSalesData.reduce((sum, item) => sum + (item.unitPrice || 0), 0) / processedSalesData.length : 0)}</p>
+              <p className="text-lg font-bold text-orange-900">{formatCurrency(derivedBillMetrics.averageUnitPrice)}</p>
             </div>
             <div className="bg-indigo-50 p-3 rounded-lg">
               <p className="text-sm text-indigo-700">Total Received Weight</p>
@@ -293,7 +324,7 @@ export function ReceivedBillSalesLogsModal({
             </div>
             <div className="bg-teal-50 p-3 rounded-lg">
               <p className="text-sm text-teal-700">Total Sold Weight</p>
-              <p className="text-lg font-bold text-teal-900">{processedSalesData.reduce((sum, item) => sum + (item.weight || 0), 0)} kg</p>
+              <p className="text-lg font-bold text-teal-900">{derivedBillMetrics.totalWeight} kg</p>
             </div>
           </div>
         </div>
@@ -419,7 +450,7 @@ export function ReceivedBillSalesLogsModal({
                   </div>
                   <div className="flex justify-between">
                     <span>Total Revenue:</span>
-                    <span className="font-medium text-green-600">{formatCurrency(bill.totalRevenue)}</span>
+                    <span className="font-medium text-green-600">{formatCurrency(bill.totalRevenue || derivedBillMetrics.revenue)}</span>
                   </div>
                 </div>
               </div>
@@ -431,15 +462,21 @@ export function ReceivedBillSalesLogsModal({
                     <>
                       <div className="flex justify-between">
                         <span>Commission ({bill.commissionRate || 0}%):</span>
-                        <span className="font-medium text-red-600">-{formatCurrency(closeBillFees.commission)}</span>
+                        <span className="font-medium text-red-600">
+                          {closeBillFees.commission > 0 ? '-' : ''}{formatCurrency(closeBillFees.commission)}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span>Porterage:</span>
-                        <span className="font-medium text-red-600">-{formatCurrency(closeBillFees.porterage)}</span>
+                        <span className="font-medium text-red-600">
+                          {closeBillFees.porterage > 0 ? '-' : ''}{formatCurrency(closeBillFees.porterage)}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span>Transfer Fee:</span>
-                        <span className="font-medium text-red-600">-{formatCurrency(closeBillFees.transfer)}</span>
+                        <span className="font-medium text-red-600">
+                          {closeBillFees.transfer > 0 ? '-' : ''}{formatCurrency(closeBillFees.transfer)}
+                        </span>
                       </div>
                     </>
                   )}
