@@ -19,6 +19,7 @@ import {
 import Toast from '../components/common/Toast';
 import { CurrencyService } from '../services/currencyService';
 import ReceivedBills from '../components/accountingPage/tabs/ReceivedBills';
+import SoldBills from '../components/accountingPage/tabs/SoldBills';
 import DashboardOverview from '../components/accountingPage/tabs/DashboardOverview';
 import ExpenseManagement from '../components/accountingPage/tabs/PaymentsManagement';
 import NonPricedItems from '../components/accountingPage/tabs/NonPricedItems';
@@ -1030,6 +1031,10 @@ export default function Accounting() {
       )}
 
    
+
+      {activeTab === 'bills-management' && (
+        <SoldBills />
+      )}
 
       {activeTab === 'received-bills' && (
         <ReceivedBills
