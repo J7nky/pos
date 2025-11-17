@@ -1055,13 +1055,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       ...cleanBillData
     };
 
+    // Note: created_by is in bills table, not bill_line_items
     const mappedLineItems = lineItems.map(item => ({
       id: createId(),
       bill_id: billId,
       store_id: storeId,
       created_at: now,
-      created_by: currentUserId,
+      updated_at: now,
       _synced: false,
+      _deleted: false,
       ...item
     }));
 

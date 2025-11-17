@@ -110,19 +110,31 @@ export class AccountStatementService {
     // 3. Calculate opening balance at start date:
     // Opening balance = Current balance - (all transactions from start date to today)
     // This way, when we add period transactions chronologically, we get the correct balance progression
+    
+    // Get customer payments from transactions table
     const allTransactionsFromStart = await db.transactions
       .where('customer_id')
       .equals(customerId)
       .and(t => !!t.created_at && new Date(t.created_at) >= startDate)
       .toArray();
 
-    const allSalesFromStart = await db.bill_line_items
+    // Get credit sales from bills (normalized approach)
+    const allCreditBillsFromStart = await db.bills
       .where('customer_id')
       .equals(customerId)
-      .and(s => (s.payment_method as string) === 'credit' && 
-                !!s.created_at && 
-                new Date(s.created_at) >= startDate)
+      .and(b => b.payment_method === 'credit' && 
+                !!b.bill_date && 
+                new Date(b.bill_date) >= startDate)
       .toArray();
+    
+    // Get line items for these bills
+    const billIdsFromStart = allCreditBillsFromStart.map(b => b.id);
+    const allSalesFromStart = billIdsFromStart.length > 0
+      ? await db.bill_line_items
+          .where('bill_id')
+          .anyOf(billIdsFromStart)
+          .toArray()
+      : [];
 
     const allSalesFromStartLBP = allSalesFromStart.reduce((sum, s) => sum + (s.received_value || 0), 0);
     
@@ -170,17 +182,27 @@ export class AccountStatementService {
     const endDate = new Date(endDateISO);
     endDate.setHours(23, 59, 59, 999); // Include entire end date
     
-    // Query period credit sales directly from database using indexed query
-    const periodSales = await db.bill_line_items
+    // STEP 1: Query credit bills for this customer (normalized approach)
+    // customer_id and payment_method are in bills table, not bill_line_items
+    const customerBills = bills || await db.bills
       .where('customer_id')
       .equals(customer.id)
-      .and(s => (s.payment_method as string) === 'credit' &&
-                !!s.created_at &&
-                new Date(s.created_at) >= startDate &&
-                new Date(s.created_at) <= endDate)
+      .and(b => b.payment_method === 'credit' &&
+                !!b.bill_date &&
+                new Date(b.bill_date) >= startDate &&
+                new Date(b.bill_date) <= endDate)
       .toArray();
+    
+    // STEP 2: Get line items for these bills (JOIN operation)
+    const billIds = customerBills.map(b => b.id);
+    const periodSales = billIds.length > 0 
+      ? await db.bill_line_items
+          .where('bill_id')
+          .anyOf(billIds)
+          .toArray()
+      : [];
 
-    // Query period customer payments directly from database using indexed query
+    // STEP 3: Query period customer payments directly from database using indexed query
     const periodPayments = await db.transactions
       .where('customer_id')
       .equals(customer.id)
@@ -189,29 +211,6 @@ export class AccountStatementService {
                 new Date(t.created_at) >= startDate &&
                 new Date(t.created_at) <= endDate)
       .toArray();
-
-    // Query bills from database if summary mode
-    let customerBills: any[] = [];
-    if (viewMode === 'summary') {
-      const allBills = bills || await db.bills
-        .where('customer_id')
-        .equals(customer.id)
-        .and(b => (b.payment_method as string) === 'credit' &&
-                  b.bill_date &&
-                  new Date(b.bill_date) >= startDate &&
-                  new Date(b.bill_date) <= endDate)
-        .toArray();
-      
-      customerBills = Array.isArray(allBills) ? allBills.filter(bill => {
-        if (!bill.customer_id || bill.customer_id !== customer.id) return false;
-        if (bill.payment_method !== 'credit') return false;
-        if (!bill.bill_date) return false;
-        
-        const billDate = new Date(bill.bill_date);
-        billDate.setHours(0, 0, 0, 0);
-        return billDate >= startDate && billDate <= endDate;
-      }) : [];
-    }
 
     type RawEvent = {
       id: string;
@@ -775,20 +774,30 @@ export class AccountStatementService {
       bills
     );
 
-    // Product summary based on period credit sales (query from database)
+    // Product summary based on period credit sales (query from database - normalized approach)
     const startDateObj = new Date(startDate);
     startDateObj.setHours(0, 0, 0, 0);
     const endDateObj = new Date(endDate);
     endDateObj.setHours(23, 59, 59, 999);
     
-    const periodCreditSales = await db.bill_line_items
+    // Get credit bills for this customer in the period
+    const periodCreditBills = await db.bills
       .where('customer_id')
       .equals(customer.id)
-      .and(s => (s.payment_method as string) === 'credit' &&
-                !!s.created_at &&
-                new Date(s.created_at) >= startDateObj &&
-                new Date(s.created_at) <= endDateObj)
+      .and(b => b.payment_method === 'credit' &&
+                !!b.bill_date &&
+                new Date(b.bill_date) >= startDateObj &&
+                new Date(b.bill_date) <= endDateObj)
       .toArray();
+    
+    // Get line items for these bills
+    const periodBillIds = periodCreditBills.map(b => b.id);
+    const periodCreditSales = periodBillIds.length > 0
+      ? await db.bill_line_items
+          .where('bill_id')
+          .anyOf(periodBillIds)
+          .toArray()
+      : [];
     
     const productSummary = viewMode === 'detailed' ? this.calculateProductSummary(periodCreditSales as unknown as BillLineItem[], products) : undefined;
 

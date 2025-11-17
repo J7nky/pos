@@ -790,19 +790,18 @@ ${dashSeparator}`;
       };
 
       // Prepare line items data
+      // Note: payment_method, customer_id, created_by are in bills table, not bill_line_items
+      // supplier_id is not in bill_line_items - resolved via inventory_items.batch_id
       const lineItemsData = activeTab.cart.map(item => ({
         inventory_item_id: item.inventory_item_id || item.inventoryItemId,
         product_id: item.product_id || item.productId, // Handle both snake_case and camelCase
-        payment_method: item.payment_method || item.paymentMethod,
-        supplier_id: item.supplier_id || item.supplierId,
         quantity: item.quantity,
         unit_price: item.unit_price || item.unitPrice || 0,
         line_total: item.line_total || item.lineTotal || 0,
         weight: item.weight || null,
         received_value: item.received_value || item.receivedValue || 0,
         notes: item.notes || null,
-        created_at: new Date().toISOString(),
-        created_by: userProfile?.id,
+        updated_at: new Date().toISOString(),
         line_order: activeTab.cart.indexOf(item) + 1
       }));
 
@@ -810,9 +809,6 @@ ${dashSeparator}`;
       for (const item of lineItemsData) {
         if (!item.product_id || (typeof item.product_id !== 'string' && typeof item.product_id !== 'number')) {
           throw new Error(`Invalid product_id in cart item: ${item.product_id}. Product ID must be a string or number.`);
-        }
-        if (!item.supplier_id || (typeof item.supplier_id !== 'string' && typeof item.supplier_id !== 'number')) {
-          throw new Error(`Invalid supplier_id in cart item: ${item.supplier_id}. Supplier ID must be a string or number.`);
         }
         if (!item.quantity || item.quantity <= 0) {
           throw new Error(`Invalid quantity in cart item: ${item.quantity}. Quantity must be a positive number.`);

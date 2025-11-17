@@ -299,14 +299,28 @@ export default function ReceivedBills({
         const validRemainingQuantity = Math.max(remainingQuantity, 0);
         const validProgress = isNaN(progress) || !isFinite(progress) ? 0 : Math.max(0, Math.min(100, progress));
 
+        // Check batch status first - it takes precedence over calculated status
+        const batchStatus = batch?.status ? batch.status.toUpperCase() : null;
+        
         let status = 'pending';
-        if (validProgress >= 100) status = 'completed';
-        else if (validProgress >= 75) status = 'nearly-complete';
-        else if (validProgress >= 50) status = 'halfway';
-        else if (validProgress > 0) status = 'in-progress';
+        if (batchStatus === 'CLOSED') {
+          // If batch is closed, status is always closed regardless of progress
+          status = 'closed';
+        } else if (batchStatus === 'COMPLETED') {
+          status = 'completed';
+        } else if (batchStatus === 'PROGRESS') {
+          status = 'in-progress';
+        } else if (batchStatus === 'RECEIVED') {
+          status = 'pending';
+        } else {
+          // Fallback to progress-based calculation if no batch status
+          if (validProgress >= 100) status = 'completed';
+          else if (validProgress >= 75) status = 'nearly-complete';
+          else if (validProgress >= 50) status = 'halfway';
+          else if (validProgress > 0) status = 'in-progress';
+        }
 
-        const isClosed = closedBillIds.has(item.id) || (item as any).status === 'closed' || (item as any).is_closed === true;
-        if (isClosed) status = 'closed';
+        const isClosed = status === 'closed' || closedBillIds.has(item.id);
 
         // Get batch-related fields from inventory_bills if batch exists
         const batchType = batch?.type || (item as any).batch_type || (item as any).type || 'commission';
@@ -483,13 +497,32 @@ export default function ReceivedBills({
       const groups = Array.from(groupMap.values()).map((g: any) => {
         const progressBase = g.originalQuantity > 0 ? (Math.max(g.originalQuantity - g.remainingQuantity, 0) / g.originalQuantity) * 100 : 0;
         const progress = isNaN(progressBase) || !isFinite(progressBase) ? 0 : Math.max(0, Math.min(100, progressBase));
+        
+        // Get the actual batch status from the first item (all items in a batch share the same status)
+        const firstItemBatchStatus = g.items.length > 0 && g.items[0].batchId 
+          ? inventoryBills.find((b: any) => b.id === g.items[0].batchId)?.status 
+          : null;
+        const batchStatus = firstItemBatchStatus ? firstItemBatchStatus.toUpperCase() : null;
+        
         let status = 'pending';
-        if (progress >= 100) status = 'completed';
-        else if (progress >= 75) status = 'nearly-complete';
-        else if (progress >= 50) status = 'halfway';
-        else if (progress > 0) status = 'in-progress';
+        if (batchStatus === 'CLOSED') {
+          status = 'closed';
+        } else if (batchStatus === 'COMPLETED') {
+          status = 'completed';
+        } else if (batchStatus === 'PROGRESS') {
+          status = 'in-progress';
+        } else if (batchStatus === 'RECEIVED') {
+          status = 'pending';
+        } else {
+          // Fallback to progress-based calculation
+          if (progress >= 100) status = 'completed';
+          else if (progress >= 75) status = 'nearly-complete';
+          else if (progress >= 50) status = 'halfway';
+          else if (progress > 0) status = 'in-progress';
+        }
+        
         // If all items in the group are closed, mark the group as closed
-        const allClosed = g.items.length > 0 && g.items.every((it: any) => it.isClosed === true);
+        const allClosed = status === 'closed' || (g.items.length > 0 && g.items.every((it: any) => it.isClosed === true));
         if (allClosed) {
           status = 'closed';
         }

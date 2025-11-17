@@ -164,13 +164,14 @@ export interface Bill {
 }
 
 // BillLineItem interface - maps directly to bill_line_items table (snake_case for db compatibility)
+// Note: customer_id, payment_method, created_by are in the parent bills table
 export interface BillLineItem {
   // Core identifiers
   id: string;
   store_id: string;
   bill_id: string;
-  inventory_item_id: string | null;
   product_id: string;
+  inventory_item_id: string | null;
   
   // Quantity and pricing
   quantity: number;

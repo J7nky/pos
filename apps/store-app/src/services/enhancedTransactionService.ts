@@ -357,24 +357,25 @@ export class EnhancedTransactionService {
       }));
 
       // Store sale items data in bill_line_items format
+      // Note: customer_id, payment_method, created_by are in bills table, not bill_line_items
       for (const item of completeSaleItems) {
         await db.bill_line_items.add({
+          id: this.generateId(),
           bill_id: saleId,
           store_id: storeId,
           product_id: item.productId,
-          supplier_id: item.supplierId,
-          customer_id: saleData.customerId,
           quantity: item.quantity,
           weight: item.weight,
           unit_price: item.unitPrice,
           line_total: item.totalPrice,
           received_value: 0,
-          payment_method: saleData.paymentMethod,
-          notes: item.notes || '',
+          notes: item.notes || null,
           created_at: timestamp,
-          created_by: saleData.createdBy,
+          updated_at: timestamp,
           line_order: 1,
-          inventory_item_id: item.inventoryItemId
+          inventory_item_id: item.inventoryItemId,
+          _synced: false,
+          _deleted: false
         });
       }
 

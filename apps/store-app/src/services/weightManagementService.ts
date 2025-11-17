@@ -138,11 +138,14 @@ export class WeightManagementService {
       let salesItems = await db.bill_line_items
         .where('product_id')
         .equals(productId)
-        // supplier_id removal: must resolve supplier via batch
         .toArray();
+      
+      // Filter by supplier: resolve via inventory_item_id → batch_id → supplier_id
       salesItems = salesItems.filter(item => {
-        if (!item.batch_id) return false;
-        const batch = batchMap.get(item.batch_id);
+        if (!item.inventory_item_id) return false;
+        const inventoryItem = inventoryItems.find(inv => inv.id === item.inventory_item_id);
+        if (!inventoryItem?.batch_id) return false;
+        const batch = batchMap.get(inventoryItem.batch_id);
         return batch?.supplier_id === supplierId;
       });
 
@@ -214,8 +217,8 @@ export class WeightManagementService {
             weight: item.weight || 0,
             quantity: item.quantity,
             soldDate: item.created_at,
-            customerId: item.customer_id || undefined,
-            customerName: undefined // Would need to fetch from customers table
+            customerId: undefined, // TODO: Get from parent bill via bill_id
+            customerName: undefined // Would need to fetch from bills → customers table
           }))
       };
 

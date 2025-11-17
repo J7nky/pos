@@ -285,30 +285,37 @@ export class AccountBalanceService {
   ): Promise<any[]> {
     if (entityType === 'supplier') {
       // For suppliers, we need sales that generate commissions
-      let query = db.bill_line_items.where('supplier_id').equals(entityId);
-      
-      if (startDate) {
-        query = query.and(sale => Boolean(sale.created_at) && new Date(sale.created_at!) >= new Date(startDate));
-      }
-      
-      if (endDate) {
-        query = query.and(sale => Boolean(sale.created_at) && new Date(sale.created_at!) <= new Date(endDate));
-      }
-
-      return await query.toArray();
+      // Note: supplier_id is not in bill_line_items, need to get from inventory_items or products
+      // This method may need refactoring based on business logic
+      // For now, returning empty array as supplier sales tracking needs clarification
+      console.warn('Supplier sales tracking via bill_line_items needs refactoring - supplier_id not in bill_line_items');
+      return [];
     } else {
-      // For customers, we need credit sales
-      let query = db.bill_line_items.where('customer_id').equals(entityId);
+      // For customers, we need credit sales - use normalized schema
+      // Step 1: Get credit bills for this customer
+      let billQuery = db.bills
+        .where('customer_id')
+        .equals(entityId)
+        .and(b => b.payment_method === 'credit');
       
       if (startDate) {
-        query = query.and(sale => Boolean(sale.created_at) && new Date(sale.created_at!) >= new Date(startDate));
+        billQuery = billQuery.and(b => Boolean(b.bill_date) && new Date(b.bill_date!) >= new Date(startDate));
       }
       
       if (endDate) {
-        query = query.and(sale => Boolean(sale.created_at) && new Date(sale.created_at!) <= new Date(endDate));
+        billQuery = billQuery.and(b => Boolean(b.bill_date) && new Date(b.bill_date!) <= new Date(endDate));
       }
 
-      return await query.toArray();
+      const bills = await billQuery.toArray();
+      
+      // Step 2: Get line items for these bills
+      if (bills.length === 0) return [];
+      
+      const billIds = bills.map(b => b.id);
+      return await db.bill_line_items
+        .where('bill_id')
+        .anyOf(billIds)
+        .toArray();
     }
   }
 

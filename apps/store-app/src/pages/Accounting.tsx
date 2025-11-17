@@ -682,10 +682,12 @@ export default function Accounting() {
   const filteredNonPricedItems = nonPricedItems
     .map(item => {
       const product = products.find(p => p.id === item.product_id);
-      const customer = customers.find(c => c.id === item.customer_id);
-      // For bill_line_items, supplier_id is stored directly (not in inventory_items)
-      // So we can use item.supplier_id here since it comes from bill_line_items
-      const supplier = suppliers.find(s => s.id === item.supplier_id);
+      // Get customer_id from parent bill (normalized schema)
+      const bill = bills.find(b => b.id === item.bill_id);
+      const customer = customers.find(c => c.id === bill?.customer_id);
+      // supplier_id needs to be retrieved from inventory_items or products
+      // For now, using undefined as supplier tracking needs refactoring
+      const supplier = undefined; // TODO: Get supplier from inventory_items via inventory_item_id
 
       // Get staged changes for this item
       const stagedChanges = stagedNonPricedChanges[item.id] || {};

@@ -5,7 +5,15 @@ import { useCurrency } from '../../../hooks/useCurrency';
 import { useI18n } from '../../../i18n';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { Pagination } from '../../common/Pagination';
-import { calculateBillTotals, BillWithTotals } from '../../../utils/billCalculations';
+import { calculateBillTotals, BillWithTotals, addComputedTotals } from '../../../utils/billCalculations';
+import { 
+  calculatePaymentStatus, 
+  handleCustomerTypeChange, 
+  validateCreditCustomerPayment,
+  calculateBalanceAdjustments,
+  resolveSupplierName,
+  canEditBill 
+} from '../../../utils/billBusinessRules';
 
 import { 
   FileText, 
@@ -115,6 +123,8 @@ export default function InventoryLogs() {
   const [showAuditTrail, setShowAuditTrail] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [businessRuleWarnings, setBusinessRuleWarnings] = useState<string[]>([]);
+  const [originalCustomerId, setOriginalCustomerId] = useState<string | null>(null);
 
   // Filters - persisted in localStorage
   const [searchTerm, setSearchTerm] = useLocalStorage('soldBills_searchTerm', '');
@@ -590,6 +600,8 @@ export default function InventoryLogs() {
 
   const handleEditBill = async (bill: Bill) => {
     await loadBillDetails(bill.id);
+    setOriginalCustomerId(bill.customer_id);
+    setBusinessRuleWarnings([]);
     setShowEditBill(true);
   };
 
@@ -757,6 +769,14 @@ export default function InventoryLogs() {
         return String(value).trim();
       };
       
+      // Track if amount_paid or payment_method changed for balance adjustments
+      let amountPaidChanged = false;
+      let paymentMethodChanged = false;
+      let oldAmountPaid = selectedBill.amount_paid ?? 0;
+      let newAmountPaid = oldAmountPaid;
+      let oldPaymentMethod = selectedBill.payment_method;
+      let newPaymentMethod = oldPaymentMethod;
+      
       // Only include fields that have actually changed
       if (editForm.customer_id !== undefined && normalizeForComparison(editForm.customer_id) !== normalizeForComparison(selectedBill.customer_id)) {
         updates.customer_id = editForm.customer_id ?? null;
@@ -764,22 +784,153 @@ export default function InventoryLogs() {
       
       if (editForm.payment_method !== undefined && editForm.payment_method !== selectedBill.payment_method) {
         updates.payment_method = editForm.payment_method;
+        paymentMethodChanged = true;
+        newPaymentMethod = editForm.payment_method;
       }
       
-      if (editForm.payment_status !== undefined && editForm.payment_status !== selectedBill.payment_status) {
-        updates.payment_status = editForm.payment_status;
-      }
-      
+      // Handle amount_paid changes
       if (editForm.amount_paid !== undefined) {
-        const newAmountPaid = editForm.amount_paid ?? 0;
-        const oldAmountPaid = selectedBill.amount_paid ?? 0;
+        newAmountPaid = editForm.amount_paid ?? 0;
         if (normalizeForComparison(newAmountPaid) !== normalizeForComparison(oldAmountPaid)) {
           updates.amount_paid = newAmountPaid;
+          amountPaidChanged = true;
         }
+      }
+      
+      // ENFORCE: Payment status MUST be calculated from amounts, not manually set
+      const totalAmount = selectedBill.total_amount || 0;
+      const calculatedPaymentStatus = calculatePaymentStatus(newAmountPaid, totalAmount);
+      
+      // Always update payment_status to the calculated value if it differs
+      if (calculatedPaymentStatus !== selectedBill.payment_status) {
+        updates.payment_status = calculatedPaymentStatus;
+        console.log(`🔍 Payment status auto-calculated: ${calculatedPaymentStatus} (was: ${selectedBill.payment_status})`);
+      }
+      
+      // VALIDATE: Walk-in customers cannot use credit payment method
+      const finalPaymentMethod = updates.payment_method || selectedBill.payment_method;
+      const finalCustomerId = updates.customer_id !== undefined ? updates.customer_id : selectedBill.customer_id;
+      const creditValidation = validateCreditCustomerPayment(
+        finalPaymentMethod,
+        finalCustomerId,
+        newAmountPaid,
+        totalAmount,
+        updates.customer_id !== undefined && updates.customer_id !== selectedBill.customer_id
+      );
+      
+      if (!creditValidation.valid) {
+        showToast(creditValidation.error || 'Invalid payment configuration', 'error');
+        setIsEditing(false);
+        return;
       }
       
       if (editForm.notes !== undefined && normalizeForComparison(editForm.notes) !== normalizeForComparison(selectedBill.notes)) {
         updates.notes = editForm.notes ?? null;
+      }
+      
+      // Handle balance adjustments if amount_paid or payment_method changed
+      if (amountPaidChanged || paymentMethodChanged) {
+        const finalCustomerId = updates.customer_id !== undefined ? updates.customer_id : selectedBill.customer_id;
+        
+        // Calculate adjustments based on what changed
+        let customerBalanceDelta = 0;
+        let cashDrawerDelta = 0;
+        
+        if (amountPaidChanged && !paymentMethodChanged) {
+          // Only amount changed - use new payment method
+          const adjustments = calculateBalanceAdjustments(
+            oldAmountPaid,
+            newAmountPaid,
+            newPaymentMethod
+          );
+          customerBalanceDelta = adjustments.customerBalanceDelta;
+          cashDrawerDelta = adjustments.cashDrawerDelta;
+          console.log('🔍 Amount changed - Balance adjustments:', adjustments);
+        } else if (paymentMethodChanged && !amountPaidChanged) {
+          // Only payment method changed - need to reverse old method and apply new method
+          // Example: $100 paid via Cash → Credit means remove $100 from cash drawer
+          const oldMethodAffectsCash = oldPaymentMethod === 'cash' || oldPaymentMethod === 'card';
+          const newMethodAffectsCash = newPaymentMethod === 'cash' || newPaymentMethod === 'card';
+          
+          if (oldMethodAffectsCash && !newMethodAffectsCash) {
+            // Moving FROM cash/card TO credit: remove from cash drawer
+            cashDrawerDelta = -newAmountPaid;
+            console.log(`💰 Payment method changed: ${oldPaymentMethod} → ${newPaymentMethod}, removing ${newAmountPaid} from cash drawer`);
+          } else if (!oldMethodAffectsCash && newMethodAffectsCash) {
+            // Moving FROM credit TO cash/card: add to cash drawer
+            cashDrawerDelta = newAmountPaid;
+            console.log(`💰 Payment method changed: ${oldPaymentMethod} → ${newPaymentMethod}, adding ${newAmountPaid} to cash drawer`);
+          }
+          // If both affect cash (cash ↔ card), no net change to cash drawer total
+          // (though in reality, you might want to track cash vs card separately)
+        } else if (amountPaidChanged && paymentMethodChanged) {
+          // Both changed - need to handle carefully
+          // First reverse the old payment, then apply the new one
+          const oldMethodAffectsCash = oldPaymentMethod === 'cash' || oldPaymentMethod === 'card';
+          const newMethodAffectsCash = newPaymentMethod === 'cash' || newPaymentMethod === 'card';
+          
+          if (oldMethodAffectsCash) {
+            cashDrawerDelta -= oldAmountPaid; // Remove old amount
+          }
+          if (newMethodAffectsCash) {
+            cashDrawerDelta += newAmountPaid; // Add new amount
+          }
+          
+          // Customer balance delta
+          const adjustments = calculateBalanceAdjustments(
+            oldAmountPaid,
+            newAmountPaid,
+            newPaymentMethod
+          );
+          customerBalanceDelta = adjustments.customerBalanceDelta;
+          
+          console.log(`🔍 Both amount and payment method changed: ${oldPaymentMethod}($${oldAmountPaid}) → ${newPaymentMethod}($${newAmountPaid})`);
+          console.log(`💰 Cash drawer delta: ${cashDrawerDelta}, Customer balance delta: ${customerBalanceDelta}`);
+        }
+        
+        // Update customer balance if there's a customer (not walk-in)
+        if (finalCustomerId && customerBalanceDelta !== 0) {
+          const customer = customers.find(c => c.id === finalCustomerId);
+          if (customer) {
+            // Assuming USD for now - in production, use bill currency
+            const currentBalance = customer.usd_balance || 0;
+            const newBalance = currentBalance + customerBalanceDelta;
+            
+            console.log(`🔍 Updating customer ${customer.name} balance: ${currentBalance} → ${newBalance} (delta: ${customerBalanceDelta})`);
+            
+            await raw.updateCustomer(customer.id, {
+              usd_balance: newBalance
+            });
+          }
+        }
+        
+        // Update cash drawer if there's a delta
+        if (cashDrawerDelta !== 0) {
+          console.log(`💰 Updating cash drawer by: ${cashDrawerDelta}`);
+          
+          try {
+            const transactionType: 'sale' | 'payment' | 'expense' | 'refund' = cashDrawerDelta > 0 ? 'sale' : 'refund';
+            const absoluteAmount = Math.abs(cashDrawerDelta);
+            
+            const result = await raw.processCashDrawerTransaction({
+              type: transactionType,
+              amount: absoluteAmount,
+              currency: 'USD' as 'USD' | 'LBP', // TODO: Use bill currency
+              description: `Bill #${selectedBill.bill_number} - Payment ${paymentMethodChanged ? 'method' : 'amount'} adjustment`,
+              reference: `bill_${selectedBill.id}`,
+              customerId: finalCustomerId || undefined,
+              storeId: storeId!,
+              createdBy: userProfile.id
+            });
+            
+            if (result.success) {
+              console.log(`✅ Cash drawer updated successfully: ${cashDrawerDelta > 0 ? '+' : ''}${cashDrawerDelta}`);
+            }
+          } catch (error) {
+            console.error('❌ Failed to update cash drawer:', error);
+            showToast('Bill saved but cash drawer update failed', 'error');
+          }
+        }
       }
       
       // Only call updateBill if there are actual changes
@@ -1504,12 +1655,88 @@ export default function InventoryLogs() {
             </div>
 
             <div className="p-6 space-y-6">
+              {/* Business Rule Warnings */}
+              {businessRuleWarnings.length > 0 && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div className="flex items-start">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ltr:ml-3 rtl:mr-3 flex-1">
+                      <h3 className="text-sm font-medium text-yellow-800">Business Rule Adjustments</h3>
+                      <div className="mt-2 text-sm text-yellow-700">
+                        <ul className="list-disc ltr:pl-5 rtl:pr-5 space-y-1">
+                          {businessRuleWarnings.map((warning, idx) => (
+                            <li key={idx}>{warning}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setBusinessRuleWarnings([])}
+                      className="ltr:ml-auto rtl:mr-auto flex-shrink-0 text-yellow-400 hover:text-yellow-600"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.customer')}</label>
                   <select
                     value={editForm.customer_id || ''}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, customer_id: e.target.value || null }))}
+                    onChange={(e) => {
+                      const newCustomerId = e.target.value || null;
+                      const totalAmount = (editForm as any).total_amount || 0;
+                      
+                      // Special handling for walk-in customer selection
+                      if (newCustomerId === null) {
+                        // Walk-in customer: auto-set payment method to cash and amount to full
+                        const warnings: string[] = [];
+                        if (originalCustomerId !== null) {
+                          warnings.push('Changed to walk-in customer');
+                          warnings.push('Payment method set to Cash, amount set to full payment');
+                        }
+                        
+                        setEditForm(prev => ({ 
+                          ...prev, 
+                          customer_id: null,
+                          payment_method: 'cash',
+                          amount_paid: totalAmount,
+                          payment_status: 'paid'
+                        }));
+                        
+                        if (warnings.length > 0) {
+                          setBusinessRuleWarnings(warnings);
+                        }
+                      } else {
+                        // Regular customer: use standard customer type change logic
+                        const result = handleCustomerTypeChange(
+                          editForm,
+                          newCustomerId,
+                          originalCustomerId,
+                          totalAmount
+                        );
+                        
+                        // Update form with new values
+                        setEditForm(prev => ({ 
+                          ...prev, 
+                          customer_id: newCustomerId,
+                          payment_method: result.payment_method,
+                          amount_paid: result.amount_paid,
+                          payment_status: result.payment_status
+                        }));
+                        
+                        // Show warnings if any
+                        if (result.warnings.length > 0) {
+                          setBusinessRuleWarnings(result.warnings);
+                        }
+                      }
+                    }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="">{t('soldBills.walkInCustomer')}</option>
@@ -1525,13 +1752,36 @@ export default function InventoryLogs() {
                   <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.paymentMethod')}</label>
                   <select
                     value={editForm.payment_method || 'cash'}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, payment_method: e.target.value as any }))}
+                    onChange={(e) => {
+                      const newPaymentMethod = e.target.value as 'cash' | 'card' | 'credit';
+                      
+                      // Validate: Walk-in customers cannot use credit
+                      const validation = validateCreditCustomerPayment(
+                        newPaymentMethod,
+                        editForm.customer_id || null,
+                        editForm.amount_paid || 0,
+                        (editForm as any).total_amount || 0,
+                        false
+                      );
+                      
+                      if (!validation.valid) {
+                        showToast(validation.error || 'Invalid payment method', 'error');
+                        return; // Don't update if validation fails
+                      }
+                      
+                      setEditForm(prev => ({ ...prev, payment_method: newPaymentMethod }));
+                    }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="cash">{t('soldBills.cash')}</option>
                     <option value="card">{t('soldBills.card')}</option>
                     <option value="credit">{t('soldBills.credit')}</option>
                   </select>
+                  {editForm.customer_id === null && (
+                    <p className="text-xs text-gray-500 mt-1 rtl:text-right">
+                      Walk-in customers can only use Cash or Card
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -1543,30 +1793,41 @@ export default function InventoryLogs() {
                     value={editForm.amount_paid || 0}
                     onChange={(e) => {
                       const amountPaid = parseFloat(e.target.value) || 0;
-                      const totalAmount = editForm.total_amount || 0;
-                      const amountDue = Math.max(0, totalAmount - amountPaid);
-                      const paymentStatus = amountDue === 0 ? 'paid' : amountPaid > 0 ? 'partial' : 'pending';
+                      const totalAmount = (editForm as any).total_amount || 0;
+                      
+                      // Use centralized business rule for status calculation
+                      const paymentStatus = calculatePaymentStatus(amountPaid, totalAmount);
+                      
                       setEditForm(prev => ({ 
                         ...prev, 
                         amount_paid: amountPaid,
-                        payment_status: paymentStatus as any
+                        payment_status: paymentStatus
                       }));
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   />
+                  {editForm.customer_id === null && (
+                    <p className="text-xs text-gray-500 mt-1 rtl:text-right">
+                      Walk-in customers must pay in full
+                    </p>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.paymentStatus')}</label>
                   <select
                     value={editForm.payment_status || 'pending'}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, payment_status: e.target.value as any }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                    disabled={true}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100 cursor-not-allowed"
+                    title="Payment status is automatically calculated based on amount paid"
                   >
                     <option value="paid">{t('soldBills.paid')}</option>
                     <option value="partial">{t('soldBills.partial')}</option>
                     <option value="pending">{t('soldBills.pending')}</option>
                   </select>
+                  <p className="text-xs text-gray-500 mt-1 rtl:text-right">
+                    Status is automatically calculated from payment amounts
+                  </p>
                 </div>
               </div>
 
@@ -1615,10 +1876,8 @@ export default function InventoryLogs() {
 
                           const { isEditable, batchStatus } = getInventoryContextForLineItem(item);
                           
-                          // Resolve product and supplier names
+                          // Resolve product name
                           const product = products.find(p => p.id === item.product_id);
-                          const inventoryItem = item.inventory_item_id ? inventoryItems.find(i => i.id === item.inventory_item_id) : null;
-                          const supplier = inventoryItem ? suppliers.find(s => s.id === inventoryItem.supplier_id) : null;
 
                           return (
                             <tr key={item.id} className="align-top">
@@ -1648,7 +1907,7 @@ export default function InventoryLogs() {
                               </td>
                               <td className="px-4 py-3 text-sm text-gray-600">
                                 {/* Supplier is read-only, determined by inventory_item */}
-                                {supplier?.name || 'Unknown Supplier'}
+                                {resolveSupplierName(item.inventory_item_id, inventoryItems, inventoryBills, suppliers)}
                               </td>
                               <td className="px-4 py-3">
                                 <input

@@ -534,6 +534,60 @@ class POSDatabase extends Dexie {
       });
     });
 
+    // Migration for version 28 - normalize bill_line_items schema to match actual database
+    // Remove supplier_id, customer_id, payment_method, created_by from bill_line_items
+    // These fields belong to the parent bills table
+    this.version(28).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
+      
+      // Core tables with comprehensive indexing for performance
+      products: 'id, store_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, customer_id, supplier_id, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, currency, _synced, _deleted',
+  
+      // Bill management tables - NORMALIZED SCHEMA
+      // payment_method added to bills, removed supplier_id, customer_id, payment_method, created_by from bill_line_items
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_method, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Cash drawer management
+      missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification management
+      notifications: 'id, store_id, type, read, created_at, priority',
+      notification_preferences: 'store_id',
+      
+      // Reminder management
+      reminders: 'id, store_id, status, type, due_date, entity_type, [entity_type+entity_id], created_by, updated_at, _synced, _deleted',
+      
+      // Employee attendance tracking
+      employee_attendance: 'id, store_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted'
+    }).upgrade(trans => {
+      console.log('🔄 Running migration v28: Normalizing bill_line_items schema');
+      console.log('   ✅ Removed supplier_id, customer_id, payment_method, created_by from bill_line_items');
+      console.log('   ✅ These fields are now accessed via JOIN with bills table');
+      console.log('   ✅ Added payment_method index to bills table');
+      console.log('   📢 This matches the actual Supabase database schema');
+      // No data migration needed - fields are removed from indexes only
+      // Data will be accessed via JOIN with bills table
+    });
+
     // Migration for version 5 - update existing records to match new schema
     this.version(5).upgrade(trans => {
       console.log('🔄 Running migration v5: Updating existing records to match new schema');
