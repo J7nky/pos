@@ -18,11 +18,13 @@ import {
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
 import { Customer, Supplier, Transaction, InventoryItem, Product,  } from '../types';
 import { BillLineItem } from '../lib/db';
+import { useI18n } from '../i18n';
 import Toast from './common/Toast';
-import { PrintLayout } from './common/PrintLayout';
 import { PrintPreview } from './common/PrintPreview';
 import { setupPrintWithPageSelection } from '../utils/printUtils';
 import { paginateTransactions, getTotalPages } from '../utils/printPagination';
+import { AccountStatementPrintContent } from './AccountStatementPrintContent';
+import { formatCurrency as formatCurrencyUtil } from '../utils/currencyFormatter';
 
 interface AccountStatementModalProps {
   isOpen: boolean;
@@ -49,6 +51,7 @@ export default function AccountStatementModal({
   inventoryBills,
   bills
 }: AccountStatementModalProps) {
+  const { t } = useI18n();
   
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
@@ -145,7 +148,7 @@ export default function AccountStatementModal({
 
   const handleExportPDF = async () => {
     if (!statement) return;
-
+    
     try {
       const accountStatementService = AccountStatementService.getInstance();
       const blob = await accountStatementService.exportToPDF(statement);
@@ -189,24 +192,12 @@ export default function AccountStatementModal({
   };
 
 
-  const formatCurrency = (amount: number, currency: 'USD' | 'LBP') => {
-    if (currency === 'USD') {
-      return `$${amount.toFixed(2)}`;
-    } else {
-      return `${amount.toLocaleString()} ل.ل`;
-    }
+  // Unified currency formatter with symbol control
+  const formatCurrency = (amount: number, currency: 'USD' | 'LBP', includeSymbol: boolean = true) => {
+    return formatCurrencyUtil(amount, currency, includeSymbol);
   };
 
   if (!isOpen) return null;
-
-  // Format currency helper
-  const formatCurrencyValue = (amount: number, currency: 'USD' | 'LBP') => {
-    if (currency === 'USD') {
-      return `$${amount.toFixed(2)}`;
-    } else {
-      return `${Math.round(amount).toLocaleString()}`;
-    }
-  };
 
   return (
     <>
@@ -222,149 +213,17 @@ export default function AccountStatementModal({
             onClose={handleClosePreview}
             onPrint={handlePrint}
             totalPages={totalPages}
-            title={`Account Statement - ${entity.name}`}
-            content={paginatedPages.map((page, idx) => {
-              const isFirstPage = page.isFirstPage;
-              const isLastPage = page.isLastPage;
-              
-              return (
-                <div key={page.pageNumber} className={idx === 0 ? '' : 'print-page-break'}>
-                  <PrintLayout
-                    title="كشف حساب مفصل"
-                    accountName={isFirstPage ? entity.name : undefined}
-                    accountNumber={isFirstPage ? entity.id.slice(0, 10) : undefined}
-                    phone={isFirstPage ? entity.phone : undefined}
-                    previousBalance={isFirstPage ? statement.financialSummary.openingBalance : undefined}
-                    currency={statement.transactions[0]?.currency || 'LBP'}
-                    dateRange={isFirstPage ? statement.dateRange : undefined}
-                    reportDate={isFirstPage ? statement.statementDate : undefined}
-                    pageNumber={page.pageNumber}
-                    totalPages={totalPages}
-                    showHeader={isFirstPage}
-                    showFooter={isLastPage}
-                    showAccountInfo={isFirstPage}
-                    showOpeningBalance={isFirstPage}
-                  >
-                    {/* Opening Balance - Only on first page */}
-                    {isFirstPage && (
-                      <div className="print-opening-balance print-section">
-                        <span className="print-opening-balance-label">الرصيد ما قبل:</span>
-                        <span className="print-opening-balance-value">
-                          {formatCurrencyValue(
-                            statement.financialSummary.openingBalance[statement.transactions[0]?.currency || 'LBP'],
-                            statement.transactions[0]?.currency || 'LBP'
-                          )}
-                          {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Transaction Table */}
-                    <div className="print-table-container print-section">
-                      <table className="print-table">
-                        <thead>
-                          <tr>
-                            <th className="print-table-col-date">التاريخ</th>
-                            <th className="print-table-col-reference">المرجع</th>
-                            <th className="print-table-col-description">البيان</th>
-                            {viewMode === 'detailed' && (
-                              <>
-                                <th className="print-table-col-quantity">العدد</th>
-                                <th className="print-table-col-weight">الوزن</th>
-                                <th className="print-table-col-price">السعر</th>
-                              </>
-                            )}
-                            <th className="print-table-col-debit">مدين</th>
-                            <th className="print-table-col-credit">دائن</th>
-                            <th className="print-table-col-balance">الرصيد</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {page.transactions.map((transaction, index) => (
-                            <tr key={transaction.id || index}>
-                              <td className="print-table-col-date">
-                                {new Date(transaction.date).toLocaleDateString('ar-LB', {
-                                  year: 'numeric',
-                                  month: '2-digit',
-                                  day: '2-digit',
-                                })}
-                              </td>
-                              <td className="print-table-col-reference">{transaction.reference || '-'}</td>
-                              <td className="print-table-col-description">{transaction.description}</td>
-                              {viewMode === 'detailed' && (
-                                <>
-                                  <td className="print-table-col-quantity print-number">
-                                    {transaction.quantity || '-'}
-                                  </td>
-                                  <td className="print-table-col-weight print-number">
-                                    {transaction.weight ? `${transaction.weight}` : '-'}
-                                  </td>
-                                  <td className="print-table-col-price print-number">
-                                    {transaction.price ? formatCurrencyValue(transaction.price, transaction.currency || 'LBP') : '-'}
-                                  </td>
-                                </>
-                              )}
-                              <td className="print-table-col-debit print-number print-currency">
-                                {transaction.type !== 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
-                              </td>
-                              <td className="print-table-col-credit print-number print-currency">
-                                {transaction.type === 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
-                              </td>
-                              <td className="print-table-col-balance print-number print-currency">
-                                {formatCurrencyValue(transaction.balanceAfter, transaction.currency)}
-                                {transaction.currency === 'LBP' ? ' ل.ل' : ''}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Summary Footer - Only on last page */}
-                    {isLastPage && (
-                      <div className="print-summary print-section">
-                        <div className="print-summary-row">
-                          <span>إجمالي مدين:</span>
-                          <span className="print-number">
-                            {formatCurrencyValue(
-                              statement.transactions
-                                .filter(t => t.type !== 'payment')
-                                .reduce((sum, t) => sum + (t.amount || 0), 0),
-                              statement.transactions[0]?.currency || 'LBP'
-                            )}
-                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                          </span>
-                        </div>
-                        <div className="print-summary-row">
-                          <span>إجمالي دائن:</span>
-                          <span className="print-number">
-                            {formatCurrencyValue(
-                              statement.transactions
-                                .filter(t => t.type === 'payment')
-                                .reduce((sum, t) => sum + (t.amount || 0), 0),
-                              statement.transactions[0]?.currency || 'LBP'
-                            )}
-                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                          </span>
-                        </div>
-                        <div className="print-total-row">
-                          <div className="print-final-balance">
-                            <div className="print-final-balance-label">الرصيد</div>
-                            <div className="print-final-balance-value">
-                              {formatCurrencyValue(
-                                statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
-                                statement.transactions[0]?.currency || 'LBP'
-                              )}
-                              {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </PrintLayout>
-                </div>
-              );
-            })}
+            title={t('customers.accountStatement')}
+            content={
+              <AccountStatementPrintContent
+                statement={statement}
+                entity={entity}
+                viewMode={viewMode}
+                totalPages={totalPages}
+                pages={paginatedPages}
+                formatCurrency={formatCurrency}
+              />
+            }
           />
         );
       })()}
@@ -375,148 +234,14 @@ export default function AccountStatementModal({
         
         return (
           <div className="print-only" style={{ display: 'none' }}>
-            {paginatedPages.map((page, idx) => {
-              const isFirstPage = page.isFirstPage;
-              const isLastPage = page.isLastPage;
-              
-              return (
-                <div key={page.pageNumber} className={idx === 0 ? '' : 'print-page-break'}>
-                  <PrintLayout
-                    title="كشف حساب مفصل"
-                    accountName={isFirstPage ? entity.name : undefined}
-                    accountNumber={isFirstPage ? entity.id.slice(0, 10) : undefined}
-                    phone={isFirstPage ? entity.phone : undefined}
-                    previousBalance={isFirstPage ? statement.financialSummary.openingBalance : undefined}
-                    currency={statement.transactions[0]?.currency || 'LBP'}
-                    dateRange={isFirstPage ? statement.dateRange : undefined}
-                    reportDate={isFirstPage ? statement.statementDate : undefined}
-                    pageNumber={page.pageNumber}
-                    totalPages={totalPages}
-                    showHeader={isFirstPage}
-                    showFooter={isLastPage}
-                    showAccountInfo={isFirstPage}
-                    showOpeningBalance={isFirstPage}
-                  >
-                    {/* Opening Balance - Only on first page */}
-                    {isFirstPage && (
-                      <div className="print-opening-balance print-section">
-                        <span className="print-opening-balance-label">الرصيد ما قبل:</span>
-                        <span className="print-opening-balance-value">
-                          {formatCurrencyValue(
-                            statement.financialSummary.openingBalance[statement.transactions[0]?.currency || 'LBP'],
-                            statement.transactions[0]?.currency || 'LBP'
-                          )}
-                          {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Transaction Table */}
-                    <div className="print-table-container print-section">
-                      <table className="print-table">
-                        <thead>
-                          <tr>
-                            <th className="print-table-col-date">التاريخ</th>
-                            <th className="print-table-col-reference">المرجع</th>
-                            <th className="print-table-col-description">البيان</th>
-                            {viewMode === 'detailed' && (
-                              <>
-                                <th className="print-table-col-quantity">العدد</th>
-                                <th className="print-table-col-weight">الوزن</th>
-                                <th className="print-table-col-price">السعر</th>
-                              </>
-                            )}
-                            <th className="print-table-col-debit">مدين</th>
-                            <th className="print-table-col-credit">دائن</th>
-                            <th className="print-table-col-balance">الرصيد</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {page.transactions.map((transaction, index) => (
-                            <tr key={transaction.id || index}>
-                              <td className="print-table-col-date">
-                                {new Date(transaction.date).toLocaleDateString('ar-LB', {
-                                  year: 'numeric',
-                                  month: '2-digit',
-                                  day: '2-digit',
-                                })}
-                              </td>
-                              <td className="print-table-col-reference">{transaction.reference || '-'}</td>
-                              <td className="print-table-col-description">{transaction.description}</td>
-                              {viewMode === 'detailed' && (
-                                <>
-                                  <td className="print-table-col-quantity print-number">
-                                    {transaction.quantity || '-'}
-                                  </td>
-                                  <td className="print-table-col-weight print-number">
-                                    {transaction.weight ? `${transaction.weight}` : '-'}
-                                  </td>
-                                  <td className="print-table-col-price print-number">
-                                    {transaction.price ? formatCurrencyValue(transaction.price, transaction.currency || 'LBP') : '-'}
-                                  </td>
-                                </>
-                              )}
-                              <td className="print-table-col-debit print-number print-currency">
-                                {transaction.type !== 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
-                              </td>
-                              <td className="print-table-col-credit print-number print-currency">
-                                {transaction.type === 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
-                              </td>
-                              <td className="print-table-col-balance print-number print-currency">
-                                {formatCurrencyValue(transaction.balanceAfter, transaction.currency)}
-                                {transaction.currency === 'LBP' ? ' ل.ل' : ''}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Summary Footer - Only on last page */}
-                    {isLastPage && (
-                      <div className="print-summary print-section">
-                        <div className="print-summary-row">
-                          <span>إجمالي مدين:</span>
-                          <span className="print-number">
-                            {formatCurrencyValue(
-                              statement.transactions
-                                .filter(t => t.type !== 'payment')
-                                .reduce((sum, t) => sum + (t.amount || 0), 0),
-                              statement.transactions[0]?.currency || 'LBP'
-                            )}
-                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                          </span>
-                        </div>
-                        <div className="print-summary-row">
-                          <span>إجمالي دائن:</span>
-                          <span className="print-number">
-                            {formatCurrencyValue(
-                              statement.transactions
-                                .filter(t => t.type === 'payment')
-                                .reduce((sum, t) => sum + (t.amount || 0), 0),
-                              statement.transactions[0]?.currency || 'LBP'
-                            )}
-                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                          </span>
-                        </div>
-                        <div className="print-total-row">
-                          <div className="print-final-balance">
-                            <div className="print-final-balance-label">الرصيد</div>
-                            <div className="print-final-balance-value">
-                              {formatCurrencyValue(
-                                statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
-                                statement.transactions[0]?.currency || 'LBP'
-                              )}
-                              {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </PrintLayout>
-                </div>
-              );
-            })}
+            <AccountStatementPrintContent
+              statement={statement}
+              entity={entity}
+              viewMode={viewMode}
+              totalPages={totalPages}
+              pages={paginatedPages}
+              formatCurrency={formatCurrency}
+            />
           </div>
         );
       })()}
@@ -533,7 +258,7 @@ export default function AccountStatementModal({
               )}
               <div>
                 <h2 className="text-2xl font-bold text-gray-900">
-                  Account Statement - {entity.name}
+                  {t('customers.accountStatement')} - {entity.name}
                 </h2>
                 <p className="text-sm text-gray-600 capitalize">
                   {entityType} • {new Date().toLocaleDateString()}
@@ -582,7 +307,7 @@ export default function AccountStatementModal({
                 className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <Download className="w-4 h-4" />
-                <span>Export</span>
+                <span>{t('common.export')}</span>
               </button>
 
               <button
@@ -590,7 +315,7 @@ export default function AccountStatementModal({
                 className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
               >
                 <Printer className="w-4 h-4" />
-                <span>Print</span>
+                <span>{t('common.print')}</span>
               </button>
 
               <button
@@ -615,7 +340,7 @@ export default function AccountStatementModal({
                   }`}
                 >
                   <BarChart3 className="w-4 h-4" />
-                  <span className="font-medium">Financial Summary</span>
+                  <span className="font-medium">{t('common.financialSummary')}</span>
                 </button>
                 <button
                   onClick={() => setViewMode('detailed')}
@@ -626,7 +351,7 @@ export default function AccountStatementModal({
                   }`}
                 >
                   <List className="w-4 h-4" />
-                  <span className="font-medium">Detailed View</span>
+                  <span className="font-medium">{t('common.detailedView')}</span>
                 </button>
               </div>
             </div>
@@ -646,11 +371,11 @@ export default function AccountStatementModal({
                 <div className="bg-gray-50 rounded-lg p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                       <DollarSign className="w-6 h-6 mr-3 text-blue-600" />
-                      Financial Overview
+                      {t('common.financialOverview')}
                     </h3>
                     <div className="flex items-center space-x-2 text-sm text-gray-600">
                       <Info className="w-4 h-4" />
-                      <span>Period: {new Date(statement.dateRange.start).toLocaleDateString()} - {new Date(statement.dateRange.end).toLocaleDateString()}</span>
+                      <span>{t('common.period')}: {new Date(statement.dateRange.start).toLocaleDateString()} - {new Date(statement.dateRange.end).toLocaleDateString()}</span>
                     </div>
                   </div>
 
@@ -670,7 +395,7 @@ export default function AccountStatementModal({
 
                     <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                       <div className="flex items-center justify-between mb-2">
-                        <div className="text-sm font-medium text-gray-500">Current Balance</div>
+                        <div className="text-sm font-medium text-gray-500">{t('common.currentBalance')}</div>
                         <DollarSign className="w-4 h-4 text-gray-400" />
                       </div>
                       <div className={`text-2xl font-bold ${
@@ -687,7 +412,7 @@ export default function AccountStatementModal({
                       <>
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-500">Total Credit Sales</div>
+                            <div className="text-sm font-medium text-gray-500">{t('common.totalCreditSales')}</div>
                             <CreditCard className="w-4 h-4 text-red-400" />
                           </div>
                           <div className="text-2xl font-bold text-red-600">
@@ -697,7 +422,7 @@ export default function AccountStatementModal({
 
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-500">Total Payments</div>
+                            <div className="text-sm font-medium text-gray-500">{t('common.totalPayments')}</div>
                             <TrendingUp className="w-4 h-4 text-green-400" />
                           </div>
                           <div className="text-2xl font-bold text-green-600">
@@ -709,7 +434,7 @@ export default function AccountStatementModal({
                       <>
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-500">Total Received Bills</div>
+                            <div className="text-sm font-medium text-gray-500">{t('common.totalReceivedBills')}</div>
                             <TrendingUp className="w-4 h-4 text-purple-400" />
                           </div>
                           <div className="text-2xl font-bold text-purple-600">
@@ -722,7 +447,7 @@ export default function AccountStatementModal({
 
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-500">Total Payments</div>
+                            <div className="text-sm font-medium text-gray-500">{t('common.totalPayments')}</div>
                             <TrendingDown className="w-4 h-4 text-red-400" />
                           </div>
                           <div className="text-2xl font-bold text-red-600">
@@ -744,7 +469,7 @@ export default function AccountStatementModal({
                   <div className="p-6 border-b border-gray-200">
                     <h3 className="text-xl font-bold text-gray-900 flex items-center">
                       <FileText className="w-6 h-6 mr-3 text-gray-600" />
-                      {viewMode === 'detailed' ? 'Detailed Transaction History' : 'Transaction Summary'}
+                      {viewMode === 'detailed' ? t('common.detailedTransactionHistory') : t('common.transactionSummary')}
                     </h3>
                     {/* <p className="text-sm text-gray-600 mt-1">
                       {statement.transactions.length} transactions found
@@ -763,41 +488,41 @@ export default function AccountStatementModal({
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Date
+                              {t('common.date')}
                             </th>
                            
                           
                               <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Description
+                            {t('common.description')}
                             </th>
                             
                             {viewMode === 'detailed' && (
                               <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Number
+                                {t('common.number')}
                               </th>
                             )}
                              {viewMode === 'detailed' && (
                               <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Weight
+                                {t('common.weight')}
                               </th>
                             )}
                              {viewMode === 'detailed' && (
                               <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Price
+                                {t('common.price')}
                               </th>
                             )}
                         
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Credit
+                              {t('common.credit')}
                             </th>
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Debit
+                              {t('common.debit')}
                             </th>
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Balance After
+                              {t('common.balanceAfter')}
                             </th>
                             <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Reference
+                              {t('common.reference')}
                             </th>
                           </tr>
                         </thead>
@@ -883,8 +608,8 @@ export default function AccountStatementModal({
             ) : (
               <div className="text-center py-16">
                 <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <p className="text-xl font-medium text-gray-500 mb-2">Failed to generate statement</p>
-                <p className="text-gray-400">Please try again or contact support if the issue persists.</p>
+                <p className="text-xl font-medium text-gray-500 mb-2">{t('common.failedToGenerateStatement')}</p>
+                <p className="text-gray-400">{t('common.tryAgainOrContactSupport')}</p>
               </div>
             )}
           </div>

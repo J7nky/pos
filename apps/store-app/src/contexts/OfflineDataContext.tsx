@@ -2979,15 +2979,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         amountInLBP = numAmount * exchangeRate;
       }
 
-      // For supplier payments, check cash drawer balance (compare in LBP)
-
+      // Only check cash drawer balance when PAYING OUT money (not when receiving)
+      // When paymentDirection is 'receive', money is coming IN, so no balance check needed
+      if (paymentDirection === 'pay') {
         const currentBalance = await getCurrentCashDrawerBalance(storeId);
         if (amountInLBP > currentBalance) {
           return { 
             success: false, 
             error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP` 
           };
-        
+        }
       }
 
       // Update entity balance in the SELECTED currency
