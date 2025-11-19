@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Printer, ChevronLeft, ChevronRight, Check, FileText } from 'lucide-react';
-
+import { useI18n } from '../../i18n';
 interface PrintPreviewProps {
   isOpen: boolean;
   onClose: () => void;
@@ -18,6 +18,7 @@ export function PrintPreview({
   totalPages = 1,
   title = 'Print Preview',
 }: PrintPreviewProps) {
+  const { t } = useI18n();
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedPages, setSelectedPages] = useState<number[]>([]);
   const [selectAll, setSelectAll] = useState(true);
@@ -97,7 +98,7 @@ export function PrintPreview({
             <div>
               <h2 className="text-xl font-bold text-gray-900">{title}</h2>
               <p className="text-sm text-gray-600">
-                Preview your document before printing
+                {t('balanceReport.previewDocumentBeforePrinting')}
               </p>
             </div>
           </div>
@@ -121,12 +122,12 @@ export function PrintPreview({
                   className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                 />
                 <span className="text-sm font-medium text-gray-700">
-                  Select All Pages
+                  {t('balanceReport.selectAllPages')}
                 </span>
               </label>
               <div className="h-6 w-px bg-gray-300" />
               <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-600">Select pages:</span>
+                <span className="text-sm text-gray-600">{t('balanceReport.selectPages')}</span>
                 <div className="flex flex-wrap gap-2">
                   {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
                     <label
@@ -147,7 +148,7 @@ export function PrintPreview({
                         {selectedPages.includes(page) && (
                           <Check className="w-3 h-3 inline mr-1" />
                         )}
-                        Page {page}
+                        {t('balanceReport.page')} {page}
                       </span>
                     </label>
                   ))}
@@ -155,7 +156,7 @@ export function PrintPreview({
               </div>
             </div>
             <div className="text-sm text-gray-600">
-              {selectedPages.length} of {totalPages} pages selected
+              {selectedPages.length} {t('common.of')} {totalPages} {t('balanceReport.pagesSelected')}
             </div>
           </div>
         </div>
@@ -197,7 +198,7 @@ export function PrintPreview({
                       if (Array.isArray(content)) {
                         // Show the page content at index pageNum - 1
                         const pageContent = content[pageNum - 1];
-                        return pageContent || <div className="text-center py-20 text-gray-400">Page {pageNum} content not available</div>;
+                        return pageContent || <div className="text-center py-20 text-gray-400">t{"balanceReport.page"} {pageNum} t{"balanceReport.contentNotAvailable"}</div>;
                       } else {
                         // Single content - show for all pages (useful for single page documents)
                         return content;
@@ -230,7 +231,7 @@ export function PrintPreview({
               <ChevronLeft className="w-5 h-5" />
             </button>
             <div className="flex items-center space-x-2">
-              <span className="text-sm text-gray-700">Page</span>
+              <span className="text-sm text-gray-700">{t('balanceReport.page')}</span>
               <input
                 type="number"
                 min={1}
@@ -244,7 +245,7 @@ export function PrintPreview({
                 }}
                 className="w-16 px-2 py-1 text-sm border border-gray-300 rounded text-center"
               />
-              <span className="text-sm text-gray-700">of {totalPages}</span>
+              <span className="text-sm text-gray-700"> {t('common.of')} {totalPages}</span>
             </div>
             <button
               onClick={() => handlePageChange(currentPage + 1)}
@@ -265,7 +266,7 @@ export function PrintPreview({
               onClick={onClose}
               className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
-              Cancel
+              {t('balanceReport.cancel')}
             </button>
             <button
               onClick={handlePrint}
@@ -277,7 +278,7 @@ export function PrintPreview({
               }`}
             >
               <Printer className="w-5 h-5" />
-              <span>Print {selectedPages.length > 0 ? `(${selectedPages.length} ${selectedPages.length === 1 ? 'page' : 'pages'})` : ''}</span>
+              <span> {t('balanceReport.print')} {selectedPages.length > 0 ? `(${selectedPages.length} ${selectedPages.length === 1 ? 'page' : 'pages'})` : ''}</span>
             </button>
           </div>
         </div>

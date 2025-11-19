@@ -213,7 +213,7 @@ export default function AccountStatementModal({
             onClose={handleClosePreview}
             onPrint={handlePrint}
             totalPages={totalPages}
-            title={t('customers.accountStatement')}
+            title={t('customers.summaryAccountStatement')}
             content={
               <AccountStatementPrintContent
                 statement={statement}
@@ -250,7 +250,7 @@ export default function AccountStatementModal({
         <div className="bg-white rounded-lg max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
           {/* Header */}
           <div className="p-6 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center gap-3">
               {entityType === 'customer' ? (
                 <Users className="w-6 h-6 text-blue-600" />
               ) : (
@@ -258,17 +258,17 @@ export default function AccountStatementModal({
               )}
               <div>
                 <h2 className="text-2xl font-bold text-gray-900">
-                  {t('customers.accountStatement')} - {entity.name}
+                  {t('customers.summaryAccountStatement')} - {entity.name}
                 </h2>
                 <p className="text-sm text-gray-600 capitalize">
-                  {entityType} • {new Date().toLocaleDateString()}
+                  {t(`payments.${entityType}`)} • {new Date().toLocaleDateString()}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center gap-3">
               {/* Date Range Picker */}
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-gray-500" />
                 <input
                   type="date"
@@ -284,7 +284,7 @@ export default function AccountStatementModal({
                   }}
                   className="border border-gray-300 rounded px-2 py-1 text-sm"
                 />
-                <span className="text-gray-500">to</span>
+                <span className="text-gray-500">{t('common.to')}</span>
                 <input
                   type="date"
                   value={dateRange.end}
@@ -304,18 +304,18 @@ export default function AccountStatementModal({
 
               <button
                 onClick={handleExportPDF}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <Download className="w-4 h-4" />
-                <span>{t('common.export')}</span>
+                <span>{t('common.actions.export')}</span>
               </button>
 
               <button
                 onClick={handlePrintClick}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
               >
                 <Printer className="w-4 h-4" />
-                <span>{t('common.print')}</span>
+                <span>{t('balanceReport.print')}</span>
               </button>
 
               <button
@@ -330,28 +330,28 @@ export default function AccountStatementModal({
           {/* View Mode Toggle */}
           <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex-shrink-0">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-1 bg-gray-100 p-1 rounded-lg">
+              <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg">
                 <button
                   onClick={() => setViewMode('summary')}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-md transition-colors ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
                     viewMode === 'summary'
                       ? 'bg-white text-blue-600 shadow-sm'
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
                   <BarChart3 className="w-4 h-4" />
-                  <span className="font-medium">{t('common.financialSummary')}</span>
+                  <span className="font-medium">{t('balanceReport.financialSummary')}</span>
                 </button>
                 <button
                   onClick={() => setViewMode('detailed')}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-md transition-colors ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
                     viewMode === 'detailed'
                       ? 'bg-white text-blue-600 shadow-sm'
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
                   <List className="w-4 h-4" />
-                  <span className="font-medium">{t('common.detailedView')}</span>
+                  <span className="font-medium">{t('balanceReport.detailedView')}</span>
                 </button>
               </div>
             </div>
@@ -370,12 +370,12 @@ export default function AccountStatementModal({
                 {/* Financial Summary Section */}
                 <div className="bg-gray-50 rounded-lg p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                      <DollarSign className="w-6 h-6 mr-3 text-blue-600" />
-                      {t('common.financialOverview')}
+                      <DollarSign className="w-6 h-6 me-3 text-blue-600" />
+                      {t('customers.financialOverview')}
                     </h3>
-                    <div className="flex items-center space-x-2 text-sm text-gray-600">
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
                       <Info className="w-4 h-4" />
-                      <span>{t('common.period')}: {new Date(statement.dateRange.start).toLocaleDateString()} - {new Date(statement.dateRange.end).toLocaleDateString()}</span>
+                      <span>{t('customers.period')}: {new Date(statement.dateRange.start).toLocaleDateString()} - {new Date(statement.dateRange.end).toLocaleDateString()}</span>
                     </div>
                   </div>
 
@@ -395,7 +395,7 @@ export default function AccountStatementModal({
 
                     <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                       <div className="flex items-center justify-between mb-2">
-                        <div className="text-sm font-medium text-gray-500">{t('common.currentBalance')}</div>
+                        <div className="text-sm font-medium text-gray-500">{t('cashDrawer.currentBalance')}</div>
                         <DollarSign className="w-4 h-4 text-gray-400" />
                       </div>
                       <div className={`text-2xl font-bold ${
@@ -412,7 +412,7 @@ export default function AccountStatementModal({
                       <>
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-500">{t('common.totalCreditSales')}</div>
+                            <div className="text-sm font-medium text-gray-500">{t('balanceReport.totalCreditSales')}</div>
                             <CreditCard className="w-4 h-4 text-red-400" />
                           </div>
                           <div className="text-2xl font-bold text-red-600">
@@ -422,7 +422,7 @@ export default function AccountStatementModal({
 
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-500">{t('common.totalPayments')}</div>
+                            <div className="text-sm font-medium text-gray-500">{t('customers.totalPayments')}</div>
                             <TrendingUp className="w-4 h-4 text-green-400" />
                           </div>
                           <div className="text-2xl font-bold text-green-600">
@@ -468,8 +468,8 @@ export default function AccountStatementModal({
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm mt-4">
                   <div className="p-6 border-b border-gray-200">
                     <h3 className="text-xl font-bold text-gray-900 flex items-center">
-                      <FileText className="w-6 h-6 mr-3 text-gray-600" />
-                      {viewMode === 'detailed' ? t('common.detailedTransactionHistory') : t('common.transactionSummary')}
+                      <FileText className="w-6 h-6 me-3 text-gray-600" />
+                      {viewMode === 'detailed' ? t('balanceReport.transactionDetails') : t('balanceReport.transactionSummary')}
                     </h3>
                     {/* <p className="text-sm text-gray-600 mt-1">
                       {statement.transactions.length} transactions found
@@ -479,50 +479,50 @@ export default function AccountStatementModal({
                   {statement.transactions.length === 0 ? (
                     <div className="text-center py-16">
                       <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                      <p className="text-xl font-medium text-gray-500 mb-2">No transactions found</p>
-                      <p className="text-gray-400">Try adjusting the date range or check back later.</p>
+                      <p className="text-xl font-medium text-gray-500 mb-2">{t('dashboard.noTransactionsFound')}</p>
+                      <p className="text-gray-400">{t('common.tryAdjustingTheDateRangeOrCheckingBackLater')}</p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              {t('common.date')}
+                            <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              {t('balanceReport.date')}
                             </th>
                            
                           
-                              <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            {t('common.description')}
+                              <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            {t('balanceReport.description')}
                             </th>
                             
                             {viewMode === 'detailed' && (
-                              <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                {t('common.number')}
+                              <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {t('balanceReport.number')}
                               </th>
                             )}
                              {viewMode === 'detailed' && (
-                              <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                {t('common.weight')}
+                              <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {t('balanceReport.weight')}
                               </th>
                             )}
                              {viewMode === 'detailed' && (
-                              <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                {t('common.price')}
+                              <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {t('balanceReport.price')}
                               </th>
                             )}
                         
-                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              {t('common.credit')}
+                            <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              {t('balanceReport.credit')}
                             </th>
-                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              {t('common.debit')}
+                            <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              {t('balanceReport.debit')}
                             </th>
-                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              {t('common.balanceAfter')}
+                            <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              {t('balanceReport.balanceAfter')}
                             </th>
-                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              {t('common.reference')}
+                            <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              {t('balanceReport.reference')}
                             </th>
                           </tr>
                         </thead>
@@ -540,7 +540,7 @@ export default function AccountStatementModal({
                                 </div>
                                 {transaction.paymentMethod && (
                                   <div className="text-xs text-gray-500 mt-1 flex items-center">
-                                    <CreditCard className="w-3 h-3 mr-1" />
+                                    <CreditCard className="w-3 h-3 me-1" />
                                     {transaction.paymentMethod}
                                   </div>
                                 )}

@@ -392,8 +392,9 @@ const ar = {
     generatedOn: 'تم إنشاؤه في'
   },
   customers: {
-    summaryAccountStatement: 'ملخص كشف الحساب',
-    detailedAccountStatement: 'تفصيل كشف الحساب',
+    
+    summaryAccountStatement: ' كشف الحساب',
+    detailedAccountStatement: 'كشف حساب مفصل',
     period: 'فترة',
     financialOverview: 'نظرة عامة على المالي',
     openingBalance: 'الرصيد الافتتاحي',
@@ -931,6 +932,19 @@ const ar = {
     closing: 'جاري الإغلاق...',
   },
   balanceReport: {
+    financialSummary: 'ملخص مالي',
+    detailedView: 'عرض مفصل',
+    totalCreditSales: 'إجمالي المبيعات بالدين',
+    pagesSelected: 'الصفحات المختارة',
+    number: 'العدد',
+    balanceAfter: 'الرصيد بعد',
+    previewDocumentBeforePrinting: 'معاينة المستند قبل الطباعة',
+    selectAllPages: 'اختيار جميع الصفحات',
+    selectPages: 'اختيار الصفحات',
+    page: 'صفحة',
+    contentNotAvailable: 'المحتوى غير متاح',
+    print: 'طباعة',
+    cancel: 'إلغاء',
     debitTotal: 'إجمالي المدين',
     creditTotal: 'إجمالي الدائن',
     debit: 'مدين',
@@ -976,13 +990,10 @@ const ar = {
     loadingTransactionDetails: 'جاري تحميل تفاصيل المعاملات...',
     transactionDetails: 'تفاصيل المعاملات',
     product: 'المنتج',
-    quantity: 'الكمية',
     unitPrice: 'سعر الوحدة',
     total: 'الإجمالي',
     unknown: 'غير معروف',
-    description: 'الوصف',
     amount: 'المبلغ',
-    reference: 'المرجع',
     category: 'الفئة'
   },
   receipt: {

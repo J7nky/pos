@@ -136,7 +136,7 @@ export class AccountStatementService {
           .toArray()
       : [];
 
-    const allSalesFromStartLBP = allSalesFromStart.reduce((sum, s) => sum + (s.received_value || 0), 0);
+    const allSalesFromStartLBP = allSalesFromStart.reduce((sum, s) => sum + (s.line_total || 0), 0);
     
     const allPaymentsFromStartUSD = allTransactionsFromStart
       .filter(t => t.currency === 'USD' && 
@@ -236,23 +236,30 @@ export class AccountStatementService {
     
     if (viewMode === 'summary' && customerBills.length > 0) {
       // In summary mode, create bill-level transactions
-
-      saleEvents = customerBills.map(bill => ({
-        id: bill.id,
-        date: bill.bill_date,
-        kind: 'sale' as const,
-        currency: 'LBP' as const,
-        amount: bill.total_amount,
-        delta: bill.total_amount,
-        productId: undefined,
-        productName: `Bill #${bill.bill_number}`,
-        unit: 'bill',
-        quantity: 1,
-        weight: undefined,
-        unitPrice: bill.total_amount,
-        notes: bill.notes || null,
-        billNumber: bill.bill_number
-      }));
+      // Calculate total from line items to ensure data normalization
+      saleEvents = customerBills.map(bill => {
+        // Get line items for this specific bill
+        const billLineItems = periodSales.filter(sale => sale.bill_id === bill.id);
+        // Calculate actual total from line items (normalized data)
+        const calculatedTotal = billLineItems.reduce((sum, item) => sum + (item.line_total || 0), 0);
+        
+        return {
+          id: bill.id,
+          date: bill.bill_date,
+          kind: 'sale' as const,
+          currency: 'LBP' as const,
+          amount: calculatedTotal,
+          delta: calculatedTotal,
+          productId: undefined,
+          productName: `Bill #${bill.bill_number}`,
+          unit: 'bill',
+          quantity: billLineItems.length,
+          weight: undefined,
+          unitPrice: calculatedTotal,
+          notes: bill.notes || null,
+          billNumber: bill.bill_number
+        };
+      });
     } else {
       // In detailed mode, create individual sale item transactions
       saleEvents = periodSales.map(sale => {
@@ -263,8 +270,8 @@ export class AccountStatementService {
           date: sale.created_at || new Date().toISOString(),
           kind: 'sale' as const,
           currency: 'LBP' as const,
-          amount: sale.received_value || 0,
-          delta: (sale.received_value || 0),
+          amount: sale.line_total || 0,
+          delta: (sale.line_total || 0),
           productId: product?.id,
           productName: product?.name,
           unit: inventoryItem?.unit || 'piece',
