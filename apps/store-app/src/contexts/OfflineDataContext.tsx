@@ -714,6 +714,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // Auto-sync when connection is restored
   useEffect(() => {
     if (justCameOnline && storeId && !isSyncing) {
+      console.log('🌐 [CONNECTION] Connection restored, triggering sync...');
       handleConnectionRestored();
     }
   }, [justCameOnline, storeId, isSyncing]);
@@ -776,20 +777,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
         // Debounce auto-sync calls
         autoSyncTimeout = setTimeout(() => {
-          debug('👀 Auto-syncing on focus/visibility change...');
+          console.log('👀 [FOCUS-SYNC] Auto-syncing on focus/visibility change...');
+          console.log('👀 [FOCUS-SYNC] Unsynced count:', unsyncedCount);
           performSync(true);
         }, 1000); // 1 second debounce
       }
     };
 
     const handleFocus = () => {
+      console.log('👀 [FOCUS-SYNC] Window focused, checking if sync needed...');
       debouncedAutoSync();
     };
 
     const handleVisibilityChange = () => {
       if (!document.hidden) {
+        console.log('👀 [FOCUS-SYNC] Tab became visible, checking if sync needed...');
         debouncedAutoSync();
-
       }
     };
 
@@ -883,7 +886,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const resetAutoSyncTimer = useCallback(() => {
     // Clear existing timer
     if (autoSyncTimerRef.current) {
-      debug('🔄 Resetting auto-sync timer (clearing existing timer)');
+      console.log('🔄 [AUTO-SYNC] Resetting auto-sync timer (clearing existing timer)');
       clearTimeout(autoSyncTimerRef.current);
       autoSyncTimerRef.current = null;
     }
@@ -892,23 +895,49 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (isOnline && storeId && !isSyncing) {
       // Use shorter delay for immediate changes, longer for idle state
       const syncDelay = unsyncedCount > 0 ? 5000 : 30000; // 5s for active changes, 30s for idle
-      debug(`⏰ Setting auto-sync timer (${syncDelay}ms delay)`);
+      console.log(`⏰ [AUTO-SYNC] Setting auto-sync timer (${syncDelay}ms delay, ${unsyncedCount} unsynced records)`);
+      console.log(`⏰ [AUTO-SYNC] Timer will fire at: ${new Date(Date.now() + syncDelay).toLocaleTimeString()}`);
+      
       autoSyncTimerRef.current = setTimeout(async () => {
-        debug('⏰ Auto-sync timer fired, checking for unsynced data...');
+        console.log('⏰ [AUTO-SYNC] ========================================');
+        console.log('⏰ [AUTO-SYNC] Timer fired at:', new Date().toLocaleTimeString());
+        console.log('⏰ [AUTO-SYNC] Checking for sync...');
 
         // Get fresh unsynced count
         const currentUnsyncedCount = await getCurrentUnsyncedCount();
-        debug(`📊 Current unsynced count: ${currentUnsyncedCount}`);
+        console.log(`📊 [AUTO-SYNC] Current unsynced count: ${currentUnsyncedCount}`);
+        console.log(`📊 [AUTO-SYNC] Sync service running: ${syncService.isCurrentlyRunning()}`);
+        console.log(`📊 [AUTO-SYNC] Online status: ${isOnline}`);
+        console.log(`📊 [AUTO-SYNC] Store ID: ${storeId}`);
 
-        if (!syncService.isCurrentlyRunning() && currentUnsyncedCount > 0) {
-          debug('⏰ Auto-sync triggered');
-          performSync(true);
+        // Always sync if not already running - need to check for both uploads AND downloads
+        // Even with 0 unsynced records locally, there might be remote changes to download
+        if (!syncService.isCurrentlyRunning()) {
+          console.log('✅ [AUTO-SYNC] Triggering auto-sync now...');
+          console.log(`📥 [AUTO-SYNC] Will upload ${currentUnsyncedCount} local changes and check for remote changes`);
+          const syncStartTime = Date.now();
+          const result = await performSync(true);
+          const syncDuration = Date.now() - syncStartTime;
+          console.log('✅ [AUTO-SYNC] Sync completed in', syncDuration, 'ms');
+          console.log('✅ [AUTO-SYNC] Sync result:', {
+            success: result.success,
+            uploaded: result.synced.uploaded,
+            downloaded: result.synced.downloaded,
+            conflicts: result.conflicts,
+            errors: result.errors
+          });
+          console.log('⏰ [AUTO-SYNC] ========================================');
         } else {
-          debug('⏰ No unsynced data or sync already running, skipping auto-sync');
+          console.log('⏭️  [AUTO-SYNC] Skipping sync - sync already running');
+          console.log('⏰ [AUTO-SYNC] ========================================');
         }
       }, syncDelay);
     } else {
-      debug('⏰ Not setting auto-sync timer - offline, no store, or syncing');
+      console.log('⏭️  [AUTO-SYNC] Not setting timer:', {
+        isOnline,
+        hasStoreId: !!storeId,
+        isSyncing
+      });
     }
   }, [isOnline, storeId, isSyncing, unsyncedCount]);
 
@@ -959,26 +988,40 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
     if (!storeId || isSyncing) {
+      console.log('⏭️  [SYNC] Skipping sync:', { hasStoreId: !!storeId, isSyncing });
       return { success: false, errors: ['No store ID or sync in progress'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
     }
 
+    console.log(`🔄 [SYNC] Starting ${isAutomatic ? 'AUTO' : 'MANUAL'} sync at ${new Date().toLocaleTimeString()}`);
     setIsSyncing(true);
     setIsAutoSyncing(isAutomatic);
     setLoading(prev => ({ ...prev, sync: true }));
 
     try {
+      const syncStartTime = Date.now();
       const result = await syncService.sync(storeId);
+      const syncDuration = Date.now() - syncStartTime;
+      
       setLastSync(new Date());
+      console.log(`✅ [SYNC] Sync completed in ${syncDuration}ms:`, {
+        success: result.success,
+        uploaded: result.synced.uploaded,
+        downloaded: result.synced.downloaded,
+        conflicts: result.conflicts,
+        errors: result.errors.length > 0 ? result.errors : 'none'
+      });
 
       if (result.success || result.synced.uploaded > 0 || result.synced.downloaded > 0) {
+        console.log('🔄 [SYNC] Refreshing local data after sync...');
         await refreshData();
         await updateUnsyncedCount();
         await checkUndoValidity();
+        console.log('✅ [SYNC] Local data refreshed');
       }
 
       return result;
     } catch (error) {
-      console.error(`${isAutomatic ? 'Auto-sync' : 'Manual sync'} error:`, error);
+      console.error(`❌ [SYNC] ${isAutomatic ? 'Auto-sync' : 'Manual sync'} error:`, error);
       return {
         success: false,
         errors: [error instanceof Error ? error.message : 'Unknown sync error'],
@@ -989,6 +1032,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setIsSyncing(false);
       setIsAutoSyncing(false);
       setLoading(prev => ({ ...prev, sync: false }));
+      console.log(`🏁 [SYNC] Sync process finished at ${new Date().toLocaleTimeString()}`);
     }
   }, [storeId, isSyncing, refreshData, updateUnsyncedCount, checkUndoValidity]);
 
@@ -1226,20 +1270,20 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     });
 
     // Process cash drawer transaction for cash sales using the general utility
-    const cashSaleItems = mappedLineItems.filter(item => item.payment_method === 'cash');
-    debug('💰 Cash sale items:', cashSaleItems);
+    // Note: payment_method is on the bill, not on individual line items
     let cashDrawerResult = null;
-    if (cashSaleItems.length > 0) {
+    if (bill.payment_method === 'cash') {
       try {
-        const totalCashAmount = cashSaleItems.reduce((sum, item) => sum + (item.received_value || item.line_total || 0), 0);
+        const totalCashAmount = bill.amount_paid || bill.total_amount || 0;
+        debug('💰 Processing cash sale transaction:', { totalCashAmount, billNumber: bill.bill_number });
 
         cashDrawerResult = await processCashDrawerTransaction({
           type: 'sale',
           amount: totalCashAmount,
           currency: 'LBP', // Assuming LBP for now, could be made dynamic
-          description: `Cash sale - ${cashSaleItems.length} items`,
-          reference: generateSaleReference(),
-          customerId: cashSaleItems[0]?.customer_id || undefined
+          description: `Cash sale - Bill ${bill.bill_number}`,
+          reference: bill.bill_number,
+          customerId: bill.customer_id || undefined
         });
 
         // // Record cash sale transaction for financial tracking
@@ -1278,11 +1322,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         ...(customerBalanceUpdate ? [
           { table: 'customers', id: customerBalanceUpdate.customerId },
           { table: 'transactions', id: `credit-sale-${billId}` }
-        ] : []),
-        // Only include cash-sale transaction if we don't have a cash drawer result
-        // (cash drawer result will handle its own transaction)
-        ...(cashSaleItems.length > 0 && !cashDrawerResult ? [
-          { table: 'transactions', id: `cash-sale-${billId}` }
         ] : [])
       ],
       steps: [
@@ -1309,12 +1348,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           op: 'delete',
           table: 'transactions',
           id: `credit-sale-${billId}`
-        }] : []),
-        // Delete the cash transaction if applicable (only if no cash drawer result)
-        ...(cashSaleItems.length > 0 && !cashDrawerResult ? [{
-          op: 'delete',
-          table: 'transactions',
-          id: `cash-sale-${billId}`
         }] : [])
       ]
     };
@@ -1327,6 +1360,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     pushUndo(undoData);
 
     await refreshData();
+    await refreshCashDrawerStatus(); // Refresh cash drawer to show updated balance
     await updateUnsyncedCount();
 
     // Reset auto-sync timer to ensure full undo window

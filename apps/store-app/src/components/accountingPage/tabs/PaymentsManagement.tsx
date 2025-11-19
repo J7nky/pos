@@ -418,6 +418,7 @@ const PaymentEditModal: React.FC<{
   const [formData, setFormData] = useState<Partial<Transaction>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [entityChangeWarning, setEntityChangeWarning] = useState<string | null>(null);
 
   // Initialize form data when payment changes
   React.useEffect(() => {
@@ -431,6 +432,7 @@ const PaymentEditModal: React.FC<{
         supplier_id: payment.supplier_id,
         category: payment.category
       });
+      setEntityChangeWarning(null);
     }
   }, [payment]);
 
@@ -450,6 +452,20 @@ const PaymentEditModal: React.FC<{
     }
     if (formData.customer_id && formData.supplier_id) {
       newErrors.entity = t('payments.bothEntitiesError');
+    }
+    
+    // Check if entity changed
+    const entityChanged = (formData.customer_id !== payment.customer_id) || 
+                         (formData.supplier_id !== payment.supplier_id);
+    if (entityChanged && !entityChangeWarning) {
+      // Show warning but don't block save
+      const oldEntity = payment.customer_id ? 
+        customers.find(c => c.id === payment.customer_id)?.name || t('payments.unknownCustomer') :
+        suppliers.find(s => s.id === payment.supplier_id)?.name || t('payments.unknownSupplier');
+      const newEntity = formData.customer_id ? 
+        customers.find(c => c.id === formData.customer_id)?.name || t('payments.unknownCustomer') :
+        suppliers.find(s => s.id === formData.supplier_id)?.name || t('payments.unknownSupplier');
+      setEntityChangeWarning(t('payments.entityChangeWarning', { oldEntity, newEntity }));
     }
 
     setErrors(newErrors);
@@ -502,6 +518,17 @@ const PaymentEditModal: React.FC<{
           {errors.general && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
               <p className="text-sm text-red-600">{errors.general}</p>
+            </div>
+          )}
+          
+          {entityChangeWarning && (
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm text-yellow-800">
+                <strong>{t('payments.warning')}:</strong> {entityChangeWarning}
+              </p>
+              <p className="text-xs text-yellow-700 mt-1">
+                {t('payments.entityChangeNote')}
+              </p>
             </div>
           )}
 
@@ -583,51 +610,117 @@ const PaymentEditModal: React.FC<{
             <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
               {t('payments.relatedEntity')} *
             </label>
-            <div className="space-y-3">
-              {/* Customer Selection */}
-              <div>
-                <label className="block text-sm text-gray-600 mb-1 rtl:text-right">{t('payments.customer')}</label>
-                <select
-                  value={formData.customer_id || ''}
-                  onChange={(e) => setFormData({ 
-                    ...formData, 
-                    customer_id: e.target.value || null,
-                    supplier_id: e.target.value ? null : formData.supplier_id
-                  })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            
+            {/* Entity Type Selector */}
+            <div className="mb-3">
+              <div className="flex gap-2 rtl:flex-row-reverse">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormData({ 
+                      ...formData, 
+                      customer_id: payment?.customer_id || null,
+                      supplier_id: null
+                    });
+                    setEntityChangeWarning(null);
+                  }}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    formData.customer_id && !formData.supplier_id
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                  }`}
                 >
-                  <option value="">{t('payments.selectCustomer')}</option>
-                  {customers.map(customer => (
-                    <option key={customer.id} value={customer.id}>{customer.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Supplier Selection */}
-              <div>
-                <label className="block text-sm text-gray-600 mb-1 rtl:text-right">{t('payments.supplier')}</label>
-                <select
-                  value={formData.supplier_id || ''}
-                  onChange={(e) => setFormData({ 
-                    ...formData, 
-                    supplier_id: e.target.value || null,
-                    customer_id: e.target.value ? null : formData.customer_id
-                  })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  {t('payments.customer')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormData({ 
+                      ...formData, 
+                      customer_id: null,
+                      supplier_id: payment?.supplier_id || null
+                    });
+                    setEntityChangeWarning(null);
+                  }}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    formData.supplier_id && !formData.customer_id
+                      ? 'bg-purple-600 text-white shadow-sm'
+                      : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                  }`}
                 >
-                  <option value="">{t('payments.selectSupplier')}</option>
-                  {suppliers.map(supplier => (
-                    <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
-                  ))}
-                </select>
+                  {t('payments.supplier')}
+                </button>
               </div>
+            </div>
+            
+            {/* Entity Selector */}
+            <div>
+              {formData.customer_id || (!formData.customer_id && !formData.supplier_id && payment?.customer_id) ? (
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1 rtl:text-right">{t('payments.selectCustomer')}</label>
+                  <select
+                    value={formData.customer_id || ''}
+                    onChange={(e) => {
+                      const newCustomerId = e.target.value || null;
+                      setFormData({ 
+                        ...formData, 
+                        customer_id: newCustomerId,
+                        supplier_id: null
+                      });
+                      if (newCustomerId !== payment?.customer_id) {
+                        const oldEntity = payment?.customer_id ? 
+                          customers.find(c => c.id === payment.customer_id)?.name || t('payments.unknownCustomer') : '';
+                        const newEntity = customers.find(c => c.id === newCustomerId)?.name || '';
+                        setEntityChangeWarning(t('payments.entityChangeWarning', { oldEntity, newEntity }));
+                      } else {
+                        setEntityChangeWarning(null);
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">{t('payments.selectCustomer')}</option>
+                    {customers.map(customer => (
+                      <option key={customer.id} value={customer.id}>{customer.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1 rtl:text-right">{t('payments.selectSupplier')}</label>
+                  <select
+                    value={formData.supplier_id || ''}
+                    onChange={(e) => {
+                      const newSupplierId = e.target.value || null;
+                      setFormData({ 
+                        ...formData, 
+                        supplier_id: newSupplierId,
+                        customer_id: null
+                      });
+                      if (newSupplierId !== payment?.supplier_id) {
+                        const oldEntity = payment?.supplier_id ? 
+                          suppliers.find(s => s.id === payment.supplier_id)?.name || t('payments.unknownSupplier') : '';
+                        const newEntity = suppliers.find(s => s.id === newSupplierId)?.name || '';
+                        setEntityChangeWarning(t('payments.entityChangeWarning', { oldEntity, newEntity }));
+                      } else {
+                        setEntityChangeWarning(null);
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">{t('payments.selectSupplier')}</option>
+                    {suppliers.map(supplier => (
+                      <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
             {errors.entity && (
               <p className="text-xs text-red-600 mt-1 rtl:text-right">{errors.entity}</p>
             )}
           </div>
 
-          {/* Payment Category */}
+          {/* Payment Category - Read Only */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">
               {t('payments.category')}

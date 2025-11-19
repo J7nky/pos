@@ -755,6 +755,19 @@ export default function Accounting() {
           reference: generateCommissionReference(),
           created_by: userProfile?.id || ''
         });
+        
+        // Update supplier balance with commission (increases what we owe them)
+        const supplier = suppliers.find(s => s.id === bill.supplier_id);
+        if (supplier) {
+          // Commission is typically in LBP
+          const currentLbBalance = supplier.lb_balance || 0;
+          const newLbBalance = currentLbBalance + fees.commission;
+          
+          await raw.updateSupplier(bill.supplier_id, {
+            lb_balance: newLbBalance
+          });
+          console.log(`💰 Updated supplier ${bill.supplierName} LBP balance: ${currentLbBalance} → ${newLbBalance} (commission: +${fees.commission})`);
+        }
       }
 
       // Add porterage transaction (if applicable)
@@ -817,6 +830,7 @@ export default function Accounting() {
       }
       console.log('bill', bill);
       // Persist closed flag onto the inventory batch by updating status
+      // Also store the commission_amount and closed_at timestamp
       try {
         const existingStatus = bill.status || '';
         const closedStatus = existingStatus==='CLOSED' ? existingStatus : "CLOSED";
@@ -824,7 +838,12 @@ export default function Accounting() {
         if (!targetBatchId) {
           console.warn('No batch identifier available when attempting to close bill:', bill);
         } else {
-          await handleUpdateBatch(targetBatchId, { status: closedStatus });
+          await handleUpdateBatch(targetBatchId, { 
+            status: closedStatus,
+            commission_amount: fees.commission, // Store calculated commission
+            closed_at: new Date().toISOString() // Store closure timestamp
+          });
+          console.log(`✅ Bill ${targetBatchId} closed with commission: ${fees.commission} ${fees.currency}`);
         }
       } catch (e) {
         console.warn('Failed to persist closed flag on inventory batch:', e);
@@ -837,7 +856,7 @@ export default function Accounting() {
     }
   };
 
-  const handleUpdateBatch  = async (batchId: string, updates: Partial<{ porterage_fee?: number | null; transfer_fee?: number | null; notes?: string | null; plastic_fee?: string | null; plastic_count?: number | null; plastic_price?: number | null; commission_rate?: number | null; received_at?: string | null; status?: string | null; type?: string | null; supplier_id?: string | null; }>) => {
+  const handleUpdateBatch  = async (batchId: string, updates: Partial<{ porterage_fee?: number | null; transfer_fee?: number | null; notes?: string | null; plastic_fee?: string | null; plastic_count?: number | null; plastic_price?: number | null; commission_rate?: number | null; commission_amount?: number | null; closed_at?: string | null; received_at?: string | null; status?: string | null; type?: string | null; supplier_id?: string | null; }>) => {
     console.log('[Accounting] handleUpdateBatch - Called with:', { batchId, updates });
     try {
       // Update batch information

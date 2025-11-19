@@ -294,8 +294,9 @@ export class CashDrawerUpdateService {
               store_id: transactionData.storeId,
               created_by: transactionData.createdBy,
               created_at: new Date().toISOString(),
+              status: 'active' as const,
               _synced: false
-            });
+            } as any);
           });
         } catch (dbError) {
           console.error('Database transaction failed, rolling back cash drawer update:', dbError);

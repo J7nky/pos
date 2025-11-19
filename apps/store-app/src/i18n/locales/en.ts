@@ -556,7 +556,12 @@ const en = {
     undoLastAction: 'Undo last action',
     undoSuccessful: 'Action undone successfully',
     undoFailed: 'Cannot undo: action has been synced or records no longer exist',
-    undoError: 'Failed to undo action: {{error}}'
+    undoError: 'Failed to undo action: {{error}}',
+    // Entity change warnings
+    warning: 'Warning',
+    entityChangeWarning: 'You are changing the payment from {{oldEntity}} to {{newEntity}}',
+    entityChangeNote: 'This will remove the payment from the previous entity\'s account and add it to the new entity\'s account. Both balances will be updated accordingly.',
+    categoryCannotBeChanged: 'Payment category cannot be changed after creation'
   },
   nonPriced: {
     title: 'Non Priced Items',

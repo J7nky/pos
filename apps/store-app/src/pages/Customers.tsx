@@ -1320,6 +1320,7 @@ export default function Customers() {
           }}
           entity={selectedEntity}
           entityType={showAccountStatement}
+          storeId={userProfile?.store_id || ''}
           sales={raw.sales || []}
           transactions={raw.transactions || []}
           products={raw.products || []}

@@ -90,6 +90,7 @@ export class AccountStatementService {
    */
   private async computeCustomerOpeningBalanceOptimized(
     customerId: string,
+    storeId: string,
     startDateISO: string
   ): Promise<{ USD: number; LBP: number }> {
     // 1. Get current stored balance (source of truth)
@@ -111,18 +112,21 @@ export class AccountStatementService {
     // Opening balance = Current balance - (all transactions from start date to today)
     // This way, when we add period transactions chronologically, we get the correct balance progression
     
-    // Get customer payments from transactions table
+    // Get customer payments from transactions table (filtered by store_id)
     const allTransactionsFromStart = await db.transactions
       .where('customer_id')
       .equals(customerId)
-      .and(t => !!t.created_at && new Date(t.created_at) >= startDate)
+      .and(t => t.store_id === storeId && 
+                !!t.created_at && 
+                new Date(t.created_at) >= startDate)
       .toArray();
 
-    // Get credit sales from bills (normalized approach)
+    // Get credit sales from bills (normalized approach, filtered by store_id)
     const allCreditBillsFromStart = await db.bills
       .where('customer_id')
       .equals(customerId)
-      .and(b => b.payment_method === 'credit' && 
+      .and(b => b.store_id === storeId &&
+                b.payment_method === 'credit' && 
                 !!b.bill_date && 
                 new Date(b.bill_date) >= startDate)
       .toArray();
@@ -168,6 +172,7 @@ export class AccountStatementService {
    */
   private async buildCustomerPeriodTransactionsOptimized(
     customer: Customer,
+    storeId: string,
     products: Product[],
     inventory: InventoryItem[],
     startDateISO: string,
@@ -182,16 +187,32 @@ export class AccountStatementService {
     const endDate = new Date(endDateISO);
     endDate.setHours(23, 59, 59, 999); // Include entire end date
     
-    // STEP 1: Query credit bills for this customer (normalized approach)
+    // STEP 1: Query credit bills for this customer (normalized approach, filtered by store_id)
     // customer_id and payment_method are in bills table, not bill_line_items
-    const customerBills = bills || await db.bills
-      .where('customer_id')
-      .equals(customer.id)
-      .and(b => b.payment_method === 'credit' &&
-                !!b.bill_date &&
-                new Date(b.bill_date) >= startDate &&
-                new Date(b.bill_date) <= endDate)
-      .toArray();
+    let customerBills: any[];
+    
+    if (bills) {
+      // Filter the provided bills array to match the same criteria as the database query
+      customerBills = bills.filter(b => 
+        b.customer_id === customer.id &&
+        b.store_id === storeId &&
+        b.payment_method === 'credit' &&
+        !!b.bill_date &&
+        new Date(b.bill_date) >= startDate &&
+        new Date(b.bill_date) <= endDate
+      );
+    } else {
+      // Query from database
+      customerBills = await db.bills
+        .where('customer_id')
+        .equals(customer.id)
+        .and(b => b.store_id === storeId &&
+                  b.payment_method === 'credit' &&
+                  !!b.bill_date &&
+                  new Date(b.bill_date) >= startDate &&
+                  new Date(b.bill_date) <= endDate)
+        .toArray();
+    }
     
     // STEP 2: Get line items for these bills (JOIN operation)
     const billIds = customerBills.map(b => b.id);
@@ -202,16 +223,17 @@ export class AccountStatementService {
           .toArray()
       : [];
 
-    // STEP 3: Query period customer payments directly from database using indexed query
+    // STEP 3: Query period customer payments directly from database using indexed query (filtered by store_id)
     const periodPayments = await db.transactions
       .where('customer_id')
       .equals(customer.id)
-      .and(t => t.type === 'income' &&
+      .and(t => t.store_id === storeId &&
+                t.type === 'income' &&
                 !!t.created_at &&
                 new Date(t.created_at) >= startDate &&
                 new Date(t.created_at) <= endDate)
       .toArray();
-
+console.log("periodPayments", periodPayments);
     type RawEvent = {
       id: string;
       date: string;
@@ -326,14 +348,9 @@ export class AccountStatementService {
           notes: ev.notes || undefined
         }] : [];
 
-        let description: string;
-        if (viewMode === 'summary' && ev.unit === 'bill') {
-          // Bill-level description for summary mode
-          description = `Credit Sale - ${ev.productName}`;
-        } else {
-          // Product-level description for detailed mode
-          description = `Sale: ${ev.productName || '-'} | ${ev.unit || 'piece'}`;
-        }
+        const description: string = viewMode === 'summary' && ev.unit === 'bill'
+          ? `Credit Sale - ${ev.productName}` // Bill-level description for summary mode
+          : `Sale: ${ev.productName || '-'} | ${ev.unit || 'piece'}`; // Product-level description for detailed mode
 
         statementTransactions.push({
           id: ev.id,
@@ -386,6 +403,7 @@ export class AccountStatementService {
    */
   private computeSupplierOpeningBalance(
     supplierId: string,
+    storeId: string,
     allTransactions: Transaction[],
     startDateISO: string
   ): { USD: number; LBP: number } {
@@ -403,8 +421,9 @@ export class AccountStatementService {
     // This would require iterating through all sales and calculating commissions for closed bills
     let closedCommissionsLBP = 0;
 
-    // Pre-period supplier payments
+    // Pre-period supplier payments (filtered by store_id)
     const prePayments = allTransactions.filter(t =>
+      t.store_id === storeId &&
       t.type === 'expense' &&
       t.category === PAYMENT_CATEGORIES.SUPPLIER_PAYMENT &&
       t.supplier_id === supplierId &&
@@ -425,6 +444,7 @@ export class AccountStatementService {
    */
   private buildSupplierPeriodTransactions(
     supplier: Supplier,
+    storeId: string,
     sales: BillLineItem[],
     transactions: Transaction[],
     products: Product[],
@@ -438,22 +458,25 @@ export class AccountStatementService {
     const startDate = new Date(startDateISO);
     const endDate = new Date(endDateISO);
 
-    // 1. Credit purchases (instant received bills)
+    // 1. Credit purchases (instant received bills, filtered by store_id)
     
     const periodCreditPurchases = inventoryBills.filter(i =>
+      i.store_id === storeId &&
       i.type === 'credit' && i.supplier_id === supplier.id &&
       !!i.created_at && new Date(i.created_at) >= startDate && new Date(i.created_at) <= endDate
     );
 
-    // 2. Closed commission bills (only appear when closed)
+    // 2. Closed commission bills (only appear when closed, filtered by store_id)
     const periodClosedCommissionBills = inventoryBills.filter(bill =>
+      bill.store_id === storeId &&
       bill.supplier_id === supplier.id &&
       !!bill.created_at && new Date(bill.created_at) >= startDate && new Date(bill.created_at) <= endDate &&
       (bill.status === 'closed' || (bill.notes && bill.notes.includes('[CLOSED]')))
     );
 
-    // 3. Supplier payments (both receive and pay)
+    // 3. Supplier payments (both receive and pay, filtered by store_id)
     const periodPayments = transactions.filter(t =>
+      t.store_id === storeId &&
       t.type === 'expense' && t.supplier_id === supplier.id &&
       !!t.created_at && new Date(t.created_at) >= startDate && new Date(t.created_at) <= endDate
     );
@@ -501,43 +524,27 @@ export class AccountStatementService {
       };
     });
 
-    // Commission bill events (only closed bills)
-    const commissionBillEvents: RawEvent[] = [];
-    periodClosedCommissionBills.forEach(bill => {
-      // Find all sales from items in this bill to calculate total commission
-      const billItems = inventoryItems.filter(item => item.batchId === bill.id);
-      let totalCommission = 0;
-      let billDate = bill.created_at;
-
-      // Calculate commission from sales of items in this bill
-      billItems.forEach(item => {
-        const itemSales = sales.filter(sale => sale.inventory_item_id === item.id);
-        itemSales.forEach(sale => {
-          const commissionRate = bill.commission_rate ? Number(bill.commission_rate) : 10;
-          totalCommission += (sale.line_total * commissionRate) / 100;
-          // Use the latest sale date as the bill date for statement purposes
-          if (new Date(sale.created_at) > new Date(billDate)) {
-            billDate = sale.created_at;
-          }
-        });
-      });
-
-      if (totalCommission > 0) {
-        commissionBillEvents.push({
+    // Commission bill events (only closed bills with stored commission_amount)
+    const commissionBillEvents: RawEvent[] = periodClosedCommissionBills
+      .filter(bill => bill.commission_amount && bill.commission_amount > 0)
+      .map(bill => {
+        // Find all items in this bill for detailed view
+        const billItems = inventoryItems.filter(item => item.batchId === bill.id);
+        
+        return {
           id: bill.id,
-          date: billDate,
+          date: bill.closed_at || bill.created_at, // Use closure date if available
           kind: 'commission_bill' as const,
           currency: 'LBP' as const,
-          amount: totalCommission,
-          delta: totalCommission, // Increases what we owe to supplier
+          amount: bill.commission_amount, // Use stored commission amount
+          delta: bill.commission_amount, // Increases what we owe to supplier
           billId: bill.id,
           billType: 'commission' as const,
           inventoryItems: billItems,
           commissionRate: bill.commission_rate ? Number(bill.commission_rate) : 10,
           notes: bill.notes
-        });
-      }
-    });
+        };
+      });
 
     // Payment events
     const paymentEvents: RawEvent[] = periodPayments.map(t => ({
@@ -754,6 +761,7 @@ export class AccountStatementService {
    */
   public async generateCustomerStatement(
     customer: Customer,
+    storeId: string,
     sales: BillLineItem[], // Kept for backward compatibility but not used
     transactions: Transaction[], // Kept for backward compatibility but not used
     products: Product[],
@@ -767,11 +775,12 @@ export class AccountStatementService {
     const endDate = this.endOfDayISO(dateRange?.end || now);
 
     // Compute opening balances using optimized method (uses stored balance + queries only after start date)
-    const openingBalance = await this.computeCustomerOpeningBalanceOptimized(customer.id, startDate);
+    const openingBalance = await this.computeCustomerOpeningBalanceOptimized(customer.id, storeId, startDate);
     
     // Build period transactions and running balances using optimized method (queries directly from database)
     const { statementTransactions, ending, totals } = await this.buildCustomerPeriodTransactionsOptimized(
       customer,
+      storeId,
       products,
       inventory,
       startDate,
@@ -780,6 +789,7 @@ export class AccountStatementService {
       openingBalance,
       bills
     );
+    
 
     // Product summary based on period credit sales (query from database - normalized approach)
     const startDateObj = new Date(startDate);
@@ -787,11 +797,12 @@ export class AccountStatementService {
     const endDateObj = new Date(endDate);
     endDateObj.setHours(23, 59, 59, 999);
     
-    // Get credit bills for this customer in the period
+    // Get credit bills for this customer in the period (filtered by store_id)
     const periodCreditBills = await db.bills
       .where('customer_id')
       .equals(customer.id)
-      .and(b => b.payment_method === 'credit' &&
+      .and(b => b.store_id === storeId &&
+                b.payment_method === 'credit' &&
                 !!b.bill_date &&
                 new Date(b.bill_date) >= startDateObj &&
                 new Date(b.bill_date) <= endDateObj)
@@ -834,6 +845,7 @@ export class AccountStatementService {
    */
   public generateSupplierStatement(
     supplier: Supplier,
+    storeId: string,
     sales: BillLineItem[],
     inventoryItems: InventoryItem[],
     transactions: Transaction[],
@@ -848,12 +860,14 @@ export class AccountStatementService {
 
     const openingBalance = this.computeSupplierOpeningBalance(
       supplier.id,
+      storeId,
       transactions,
       startDate
     );
 
     const { statementTransactions, ending, totals } = this.buildSupplierPeriodTransactions(
       supplier,
+      storeId,
       sales,
       transactions,
       products,

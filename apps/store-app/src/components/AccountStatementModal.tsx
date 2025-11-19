@@ -31,6 +31,7 @@ interface AccountStatementModalProps {
   onClose: () => void;
   entity: Customer | Supplier;
   entityType: 'customer' | 'supplier';
+  storeId: string;
   sales: BillLineItem[];
   transactions: Transaction[];
   products: Product[];
@@ -44,6 +45,7 @@ export default function AccountStatementModal({
   onClose,
   entity,
   entityType,
+  storeId,
   sales,
   transactions,
   products,
@@ -55,9 +57,15 @@ export default function AccountStatementModal({
   
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
-  const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
-    start: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0], // Start of year
-    end: new Date().toISOString().split('T')[0] // Today
+  const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return {
+      start: `${year}-01-01`, // Start of year
+      end: `${year}-${month}-${day}` // Today in local timezone
+    };
   });
   const [isLoading, setIsLoading] = useState(false);
   const [showPrintPreview, setShowPrintPreview] = useState(false);
@@ -94,6 +102,7 @@ export default function AccountStatementModal({
       if (entityType === 'customer') {
         newStatement = await accountStatementService.generateCustomerStatement(
           entity as Customer,
+          storeId,
           sales,
           transactions,
           products,
@@ -127,6 +136,7 @@ export default function AccountStatementModal({
 
         newStatement = accountStatementService.generateSupplierStatement(
           entity as Supplier,
+          storeId,
           sales,
           inventory,
           transactions,

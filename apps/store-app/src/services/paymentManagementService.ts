@@ -157,11 +157,40 @@ export class PaymentManagementService {
           _synced: false
         };
 
+        // Track new entity balances BEFORE applying changes (if entity changed)
+        let newCustomerBalance = null;
+        let newSupplierBalance = null;
+        
+        if (entityChanged) {
+          if (updatedTransaction.customer_id && updatedTransaction.customer_id !== originalTransaction.customer_id) {
+            const customer = await db.customers.get(updatedTransaction.customer_id);
+            if (customer) {
+              newCustomerBalance = { id: customer.id, usd_balance: customer.usd_balance, lb_balance: customer.lb_balance };
+              undoAffected.push({ table: 'customers', id: customer.id });
+            }
+          }
+          
+          if (updatedTransaction.supplier_id && updatedTransaction.supplier_id !== originalTransaction.supplier_id) {
+            const supplier = await db.suppliers.get(updatedTransaction.supplier_id);
+            if (supplier) {
+              newSupplierBalance = { id: supplier.id, usd_balance: supplier.usd_balance, lb_balance: supplier.lb_balance };
+              undoAffected.push({ table: 'suppliers', id: supplier.id });
+            }
+          }
+        }
+
         // Apply new transaction impact
+        console.log('🔄 Applying new transaction impact:', {
+          originalEntity: originalTransaction.customer_id ? `Customer ${originalTransaction.customer_id}` : `Supplier ${originalTransaction.supplier_id}`,
+          newEntity: updatedTransaction.customer_id ? `Customer ${updatedTransaction.customer_id}` : `Supplier ${updatedTransaction.supplier_id}`,
+          amount: updatedTransaction.amount,
+          type: updatedTransaction.type
+        });
         const newImpact = await this.applyTransactionImpact(updatedTransaction, context);
         balanceUpdates = newImpact.balanceUpdates;
+        console.log('✅ New transaction impact applied:', balanceUpdates);
 
-        // Add balance restoration to undo steps
+        // Add balance restoration to undo steps for original entities
         if (originalCustomerBalance) {
           undoSteps.push({
             op: 'update',
@@ -183,6 +212,33 @@ export class PaymentManagementService {
             changes: { 
               usd_balance: originalSupplierBalance.usd_balance, 
               lb_balance: originalSupplierBalance.lb_balance,
+              _synced: false 
+            }
+          });
+        }
+        
+        // Add balance restoration to undo steps for new entities (if entity changed)
+        if (newCustomerBalance) {
+          undoSteps.push({
+            op: 'update',
+            table: 'customers',
+            id: newCustomerBalance.id,
+            changes: { 
+              usd_balance: newCustomerBalance.usd_balance, 
+              lb_balance: newCustomerBalance.lb_balance,
+              _synced: false 
+            }
+          });
+        }
+        
+        if (newSupplierBalance) {
+          undoSteps.push({
+            op: 'update',
+            table: 'suppliers',
+            id: newSupplierBalance.id,
+            changes: { 
+              usd_balance: newSupplierBalance.usd_balance, 
+              lb_balance: newSupplierBalance.lb_balance,
               _synced: false 
             }
           });
@@ -503,20 +559,43 @@ export class PaymentManagementService {
   ): Promise<PaymentManagementResult['balanceUpdates']['entity'] | null> {
     try {
       const customer = await db.customers.get(transaction.customer_id);
-      if (!customer) return null;
+      if (!customer) {
+        console.warn('⚠️ Customer not found:', transaction.customer_id);
+        return null;
+      }
 
-      const previousBalance = customer.usd_balance || 0;
-      const amountInUSD = currencyService.convertCurrency(transaction.amount, transaction.currency, 'USD');
+      // Update the correct balance based on transaction currency
+      const isUSD = transaction.currency === 'USD';
+      const previousBalance = isUSD ? (customer.usd_balance || 0) : (customer.lb_balance || 0);
       
       // For customer payments: income reduces customer debt, expense increases it
-      const balanceChange = transaction.type === 'income' ? -amountInUSD : amountInUSD;
+      const balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
       const newBalance = previousBalance + balanceChange;
 
-      await db.customers.update(transaction.customer_id, {
-        usd_balance: newBalance,
+      console.log('💰 Updating customer balance:', {
+        customerId: transaction.customer_id,
+        customerName: customer.name,
+        currency: transaction.currency,
+        previousBalance,
+        balanceChange,
+        newBalance,
+        transactionType: transaction.type,
+        amount: transaction.amount
+      });
+
+      // Update the appropriate balance field
+      const updateData: any = {
         updated_at: new Date().toISOString(),
         _synced: false
-      });
+      };
+      
+      if (isUSD) {
+        updateData.usd_balance = newBalance;
+      } else {
+        updateData.lb_balance = newBalance;
+      }
+
+      await db.customers.update(transaction.customer_id, updateData);
 
       return {
         entityType: 'customer',
@@ -540,20 +619,43 @@ export class PaymentManagementService {
   ): Promise<PaymentManagementResult['balanceUpdates']['entity'] | null> {
     try {
       const supplier = await db.suppliers.get(transaction.supplier_id);
-      if (!supplier) return null;
+      if (!supplier) {
+        console.warn('⚠️ Supplier not found:', transaction.supplier_id);
+        return null;
+      }
 
-      const previousBalance = supplier.usd_balance || 0;
-      const amountInUSD = currencyService.convertCurrency(transaction.amount, transaction.currency, 'USD');
+      // Update the correct balance based on transaction currency
+      const isUSD = transaction.currency === 'USD';
+      const previousBalance = isUSD ? (supplier.usd_balance || 0) : (supplier.lb_balance || 0);
       
       // For supplier payments: expense reduces what we owe them, income increases it
-      const balanceChange = transaction.type === 'expense' ? -amountInUSD : amountInUSD;
+      const balanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
       const newBalance = previousBalance + balanceChange;
 
-      await db.suppliers.update(transaction.supplier_id, {
-        usd_balance: newBalance,
+      console.log('💰 Updating supplier balance:', {
+        supplierId: transaction.supplier_id,
+        supplierName: supplier.name,
+        currency: transaction.currency,
+        previousBalance,
+        balanceChange,
+        newBalance,
+        transactionType: transaction.type,
+        amount: transaction.amount
+      });
+
+      // Update the appropriate balance field
+      const updateData: any = {
         updated_at: new Date().toISOString(),
         _synced: false
-      });
+      };
+      
+      if (isUSD) {
+        updateData.usd_balance = newBalance;
+      } else {
+        updateData.lb_balance = newBalance;
+      }
+
+      await db.suppliers.update(transaction.supplier_id, updateData);
 
       return {
         entityType: 'supplier',
@@ -579,18 +681,36 @@ export class PaymentManagementService {
       const customer = await db.customers.get(transaction.customer_id);
       if (!customer) return null;
 
-      const previousBalance = customer.usd_balance || 0;
-      const amountInUSD = currencyService.convertCurrency(transaction.amount, transaction.currency, 'USD');
+      // Revert the correct balance based on transaction currency
+      const isUSD = transaction.currency === 'USD';
+      const previousBalance = isUSD ? (customer.usd_balance || 0) : (customer.lb_balance || 0);
       
       // Reverse the original balance change
-      const balanceChange = transaction.type === 'income' ? amountInUSD : -amountInUSD;
+      const balanceChange = transaction.type === 'income' ? transaction.amount : -transaction.amount;
       const newBalance = previousBalance + balanceChange;
 
-      await db.customers.update(transaction.customer_id, {
-        usd_balance: newBalance,
+      console.log('🔄 Reverting customer balance:', {
+        customerId: transaction.customer_id,
+        customerName: customer.name,
+        currency: transaction.currency,
+        previousBalance,
+        balanceChange,
+        newBalance
+      });
+
+      // Update the appropriate balance field
+      const updateData: any = {
         updated_at: new Date().toISOString(),
         _synced: false
-      });
+      };
+      
+      if (isUSD) {
+        updateData.usd_balance = newBalance;
+      } else {
+        updateData.lb_balance = newBalance;
+      }
+
+      await db.customers.update(transaction.customer_id, updateData);
 
       return {
         entityType: 'customer',
@@ -616,18 +736,36 @@ export class PaymentManagementService {
       const supplier = await db.suppliers.get(transaction.supplier_id);
       if (!supplier) return null;
 
-      const previousBalance = supplier.usd_balance || 0;
-      const amountInUSD = currencyService.convertCurrency(transaction.amount, transaction.currency, 'USD');
+      // Revert the correct balance based on transaction currency
+      const isUSD = transaction.currency === 'USD';
+      const previousBalance = isUSD ? (supplier.usd_balance || 0) : (supplier.lb_balance || 0);
       
       // Reverse the original balance change
-      const balanceChange = transaction.type === 'expense' ? amountInUSD : -amountInUSD;
+      const balanceChange = transaction.type === 'expense' ? transaction.amount : -transaction.amount;
       const newBalance = previousBalance + balanceChange;
 
-      await db.suppliers.update(transaction.supplier_id, {
-        usd_balance: newBalance,
+      console.log('🔄 Reverting supplier balance:', {
+        supplierId: transaction.supplier_id,
+        supplierName: supplier.name,
+        currency: transaction.currency,
+        previousBalance,
+        balanceChange,
+        newBalance
+      });
+
+      // Update the appropriate balance field
+      const updateData: any = {
         updated_at: new Date().toISOString(),
         _synced: false
-      });
+      };
+      
+      if (isUSD) {
+        updateData.usd_balance = newBalance;
+      } else {
+        updateData.lb_balance = newBalance;
+      }
+
+      await db.suppliers.update(transaction.supplier_id, updateData);
 
       return {
         entityType: 'supplier',

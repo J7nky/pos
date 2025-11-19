@@ -134,6 +134,8 @@ export interface inventory_bills {
   created_at:string;
   notes?:string;
   commission_rate?:number | null;
+  commission_amount?: number | null; // Calculated commission when bill is closed
+  closed_at?: string | null; // Timestamp when bill was closed
   plastic_fee?:string;
   type:string
   _synced?: boolean;
