@@ -229,6 +229,7 @@ export class AccountStatementService {
       .equals(customer.id)
       .and(t => t.store_id === storeId &&
                 t.type === 'income' &&
+                t.category==='cash_drawer_payment'&&
                 !!t.created_at &&
                 new Date(t.created_at) >= startDate &&
                 new Date(t.created_at) <= endDate)
@@ -237,7 +238,7 @@ console.log("periodPayments", periodPayments);
     type RawEvent = {
       id: string;
       date: string;
-      kind: 'sale' | 'payment';
+      type: 'sale' | 'payment';
       currency: 'USD' | 'LBP';
       amount: number; // positive amount for display
       delta: number; // signed effect on balance
@@ -268,7 +269,7 @@ console.log("periodPayments", periodPayments);
         return {
           id: bill.id,
           date: bill.bill_date,
-          kind: 'sale' as const,
+          type: 'sale' as const,
           currency: 'LBP' as const,
           amount: calculatedTotal,
           delta: calculatedTotal,
@@ -290,7 +291,7 @@ console.log("periodPayments", periodPayments);
         return {
           id: sale.id,
           date: sale.created_at || new Date().toISOString(),
-          kind: 'sale' as const,
+          type: 'sale' as const,
           currency: 'LBP' as const,
           amount: sale.line_total || 0,
           delta: (sale.line_total || 0),
@@ -309,7 +310,7 @@ console.log("periodPayments", periodPayments);
     const paymentEvents: RawEvent[] = periodPayments.map(t => ({
       id: t.id,
       date: t.created_at,
-      kind: 'payment',
+      type: 'payment',
       currency: t.currency,
       amount: t.amount,
       delta: -t.amount,
@@ -321,7 +322,7 @@ console.log("periodPayments", periodPayments);
       const db = new Date(b.date).getTime();
       if (da !== db) return da - db;
       // Stable tie-breaker: sales before payments
-      if (a.kind !== b.kind) return a.kind === 'sale' ? -1 : 1;
+      if (a.type !== b.type) return a.type === 'sale' ? -1 : 1;
       return a.id.localeCompare(b.id);
     });
 
@@ -336,7 +337,7 @@ console.log("periodPayments", periodPayments);
         runningLBP += ev.delta;
       }
 
-      if (ev.kind === 'sale') {
+      if (ev.type === 'sale') {
         const productDetails: StatementProductDetail[] = viewMode === 'detailed' && ev.productId && ev.productName ? [{
           productId: ev.productId,
           productName: ev.productName,
@@ -484,7 +485,7 @@ console.log("periodPayments", periodPayments);
     type RawEvent = {
       id: string;
       date: string;
-      kind: 'credit_purchase' | 'commission_bill' | 'payment';
+      type: 'credit_purchase' | 'commission_bill' | 'payment';
       currency: 'USD' | 'LBP';
       amount: number;
       delta: number; // positive increases what we owe, negative decreases
@@ -514,7 +515,7 @@ console.log("periodPayments", periodPayments);
       return {
         id: bill.id,
         date: bill.created_at,
-        kind: 'credit_purchase' as const,
+        type: 'credit_purchase' as const,
         currency: 'LBP' as const, // inventory_bills are typically in LBP
         amount: totalAmount,
         delta: totalAmount, // Increases what we owe
@@ -534,7 +535,7 @@ console.log("periodPayments", periodPayments);
         return {
           id: bill.id,
           date: bill.closed_at || bill.created_at, // Use closure date if available
-          kind: 'commission_bill' as const,
+          type: 'commission_bill' as const,
           currency: 'LBP' as const,
           amount: bill.commission_amount, // Use stored commission amount
           delta: bill.commission_amount, // Increases what we owe to supplier
@@ -550,7 +551,7 @@ console.log("periodPayments", periodPayments);
     const paymentEvents: RawEvent[] = periodPayments.map(t => ({
       id: t.id,
       date: t.created_at,
-      kind: 'payment' as const,
+      type: 'payment' as const,
       currency: t.currency,
       amount: t.amount,
       delta: -t.amount, // Decreases what we owe
@@ -564,9 +565,9 @@ console.log("periodPayments", periodPayments);
       const db = new Date(b.date).getTime();
       if (da !== db) return da - db;
       // Sort order: received bills before payments
-      if (a.kind !== b.kind) {
+      if (a.type !== b.type) {
         const order = { credit_purchase: 0, commission_bill: 1, payment: 2 };
-        return order[a.kind] - order[b.kind];
+        return order[a.type] - order[b.type];
       }
       return a.id.localeCompare(b.id);
     });
@@ -583,7 +584,7 @@ console.log("periodPayments", periodPayments);
         runningLBP += ev.delta;
       }
 
-      if (ev.kind === 'credit_purchase') {
+      if (ev.type === 'credit_purchase') {
         
         if (viewMode === 'detailed' && ev.inventoryItems && ev.inventoryItems.length > 0) {
           
@@ -661,7 +662,7 @@ console.log("periodPayments", periodPayments);
             paymentMethod: 'Received Bill'
           });
         }
-      } else if (ev.kind === 'commission_bill') {
+      } else if (ev.type === 'commission_bill') {
         if (viewMode === 'detailed' && ev.inventoryItems && ev.inventoryItems.length > 0) {
           // Show individual inventory items in detailed mode
           // For detailed mode, we need to track running balance per item since each item affects the balance
@@ -727,7 +728,7 @@ console.log("periodPayments", periodPayments);
             reference: `COMM-${ev.id.slice(-8)}`
           });
         }
-      } else if (ev.kind === 'payment') {
+      } else if (ev.type === 'payment') {
         statementTransactions.push({
           id: ev.id,
           date: ev.date,

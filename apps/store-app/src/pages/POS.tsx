@@ -44,6 +44,15 @@ export default function POS() {
   const raw = useOfflineData();
   const { requestAddCustomerFromPOS } = useCustomerForm();
   const navigate = useNavigate();
+  const [activeTabs, setActiveTabs] = useLocalStorage<BillTab[]>('pos_active_tabs', []);
+  const [activeTabId, setActiveTabId] = useLocalStorage<string>('pos_active_tab_id', '');
+  
+  // Early return check - must happen after localStorage hooks but before other hooks
+  const activeTab = activeTabs.find(tab => tab.id === activeTabId);
+  if (!activeTab && activeTabs.length > 0) {
+    // If we have tabs but no active tab, set the first one as active
+    setActiveTabId(activeTabs[0].id);
+  }
 
   // Refs for keyboard navigation
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -63,8 +72,6 @@ export default function POS() {
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
 
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
-  const [activeTabs, setActiveTabs] = useLocalStorage<BillTab[]>('pos_active_tabs', []);
-  const [activeTabId, setActiveTabId] = useLocalStorage<string>('pos_active_tab_id', '');
   const [searchTerm, setSearchTerm] = useState('');
   // Add isProcessing state for async checkout
   const [isProcessing, setIsProcessing] = useState(false);
@@ -436,8 +443,7 @@ ${dashSeparator}`;
     setActiveTabs(updatedTabs);
   };
 
-  const activeTab = activeTabs.find(tab => tab.id === activeTabId);
-  if (!activeTab) return null;
+  // activeTab is already defined at the top of the component
 
   // Get total available stock for a product across all suppliers (subtract reservations across all tabs)
   const getProductStock = (productId: string) => {
@@ -910,6 +916,11 @@ ${dashSeparator}`;
   };
 
   // Add customer form handlers are centralized in the Customers page via CustomerFormContext
+  
+  // Guard: return early if no active tab exists (after all hooks have been called)
+  if (!activeTab) {
+    return null;
+  }
 
   return (
     <div className="p-6 pt-3">
