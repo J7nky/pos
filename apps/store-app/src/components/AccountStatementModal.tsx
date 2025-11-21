@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
   Download, 
@@ -16,8 +16,7 @@ import {
   Info
 } from 'lucide-react';
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
-import { Customer, Supplier, Transaction, InventoryItem, Product,  } from '../types';
-import { BillLineItem } from '../lib/db';
+import { Customer, Supplier, Transaction, InventoryItem, Product, BillLineItem } from '../types';
 import { useI18n } from '../i18n';
 import Toast from './common/Toast';
 import { PrintPreview } from './common/PrintPreview';
@@ -38,6 +37,7 @@ interface AccountStatementModalProps {
   inventory: InventoryItem[];
   inventoryBills: any[];
   bills?: any[];
+  isSyncing?: boolean;
 }
 
 export default function AccountStatementModal({
@@ -51,7 +51,8 @@ export default function AccountStatementModal({
   products,
   inventory,
   inventoryBills,
-  bills
+  bills,
+  isSyncing = false
 }: AccountStatementModalProps) {
   const { t } = useI18n();
   
@@ -70,7 +71,6 @@ export default function AccountStatementModal({
   const [isLoading, setIsLoading] = useState(false);
   const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [totalPages, setTotalPages] = useState(1);
-  const printContentRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
     message: '',
     type: 'success',
@@ -83,11 +83,23 @@ export default function AccountStatementModal({
 
   const hideToast = () => setToast(t => ({ ...t, visible: false }));
 
+  // Create stable dependency tracking to prevent unnecessary regeneration
+  // Only regenerate when actual data count changes, not when array reference changes
+  const transactionsKey = useMemo(() => 
+    `${transactions.length}-${transactions.slice(0, 5).map(t => t.id).join(',')}`,
+    [transactions]
+  );
+  
+  const salesKey = useMemo(() => 
+    `${sales.length}-${sales.slice(0, 5).map(s => s.id).join(',')}`,
+    [sales]
+  );
+
   useEffect(() => {
     if (isOpen && entity) {
       generateStatement();
     }
-  }, [isOpen, entity, dateRange, viewMode, transactions, sales]);
+  }, [isOpen, entity, dateRange, viewMode, transactionsKey, salesKey]);
 
   const generateStatement = async () => {
     if (!entity) return;
@@ -258,6 +270,14 @@ export default function AccountStatementModal({
 
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 no-print">
         <div className="bg-white rounded-lg max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
+          {/* Sync Indicator - Subtle, non-intrusive */}
+          {isSyncing && (
+            <div className="absolute top-2 right-2 z-10 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 flex items-center gap-2 shadow-sm">
+              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+              <span className="text-xs text-blue-600 font-medium">Syncing...</span>
+            </div>
+          )}
+
           {/* Header */}
           <div className="p-6 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-3">

@@ -3,6 +3,7 @@ import { createId } from '../lib/db';
 // Removed React hook import to avoid invalid hook usage in a service context
 import { currencyService } from './currencyService';
 import { generatePaymentReference, generateSaleReference, generateExpenseReference, generateRefundReference } from '../utils/referenceGenerator';
+import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 
 export interface CashTransactionData {
   type: 'sale' | 'payment' | 'expense' | 'refund';
@@ -281,12 +282,17 @@ export class CashDrawerUpdateService {
             } as any);
 
             // Create transaction record for cash drawer tracking
+            const category = transactionData.type === 'sale' ? PAYMENT_CATEGORIES.CASH_DRAWER_SALE
+              : transactionData.type === 'payment' ? PAYMENT_CATEGORIES.CASH_DRAWER_PAYMENT
+              : transactionData.type === 'expense' ? PAYMENT_CATEGORIES.CASH_DRAWER_EXPENSE
+              : PAYMENT_CATEGORIES.CASH_DRAWER_REFUND;
+            
             await db.transactions.add({
               supplier_id:transactionData.supplierId ?? null,
               customer_id:transactionData.customerId ?? null,
               id: transactionId,
               type: balanceChange > 0 ? 'income' : 'expense',
-              category: `cash_drawer_${transactionData.type}`,
+              category: category,
               amount: Math.abs(balanceChange),
               currency: storeCurrency,
               description: `${transactionData.description} - Cash Drawer Update`,

@@ -267,6 +267,9 @@ export class TransactionService {
         reference: generatePaymentReference(),
         created_at: new Date().toISOString(),
         created_by: createdBy,
+        supplier_id: supplierId,
+        customer_id: null,
+        _synced:false,
         store_id: storeId
       };
 

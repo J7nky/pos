@@ -15,6 +15,17 @@ export const PAYMENT_CATEGORIES = {
   // Cash drawer payments
   CASH_PAYMENT: 'Cash Payment',
   CASH_SALE: 'Cash Sale',
+  CASH_DRAWER_SALE: 'cash_drawer_sale',
+  CASH_DRAWER_PAYMENT: 'cash_drawer_payment',
+  CASH_DRAWER_CUSTOMER_PAYMENT: 'cash_drawer_customer_payment',
+  CASH_DRAWER_EXPENSE: 'cash_drawer_expense',
+  CASH_DRAWER_REFUND: 'cash_drawer_refund',
+  
+  // Employee payments
+  EMPLOYEE_PAYMENT: 'Employee Payment',
+  
+  // Sales
+  SALE: 'sale',
   
   // General payment types
   PAYMENT_RECEIVED: 'Payment Received',

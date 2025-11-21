@@ -1327,6 +1327,7 @@ export default function Customers() {
           inventory={raw.inventory || []}
           inventoryBills={raw.inventoryBills || []}
           bills={raw.bills || []}
+          isSyncing={raw.getSyncStatus().isSyncing}
         />
       )}
     </div>

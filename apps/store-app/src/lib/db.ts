@@ -2,6 +2,7 @@ import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { Database } from '../types/database';
 import { generateBillReference } from '../utils/referenceGenerator';
+import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
   Product, 
   Supplier, 
@@ -1016,15 +1017,15 @@ class POSDatabase extends Dexie {
 
       // Group transactions by type for display
       const cashSales = cashDrawerTransactions.filter(trans => 
-        trans.category === 'cash_drawer_sale' && trans.type === 'income'
+        trans.category === PAYMENT_CATEGORIES.CASH_DRAWER_SALE && trans.type === 'income'
       );
       
       const cashPayments = cashDrawerTransactions.filter(trans => 
-        (trans.category === 'cash_drawer_payment' || trans.category === 'cash_drawer_customer_payment') && trans.type === 'income'
+        (trans.category === PAYMENT_CATEGORIES.CASH_DRAWER_PAYMENT || trans.category === PAYMENT_CATEGORIES.CASH_DRAWER_CUSTOMER_PAYMENT) && trans.type === 'income'
       );
       
       const cashExpenses = cashDrawerTransactions.filter(trans => 
-        trans.category === 'cash_drawer_expense' && trans.type === 'expense'
+        trans.category === PAYMENT_CATEGORIES.CASH_DRAWER_EXPENSE && trans.type === 'expense'
       );
 
       return {

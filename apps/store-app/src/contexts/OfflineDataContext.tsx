@@ -19,6 +19,7 @@ import {
   generateAdvanceReference,
   generateReversalReference
 } from '../utils/referenceGenerator';
+import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -1260,7 +1261,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             reference: bill.bill_number,
             customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
             supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
-            category: "sale",
+            category: PAYMENT_CATEGORIES.CUSTOMER_CREDIT_SALE,
             created_by: currentUserId,
             status: 'active' as const
           };
@@ -3222,7 +3223,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const transactionData = {
         id: transactionId,
         type: 'expense' as const,
-        category: 'Employee Payment',
+        category: PAYMENT_CATEGORIES.EMPLOYEE_PAYMENT,
         amount: numAmount,
         currency: currency,
         description: `Employee payment - ${employee.name}${description ? ': ' + description : ''}`,

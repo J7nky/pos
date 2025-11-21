@@ -1,6 +1,7 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { Database } from '../types/database';
+import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
   Product, 
   Supplier, 
@@ -476,7 +477,7 @@ class POSDatabase extends Dexie {
       const cashPayments = await this.transactions
         .filter(trans => 
           trans.type === 'income' && 
-          trans.category === 'Cash Payment' &&
+          trans.category === PAYMENT_CATEGORIES.CASH_PAYMENT &&
           new Date(trans.created_at) >= sessionStartTime &&
           new Date(trans.created_at) <= sessionEndTime
         )
@@ -586,7 +587,7 @@ class POSDatabase extends Dexie {
       const cashPayments = await this.transactions
         .filter(trans => 
           trans.type === 'income' && 
-          trans.category === 'Cash Payment' &&
+          trans.category === PAYMENT_CATEGORIES.CASH_PAYMENT &&
           trans.created_by === sessionId
         )
         .toArray();

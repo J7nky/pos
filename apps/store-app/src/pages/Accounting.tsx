@@ -11,6 +11,7 @@ import {
   generatePorterageReference,
   generateTransferReference
 } from '../utils/referenceGenerator';
+import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
   TrendingUp,
   CheckCircle,
@@ -809,7 +810,7 @@ export default function Accounting() {
           id: raw.createId?.() || crypto.randomUUID(),
           supplier_id: bill.supplier_id,
           type: 'expense',
-          category: 'Supplier Payment',
+          category: PAYMENT_CATEGORIES.SUPPLIER_PAYMENT,
           amount: safeSupplierAmount.amount,
           currency: safeSupplierAmount.currency,
           description: `Payment to ${bill.supplierName} for ${bill.productName} sales${safeSupplierAmount.wasConverted ? ` (Originally ${fees.supplierAmount} ${currency})` : ''}`,
