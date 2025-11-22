@@ -830,6 +830,9 @@ export class TransactionService {
     context: TransactionContext,
     correlationId: string
   ): Promise<string> {
+    // Map source to audit log accepted values
+    const auditSource = context.source === 'offline' ? 'system' : (context.source || 'web');
+    
     return auditLogService.log({
       action: 'transaction_created',
       entityType: 'transaction',
@@ -841,7 +844,7 @@ export class TransactionService {
       userName: context.userName,
       newData: transaction,
       balanceChange: {
-        entityType: transaction.customer_id ? 'customer' : transaction.supplier_id ? 'supplier' : 'system',
+        entityType: transaction.customer_id ? 'customer' : transaction.supplier_id ? 'supplier' : 'cash_drawer',
         balanceBefore,
         balanceAfter,
         currency: transaction.currency
@@ -850,7 +853,7 @@ export class TransactionService {
       severity: 'medium',
       tags: ['transaction', 'create', transaction.category.toLowerCase().replace(/\s+/g, '_')],
       metadata: {
-        source: context.source || 'web',
+        source: auditSource as 'web' | 'mobile' | 'api' | 'system',
         module: context.module,
         sessionId: context.sessionId
       }
@@ -861,14 +864,15 @@ export class TransactionService {
    * Check if category affects cash drawer
    */
   private isCashDrawerCategory(category: TransactionCategory): boolean {
-    return [
+    const cashDrawerCategories: readonly TransactionCategory[] = [
       TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
       TRANSACTION_CATEGORIES.CASH_DRAWER_PAYMENT,
       TRANSACTION_CATEGORIES.CASH_DRAWER_REFUND,
       TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
       TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT,
       TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT
-    ].includes(category);
+    ];
+    return cashDrawerCategories.includes(category);
   }
 
   /**

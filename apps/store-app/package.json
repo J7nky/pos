@@ -23,7 +23,11 @@
     "build:netlify": "vite build --mode production",
     "prepare-updates": "node prepare-updates.js",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.51.0",
@@ -53,6 +57,7 @@
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "@vitest/ui": "^4.0.12",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
     "electron": "38.5.0",
@@ -72,14 +77,15 @@
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.3.0",
     "vite": "^7.0.5",
+    "vitest": "^4.0.12",
     "wait-on": "^9.0.1"
   },
   "repository": "https://github.com/J7nky/pos",
-  "publish":{
+  "publish": {
     "provider": "github",
     "owner": "J7nky",
     "repo": "pos",
-    "releaseType":"release"
+    "releaseType": "release"
   },
   "build": {
     "electronVersion": "38.5.0",

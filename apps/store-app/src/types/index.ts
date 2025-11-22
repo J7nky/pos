@@ -361,8 +361,11 @@ export interface Transaction {
   store_id: string;
   created_by: string;
   created_at: string;
+  updated_at?: string;
   supplier_id: string | null;
   customer_id: string | null;
+  employee_id?: string | null;
+  metadata?: Record<string, any>;
   _synced: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
