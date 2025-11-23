@@ -20,6 +20,8 @@ import {
   generateReversalReference
 } from '../utils/referenceGenerator';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
+import { transactionService } from '../services/transactionService.refactored';
+import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -1247,25 +1249,28 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             });
           }
 
-          // Record the transaction for financial tracking
-          const transaction = {
-            id: createId(),
-            store_id: storeId,
-            created_at: now,
-            updated_at: now,
-            _synced: false,
-            type: 'income', // Credit sale creates accounts receivable (income)
+          // Record the transaction for financial tracking using the unified service
+          await transactionService.createTransaction({
+            category: entityType === 'customer' 
+              ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
+              : TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
             amount: customerBalanceUpdate.amountDue,
             currency: 'LBP',
             description: `Credit sale - Bill ${bill.bill_number} (${entityType})`,
             reference: bill.bill_number,
-            customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
-            supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
-            category: PAYMENT_CATEGORIES.CUSTOMER_CREDIT_SALE,
-            created_by: currentUserId,
-            status: 'active' as const
-          };
-          await db.transactions.add(transaction as any);
+            customerId: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
+            supplierId: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
+            context: {
+              userId: currentUserId,
+              storeId: storeId,
+              module: 'billing',
+              source: 'offline'
+            },
+            updateBalances: false, // Balance already updated above
+            updateCashDrawer: false, // Not a cash transaction
+            createAuditLog: true,
+            _synced: false
+          });
         }
       }
     });
@@ -2604,22 +2609,64 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) throw new Error('No store ID available');
 
     const transactionId = (transactionData as any).id || createId();
+    const currentUserId = userProfile?.id || transactionData.created_by || 'system';
     
-    // Store amounts as-is in their original currency
-    // We'll handle database precision issues only during sync to Supabase
-    const transaction: Transaction = {
-      ...transactionData,
-      id: transactionId,
-      customer_id: transactionData.customer_id ?? null,
-      supplier_id: transactionData.supplier_id ?? null,
-      store_id: storeId,
-      created_at: new Date().toISOString(),
-      _synced: false,
-      amount: transactionData.amount, // Store original amount
-      reference: transactionData.reference ?? null
+    // Map old category format to new standardized categories
+    const categoryMapping: Record<string, string> = {
+      'Commission': TRANSACTION_CATEGORIES.SUPPLIER_COMMISSION,
+      'Customer Payment': TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED,
+      'Supplier Payment': TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT,
+      'Accounts Receivable': TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE,
+      'Accounts Payable': TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
+      // Additional fee categories
+      'Porterage': TRANSACTION_CATEGORIES.SUPPLIER_PORTERAGE,
+      'Transfer Fee': TRANSACTION_CATEGORIES.SUPPLIER_TRANSFER_FEE,
+      // Advance categories
+      'Supplier Advance': TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN, // Default to given
     };
-
-    await db.transactions.add(transaction);
+    
+    const mappedCategory = categoryMapping[transactionData.category as string] || transactionData.category as string;
+    
+    // Validate category exists in TRANSACTION_CATEGORIES
+    const isValidCategory = Object.values(TRANSACTION_CATEGORIES).includes(mappedCategory as any);
+    
+    if (!isValidCategory) {
+      // Fallback: use direct DB write for unknown categories (backward compatibility)
+      console.warn(`⚠️ Unknown transaction category: ${transactionData.category}. Using direct DB write.`);
+      const transaction: Transaction = {
+        ...transactionData,
+        id: transactionId,
+        customer_id: transactionData.customer_id ?? null,
+        supplier_id: transactionData.supplier_id ?? null,
+        store_id: storeId,
+        created_at: new Date().toISOString(),
+        _synced: false,
+        amount: transactionData.amount,
+        reference: transactionData.reference ?? null
+      };
+      await db.transactions.add(transaction);
+    } else {
+      // Use unified transaction service for validated categories
+      await transactionService.createTransaction({
+        category: mappedCategory as any,
+        amount: transactionData.amount,
+        currency: (transactionData.currency as 'USD' | 'LBP') || 'USD',
+        description: transactionData.description || '',
+        reference: transactionData.reference ?? undefined,
+        customerId: transactionData.customer_id ?? undefined,
+        supplierId: transactionData.supplier_id ?? undefined,
+        context: {
+          userId: currentUserId,
+          storeId: storeId,
+          module: 'accounting',
+          source: 'offline'
+        },
+        updateBalances: false, // Caller handles balance updates
+        updateCashDrawer: false, // Caller handles cash drawer
+        createAuditLog: true,
+        _synced: false
+      });
+    }
     
     // Store undo data
     pushUndo({
@@ -3218,27 +3265,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         return { success: false, error: 'Failed to process cash drawer transaction' };
       }
 
-      // Create transaction record
-      const transactionId = createIdFunction();
-      const transactionData = {
-        id: transactionId,
-        type: 'expense' as const,
-        category: PAYMENT_CATEGORIES.EMPLOYEE_PAYMENT,
+      // Create transaction record using unified service
+      await transactionService.createTransaction({
+        category: TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT,
         amount: numAmount,
         currency: currency,
         description: `Employee payment - ${employee.name}${description ? ': ' + description : ''}`,
         reference: reference || generatePaymentReference(),
-        store_id: storeId,
-        created_by: createdBy,
-        created_at: new Date().toISOString(),
-        supplier_id: null,
-        customer_id: null,
-        _synced: false,
-        _lastSyncedAt: undefined,
-        _deleted: false,
-      };
-
-      await db.transactions.add(transactionData);
+        employeeId: employeeId,
+        context: {
+          userId: createdBy,
+          storeId: storeId,
+          module: 'employee_management',
+          source: 'offline'
+        },
+        updateBalances: false, // Balance already updated above
+        updateCashDrawer: false, // Cash drawer already updated above
+        createAuditLog: true,
+        _synced: false
+      });
 
       // Refresh data
       await refreshData();
@@ -3321,29 +3366,36 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Update supplier advance balance
       await updateSupplier(supplierId, updateData);
 
-      // Create transaction record
-      const transactionId = createIdFunction();
+      // Create transaction record using unified service
       const reviewDateNote = reviewDate ? ` [Review: ${new Date(reviewDate).toLocaleDateString()}]` : '';
-      const transactionData = {
-        id: transactionId,
-        type: type === 'give' ? 'expense' as const : 'income' as const,
-        category: 'Supplier Advance',
+      
+      await transactionService.createTransaction({
+        category: type === 'give' 
+          ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
+          : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
         amount: amount,
         currency: currency,
         description: `${description || `Supplier advance ${type === 'give' ? 'payment' : 'deduction'} - ${supplier.name}`}${reviewDateNote}`,
         reference: generateAdvanceReference(),
-        store_id: userProfile?.store_id || '',
-        created_by: userProfile?.id || '',
-        created_at: date,
-        supplier_id: supplierId,
-        customer_id: null,
+        supplierId: supplierId,
+        context: {
+          userId: userProfile?.id || '',
+          storeId: userProfile?.store_id || '',
+          module: 'supplier_management',
+          source: 'offline'
+        },
+        updateBalances: false, // Balance already updated above (lines 3365)
+        updateCashDrawer: false, // No cash drawer update for advances
+        createAuditLog: true,
         _synced: false,
-        _lastSyncedAt: undefined,
-        _deleted: false,
-      };
-
-      // Save transaction to IndexedDB
-      await db.transactions.add(transactionData);
+        metadata: {
+          advanceType: type,
+          reviewDate: reviewDate,
+          previousAdvanceLBP,
+          previousAdvanceUSD,
+          newAdvanceBalance
+        }
+      });
 
       // Create reminder if review date is provided
       if (reviewDate && type === 'give') {
