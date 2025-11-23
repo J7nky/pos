@@ -7,8 +7,8 @@ export interface User {
   email: string;
   name: string;
   role: 'admin' | 'manager' | 'cashier';
-  storeId: string;
-  createdAt: string;
+  store_id: string;
+  created_at: string;
 }
 
 // Employee interface for admin management (extends User with additional employee fields)
@@ -35,16 +35,16 @@ export interface Employee {
 
 export interface Sale {
   id: string;
-  storeId: string;
-  customerId: string;
-  customerName: string;
-  totalAmount: number;
-  paymentMethod: 'cash' | 'card' | 'credit';
+  store_id: string;
+  customer_id: string;
+  customer_name: string;
+  total_amount: number;
+  payment_method: 'cash' | 'card' | 'credit';
   status: 'pending' | 'paid' | 'cancelled';
   notes: string;
-  createdBy: string;
-  createdAt: string;
-  amountPaid: number;
+  created_by: string;
+  created_at: string;
+  amount_paid: number;
 }
 export interface Store {
   id: string;
@@ -52,7 +52,7 @@ export interface Store {
   address: string;
   phone: string;
   email: string;
-  createdAt: string;
+  created_at: string;
 }
 
 export interface Product {
@@ -61,7 +61,7 @@ export interface Product {
   category: string;
   image: string;
   is_global?: boolean; // True for predefined global products, false/undefined for store-specific
-  createdAt: string;
+  created_at: string;
   _synced?: boolean;
   _deleted?: boolean;
 }
@@ -76,7 +76,8 @@ export interface Supplier {
   usd_balance?: number ; // Updated to match database schema
   advance_lb_balance?: number ; // Advance payments in LBP
   advance_usd_balance?: number ; // Advance payments in USD
-  createdAt: string;
+  created_at: string;
+  updated_at?: string;
   _synced?: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
@@ -115,7 +116,8 @@ export interface Customer {
   lb_max_balance?: number; // Maximum allowed balance in LBP
   usd_max_balance?: number; // Maximum allowed balance in USD
   is_active: boolean;
-  createdAt: string;
+  created_at: string;
+  updated_at?: string;
   _synced?: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
@@ -301,52 +303,52 @@ export const BillLineItemTransforms = {
 
 export interface AccountsReceivable {
   id: string;
-  customerId: string;
-  customerName: string;
-  invoiceNumber: string;
+  customer_id: string;
+  customer_name: string;
+  invoice_number: string;
   amount: number;
-  amountPaid: number;
-  amountDue: number;
-  dueDate: string;
+  amount_paid: number;
+  amount_due: number;
+  due_date: string;
   status: 'pending' | 'paid' | 'overdue' | 'partial';
   description?: string;
-  createdAt: string;
-  lastPaymentDate?: string;
+  created_at: string;
+  last_payment_date?: string;
 }
 
 export interface AccountsPayable {
   id: string;
-  supplierId: string;
-  supplierName: string;
-  invoiceNumber: string;
+  supplier_id: string;
+  supplier_name: string;
+  invoice_number: string;
   amount: number;
-  amountPaid: number;
-  amountDue: number;
-  dueDate: string;
+  amount_paid: number;
+  amount_due: number;
+  due_date: string;
   status: 'pending' | 'paid' | 'overdue' | 'partial';
   description?: string;
-  createdAt: string;
-  lastPaymentDate?: string;
+  created_at: string;
+  last_payment_date?: string;
 }
 
 export interface ExpenseCategory {
   id: string;
   name: string;
   description?: string;
-  isActive: boolean;
-  createdAt: string;
+  is_active: boolean;
+  created_at: string;
 }
 
 export interface Payment {
   id: string;
-  customerId: string;
-  saleId?: string;
+  customer_id: string;
+  sale_id?: string;
   amount: number;
   method: 'cash' | 'card';
   reference?: string;
   notes?: string;
-  createdAt: string;
-  createdBy: string;
+  created_at: string;
+  created_by: string;
 }
 
 export interface Transaction {
@@ -373,36 +375,36 @@ export interface Transaction {
 
 export interface CashDrawer {
   id: string;
-  openingAmount: number;
-  currentAmount: number;
-  totalCashSales: number;
-  totalCashPayments: number;
-  totalExpenses: number;
-  openedAt: string;
-  openedBy: string;
-  closedAt?: string;
-  closedBy?: string;
+  opening_amount: number;
+  current_amount: number;
+  total_cash_sales: number;
+  total_cash_payments: number;
+  total_expenses: number;
+  opened_at: string;
+  opened_by: string;
+  closed_at?: string;
+  closed_by?: string;
   status: 'open' | 'closed';
 }
 
 export interface ReportParams {
-  startDate: string;
-  endDate: string;
-  productCategory?: string;
-  supplierId?: string;
-  paymentStatus?: 'paid' | 'unpaid' | 'partial';
-  includeProfit?: boolean;
+  start_date: string;
+  end_date: string;
+  product_category?: string;
+  supplier_id?: string;
+  payment_status?: 'paid' | 'unpaid' | 'partial';
+  include_profit?: boolean;
 }
 
 export interface StockLevel {
-  productId: string;
-  productName: string;
-  currentStock: number;
+  product_id: string;
+  product_name: string;
+  current_stock: number;
   unit: string;
-  lastReceived: string;
+  last_received: string;
   suppliers: Array<{
-    supplierId: string;
-    supplierName: string;
+    supplier_id: string;
+    supplier_name: string;
     quantity: number;
   }>;
 }
@@ -417,22 +419,22 @@ export interface StatementTransaction {
   weight: number;
   price: number;
   currency: 'USD' | 'LBP';
-  balanceAfter: number;
-  paymentMethod?: string;
-  productDetails?: StatementProductDetail[];
+  balance_after: number;
+  payment_method?: string;
+  product_details?: StatementProductDetail[];
   reference?: string;
 }
 
 export interface StatementProductDetail {
-  productId: string;
-  productName: string;
+  product_id: string;
+  product_name: string;
   quantity: number;
   unit: string;
-  unitPrice: number;
-  totalPrice: number;
+  unit_price: number;
+  total_price: number;
   weight?: number;
-  commissionRate?: number;
-  commissionAmount?: number;
+  commission_rate?: number;
+  commission_amount?: number;
   notes?: string;
 }
 
@@ -759,9 +761,9 @@ export interface ReminderStats {
   total: number;
   pending: number;
   overdue: number;
-  dueToday: number;
-  dueThisWeek: number;
+  due_today: number;
+  due_this_week: number;
   completed: number;
-  byType: Record<ReminderType, number>;
-  byPriority: Record<'low' | 'medium' | 'high' | 'urgent', number>;
+  by_type: Record<ReminderType, number>;
+  by_priority: Record<'low' | 'medium' | 'high' | 'urgent', number>;
 }

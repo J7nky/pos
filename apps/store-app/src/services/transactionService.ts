@@ -56,8 +56,6 @@ export class TransactionService {
         };
       }
 
-      const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
-      
       // Get customer data from IndexedDB
       const { db } = await import('../lib/db');
       const customerData = await db.customers.get(customerId);
@@ -79,17 +77,22 @@ export class TransactionService {
         address: customerData.address || '',
         lb_balance: customerData.lb_balance || 0,
         usd_balance: customerData.usd_balance || 0,
-        isActive: customerData.isActive,
-        createdAt: customerData.createdAt,
+        is_active: customerData.is_active,
+        created_at: customerData.created_at,
       };
 
-      const balanceBefore = customer.balance || 0;
-      const balanceAfter = balanceBefore - amountInUSD; // Payment reduces debt
+      // Work with the actual currency instead of converting
+      const balanceBefore = currency === 'USD' ? customer.usd_balance : customer.lb_balance;
+      const balanceAfter = balanceBefore - amount; // Payment reduces debt
 
-      // Update customer balance in IndexedDB
+      // Update customer balance in IndexedDB - update the correct currency field
       if (options.updateCustomerBalance !== false) {
+        const balanceUpdate = currency === 'USD' 
+          ? { usd_balance: balanceAfter }
+          : { lb_balance: balanceAfter };
+        
         await db.customers.update(customerId, { 
-          usd_balance: balanceAfter,
+          ...balanceUpdate,
           _synced: false,
           updated_at: new Date().toISOString()
         });
@@ -103,8 +106,8 @@ export class TransactionService {
           store_id: storeId,
           type: 'income',
           category: 'Accounts Receivable',
-          amount: amountInUSD,
-          currency: 'USD',
+          amount: amount,
+          currency: currency,
           customer_id: customerId,
           supplier_id: null,
           description: `Receivable update for customer ${customerId}`,
@@ -120,12 +123,15 @@ export class TransactionService {
         id: Date.now().toString(),
         type: PAYMENT_TYPES.INCOME,
         category: PAYMENT_CATEGORIES.CUSTOMER_PAYMENT,
-        amount: amountInUSD,
-        currency: 'USD',
-        description: `${description} (Originally ${currency} ${amount})`,
+        amount: amount,
+        currency: currency,
+        description: description,
         reference: generatePaymentReference(),
         created_at: new Date().toISOString(),
         created_by: createdBy,
+        customer_id: customerId,
+        supplier_id: null,
+        _synced: false,
         store_id: storeId
       };
 
@@ -138,11 +144,9 @@ export class TransactionService {
       // Update cash drawer for cash payments
       if (options.updateCashDrawer !== false) {
         try {
-          // Get store ID from context or use a default
-          const storeId = 'default-store'; // This should be passed from the calling context
           const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForCustomerPayment({
-            amount: amountInUSD,
-            currency: 'USD',
+            amount: amount,
+            currency: currency,
             storeId,
             createdBy,
             customerId,
@@ -197,8 +201,6 @@ export class TransactionService {
         };
       }
 
-      const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
-      
       // Get supplier data from IndexedDB
       const { db } = await import('../lib/db');
       const supplierData = await db.suppliers.get(supplierId);
@@ -218,19 +220,23 @@ export class TransactionService {
         phone: supplierData.phone,
         email: supplierData.email || '',
         address: supplierData.address,
-        lbBalance: supplierData.lb_balance || 0,
-        usdBalance: supplierData.usd_balance || 0,
-        createdAt: supplierData.created_at,
-        balance: supplierData.usd_balance || 0,
+        lb_balance: supplierData.lb_balance || 0,
+        usd_balance: supplierData.usd_balance || 0,
+        created_at: supplierData.created_at,
       };
 
-      const balanceBefore = supplier.balance || 0;
-      const balanceAfter = balanceBefore - amountInUSD; // Payment reduces debt
+      // Work with the actual currency instead of converting
+      const balanceBefore = currency === 'USD' ? supplier.usd_balance || 0 : supplier.lb_balance || 0;
+      const balanceAfter = balanceBefore - amount; // Payment reduces debt
 
-      // Update supplier balance in IndexedDB
+      // Update supplier balance in IndexedDB - update the correct currency field
       if (options.updateSupplierBalance !== false) {
+        const balanceUpdate = currency === 'USD' 
+          ? { usd_balance: balanceAfter }
+          : { lb_balance: balanceAfter };
+        
         await db.suppliers.update(supplierId, { 
-          usd_balance: balanceAfter,
+          ...balanceUpdate,
           _synced: false,
           updated_at: new Date().toISOString()
         });
@@ -244,8 +250,8 @@ export class TransactionService {
           store_id: storeId,
           type: 'expense',
           category: 'Accounts Payable',
-          amount: amountInUSD,
-          currency: 'USD',
+          amount: amount,
+          currency: currency,
           supplier_id: supplierId,
           customer_id: null,
           description: `Payable update for supplier ${supplierId}`,
@@ -261,15 +267,15 @@ export class TransactionService {
         id: Date.now().toString(),
         type: PAYMENT_TYPES.EXPENSE,
         category: PAYMENT_CATEGORIES.SUPPLIER_PAYMENT,
-        amount: amountInUSD,
-        currency: 'USD',
-        description: `${description} (Originally ${currency} ${amount})`,
+        amount: amount,
+        currency: currency,
+        description: description,
         reference: generatePaymentReference(),
         created_at: new Date().toISOString(),
         created_by: createdBy,
         supplier_id: supplierId,
         customer_id: null,
-        _synced:false,
+        _synced: false,
         store_id: storeId
       };
 
@@ -320,6 +326,9 @@ export class TransactionService {
 
       const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
 
+      // Get database instance
+      const { db } = await import('../lib/db');
+
       // Create transaction record
       const transaction: Transaction = {
         id: Date.now().toString(),
@@ -331,6 +340,9 @@ export class TransactionService {
         reference: generateExpenseReference(),
         created_at: new Date().toISOString(),
         created_by: createdBy,
+        customer_id: null,
+        supplier_id: null,
+        _synced: false,
         store_id: storeId
       };
 
