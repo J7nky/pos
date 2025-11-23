@@ -20,8 +20,6 @@ import {
   generateReversalReference
 } from '../utils/referenceGenerator';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
-import { transactionService, TransactionContext } from '../services/transactionService.refactored';
-import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -1244,219 +1242,35 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             });
           } else {
             await db.suppliers.update(customerBalanceUpdate.customerId, {
-
-        await transactionService.createTransaction({
-          category: entityType === 'customer' 
-            ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
-            : TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
-          amount: customerBalanceUpdate.amountDue,
-          currency: 'LBP',
-          description: `Credit sale - Bill ${bill.bill_number} (${entityType})`,
-          reference: bill.bill_number,
-          context: transactionContext,
-          customerId: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
-          supplierId: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
-          updateBalances: false, // Balance already updated above
-          updateCashDrawer: false, // Credit sales don't affect cash drawer
-          createAuditLog: true
-        });
-      }
-    }
-  });
-
-  // Process cash drawer transaction for cash sales using the general utility
-  // Note: payment_method is on the bill, not on individual line items
-  let cashDrawerResult = null;
-  if (bill.payment_method === 'cash') {
-    try {
-      const totalCashAmount = bill.amount_paid || bill.total_amount || 0;
-      debug(' Processing cash sale transaction:', { totalCashAmount, billNumber: bill.bill_number });
-
-      cashDrawerResult = await processCashDrawerTransaction({
-        type: 'sale',
-        amount: totalCashAmount,
-        currency: 'LBP', // Assuming LBP for now, could be made dynamic
-        description: `Cash sale - Bill ${bill.bill_number}`,
-        reference: bill.bill_number,
-        customerId: bill.customer_id || undefined
-      });
-
-      // // Record cash sale transaction for financial tracking
-      // await db.transaction('rw', [db.transactions], async () => {
-      //   const cashTransaction = {
-      //     id: createId(),
-      //     store_id: storeId,
-      //     created_at: now,
-      //     updated_at: now,
-      //     _synced: false,
-      //     type: 'income', // Cash sale is income
-      //     amount: totalCashAmount,
-      //     currency: 'LBP',
-      //     description: `Cash sale - Bill ${bill.bill_number}`,
-      //     reference: bill.bill_number,
-      //     customer_id: cashSaleItems[0]?.customer_id || null,
-      //     supplier_id: null,
-      //     category: "sale",
-      //     created_by: currentUserId,
-      //   };
-      //   await db.transactions.add(cashTransaction as any);
-      // });
-
-      debug(` Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
-    } catch (error) {
-      console.error(' Error updating cash drawer for sales:', error);
-    }
-  }
-
-  // Store undo data for the complete checkout action
-  const baseUndoData = {
-    affected: [
-      { table: 'bills', id: billId },
-      ...mappedLineItems.map(item => ({ table: 'bill_line_items', id: item.id })),
-      ...inventoryStates.map(state => ({ table: 'inventory_items', id: state.id })),
-      ...(customerBalanceUpdate ? [
-        { table: 'customers', id: customerBalanceUpdate.customerId },
-        { table: 'transactions', id: `credit-sale-${billId}` }
-      ] : [])
-    ],
-    steps: [
-      // Delete the bill
-      { op: 'delete', table: 'bills', id: billId },
-      // Delete all line items
-      ...mappedLineItems.map(item => ({ op: 'delete', table: 'bill_line_items', id: item.id })),
-      // Restore inventory quantities
-      ...inventoryStates.map(state => ({
-        op: 'update',
-        table: 'inventory_items',
-        id: state.id,
-        changes: { quantity: state.originalQuantity, _synced: false }
-      })),
-      // Restore customer balance if applicable
-      ...(customerBalanceUpdate ? [{
-        op: 'update',
-        table: 'customers',
-        id: customerBalanceUpdate.customerId,
-        changes: { lb_balance: customerBalanceUpdate.originalBalance, _synced: false }
-      }] : []),
-      // Delete the credit transaction if applicable
-      ...(customerBalanceUpdate ? [{
-        op: 'delete',
-        table: 'transactions',
-        id: `credit-sale-${billId}`
-      }] : [])
-    ]
-  };
-
-  // Create comprehensive undo data including cash drawer if applicable
-  const undoData = cashDrawerResult
-    ? createCashDrawerUndoData(cashDrawerResult.transactionId, cashDrawerResult.previousBalance, cashDrawerResult.accountId, baseUndoData)
-    : { type: 'complete_checkout', ...baseUndoData };
-
-  pushUndo(undoData);
-
-  await refreshData();
-  await refreshCashDrawerStatus(); // Refresh cash drawer to show updated balance
-  await updateUnsyncedCount();
-
-  // Reset auto-sync timer to ensure full undo window
-  resetAutoSyncTimer();
-
-  debouncedSync();
-
-  // Check if any inventory items are now 100% complete
-  for (const item of mappedLineItems) {
-    if (item.inventory_item_id) {
-      receivedBillMonitoringService.checkBillAfterSale(storeId, item.inventory_item_id).catch(err => {
-        console.error('Error checking bill completion:', err);
-      });
-    }
-  }
-
-  return billId;
-};
-
-const updateBill = async (billId: string, updates: any, changedBy: string, changeReason?: string): Promise<void> => {
-  if (!storeId) throw new Error('No store ID available');
-
-  // Get original bill for undo and comparison
-  const originalBill = await db.bills.get(billId);
-  if (!originalBill) throw new Error('Bill not found');
-  
-  const now = new Date().toISOString();
-
-  // Pure offline-first approach - update local database only
-  // Create audit logs for each changed field with ID resolution
-  const auditLogs: any[] = [];
-  const auditLogIds: string[] = [];
-
-  await db.transaction('rw', [db.bills, db.bill_audit_logs, db.customers], async () => {
-    // Update the bill
-    await db.bills.update(billId, {
-      ...updates,
-      updated_at: now,
-      _synced: false // Mark as unsynced for background sync
-    });
-
-    // ==================== CREATE FIELD-LEVEL AUDIT LOGS ====================
-    // Create MULTIPLE audit logs (one per changed field) with ID resolution
-    for (const [field, newValue] of Object.entries(updates)) {
-      if (field !== '_synced' && field !== 'updated_at') {
-        const oldValue = (originalBill as any)[field];
-        if (oldValue !== newValue) {
-          // Resolve IDs to human-readable names
-          let oldValueDisplay = oldValue != null ? String(oldValue) : 'empty';
-          let newValueDisplay = newValue != null ? String(newValue) : 'empty';
-
-          // Resolve customer_id to customer name
-          if (field === 'customer_id') {
-            if (oldValue) {
-              const oldCustomer = await db.customers.get(oldValue);
-              oldValueDisplay = oldCustomer?.name || oldValue;
-            } else {
-              oldValueDisplay = 'Walk-in Customer';
-            }
-            
-            if (newValue) {
-              const newCustomer = await db.customers.get(newValue);
-              newValueDisplay = newCustomer?.name || newValue as string;
-            } else {
-              newValueDisplay = 'Walk-in Customer';
-            }
+              lb_balance: newBalance,
+              _synced: false
+            });
           }
 
-          // Format numeric values for better readability
-          if (field === 'total_amount' || field === 'amount_paid' || field === 'amount_due' || 
-              field === 'subtotal' || field === 'tax_amount' || field === 'discount_amount') {
-            if (oldValue != null) oldValueDisplay = Number(oldValue).toLocaleString();
-            if (newValue != null) newValueDisplay = Number(newValue).toLocaleString();
-          }
-
-          // Generate descriptive change reason
-          const fieldLabel = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-          const generatedReason = changeReason || `Updating ${fieldLabel} from ${oldValueDisplay} to ${newValueDisplay}`;
-
-          const auditLogId = createId();
-          auditLogIds.push(auditLogId);
-
-          const auditLog = {
-            id: auditLogId,
-            bill_id: billId,
+          // Record the transaction for financial tracking
+          const transaction = {
+            id: createId(),
             store_id: storeId,
-            action: 'updated' as const,
-            field_changed: field,
-            old_value: oldValueDisplay !== 'empty' ? oldValueDisplay : null,
-            new_value: newValueDisplay !== 'empty' ? newValueDisplay : null,
-            change_reason: generatedReason,
-            changed_by: changedBy,
-            ip_address: null,
-            user_agent: null,
             created_at: now,
             updated_at: now,
-            _synced: false
+            _synced: false,
+            type: 'income', // Credit sale creates accounts receivable (income)
+            amount: customerBalanceUpdate.amountDue,
+            currency: 'LBP',
+            description: `Credit sale - Bill ${bill.bill_number} (${entityType})`,
+            reference: bill.bill_number,
+            customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
+            supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
+            category: PAYMENT_CATEGORIES.CUSTOMER_CREDIT_SALE,
+            created_by: currentUserId,
+            status: 'active' as const
           };
+          await db.transactions.add(transaction as any);
+        }
+      }
+    });
 
-          auditLogs.push(auditLog);
-          await db.bill_audit_logs.add(auditLog);
+    // Process cash drawer transaction for cash sales using the general utility
     // Note: payment_method is on the bill, not on individual line items
     let cashDrawerResult = null;
     if (bill.payment_method === 'cash') {
