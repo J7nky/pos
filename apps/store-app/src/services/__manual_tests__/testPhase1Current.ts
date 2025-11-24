@@ -3,7 +3,7 @@
  * Tests the normalized types and existing transactionService methods
  */
 
-import { TransactionService } from '../transactionService';
+import { TransactionService } from '../transactionService-old';
 import { PAYMENT_CATEGORIES, PAYMENT_TYPES } from '../../constants/paymentCategories';
 
 // Mock database for testing

@@ -1,11 +1,11 @@
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
-import { transactionService, TransactionResult } from './transactionService';
+import { TransactionService, TransactionResult } from './transactionService';
 // Remove dataAccessService import - use direct IndexedDB access
-import { db } from '../lib/db';
-import { generateARReference, generateAPReference } from '../utils/referenceGenerator';
+import { db, createId } from '../lib/db';
+
+const transactionService = TransactionService.getInstance();
 import { 
-  AccountsReceivable, 
   AccountsPayable, 
   Customer, 
   Supplier,
@@ -27,6 +27,7 @@ export interface TransactionContext {
   source?: 'web' | 'mobile' | 'api';
   module: string;
   correlationId?: string;
+  storeId: string;
 }
 
 export interface BalanceSnapshot {
@@ -94,16 +95,19 @@ export class EnhancedTransactionService {
       const correlationId = context.correlationId || this.generateCorrelationId();
 
       // Process the payment using existing service
-      const result = await transactionService.processCustomerPayment(
+      const paymentContext: TransactionContext = {
+        ...context,
+        storeId
+      };
+      const result = await transactionService.createCustomerPayment(
         customerId,
         amount,
         currency,
         description,
-        context.userId,
-        storeId,
+        paymentContext,
         {
-          updateCustomerBalance: options.updateCustomerBalance,
-          createReceivable: options.createReceivable
+          reference: options.reference,
+          updateCashDrawer: true
         }
       );
 
@@ -163,7 +167,8 @@ export class EnhancedTransactionService {
         amountInUSD,
         result.transactionId!,
         correlationId,
-        context
+        context,
+        storeId
       );
 
       const activitySummary = this.generateActivitySummary('customer_payment', {
@@ -252,16 +257,19 @@ export class EnhancedTransactionService {
       const correlationId = context.correlationId || this.generateCorrelationId();
 
       // Process payment
-      const result = await transactionService.processSupplierPayment(
+      const paymentContext: TransactionContext = {
+        ...context,
+        storeId
+      };
+      const result = await transactionService.createSupplierPayment(
         supplierId,
         amount,
         currency,
         description,
-        context.userId,
-        storeId,
+        paymentContext,
         {
-          updateSupplierBalance: options.updateSupplierBalance,
-          createPayable: options.createPayable
+          reference: options.reference,
+          updateCashDrawer: true
         }
       );
 
@@ -289,7 +297,8 @@ export class EnhancedTransactionService {
         amountInUSD,
         result.transactionId!,
         correlationId,
-        context
+        context,
+        storeId
       );
 
       const activitySummary = this.generateActivitySummary('supplier_payment', {
@@ -402,40 +411,39 @@ export class EnhancedTransactionService {
         
         if (customer) {
           const balanceBefore = customer.balance || 0;
-          const balanceAfter = balanceBefore + saleData.amountDue;
           
-          // Update customer balance in IndexedDB
-          await db.customers.update(saleData.customerId, { 
-            usd_balance: balanceAfter,
-            _synced: false,
-            updated_at: new Date().toISOString()
-          });
-
-          customerBalanceChange = {
-            entityId: saleData.customerId,
-            entityType: 'customer',
-            balanceBefore,
-            balanceAfter,
-            currency: 'USD',
-            timestamp
-          };
-
           // Create accounts receivable for credit amount
+          // NOTE: transactionService will handle balance updates
           if (saleData.amountDue > 0) {
-            // Create a transaction record for the receivable update
-            await db.transactions.add({
-              id: `ar-${Date.now()}`,
-              store_id: storeId,
-              type: 'income',
-              category: 'Accounts Receivable',
-              amount: saleData.amountDue,
+            // Use transactionService to create AR transaction with proper validation and balance update
+            const arContext: TransactionContext = {
+              userId: saleData.createdBy,
+              userEmail: context.userEmail,
+              userName: context.userName,
+              sessionId: context.sessionId,
+              source: context.source,
+              module: context.module,
+              correlationId,
+              storeId
+            };
+            const result = await transactionService.createAccountsReceivable(
+              saleData.customerId,
+              saleData.amountDue,
+              'USD',
+              `Credit sale - ${saleData.customerId}`,
+              arContext
+            );
+
+            const balanceAfter = result.balanceAfter || (balanceBefore + saleData.amountDue);
+            
+            customerBalanceChange = {
+              entityId: saleData.customerId,
+              entityType: 'customer',
+              balanceBefore,
+              balanceAfter,
               currency: 'USD',
-              description: `Receivable update for customer ${saleData.customerId}`,
-              reference: generateARReference(),
-              created_at: new Date().toISOString(),
-              created_by: saleData.createdBy,
-              _synced: false
-            });
+              timestamp
+            };
           }
         }
       }
@@ -623,22 +631,22 @@ export class EnhancedTransactionService {
     amountInUSD: number,
     transactionId: string,
     correlationId: string,
-    context: TransactionContext
+    context: TransactionContext,
+    storeId: string
   ): Promise<void> {
-    // Update accounts receivable through transaction record
-    await db.transactions.add({
-      id: `ar-${Date.now()}`,
-      store_id: 'current-store', // Should be passed from context
-      type: 'income',
-      category: 'Accounts Receivable',
-      amount: amountInUSD,
-      currency: 'USD',
-      description: `Receivable update for customer ${customerId}`,
-      reference: generateARReference(),
-      created_at: new Date().toISOString(),
-      created_by: context.userId,
-      _synced: false
-    });
+    // Update accounts receivable through transaction service
+    const arContext: TransactionContext = {
+      ...context,
+      correlationId,
+      storeId
+    };
+    await transactionService.createAccountsReceivable(
+      customerId,
+      amountInUSD,
+      'USD',
+      `Receivable update for customer ${customerId}`,
+      arContext
+    );
     
     // Log the update
     auditLogService.log({
@@ -661,22 +669,22 @@ export class EnhancedTransactionService {
     amountInUSD: number,
     transactionId: string,
     correlationId: string,
-    context: TransactionContext
+    context: TransactionContext,
+    storeId: string
   ): Promise<void> {
     // Update accounts payable through transaction record
-    await db.transactions.add({
-      id: `ap-${Date.now()}`,
-      store_id: 'current-store', // Should be passed from context
-      type: 'expense',
-      category: 'Accounts Payable',
-      amount: amountInUSD,
-      currency: 'USD',
-      description: `Payable update for supplier ${supplierId}`,
-      reference: generateAPReference(),
-      created_at: new Date().toISOString(),
-      created_by: context.userId,
-      _synced: false
-    });
+    const apContext: TransactionContext = {
+      ...context,
+      correlationId,
+      storeId
+    };
+    await transactionService.createAccountsPayable(
+      supplierId,
+      amountInUSD,
+      'USD',
+      `Payable update for supplier ${supplierId}`,
+      apContext
+    );
     
     // Log the update
     auditLogService.log({
@@ -783,11 +791,11 @@ export class EnhancedTransactionService {
   }
 
   private generateCorrelationId(): string {
-    return `corr-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `corr-${createId()}`;
   }
 
   private generateId(): string {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return createId();
   }
 
   // Query methods for comprehensive transaction history

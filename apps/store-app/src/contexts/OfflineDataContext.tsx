@@ -20,7 +20,7 @@ import {
   generateReversalReference
 } from '../utils/referenceGenerator';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
-import { transactionService } from '../services/transactionService.refactored';
+import { transactionService } from '../services/transactionService';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 
 // Removed SupabaseService import - using offline-first approach only

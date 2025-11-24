@@ -1,6 +1,6 @@
 import { db } from '../lib/db';
 import { Customer, Supplier, Transaction, LocalSaleItem } from '../lib/db';
-import { generateReversalReference } from '../utils/referenceGenerator';
+import { transactionService } from './transactionService';
 
 export interface RunningBalance {
   USD: number;
@@ -442,24 +442,103 @@ export class AccountBalanceService {
         throw new Error(`Original transaction not found: ${originalTransactionId}`);
       }
 
-      // Create opposite transaction
-      const reversalTransaction: Transaction = {
-        id: `rev_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        store_id: originalTransaction.store_id,
-        type: originalTransaction.type === 'income' ? 'expense' : 'income',
-        category: `${originalTransaction.category} - Reversal`,
-        amount: originalTransaction.amount,
-        currency: originalTransaction.currency,
-        description: `Reversal of ${originalTransaction.description} - Reason: ${reason}`,
-        reference: generateReversalReference(),
-        created_by: createdBy,
-        created_at: new Date().toISOString(),
-        customer_id: originalTransaction.customer_id,
-        supplier_id: originalTransaction.supplier_id,
-        _synced: false
-      };
-
-      await db.transactions.add(reversalTransaction);
+      // Create opposite transaction using transactionService
+      const reversalDescription = `Reversal of ${originalTransaction.description} - Reason: ${reason}`;
+      const reversalAmount = originalTransaction.amount;
+      const reversalCurrency = originalTransaction.currency as 'USD' | 'LBP';
+      
+      let reversalResult;
+      
+      // Determine which service method to use based on the original transaction
+      if (originalTransaction.customer_id) {
+        // For customer transactions, reverse the payment direction
+        if (originalTransaction.type === 'income') {
+          // Original was income (customer paid us), reversal is expense (we refund customer)
+          // This increases customer balance (they owe us less or we owe them)
+          reversalResult = await transactionService.createCustomerPayment(
+            originalTransaction.customer_id,
+            -reversalAmount, // Negative to reverse the payment
+            reversalCurrency,
+            reversalDescription,
+            {
+              userId: createdBy,
+              module: 'account_balance_service',
+              source: 'api',
+              storeId: originalTransaction.store_id
+            }
+          );
+        } else {
+          // Original was expense (we paid customer), reversal is income (customer pays us back)
+          reversalResult = await transactionService.createCustomerPayment(
+            originalTransaction.customer_id,
+            reversalAmount,
+            reversalCurrency,
+            reversalDescription,
+            {
+              userId: createdBy,
+              module: 'account_balance_service',
+              source: 'api',
+              storeId: originalTransaction.store_id
+            }
+          );
+        }
+      } else if (originalTransaction.supplier_id) {
+        // For supplier transactions, reverse the payment direction
+        if (originalTransaction.type === 'expense') {
+          // Original was expense (we paid supplier), reversal is income (supplier refunds us)
+          reversalResult = await transactionService.createSupplierPayment(
+            originalTransaction.supplier_id,
+            -reversalAmount, // Negative to reverse the payment
+            reversalCurrency,
+            reversalDescription,
+            {
+              userId: createdBy,
+              module: 'account_balance_service',
+              source: 'api',
+              storeId: originalTransaction.store_id
+            }
+          );
+        } else {
+          // Original was income (supplier paid us), reversal is expense (we pay supplier back)
+          reversalResult = await transactionService.createSupplierPayment(
+            originalTransaction.supplier_id,
+            reversalAmount,
+            reversalCurrency,
+            reversalDescription,
+            {
+              userId: createdBy,
+              module: 'account_balance_service',
+              source: 'api',
+              storeId: originalTransaction.store_id
+            }
+          );
+        }
+      } else {
+        // General expense reversal (no customer or supplier)
+        reversalResult = await transactionService.createTransaction({
+          category: originalTransaction.category as any,
+          amount: reversalAmount,
+          currency: reversalCurrency,
+          description: reversalDescription,
+          context: {
+            userId: createdBy,
+            module: 'account_balance_service',
+            source: 'api',
+            storeId: originalTransaction.store_id
+          }
+        });
+      }
+      
+      // Get the created reversal transaction
+      if (!reversalResult.transactionId) {
+        throw new Error('Failed to create reversal transaction');
+      }
+      
+      const reversalTransaction = await db.transactions.get(reversalResult.transactionId);
+      
+      if (!reversalTransaction) {
+        throw new Error('Failed to retrieve created reversal transaction');
+      }
 
       // Update affected account balance
       if (originalTransaction.customer_id) {

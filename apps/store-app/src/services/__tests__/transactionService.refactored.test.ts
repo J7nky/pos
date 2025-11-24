@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { transactionService, TransactionContext } from '../transactionService.refactored';
+import { transactionService, TransactionContext } from '../transactionService';
 import { TRANSACTION_CATEGORIES } from '../../constants/transactionCategories';
 import { db } from '../../lib/db';
 

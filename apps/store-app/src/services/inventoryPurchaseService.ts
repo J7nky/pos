@@ -1,6 +1,8 @@
 import { createId, db } from '../lib/db';
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
-import { generateCreditReference } from '../utils/referenceGenerator';
+import { TransactionService } from './transactionService-old';
+
+const transactionService = TransactionService.getInstance();
 
 export interface InventoryPurchaseItem {
   product_id: string;
@@ -177,25 +179,20 @@ export class InventoryPurchaseService {
         });
       }
 
-      // Create transaction record for credit purchase (appears in account statement)
-      const creditPurchaseTransaction = {
-        id: transactionId,
-        type: 'expense' as const,
-        category: 'Credit Purchase',
-        amount: totalAmount,
-        currency: 'LBP' as const,
-        description: `Credit purchase - ${items.length} items from ${supplier?.name || 'Supplier'}`,
-        reference: generateCreditReference(),
-        store_id: data.store_id,
-        created_by: data.created_by,
-        created_at: new Date().toISOString(),
-        supplier_id: data.supplier_id,
-        customer_id: null,
-        _synced: false
-      };
-
-      // Store the transaction in the database
-      await db.transactions.add(creditPurchaseTransaction);
+      // Create transaction record for credit purchase using transactionService
+      const creditPurchaseResult = await transactionService.processSupplierPayment(
+        data.supplier_id,
+        totalAmount,
+        'LBP',
+        `Credit purchase - ${items.length} items from ${supplier?.name || 'Supplier'}`,
+        data.created_by,
+        data.store_id,
+        {
+          updateSupplierBalance: false, // Balance already updated above
+          createPayable: true,
+          updateCashDrawer: false // Only fees affect cash drawer, handled separately below
+        }
+      );
 
       // Deduct only fees from cash drawer (supplier not responsible for fees)
       let cashDrawerImpact = 0;
@@ -214,7 +211,7 @@ export class InventoryPurchaseService {
 
       return {
         success: true,
-        transactionId,
+        transactionId: creditPurchaseResult.transactionId || transactionId,
         totalAmount,
         cashDrawerImpact,
         supplierBalanceImpact: totalAmount, // Positive because we owe them more

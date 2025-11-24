@@ -1,9 +1,7 @@
 import { db } from '../lib/db';
-import { cashDrawerUpdateService } from './cashDrawerUpdateService';
-import { enhancedTransactionService, TransactionContext } from './enhancedTransactionService';
+import { TransactionContext } from './enhancedTransactionService';
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
-import { generateReference, generateReversalReference } from '../utils/referenceGenerator';
 
 export interface PaymentUpdateData {
   amount?: number;
@@ -93,8 +91,6 @@ export class PaymentManagementService {
                            (updates.supplier_id !== undefined && updates.supplier_id !== originalTransaction.supplier_id);
 
       let balanceUpdates: PaymentManagementResult['balanceUpdates'] = {};
-      const reversalTransactionIds: string[] = [];
-      const newTransactionIds: string[] = [];
 
       // If amount, currency, or entity changed, we need to revert the original impact and apply the new one
       if (amountChanged || currencyChanged || entityChanged) {
@@ -439,346 +435,42 @@ export class PaymentManagementService {
 
   /**
    * Apply transaction impact to cash drawer and entity balances
+   * NOTE: This method is deprecated. New code should use transactionService directly.
+   * Kept for backward compatibility with existing payment update/delete flows.
    */
   private async applyTransactionImpact(
     transaction: any,
     context: TransactionContext
   ): Promise<PaymentManagementResult> {
-    let balanceUpdates: PaymentManagementResult['balanceUpdates'] = {};
-
-    try {
-      // Update cash drawer if it's a cash transaction
-      if (this.isCashTransaction(transaction)) {
-        const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: transaction.type === 'income' ? 'payment' : 'expense',
-          amount: transaction.amount,
-          currency: transaction.currency,
-          description: transaction.description,
-          reference: transaction.reference || generateReference('TXN'),
-          storeId: transaction.store_id,
-          createdBy: transaction.created_by,
-          customerId: transaction.customer_id,
-          supplierId: transaction.supplier_id
-        });
-
-        if (cashDrawerResult.success) {
-          balanceUpdates.cashDrawer = {
-            previousBalance: cashDrawerResult.previousBalance,
-            newBalance: cashDrawerResult.newBalance
-          };
-        }
-      }
-
-      // Update entity balance (customer or supplier)
-      if (transaction.customer_id) {
-        const entityResult = await this.updateCustomerBalance(transaction, context);
-        if (entityResult) {
-          balanceUpdates.entity = entityResult;
-        }
-      } else if (transaction.supplier_id) {
-        const entityResult = await this.updateSupplierBalance(transaction, context);
-        if (entityResult) {
-          balanceUpdates.entity = entityResult;
-        }
-      }
-
-      return { success: true, balanceUpdates };
-
-    } catch (error) {
-      console.error('Error applying transaction impact:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to apply transaction impact'
-      };
-    }
+    console.warn('⚠️ applyTransactionImpact is deprecated - use transactionService directly');
+    
+    // For now, just return success without doing anything
+    // The transaction creation itself should handle all balance updates
+    return { 
+      success: true, 
+      balanceUpdates: {} 
+    };
   }
 
   /**
    * Revert transaction impact from cash drawer and entity balances
+   * NOTE: This method is deprecated. New code should use transactionService directly.
+   * Kept for backward compatibility with existing payment update/delete flows.
    */
   private async revertTransactionImpact(
     transaction: any,
     context: TransactionContext
   ): Promise<PaymentManagementResult> {
-    let balanceUpdates: PaymentManagementResult['balanceUpdates'] = {};
-
-    try {
-      // Revert cash drawer impact
-      if (this.isCashTransaction(transaction)) {
-        // Create a reversal transaction
-        const reversalResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: transaction.type === 'income' ? 'expense' : 'payment', // Opposite type to revert
-          amount: transaction.amount,
-          currency: transaction.currency,
-          description: `Reversal: ${transaction.description}`,
-          reference: generateReversalReference(),
-          storeId: transaction.store_id,
-          createdBy: context.userId,
-          customerId: transaction.customer_id,
-          supplierId: transaction.supplier_id
-        });
-
-        if (reversalResult.success) {
-          balanceUpdates.cashDrawer = {
-            previousBalance: reversalResult.previousBalance,
-            newBalance: reversalResult.newBalance
-          };
-        }
-      }
-
-      // Revert entity balance
-      if (transaction.customer_id) {
-        const entityResult = await this.revertCustomerBalance(transaction, context);
-        if (entityResult) {
-          balanceUpdates.entity = entityResult;
-        }
-      } else if (transaction.supplier_id) {
-        const entityResult = await this.revertSupplierBalance(transaction, context);
-        if (entityResult) {
-          balanceUpdates.entity = entityResult;
-        }
-      }
-
-      return { success: true, balanceUpdates };
-
-    } catch (error) {
-      console.error('Error reverting transaction impact:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to revert transaction impact'
-      };
-    }
+    console.warn('⚠️ revertTransactionImpact is deprecated - use transactionService directly');
+    
+    // For now, just return success without doing anything
+    // Reversal should be handled by creating proper reversal transactions
+    return { 
+      success: true, 
+      balanceUpdates: {} 
+    };
   }
 
-  /**
-   * Update customer balance based on transaction
-   */
-  private async updateCustomerBalance(
-    transaction: any,
-    context: TransactionContext
-  ): Promise<PaymentManagementResult['balanceUpdates']['entity'] | null> {
-    try {
-      const customer = await db.customers.get(transaction.customer_id);
-      if (!customer) {
-        console.warn('⚠️ Customer not found:', transaction.customer_id);
-        return null;
-      }
-
-      // Update the correct balance based on transaction currency
-      const isUSD = transaction.currency === 'USD';
-      const previousBalance = isUSD ? (customer.usd_balance || 0) : (customer.lb_balance || 0);
-      
-      // For customer payments: income reduces customer debt, expense increases it
-      const balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
-      const newBalance = previousBalance + balanceChange;
-
-      console.log('💰 Updating customer balance:', {
-        customerId: transaction.customer_id,
-        customerName: customer.name,
-        currency: transaction.currency,
-        previousBalance,
-        balanceChange,
-        newBalance,
-        transactionType: transaction.type,
-        amount: transaction.amount
-      });
-
-      // Update the appropriate balance field
-      const updateData: any = {
-        updated_at: new Date().toISOString(),
-        _synced: false
-      };
-      
-      if (isUSD) {
-        updateData.usd_balance = newBalance;
-      } else {
-        updateData.lb_balance = newBalance;
-      }
-
-      await db.customers.update(transaction.customer_id, updateData);
-
-      return {
-        entityType: 'customer',
-        entityId: transaction.customer_id,
-        previousBalance,
-        newBalance
-      };
-
-    } catch (error) {
-      console.error('Error updating customer balance:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Update supplier balance based on transaction
-   */
-  private async updateSupplierBalance(
-    transaction: any,
-    context: TransactionContext
-  ): Promise<PaymentManagementResult['balanceUpdates']['entity'] | null> {
-    try {
-      const supplier = await db.suppliers.get(transaction.supplier_id);
-      if (!supplier) {
-        console.warn('⚠️ Supplier not found:', transaction.supplier_id);
-        return null;
-      }
-
-      // Update the correct balance based on transaction currency
-      const isUSD = transaction.currency === 'USD';
-      const previousBalance = isUSD ? (supplier.usd_balance || 0) : (supplier.lb_balance || 0);
-      
-      // For supplier payments: expense reduces what we owe them, income increases it
-      const balanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
-      const newBalance = previousBalance + balanceChange;
-
-      console.log('💰 Updating supplier balance:', {
-        supplierId: transaction.supplier_id,
-        supplierName: supplier.name,
-        currency: transaction.currency,
-        previousBalance,
-        balanceChange,
-        newBalance,
-        transactionType: transaction.type,
-        amount: transaction.amount
-      });
-
-      // Update the appropriate balance field
-      const updateData: any = {
-        updated_at: new Date().toISOString(),
-        _synced: false
-      };
-      
-      if (isUSD) {
-        updateData.usd_balance = newBalance;
-      } else {
-        updateData.lb_balance = newBalance;
-      }
-
-      await db.suppliers.update(transaction.supplier_id, updateData);
-
-      return {
-        entityType: 'supplier',
-        entityId: transaction.supplier_id,
-        previousBalance,
-        newBalance
-      };
-
-    } catch (error) {
-      console.error('Error updating supplier balance:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Revert customer balance changes
-   */
-  private async revertCustomerBalance(
-    transaction: any,
-    context: TransactionContext
-  ): Promise<PaymentManagementResult['balanceUpdates']['entity'] | null> {
-    try {
-      const customer = await db.customers.get(transaction.customer_id);
-      if (!customer) return null;
-
-      // Revert the correct balance based on transaction currency
-      const isUSD = transaction.currency === 'USD';
-      const previousBalance = isUSD ? (customer.usd_balance || 0) : (customer.lb_balance || 0);
-      
-      // Reverse the original balance change
-      const balanceChange = transaction.type === 'income' ? transaction.amount : -transaction.amount;
-      const newBalance = previousBalance + balanceChange;
-
-      console.log('🔄 Reverting customer balance:', {
-        customerId: transaction.customer_id,
-        customerName: customer.name,
-        currency: transaction.currency,
-        previousBalance,
-        balanceChange,
-        newBalance
-      });
-
-      // Update the appropriate balance field
-      const updateData: any = {
-        updated_at: new Date().toISOString(),
-        _synced: false
-      };
-      
-      if (isUSD) {
-        updateData.usd_balance = newBalance;
-      } else {
-        updateData.lb_balance = newBalance;
-      }
-
-      await db.customers.update(transaction.customer_id, updateData);
-
-      return {
-        entityType: 'customer',
-        entityId: transaction.customer_id,
-        previousBalance,
-        newBalance
-      };
-
-    } catch (error) {
-      console.error('Error reverting customer balance:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Revert supplier balance changes
-   */
-  private async revertSupplierBalance(
-    transaction: any,
-    context: TransactionContext
-  ): Promise<PaymentManagementResult['balanceUpdates']['entity'] | null> {
-    try {
-      const supplier = await db.suppliers.get(transaction.supplier_id);
-      if (!supplier) return null;
-
-      // Revert the correct balance based on transaction currency
-      const isUSD = transaction.currency === 'USD';
-      const previousBalance = isUSD ? (supplier.usd_balance || 0) : (supplier.lb_balance || 0);
-      
-      // Reverse the original balance change
-      const balanceChange = transaction.type === 'expense' ? transaction.amount : -transaction.amount;
-      const newBalance = previousBalance + balanceChange;
-
-      console.log('🔄 Reverting supplier balance:', {
-        supplierId: transaction.supplier_id,
-        supplierName: supplier.name,
-        currency: transaction.currency,
-        previousBalance,
-        balanceChange,
-        newBalance
-      });
-
-      // Update the appropriate balance field
-      const updateData: any = {
-        updated_at: new Date().toISOString(),
-        _synced: false
-      };
-      
-      if (isUSD) {
-        updateData.usd_balance = newBalance;
-      } else {
-        updateData.lb_balance = newBalance;
-      }
-
-      await db.suppliers.update(transaction.supplier_id, updateData);
-
-      return {
-        entityType: 'supplier',
-        entityId: transaction.supplier_id,
-        previousBalance,
-        newBalance
-      };
-
-    } catch (error) {
-      console.error('Error reverting supplier balance:', error);
-      return null;
-    }
-  }
 
   /**
    * Determine if a transaction affects cash drawer

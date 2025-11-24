@@ -2,8 +2,11 @@ import { db } from '../lib/db';
 import { createId } from '../lib/db';
 // Removed React hook import to avoid invalid hook usage in a service context
 import { currencyService } from './currencyService';
+// TODO Phase 5: Consolidate reference generation into transactionService
+// These scattered reference generators should be replaced with centralized generation
 import { generatePaymentReference, generateSaleReference, generateExpenseReference, generateRefundReference } from '../utils/referenceGenerator';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
+import { transactionService, TransactionContext } from './transactionService';
 
 export interface CashTransactionData {
   type: 'sale' | 'payment' | 'expense' | 'refund';
@@ -272,30 +275,91 @@ export class CashDrawerUpdateService {
         const transactionId = createId();
         
         try {
-          // Use database transaction to ensure atomicity
-          await db.transaction('rw', [db.cash_drawer_accounts, db.transactions], async () => {
-            // Update cash drawer account balance
-            await db.cash_drawer_accounts.update(account.id, {
-              current_balance: newBalance as any,
-              updated_at: new Date().toISOString(),
-              _synced: false
-            } as any);
+          // Update cash drawer account balance first
+          await db.cash_drawer_accounts.update(account.id, {
+            current_balance: newBalance as any,
+            updated_at: new Date().toISOString(),
+            _synced: false
+          } as any);
 
-            // Create transaction record for cash drawer tracking
+          // Create transaction record using transactionService
+          const description = `${transactionData.description} - Cash Drawer Update`;
+          let transactionResult;
+
+          // Use appropriate transactionService method based on transaction type and entity
+          if (transactionData.customerId && transactionData.type === 'payment') {
+            // Customer payment to cash drawer
+            const context: TransactionContext = {
+              userId: transactionData.createdBy,
+              storeId: transactionData.storeId,
+              module: 'cash_drawer',
+              source: 'web'
+            };
+            
+            transactionResult = await transactionService.createCustomerPayment(
+              transactionData.customerId,
+              Math.abs(balanceChange),
+              storeCurrency,
+              description,
+              context,
+              {
+                updateCashDrawer: false // Already updated above
+              }
+            );
+          } else if (transactionData.supplierId && transactionData.type === 'payment') {
+            // Supplier payment from cash drawer
+            const context: TransactionContext = {
+              userId: transactionData.createdBy,
+              storeId: transactionData.storeId,
+              module: 'cash_drawer',
+              source: 'web'
+            };
+            
+            transactionResult = await transactionService.createSupplierPayment(
+              transactionData.supplierId,
+              Math.abs(balanceChange),
+              storeCurrency,
+              description,
+              context,
+              {
+                updateCashDrawer: false // Already updated above
+              }
+            );
+          } else if (transactionData.type === 'expense') {
+            // General expense from cash drawer
+            const context: TransactionContext = {
+              userId: transactionData.createdBy,
+              storeId: transactionData.storeId,
+              module: 'cash_drawer',
+              source: 'web'
+            };
+            
+            transactionResult = await transactionService.createCashDrawerExpense(
+              Math.abs(balanceChange),
+              storeCurrency,
+              description,
+              context,
+              {
+                category: transactionData.type === 'expense' ? 'expense' : 'refund'
+              }
+            );
+          } else {
+            // For sale, refund, or other payment types without customer/supplier
+            // Since transactionService doesn't have a generic method yet, we'll use direct DB access
+            // TODO: Replace with transactionService.createTransaction() when available
             const category = transactionData.type === 'sale' ? PAYMENT_CATEGORIES.CASH_DRAWER_SALE
-              : transactionData.type === 'payment' ? PAYMENT_CATEGORIES.CASH_DRAWER_PAYMENT
-              : transactionData.type === 'expense' ? PAYMENT_CATEGORIES.CASH_DRAWER_EXPENSE
-              : PAYMENT_CATEGORIES.CASH_DRAWER_REFUND;
+              : transactionData.type === 'refund' ? PAYMENT_CATEGORIES.CASH_DRAWER_REFUND
+              : PAYMENT_CATEGORIES.CASH_DRAWER_PAYMENT;
             
             await db.transactions.add({
-              supplier_id:transactionData.supplierId ?? null,
-              customer_id:transactionData.customerId ?? null,
+              supplier_id: transactionData.supplierId ?? null,
+              customer_id: transactionData.customerId ?? null,
               id: transactionId,
               type: balanceChange > 0 ? 'income' : 'expense',
               category: category,
               amount: Math.abs(balanceChange),
               currency: storeCurrency,
-              description: `${transactionData.description} - Cash Drawer Update`,
+              description: description,
               reference: transactionData.reference,
               store_id: transactionData.storeId,
               created_by: transactionData.createdBy,
@@ -303,7 +367,7 @@ export class CashDrawerUpdateService {
               status: 'active' as const,
               _synced: false
             } as any);
-          });
+          }
         } catch (dbError) {
           console.error('Database transaction failed, rolling back cash drawer update:', dbError);
           throw new Error(`Failed to update cash drawer: ${dbError instanceof Error ? dbError.message : 'Database error'}`);
