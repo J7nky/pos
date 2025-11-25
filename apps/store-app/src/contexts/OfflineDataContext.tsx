@@ -44,6 +44,12 @@ interface OfflineDataContextType {
   billLineItems: any[]; // Bill line items data
   billAuditLogs: any[]; // Bill audit logs data
   missedProducts: any[]; // Missed products data
+  
+  // NEW: Accounting foundation data
+  journalEntries: any[]; // Journal entries for double-entry bookkeeping
+  entities: any[]; // Unified customer/supplier/employee entities
+  chartOfAccounts: any[]; // Chart of accounts configuration
+  balanceSnapshots: any[]; // Balance snapshots for performance
 
 
   // Computed/legacy compatibility - exact match
@@ -320,6 +326,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [missedProducts, setMissedProducts] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences | null>(null);
+  
+  // NEW: Accounting foundation data states
+  const [journalEntries, setJournalEntries] = useState<any[]>([]);
+  const [entities, setEntities] = useState<any[]>([]);
+  const [chartOfAccounts, setChartOfAccounts] = useState<any[]>([]);
+  const [balanceSnapshots, setBalanceSnapshots] = useState<any[]>([]);
 
   // Loading states - exact match
   const [loading, setLoading] = useState({
@@ -498,6 +510,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         cashDrawerAccountsData,
         cashDrawerSessionsData,
         missedProductsData,
+        // NEW: Accounting foundation data
+        journalEntriesData,
+        entitiesData,
+        chartOfAccountsData,
+        balanceSnapshotsData,
       } = await crudHelperService.loadAllStoreData(storeId);
       
       console.log(`🔄 refreshData: Loaded ${customersData.length} customers, ${suppliersData.length} suppliers, ${employeesData.length} employees`);
@@ -526,6 +543,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Store raw data
       setInventoryItems(inventoryData);
       setInventoryBills(batchesData);
+      
+      // NEW: Set accounting foundation data
+      setJournalEntries(journalEntriesData || []);
+      setEntities(entitiesData || []);
+      setChartOfAccounts(chartOfAccountsData || []);
+      setBalanceSnapshots(balanceSnapshotsData || []);
+      
+      console.log(`🔄 refreshData: Loaded ${journalEntriesData?.length || 0} journal entries, ${entitiesData?.length || 0} entities, ${chartOfAccountsData?.length || 0} chart accounts, ${balanceSnapshotsData?.length || 0} balance snapshots`);
 
       // Transform bill line items to unified SaleItem interface for backward compatibility
       const transformedSaleItems: BillLineItem[] = await Promise.all(
@@ -685,13 +710,42 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await refreshDataAndUpdateCount();
     }
 
-    // Run migration for existing transactions after data loads
+    // Run migrations for existing transactions after data loads
     await migrateExistingTransactions();
+    await migrateTransactionIds();
 
     // Start monitoring for completed bills
     if (storeId) {
       receivedBillMonitoringService.startMonitoring(storeId);
       reminderMonitoringService.startMonitoring(storeId);
+    }
+  };
+
+  // Migration: Fix transaction IDs with old format to proper UUIDs
+  const migrateTransactionIds = async () => {
+    if (!storeId) return;
+
+    try {
+      const { TransactionIdMigration } = await import('../utils/transactionIdMigration');
+      
+      // Check if migration is needed
+      const hasOldFormat = await TransactionIdMigration.hasOldFormatTransactions(storeId);
+      if (!hasOldFormat) {
+        return; // No migration needed
+      }
+
+      console.log('🔄 [MIGRATION] Starting transaction ID migration...');
+      const result = await TransactionIdMigration.migrateTransactionIds(storeId);
+      
+      if (result.success) {
+        console.log(`✅ [MIGRATION] Successfully migrated ${result.migratedCount} transaction IDs`);
+        // Refresh data to reflect changes
+        await refreshDataAndUpdateCount();
+      } else {
+        console.error('❌ [MIGRATION] Transaction ID migration failed:', result.errors);
+      }
+    } catch (error) {
+      console.error('❌ [MIGRATION] Transaction ID migration error:', error);
     }
   };
 
@@ -860,6 +914,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       
       if (unsyncedTables.length > 0) {
         debug('🔍 Unsynced records by table:', unsyncedTables);
+        
+        // Get detailed breakdown for debugging sync discrepancies
+        const detailedCount = await crudHelperService.getDetailedUnsyncedCount();
+        if (total > 0) {
+          console.log('🔍 [COUNT-DEBUG] Detailed breakdown:', detailedCount.summary);
+        }
       }
       
       setUnsyncedCount(total);
@@ -3023,7 +3083,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     return getCurrentCashDrawerBalance(storeId);
   };
 
-  // Unified payment processing function
+  // ⭐⭐⭐ ATOMIC PAYMENT PROCESSING FUNCTION ⭐⭐⭐
+  // Fixed atomicity violation - all operations now happen in a single database transaction
   const processPayment = async (params: {
     entityType: 'customer' | 'supplier';
     entityId: string;
@@ -3044,7 +3105,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         return { success: false, error: 'Please enter a valid positive amount' };
       }
 
-      // Find entity
+      // Find entity (read-only operation outside transaction)
       const entity = entityType === 'customer' 
         ? customers.find(c => c.id === entityId)
         : suppliers.find(s => s.id === entityId);
@@ -3073,119 +3134,207 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Update entity balance in the SELECTED currency
-      // CORRECTED LOGIC:
-      // Balance represents what they owe us:
-      //   - Positive balance = they owe us (debt) - e.g., $500 = "Owes US $500"
-      //   - Negative balance = we owe them (credit) - e.g., -$500 = "Owes Them $500"
-      // 
-      // Payment received (they pay us) → balance DECREASES (they're paying off their debt)
-      // Payment sent (we pay them) → balance INCREASES (we're giving them money, increasing their debt or reducing credit we owe them)
-      // 
-      // Examples:
-      // - Ahmed purchases $500 credit → balance = +$500 (Owes US $500)
-      // - Ahmed pays $200 → balance = +$300 (still Owes US $300)
-      // - If Ahmed has -$500 (we owe him) and we pay $200 → balance = -$300 (we still owe $300)
+      // Get current balances (read-only operation outside transaction)
       const currentLbBalance = entity.lb_balance || 0;
       const currentUsdBalance = entity.usd_balance || 0;
 
-      console.log(`💳 Payment Processing - Entity: ${entity.name}, Type: ${isCustomer ? 'Customer' : 'Supplier'}, Direction: ${paymentDirection}, Currency: ${currency}`);
-      console.log(`💳 Current Balances - LBP: ${currentLbBalance}, USD: ${currentUsdBalance}`);
-      console.log(`💳 Payment Amount: ${numAmount}`);
+      console.log(`💳 [ATOMIC] Payment Processing - Entity: ${entity.name}, Type: ${isCustomer ? 'Customer' : 'Supplier'}, Direction: ${paymentDirection}, Currency: ${currency}`);
+      console.log(`💳 [ATOMIC] Current Balances - LBP: ${currentLbBalance}, USD: ${currentUsdBalance}`);
+      console.log(`💳 [ATOMIC] Payment Amount: ${numAmount}`);
 
+      // Calculate new balance - DIFFERENT LOGIC FOR CUSTOMERS VS SUPPLIERS
+      let newBalance: number;
+      let balanceField: string;
+      
       if (currency === 'LBP') {
-        // CORRECTED: Payment received (they pay us) → DECREASE balance (they pay off debt)
-        // Payment sent (we pay them) → INCREASE balance (increases their debt or reduces our credit)
-        const newBalance = paymentDirection === 'receive' 
-          ? currentLbBalance - numAmount  // They pay us → balance decreases (paying off debt)
-          : currentLbBalance + numAmount; // We pay them → balance increases (more debt or less credit)
-        const updateData = { lb_balance: newBalance };
-        console.log(`💳 ${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${isCustomer ? 'customer' : 'supplier'}: LBP balance ${currentLbBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
         if (isCustomer) {
-          await updateCustomer(entityId, updateData);
+          // CUSTOMER BALANCE: positive = customer owes us, negative = we owe customer
+          newBalance = paymentDirection === 'receive' 
+            ? currentLbBalance - numAmount  // Customer pays us → they owe us less
+            : currentLbBalance + numAmount; // We pay customer → we owe them more (or they owe us less)
         } else {
-          await updateSupplier(entityId, updateData);
+          // SUPPLIER BALANCE: positive = we owe supplier, negative = supplier owes us
+          newBalance = paymentDirection === 'receive'
+            ? currentLbBalance + numAmount  // Supplier pays us → they owe us less (rare scenario)
+            : currentLbBalance - numAmount; // We pay supplier → we owe them less
         }
+        balanceField = 'lb_balance';
       } else {
-        // USD payment - update USD balance
-        // CORRECTED: Payment received (they pay us) → DECREASE balance (they pay off debt)
-        // Payment sent (we pay them) → INCREASE balance (increases their debt or reduces our credit)
-        const newBalance = paymentDirection === 'receive'
-          ? currentUsdBalance - numAmount  // They pay us → balance decreases (paying off debt)
-          : currentUsdBalance + numAmount; // We pay them → balance increases (more debt or less credit)
-        const updateData = { usd_balance: newBalance };
-        console.log(`💳 ${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${isCustomer ? 'customer' : 'supplier'}: USD balance ${currentUsdBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
         if (isCustomer) {
-          await updateCustomer(entityId, updateData);
+          // CUSTOMER BALANCE: positive = customer owes us, negative = we owe customer
+          newBalance = paymentDirection === 'receive'
+            ? currentUsdBalance - numAmount  // Customer pays us → they owe us less
+            : currentUsdBalance + numAmount; // We pay customer → we owe them more (or they owe us less)
         } else {
-          await updateSupplier(entityId, updateData);
+          // SUPPLIER BALANCE: positive = we owe supplier, negative = supplier owes us
+          newBalance = paymentDirection === 'receive'
+            ? currentUsdBalance + numAmount  // Supplier pays us → they owe us less (rare scenario)
+            : currentUsdBalance - numAmount; // We pay supplier → we owe them less
         }
+        balanceField = 'usd_balance';
       }
 
-      // Verify the update happened
-      const updatedEntity = isCustomer 
-        ? customers.find(c => c.id === entityId)
-        : suppliers.find(s => s.id === entityId);
-      console.log(`💳 After update - LBP: ${updatedEntity?.lb_balance}, USD: ${updatedEntity?.usd_balance}`);
+      console.log(`💳 [ATOMIC] ${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${isCustomer ? 'customer' : 'supplier'}: ${currency} balance ${currency === 'LBP' ? currentLbBalance : currentUsdBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
 
-      // Process cash drawer transaction in LBP (cash drawer storage is always LBP)
-      // Payment received (they pay us) → cash drawer INCREASES (income)
-      // Payment sent (we pay them) → cash drawer DECREASES (expense)
+      // Prepare transaction data
       const cashDrawerType = paymentDirection === 'receive' ? 'payment' : 'expense';
-      const cashDrawerResult = await processCashDrawerTransaction({
-        type: cashDrawerType,
-        amount: amountInLBP, // Always in LBP for cash drawer
-        currency: 'LBP', // Cash drawer always uses LBP
-        description: `${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${entity.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`,
-        reference: reference || generatePaymentReference(),
-        customerId: isCustomer ? entityId : undefined,
-        supplierId: isCustomer ? undefined : entityId
-      });
+      const transactionDescription = `${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${entity.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`;
+      
+      let cashDrawerResult: any;
+      let transactionId: string | undefined;
+      let previousBalance: number | undefined;
+      let accountId: string | undefined;
 
-      if (!cashDrawerResult.success) {
-        return { success: false, error: 'Failed to process cash drawer transaction' };
+      // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK - ALL OR NOTHING ⭐⭐⭐
+      await db.transaction('rw', 
+        [
+          db.customers, 
+          db.suppliers, 
+          db.transactions, 
+          db.cash_drawer_accounts, 
+          db.cash_drawer_sessions
+        ], 
+        async () => {
+          console.log('💳 [ATOMIC] Starting atomic transaction block...');
+
+          // 1. Update entity balance atomically
+          const updateData = { [balanceField]: newBalance, _synced: false };
+          if (isCustomer) {
+            await db.customers.update(entityId, updateData);
+          } else {
+            await db.suppliers.update(entityId, updateData);
+          }
+          console.log(`💳 [ATOMIC] Entity balance updated: ${balanceField} = ${newBalance}`);
+
+          // 2. Process cash drawer transaction atomically (within existing transaction)
+          // NOTE: We can't call processCashDrawerTransaction() here because it creates its own transaction
+          // Instead, we'll do the cash drawer operations directly within this atomic block
+          
+          // Get cash drawer account
+          const cashDrawerAccount = await db.getCashDrawerAccount(storeId);
+          if (!cashDrawerAccount) {
+            throw new Error('No cash drawer account found. Please create one before processing payments.');
+          }
+
+          // Calculate balance change
+          const previousCashBalance = Number(cashDrawerAccount.current_balance ?? 0) || 0;
+          const balanceChange = paymentDirection === 'receive' ? amountInLBP : -amountInLBP;
+          const newCashBalance = previousCashBalance + balanceChange;
+
+          // Validate cash drawer balance for outgoing payments
+          if (paymentDirection === 'pay' && newCashBalance < 0) {
+            throw new Error(`Insufficient cash drawer balance. Required: ${Math.round(amountInLBP).toLocaleString()} LBP, Available: ${Math.round(previousCashBalance).toLocaleString()} LBP`);
+          }
+
+          // Update cash drawer balance atomically
+          await db.cash_drawer_accounts.update(cashDrawerAccount.id, {
+            current_balance: newCashBalance,
+            updated_at: new Date().toISOString(),
+            _synced: false
+          });
+
+          // Create transaction record atomically
+          const transactionRecord = {
+            id: crypto.randomUUID(),
+            store_id: storeId,
+            type: (paymentDirection === 'receive' ? 'income' : 'expense') as 'income' | 'expense',
+            category: isCustomer 
+              ? (paymentDirection === 'receive' ? 'Customer Payment' : 'Customer Payment')
+              : (paymentDirection === 'receive' ? 'Supplier Payment' : 'Supplier Payment'),
+            amount: numAmount,
+            currency: currency,
+            description: transactionDescription,
+            reference: reference || generatePaymentReference(),
+            customer_id: isCustomer ? entityId : null,
+            supplier_id: isCustomer ? null : entityId,
+            employee_id: null,
+            created_by: createdBy,
+            metadata: {
+              payment_direction: paymentDirection,
+              original_currency: currency,
+              cash_drawer_amount: amountInLBP,
+              exchange_rate: currency === 'USD' ? exchangeRate : 1
+            },
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            _synced: false
+          };
+
+          await db.transactions.add(transactionRecord);
+
+          // Set result for undo data creation
+          cashDrawerResult = {
+            success: true,
+            transactionId: transactionRecord.id,
+            previousBalance: previousCashBalance,
+            newBalance: newCashBalance,
+            accountId: cashDrawerAccount.id
+          };
+
+          console.log(`💳 [ATOMIC] Cash drawer updated: ${previousCashBalance} → ${newCashBalance} LBP`);
+          console.log(`💳 [ATOMIC] Transaction created: ${transactionRecord.id}`);
+
+          transactionId = cashDrawerResult.transactionId;
+          previousBalance = cashDrawerResult.previousBalance;
+          accountId = cashDrawerResult.accountId;
+
+          console.log('💳 [ATOMIC] Cash drawer transaction created successfully');
+        }
+      );
+      // ⭐⭐⭐ END ATOMIC TRANSACTION - ALL OPERATIONS COMMITTED ⭐⭐⭐
+
+      console.log('✅ [ATOMIC] All operations completed successfully - transaction committed');
+
+      // Create undo data (outside transaction - non-critical)
+      try {
+        const baseUndoData = {
+          affected: [
+            { table: isCustomer ? 'customers' : 'suppliers', id: entityId }
+          ],
+          steps: [
+            {
+              op: 'update',
+              table: isCustomer ? 'customers' : 'suppliers',
+              id: entityId,
+              changes: currency === 'LBP'
+                ? { lb_balance: currentLbBalance, _synced: false }
+                : { usd_balance: currentUsdBalance, _synced: false }
+            }
+          ]
+        };
+
+        const undoData = createCashDrawerUndoData(
+          transactionId,
+          previousBalance,
+          accountId,
+          baseUndoData
+        );
+
+        pushUndo(undoData);
+      } catch (undoError) {
+        console.warn('⚠️ Undo data creation failed (non-critical):', undoError);
       }
 
-      // Create undo data
-      const baseUndoData = {
-        affected: [
-          { table: isCustomer ? 'customers' : 'suppliers', id: entityId }
-        ],
-        steps: [
-          {
-            op: 'update',
-            table: isCustomer ? 'customers' : 'suppliers',
-            id: entityId,
-            changes: currency === 'LBP'
-              ? { lb_balance: currentLbBalance, _synced: false }
-              : { usd_balance: currentUsdBalance, _synced: false }
-          }
-        ]
-      };
-
-      const undoData = createCashDrawerUndoData(
-        cashDrawerResult.transactionId,
-        cashDrawerResult.previousBalance,
-        cashDrawerResult.accountId,
-        baseUndoData
-      );
-
-      pushUndo(undoData);
-
-      // Refresh data
-      await refreshData();
+      // Refresh data (outside transaction - non-critical)
+      try {
+        await refreshData();
+      } catch (refreshError) {
+        console.warn('⚠️ Data refresh failed (non-critical):', refreshError);
+      }
 
       return { success: true };
+
     } catch (error) {
-      console.error('Payment processing error:', error);
+      console.error('❌ [ATOMIC] Payment processing failed - all operations rolled back:', error);
       return { 
         success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error occurred' 
+        error: error instanceof Error ? error.message : 'Payment processing failed - all operations rolled back' 
       };
     }
   };
 
-  // Process employee payment (we pay them salary)
+  // ⭐⭐⭐ ATOMIC EMPLOYEE PAYMENT PROCESSING FUNCTION ⭐⭐⭐
+  // Fixed atomicity violation - all operations now happen in a single database transaction
   const processEmployeePayment = async (params: {
     employeeId: string;
     amount: string;
@@ -3204,7 +3353,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         return { success: false, error: 'Please enter a valid positive amount' };
       }
 
-      // Find employee
+      // Find employee (read-only operation outside transaction)
       const employee = employees.find(e => e.id === employeeId);
       if (!employee) {
         return { success: false, error: 'Employee not found' };
@@ -3216,7 +3365,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         amountInLBP = numAmount * exchangeRate;
       }
 
-      // Check cash drawer balance
+      // Check cash drawer balance (read-only operation outside transaction)
       const currentBalance = await getCurrentCashDrawerBalance(storeId);
       if (amountInLBP > currentBalance) {
         return { 
@@ -3225,73 +3374,141 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      // Employee balance represents what we owe them (salary/advance)
-      // When we pay them, we DECREASE their balance (we owe them less)
+      // Get current balances (read-only operation outside transaction)
       const currentLbBalance = employee.lbp_balance || 0;
       const currentUsdBalance = employee.usd_balance || 0;
 
-      console.log(`💳 Employee Payment - Employee: ${employee.name}, Currency: ${currency}`);
-      console.log(`💳 Current Balances - LBP: ${currentLbBalance}, USD: ${currentUsdBalance}`);
-      console.log(`💳 Payment Amount: ${numAmount}`);
+      console.log(`💳 [ATOMIC] Employee Payment - Employee: ${employee.name}, Currency: ${currency}`);
+      console.log(`💳 [ATOMIC] Current Balances - LBP: ${currentLbBalance}, USD: ${currentUsdBalance}`);
+      console.log(`💳 [ATOMIC] Payment Amount: ${numAmount}`);
 
+      // Calculate new balance
+      let newBalance: number;
+      let balanceField: string;
+      
       if (currency === 'LBP') {
-        const newBalance = currentLbBalance - numAmount;
-        await updateEmployee(employeeId, { 
-          lbp_balance: newBalance,
-          updated_at: new Date().toISOString()
-        });
-        console.log(`💳 Payment sent to employee: LBP balance ${currentLbBalance} → ${newBalance}`);
+        newBalance = currentLbBalance - numAmount; // We pay them → we owe them less
+        balanceField = 'lbp_balance';
       } else {
-        const newBalance = currentUsdBalance - numAmount;
-        await updateEmployee(employeeId, { 
-          usd_balance: newBalance,
-          updated_at: new Date().toISOString()
-        });
-        console.log(`💳 Payment sent to employee: USD balance ${currentUsdBalance} → ${newBalance}`);
+        newBalance = currentUsdBalance - numAmount; // We pay them → we owe them less
+        balanceField = 'usd_balance';
       }
 
-      // Process cash drawer transaction (expense - we're paying out)
-      const cashDrawerResult = await processCashDrawerTransaction({
-        type: 'expense',
-        amount: amountInLBP,
-        currency: 'LBP',
-        description: `Employee payment - ${employee.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`,
-        reference: reference || generatePaymentReference(),
-        customerId: undefined,
-        supplierId: undefined
-      });
+      console.log(`💳 [ATOMIC] Payment sent to employee: ${currency} balance ${currency === 'LBP' ? currentLbBalance : currentUsdBalance} → ${newBalance}`);
 
-      if (!cashDrawerResult.success) {
-        return { success: false, error: 'Failed to process cash drawer transaction' };
+      // Prepare transaction data
+      const transactionDescription = `Employee payment - ${employee.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`;
+      
+      let cashDrawerResult: any;
+
+      // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK - ALL OR NOTHING ⭐⭐⭐
+      await db.transaction('rw', 
+        [
+          db.employees, 
+          db.transactions, 
+          db.cash_drawer_accounts, 
+          db.cash_drawer_sessions
+        ], 
+        async () => {
+          console.log('💳 [ATOMIC] Starting atomic employee payment transaction...');
+
+          // 1. Update employee balance atomically
+          const updateData = { 
+            [balanceField]: newBalance, 
+            updated_at: new Date().toISOString(),
+            _synced: false 
+          };
+          await db.employees.update(employeeId, updateData);
+          console.log(`💳 [ATOMIC] Employee balance updated: ${balanceField} = ${newBalance}`);
+
+          // 2. Process cash drawer transaction atomically (within existing transaction)
+          // NOTE: We can't call processCashDrawerTransaction() here because it creates its own transaction
+          // Instead, we'll do the cash drawer operations directly within this atomic block
+          
+          // Get cash drawer account
+          const cashDrawerAccount = await db.getCashDrawerAccount(storeId);
+          if (!cashDrawerAccount) {
+            throw new Error('No cash drawer account found. Please create one before processing payments.');
+          }
+
+          // Calculate balance change (employee payment is always an expense - money going out)
+          const previousCashBalance = Number(cashDrawerAccount.current_balance ?? 0) || 0;
+          const balanceChange = -amountInLBP; // Negative because we're paying out
+          const newCashBalance = previousCashBalance + balanceChange;
+
+          // Validate cash drawer balance
+          if (newCashBalance < 0) {
+            throw new Error(`Insufficient cash drawer balance. Required: ${Math.round(amountInLBP).toLocaleString()} LBP, Available: ${Math.round(previousCashBalance).toLocaleString()} LBP`);
+          }
+
+          // Update cash drawer balance atomically
+          await db.cash_drawer_accounts.update(cashDrawerAccount.id, {
+            current_balance: newCashBalance,
+            updated_at: new Date().toISOString(),
+            _synced: false
+          });
+
+          // Create transaction record atomically
+          const transactionRecord = {
+            id: crypto.randomUUID(),
+            store_id: storeId,
+            type: 'expense' as 'expense',
+            category: 'Employee Payment',
+            amount: numAmount,
+            currency: currency,
+            description: transactionDescription,
+            reference: reference || generatePaymentReference(),
+            customer_id: null,
+            supplier_id: null,
+            employee_id: employeeId,
+            created_by: createdBy,
+            metadata: {
+              payment_type: 'employee_salary',
+              original_currency: currency,
+              cash_drawer_amount: amountInLBP,
+              exchange_rate: currency === 'USD' ? exchangeRate : 1
+            },
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            _synced: false
+          };
+
+          await db.transactions.add(transactionRecord);
+
+          // Set result for undo data creation
+          cashDrawerResult = {
+            success: true,
+            transactionId: transactionRecord.id,
+            previousBalance: previousCashBalance,
+            newBalance: newCashBalance,
+            accountId: cashDrawerAccount.id
+          };
+
+          console.log(`💳 [ATOMIC] Cash drawer updated: ${previousCashBalance} → ${newCashBalance} LBP`);
+          console.log(`💳 [ATOMIC] Employee transaction created: ${transactionRecord.id}`);
+
+          console.log('💳 [ATOMIC] Cash drawer transaction created successfully');
+        }
+      );
+      // ⭐⭐⭐ END ATOMIC TRANSACTION - ALL OPERATIONS COMMITTED ⭐⭐⭐
+
+      console.log('✅ [ATOMIC] All employee payment operations completed successfully - transaction committed');
+
+      // Refresh data (outside transaction - non-critical)
+      try {
+        await refreshData();
+      } catch (refreshError) {
+        console.warn('⚠️ Data refresh failed (non-critical):', refreshError);
       }
-
-      // Create transaction record using unified service
-      await transactionService.createTransaction({
-        category: TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT,
-        amount: numAmount,
-        currency: currency,
-        description: `Employee payment - ${employee.name}${description ? ': ' + description : ''}`,
-        reference: reference || generatePaymentReference(),
-        employeeId: employeeId,
-        context: {
-          userId: createdBy,
-          storeId: storeId,
-          module: 'employee_management',
-          source: 'offline'
-        },
-        updateBalances: false, // Balance already updated above
-        updateCashDrawer: false, // Cash drawer already updated above
-        createAuditLog: true,
-        _synced: false
-      });
-
-      // Refresh data
-      await refreshData();
 
       return { success: true };
-    } catch (error: any) {
-      console.error('Employee payment processing error:', error);
-      return { success: false, error: error?.message || 'Failed to process employee payment' };
+
+    } catch (error) {
+      console.error('❌ [ATOMIC] Employee payment processing failed - all operations rolled back:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Employee payment processing failed - all operations rolled back' 
+      };
     }
   };
 
@@ -4632,6 +4849,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         billLineItems: [],
         billAuditLogs: [],
         missedProducts: [],
+        // NEW: Empty accounting foundation data
+        journalEntries: [],
+        entities: [],
+        chartOfAccounts: [],
+        balanceSnapshots: [],
         stockLevels: [],
         setStockLevels: () => { },
         lowStockAlertsEnabled: false,
@@ -4760,6 +4982,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       billLineItems,
       billAuditLogs,
       missedProducts,
+      
+      // NEW: Accounting foundation data
+      journalEntries,
+      entities,
+      chartOfAccounts,
+      balanceSnapshots,
 
       // Computed/legacy compatibility - exact match
       stockLevels,

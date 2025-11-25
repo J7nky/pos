@@ -1,7 +1,13 @@
 # Atomic Transactions & Balance Verification Implementation
 
 **Date:** November 23, 2025  
-**Priority:** 🔥 CRITICAL
+**Priority:** 🔥 CRITICAL  
+**Status:** ⚠️ **DEPRECATED** - See `ATOMIC_TRANSACTIONS_NEW_ARCHITECTURE.md`
+
+> **⚠️ DEPRECATION NOTICE**  
+> This document is **OUTDATED** and references functions that have been refactored or removed.  
+> Please use the new documentation: `ATOMIC_TRANSACTIONS_NEW_ARCHITECTURE.md`  
+> The new architecture uses the unified `TransactionService` for all transaction operations.
 
 ---
 

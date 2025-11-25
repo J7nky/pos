@@ -1,5 +1,11 @@
 # Achieving Atomicity with IndexedDB Transactions
 
+**Status:** ⚠️ **DEPRECATED** - See `ATOMIC_TRANSACTIONS_NEW_ARCHITECTURE.md`
+
+> **⚠️ DEPRECATION NOTICE**  
+> This document references the old transaction architecture.  
+> Please use the new documentation: `ATOMIC_TRANSACTIONS_NEW_ARCHITECTURE.md`
+
 ## Introduction
 IndexedDB transactions ensure that database operations either complete entirely or fail completely, maintaining data integrity. This is crucial for financial systems like our POS.
 

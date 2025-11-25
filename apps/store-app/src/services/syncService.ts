@@ -47,13 +47,19 @@ const TABLES_WITH_UPDATED_AT = [
   'bill_line_items',
   'bill_audit_logs',
   'missed_products',
-  'reminders'
+  'reminders',
+  // NEW: Accounting foundation tables with updated_at
+  'entities'
 ] as const;
 
 // Tables that only have created_at (no updated_at)
 const TABLES_WITH_CREATED_AT_ONLY = [
   'inventory_items',
-  'transactions'
+  'transactions',
+  // NEW: Accounting foundation tables with created_at only
+  'journal_entries',
+  'balance_snapshots',
+  'chart_of_accounts'
 ] as const;
 
 // Table sync order (respects foreign key dependencies)
@@ -64,9 +70,14 @@ const SYNC_TABLES = [
   'customers',
   'users', // Employees with auth accounts - synced to Supabase
   'cash_drawer_accounts',
+  // NEW: Accounting foundation tables (sync early for dependencies)
+  'chart_of_accounts', // Must sync before journal_entries
+  'entities', // Must sync before journal_entries and balance_snapshots
   'inventory_bills',
   'inventory_items',
   'transactions',
+  'journal_entries', // Must sync after entities and chart_of_accounts
+  'balance_snapshots', // Must sync after entities
   'bills',
   'bill_line_items',
   'bill_audit_logs',
@@ -84,6 +95,11 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'customers': [],
   'users': ['stores'],
   'cash_drawer_accounts': [],
+  // NEW: Accounting foundation dependencies
+  'chart_of_accounts': ['stores'], // Chart of accounts belongs to stores
+  'entities': ['stores'], // Entities belong to stores
+  'journal_entries': ['stores', 'entities', 'chart_of_accounts'], // Journal entries reference entities and accounts
+  'balance_snapshots': ['stores', 'entities'], // Balance snapshots reference entities
   'inventory_bills': ['suppliers'],
   // supplier_id was removed from inventory_items; depend on batch linkage only
   'inventory_items': ['products', 'inventory_bills'],
@@ -439,6 +455,17 @@ export class SyncService {
   private async uploadLocalChanges(storeId: string) {
     const result = { uploaded: 0, errors: [] as string[] };
 
+    // Get detailed count for debugging
+    const { crudHelperService } = await import('./crudHelperService');
+    const detailedCount = await crudHelperService.getDetailedUnsyncedCount();
+    console.log('🔍 [SYNC-DEBUG] Detailed unsynced count before sync:', detailedCount.summary);
+    
+    // Run detailed discrepancy analysis if there are unsynced records
+    if (detailedCount.total > 0) {
+      const { SyncDebugger } = await import('../utils/syncDebugger');
+      await SyncDebugger.printSyncDiscrepancyReport(storeId);
+    }
+
     for (const tableName of SYNC_TABLES) {
       const tableStart = performance.now();
       try {
@@ -456,6 +483,15 @@ export class SyncService {
         if (activeRecords.length === 0 && deletedRecords.length === 0) {
           console.log(`  ⏭️  No unsynced records for ${tableName}`);
           continue;
+        }
+
+        // Debug logging for discrepancy analysis
+        const tableDetail = detailedCount.byTable[tableName];
+        if (tableDetail && (activeRecords.length !== tableDetail.active || deletedRecords.length !== tableDetail.deleted)) {
+          console.warn(`🔍 [SYNC-DEBUG] Count mismatch for ${tableName}:`, {
+            expected: tableDetail,
+            found: { active: activeRecords.length, deleted: deletedRecords.length }
+          });
         }
 
         // Process deleted records first if there are any (they don't need dependency validation)

@@ -25,6 +25,12 @@ import {
   Reminder,
   EmployeeAttendance
 } from '../types';
+import { 
+  JournalEntry, 
+  BalanceSnapshot, 
+  Entity, 
+  ChartOfAccounts 
+} from '../types/accounting';
 
 type Tables = Database['public']['Tables'];
 
@@ -95,6 +101,12 @@ class POSDatabase extends Dexie {
   notification_preferences!: Table<NotificationPreferences, string>;
   reminders!: Table<Reminder, string>;
   employee_attendance!: Table<EmployeeAttendance, string>;
+  
+  // Accounting foundation tables (Phase 1)
+  journal_entries!: Table<JournalEntry, string>;
+  balance_snapshots!: Table<BalanceSnapshot, string>;
+  entities!: Table<Entity, string>;
+  chart_of_accounts!: Table<ChartOfAccounts, string>;
   
   // Database initialization state
   private _isInitialized = false;
@@ -587,6 +599,71 @@ class POSDatabase extends Dexie {
       console.log('   📢 This matches the actual Supabase database schema');
       // No data migration needed - fields are removed from indexes only
       // Data will be accessed via JOIN with bills table
+    });
+
+    // Migration for version 29 - add accounting foundation tables (Phase 1)
+    this.version(29).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, account_code, updated_at',
+      cash_drawer_sessions: 'id, store_id, account_id, status, created_at, updated_at',
+      
+      // Core tables
+      products: 'id, store_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, _synced, _deleted',
+      transactions: 'id, store_id, type, category, created_at, created_by, currency, customer_id, supplier_id, _synced, _deleted',
+      inventory_bills: 'id, store_id, supplier_id, received_at, created_by, currency, _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, bill_number, customer_id, bill_date, payment_method, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, bill_id, product_id, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Cash drawer management
+      missed_products: 'id, store_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification management
+      notifications: 'id, store_id, type, read, created_at, priority',
+      notification_preferences: 'store_id',
+      
+      // Reminder management
+      reminders: 'id, store_id, status, type, due_date, entity_type, [entity_type+entity_id], created_by, updated_at, _synced, _deleted',
+      
+      // Employee attendance tracking
+      employee_attendance: 'id, store_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
+      
+      // 🔥 NEW: Accounting foundation tables (Phase 1)
+      // Journal entries - source of truth for all financial transactions
+      journal_entries: 'id, store_id, branch_id, transaction_id, account_code, entity_id, currency, posted_date, fiscal_period, is_posted, created_at, created_by, _synced',
+      
+      // Balance snapshots - performance optimization for historical queries
+      balance_snapshots: 'id, store_id, branch_id, account_code, entity_id, snapshot_date, snapshot_type, verified, created_at, _synced',
+      
+      // Entities - unified customer/supplier/employee/cash abstraction
+      entities: 'id, store_id, branch_id, entity_type, entity_code, name, phone, is_system_entity, is_active, created_at, updated_at, _synced',
+      
+      // Chart of accounts - configuration for account types
+      chart_of_accounts: 'id, store_id, account_code, account_name, account_type, requires_entity, is_active'
+    }).upgrade(trans => {
+      console.log('🔥 Running migration v29: Adding accounting foundation tables (Phase 1)');
+      console.log('   ✅ Added journal_entries table - source of truth for all financial transactions');
+      console.log('   ✅ Added balance_snapshots table - performance optimization for historical queries');
+      console.log('   ✅ Added entities table - unified customer/supplier/employee/cash abstraction');
+      console.log('   ✅ Added chart_of_accounts table - configuration for account types');
+      console.log('   📢 Phase 1 of ACCOUNTING_FOUNDATION_MIGRATION_PLAN.md complete');
+      console.log('   📢 Ready for entity migration and journal entry creation');
+      // No data migration needed - new tables are empty
     });
 
     // Migration for version 5 - update existing records to match new schema

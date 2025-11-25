@@ -1,6 +1,7 @@
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
 import { TransactionService, TransactionResult } from './transactionService';
+import { journalService } from './journalService';
 // Remove dataAccessService import - use direct IndexedDB access
 import { db, createId } from '../lib/db';
 
@@ -94,26 +95,42 @@ export class EnhancedTransactionService {
       // Create correlation ID for this transaction group
       const correlationId = context.correlationId || this.generateCorrelationId();
 
-      // Process the payment using existing service
+      // Process the payment using existing service AND create journal entries
       const paymentContext: TransactionContext = {
         ...context,
         storeId
       };
-      const result = await transactionService.createCustomerPayment(
-        customerId,
-        amount,
-        currency,
-        description,
-        paymentContext,
-        {
-          reference: options.reference,
-          updateCashDrawer: true
-        }
-      );
+      
+      // ATOMIC TRANSACTION: Create both existing transaction and journal entries
+      let result: TransactionResult;
+      await db.transaction('rw', [db.transactions, db.customers, db.journal_entries, db.entities], async () => {
+        // 1. Create existing transaction record
+        result = await transactionService.createCustomerPayment(
+          customerId,
+          amount,
+          currency,
+          description,
+          paymentContext,
+          {
+            reference: options.reference,
+            updateCashDrawer: true
+          }
+        );
 
-      if (!result.success) {
-        throw new Error(result.error || 'Payment processing failed');
-      }
+        if (!result.success) {
+          throw new Error(result.error || 'Payment processing failed');
+        }
+
+        // 2. Create journal entries (NEW - ALONGSIDE)
+        await journalService.recordCustomerPayment(
+          customerId,
+          amount,
+          currency,
+          description
+        );
+      });
+
+      result = result!; // TypeScript assertion - result is set in transaction
 
       // Log the payment with comprehensive audit trail
       const auditLogId = auditLogService.logCustomerPayment({
@@ -256,26 +273,42 @@ export class EnhancedTransactionService {
 
       const correlationId = context.correlationId || this.generateCorrelationId();
 
-      // Process payment
+      // Process payment AND create journal entries
       const paymentContext: TransactionContext = {
         ...context,
         storeId
       };
-      const result = await transactionService.createSupplierPayment(
-        supplierId,
-        amount,
-        currency,
-        description,
-        paymentContext,
-        {
-          reference: options.reference,
-          updateCashDrawer: true
-        }
-      );
+      
+      // ATOMIC TRANSACTION: Create both existing transaction and journal entries
+      let result: TransactionResult;
+      await db.transaction('rw', [db.transactions, db.suppliers, db.journal_entries, db.entities], async () => {
+        // 1. Create existing transaction record
+        result = await transactionService.createSupplierPayment(
+          supplierId,
+          amount,
+          currency,
+          description,
+          paymentContext,
+          {
+            reference: options.reference,
+            updateCashDrawer: true
+          }
+        );
 
-      if (!result.success) {
-        throw new Error(result.error || 'Payment processing failed');
-      }
+        if (!result.success) {
+          throw new Error(result.error || 'Payment processing failed');
+        }
+
+        // 2. Create journal entries (NEW - ALONGSIDE)
+        await journalService.recordSupplierPayment(
+          supplierId,
+          amount,
+          currency,
+          description
+        );
+      });
+
+      result = result!; // TypeScript assertion - result is set in transaction
 
       // Log the payment
       const auditLogId = auditLogService.logSupplierPayment({

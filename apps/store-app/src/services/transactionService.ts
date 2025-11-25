@@ -8,6 +8,7 @@
 import { db } from '../lib/db';
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
+import { journalService } from './journalService';
 import { 
   TRANSACTION_CATEGORIES, 
   TransactionCategory, 
@@ -118,10 +119,11 @@ export class TransactionService {
 
   /**
    * Create a new transaction - THE ONLY WAY TO CREATE TRANSACTIONS
+   * Uses IndexedDB transactions for true atomicity
    */
   public async createTransaction(params: CreateTransactionParams): Promise<TransactionResult> {
     try {
-      // 1. VALIDATION
+      // 1. VALIDATION (outside transaction)
       const validationResult = this.validateTransaction(params);
       if (!validationResult.isValid) {
         return {
@@ -133,7 +135,7 @@ export class TransactionService {
         };
       }
 
-      // 2. PREPARE TRANSACTION DATA
+      // 2. PREPARE TRANSACTION DATA (outside transaction)
       const transactionId = this.generateTransactionId();
       const correlationId = params.context.correlationId || this.generateCorrelationId();
       const timestamp = new Date().toISOString();
@@ -149,7 +151,7 @@ export class TransactionService {
       // Generate reference if not provided
       const reference = params.reference || this.generateReferenceForCategory(params.category);
 
-      // 3. GET BALANCE BEFORE
+      // 3. GET BALANCE BEFORE (outside transaction - read-only)
       const balanceBefore = await this.getEntityBalance(
         params.customerId,
         params.supplierId,
@@ -157,7 +159,7 @@ export class TransactionService {
         params.currency
       );
 
-      // 4. CREATE TRANSACTION RECORD
+      // 4. PREPARE TRANSACTION RECORD
       const transaction: Transaction = {
         id: transactionId,
         store_id: params.context.storeId,
@@ -182,42 +184,63 @@ export class TransactionService {
         }
       };
 
-      // 5. SAVE TO DATABASE
-      await db.transactions.add(transaction);
-
-      // 6. UPDATE BALANCES (if enabled)
+      // Variables to capture results from atomic transaction
       let balanceAfter = balanceBefore;
-      const affectedRecords: string[] = [transactionId];
+      let affectedRecords: string[] = [transactionId];
+      let cashDrawerImpact: { previousBalance: number; newBalance: number } | undefined;
 
-      if (params.updateBalances !== false) {
-        const balanceResult = await this.updateEntityBalances(
-          transaction,
-          amountInUSD,
-          params.context
-        );
-        balanceAfter = balanceResult.newBalance;
-        affectedRecords.push(...balanceResult.affectedRecords);
-      }
+      // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
+      // ALL database write operations happen atomically
+      await db.transaction('rw', 
+        [db.transactions, db.customers, db.suppliers, db.cash_drawer_sessions, db.journal_entries, db.entities], 
+        async () => {
+          // 5. CREATE TRANSACTION RECORD
+          await db.transactions.add(transaction);
 
-      // 7. UPDATE CASH DRAWER (if enabled and applicable)
-      let cashDrawerImpact;
-      if (params.updateCashDrawer !== false && this.isCashDrawerCategory(params.category)) {
-        cashDrawerImpact = await this.updateCashDrawerForTransaction(
-          transaction,
-          params.context
-        );
-      }
+          // 6. CREATE JOURNAL ENTRIES (NEW - ACCOUNTING MIGRATION)
+          try {
+            await this.createJournalEntriesForTransaction(transaction);
+          } catch (journalError) {
+            console.warn('⚠️ Journal entry creation failed:', journalError);
+            // Don't fail the transaction for journal errors during migration period
+          }
 
-      // 8. CREATE AUDIT LOG (if enabled)
+          // 7. UPDATE ENTITY BALANCES (if enabled)
+          if (params.updateBalances !== false) {
+            const balanceResult = await this.updateEntityBalancesAtomic(
+              transaction,
+              amountInUSD
+            );
+            balanceAfter = balanceResult.newBalance;
+            affectedRecords.push(...balanceResult.affectedRecords);
+          }
+
+          // 8. UPDATE CASH DRAWER (if enabled and applicable)
+          if (params.updateCashDrawer !== false && this.isCashDrawerCategory(params.category)) {
+            cashDrawerImpact = await this.updateCashDrawerAtomic(
+              transaction,
+              params.context.storeId
+            );
+          }
+        }
+      );
+      // ⭐⭐⭐ END ATOMIC TRANSACTION ⭐⭐⭐
+
+      // 8. CREATE AUDIT LOG (outside transaction - non-critical)
       let auditLogId;
       if (params.createAuditLog !== false) {
-        auditLogId = await this.createAuditLog(
-          transaction,
-          balanceBefore,
-          balanceAfter,
-          params.context,
-          correlationId
-        );
+        try {
+          auditLogId = await this.createAuditLog(
+            transaction,
+            balanceBefore,
+            balanceAfter,
+            params.context,
+            correlationId
+          );
+        } catch (auditError) {
+          // Log audit error but don't fail the transaction
+          console.warn('⚠️ Audit log creation failed:', auditError);
+        }
       }
 
       // 9. RETURN RESULT
@@ -233,7 +256,7 @@ export class TransactionService {
       };
 
     } catch (error) {
-      console.error('❌ Transaction creation failed:', error);
+      console.error('❌ Transaction creation failed (all operations rolled back):', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -433,7 +456,8 @@ export class TransactionService {
   // ==========================================================================
 
   /**
-   * Update an existing transaction
+   * Update an existing transaction atomically
+   * Handles balance adjustments and maintains data integrity
    */
   public async updateTransaction(
     transactionId: string,
@@ -441,7 +465,7 @@ export class TransactionService {
     context: TransactionContext
   ): Promise<TransactionResult> {
     try {
-      // Get original transaction
+      // Get original transaction (outside transaction - read-only)
       const original = await db.transactions.get(transactionId);
       if (!original) {
         return {
@@ -453,23 +477,112 @@ export class TransactionService {
         };
       }
 
-      // For now, we'll mark as not synced and update fields
-      // Full reversal logic can be added later if needed
-      await db.transactions.update(transactionId, {
-        ...updates,
-        updated_at: new Date().toISOString(),
-        _synced: false
-      });
+      if (original._deleted) {
+        return {
+          success: false,
+          error: 'Cannot update deleted transaction',
+          balanceBefore: 0,
+          balanceAfter: 0,
+          affectedRecords: []
+        };
+      }
+
+      const timestamp = new Date().toISOString();
+      let balanceBefore = 0;
+      let balanceAfter = 0;
+      const affectedRecords: string[] = [transactionId];
+
+      // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
+      await db.transaction('rw', 
+        [db.transactions, db.customers, db.suppliers, db.cash_drawer_sessions], 
+        async () => {
+          // Get current balance before update
+          balanceBefore = await this.getEntityBalance(
+            original.customer_id,
+            original.supplier_id,
+            original.employee_id,
+            original.currency
+          );
+
+          // If amount or type changed, we need to reverse old balance impact
+          // and apply new balance impact
+          if (updates.amount !== undefined || updates.category !== undefined) {
+            // Reverse original transaction impact
+            const reversalTransaction: Transaction = {
+              ...original,
+              type: original.type === 'income' ? 'expense' : 'income', // Reverse type
+              amount: original.amount, // Keep original amount
+              category: original.category as TransactionCategory,
+              description: typeof original.description === 'string' ? original.description : JSON.stringify(original.description)
+            };
+            
+            await this.updateEntityBalancesAtomic(reversalTransaction, 0);
+            
+            // Apply new transaction impact
+            const newType = updates.category ? getTransactionType(updates.category) : original.type;
+            const newAmount = updates.amount ?? original.amount;
+            
+            const newTransaction: Transaction = {
+              ...original,
+              type: newType as TransactionType,
+              amount: newAmount,
+              category: (updates.category ?? original.category) as TransactionCategory,
+              description: typeof original.description === 'string' ? original.description : JSON.stringify(original.description)
+            };
+            
+            const balanceResult = await this.updateEntityBalancesAtomic(newTransaction, 0);
+            balanceAfter = balanceResult.newBalance;
+            affectedRecords.push(...balanceResult.affectedRecords);
+          } else {
+            balanceAfter = balanceBefore;
+          }
+
+          // Update the transaction record
+          const updateData: any = {
+            ...updates,
+            updated_at: timestamp,
+            _synced: false
+          };
+
+          // Remove context from updates as it's not a transaction field
+          delete updateData.context;
+
+          await db.transactions.update(transactionId, updateData);
+        }
+      );
+      // ⭐⭐⭐ END ATOMIC TRANSACTION ⭐⭐⭐
+
+      // Create audit log (outside transaction - non-critical)
+      try {
+        await auditLogService.log({
+          action: 'transaction_updated',
+          entityType: 'transaction',
+          entityId: transactionId,
+          description: `Transaction updated: ${original.description} | Balance: ${balanceBefore} → ${balanceAfter}`,
+          userId: context.userId,
+          userEmail: context.userEmail,
+          severity: 'medium',
+          tags: ['transaction', 'update'],
+          metadata: {
+            source: (context.source === 'offline' ? 'system' : context.source) || 'web',
+            module: context.module,
+            sessionId: context.sessionId
+          }
+        });
+      } catch (auditError) {
+        console.warn('⚠️ Audit log creation failed:', auditError);
+      }
 
       return {
         success: true,
         transactionId,
-        balanceBefore: 0,
-        balanceAfter: 0,
-        affectedRecords: [transactionId]
+        balanceBefore,
+        balanceAfter,
+        affectedRecords
       };
 
     } catch (error) {
+      console.error('❌ Transaction update failed (all operations rolled back):', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Update failed',
@@ -481,13 +594,15 @@ export class TransactionService {
   }
 
   /**
-   * Delete (soft delete) a transaction
+   * Delete (soft delete) a transaction atomically
+   * Reverses balance impacts and maintains data integrity
    */
   public async deleteTransaction(
     transactionId: string,
     context: TransactionContext
   ): Promise<TransactionResult> {
     try {
+      // Get original transaction (outside transaction - read-only)
       const transaction = await db.transactions.get(transactionId);
       if (!transaction) {
         return {
@@ -499,34 +614,98 @@ export class TransactionService {
         };
       }
 
-      // Soft delete
-      await db.transactions.update(transactionId, {
-        _deleted: true,
-        updated_at: new Date().toISOString(),
-        _synced: false
-      });
+      if (transaction._deleted) {
+        return {
+          success: false,
+          error: 'Transaction already deleted',
+          balanceBefore: 0,
+          balanceAfter: 0,
+          affectedRecords: []
+        };
+      }
 
-      // Log deletion
-      auditLogService.log({
-        action: 'transaction_deleted',
-        entityType: 'transaction',
-        entityId: transactionId,
-        description: `Transaction deleted: ${transaction.description}`,
-        userId: context.userId,
-        userEmail: context.userEmail,
-        severity: 'high',
-        tags: ['transaction', 'delete']
-      });
+      const timestamp = new Date().toISOString();
+      let balanceBefore = 0;
+      let balanceAfter = 0;
+      const affectedRecords: string[] = [transactionId];
+
+      // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
+      await db.transaction('rw', 
+        [db.transactions, db.customers, db.suppliers, db.cash_drawer_sessions], 
+        async () => {
+          // Get current balance before deletion
+          balanceBefore = await this.getEntityBalance(
+            transaction.customer_id,
+            transaction.supplier_id,
+            transaction.employee_id,
+            transaction.currency
+          );
+
+          // Reverse the transaction's balance impact
+          const reversalTransaction: Transaction = {
+            ...transaction,
+            type: transaction.type === 'income' ? 'expense' : 'income', // Reverse type
+            amount: transaction.amount, // Keep original amount
+            category: transaction.category as TransactionCategory,
+            description: typeof transaction.description === 'string' ? transaction.description : JSON.stringify(transaction.description)
+          };
+          
+          const balanceResult = await this.updateEntityBalancesAtomic(reversalTransaction, 0);
+          balanceAfter = balanceResult.newBalance;
+          affectedRecords.push(...balanceResult.affectedRecords);
+
+          // Reverse cash drawer impact if applicable
+          if (this.isCashDrawerCategory(transaction.category as TransactionCategory)) {
+            const reversalForCash: Transaction = {
+              ...transaction,
+              type: transaction.type === 'income' ? 'expense' : 'income', // Reverse for cash drawer too
+              category: transaction.category as TransactionCategory,
+              description: typeof transaction.description === 'string' ? transaction.description : JSON.stringify(transaction.description)
+            };
+            await this.updateCashDrawerAtomic(reversalForCash, context.storeId);
+          }
+
+          // Soft delete the transaction
+          await db.transactions.update(transactionId, {
+            _deleted: true,
+            updated_at: timestamp,
+            _synced: false
+          });
+        }
+      );
+      // ⭐⭐⭐ END ATOMIC TRANSACTION ⭐⭐⭐
+
+      // Create audit log (outside transaction - non-critical)
+      try {
+        await auditLogService.log({
+          action: 'transaction_deleted',
+          entityType: 'transaction',
+          entityId: transactionId,
+          description: `Transaction deleted: ${transaction.description} | Balance reversed: ${balanceBefore} → ${balanceAfter} ${transaction.currency}`,
+          userId: context.userId,
+          userEmail: context.userEmail,
+          severity: 'high',
+          tags: ['transaction', 'delete'],
+          metadata: {
+            source: (context.source === 'offline' ? 'system' : context.source) || 'web',
+            module: context.module,
+            sessionId: context.sessionId
+          }
+        });
+      } catch (auditError) {
+        console.warn('⚠️ Audit log creation failed:', auditError);
+      }
 
       return {
         success: true,
         transactionId,
-        balanceBefore: 0,
-        balanceAfter: 0,
-        affectedRecords: [transactionId]
+        balanceBefore,
+        balanceAfter,
+        affectedRecords
       };
 
     } catch (error) {
+      console.error('❌ Transaction deletion failed (all operations rolled back):', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Delete failed',
@@ -685,6 +864,7 @@ export class TransactionService {
 
   /**
    * Get current entity balance
+   * Can be called within or outside transactions (read-only operation)
    */
   private async getEntityBalance(
     customerId?: string | null,
@@ -712,116 +892,179 @@ export class TransactionService {
   }
 
   /**
-   * Update entity balances based on transaction
+   * Update entity balances atomically within IndexedDB transaction
+   * This method MUST be called within a db.transaction() block
+   */
+  private async updateEntityBalancesAtomic(
+    transaction: Transaction,
+    amountInUSD: number
+  ): Promise<{ newBalance: number; affectedRecords: string[] }> {
+    const affectedRecords: string[] = [];
+    let newBalance = 0;
+    const timestamp = new Date().toISOString();
+
+    // Update customer balance
+    if (transaction.customer_id) {
+      const customer = await db.customers.get(transaction.customer_id);
+      if (customer) {
+        const isUSD = transaction.currency === 'USD';
+        const previousBalance = isUSD ? (customer.usd_balance || 0) : (customer.lb_balance || 0);
+        
+        // For customer: income reduces debt, expense increases it
+        const balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
+        newBalance = previousBalance + balanceChange;
+
+        const updateData: any = {
+          updated_at: timestamp,
+          _synced: false
+        };
+        
+        if (isUSD) {
+          updateData.usd_balance = newBalance;
+        } else {
+          updateData.lb_balance = newBalance;
+        }
+
+        await db.customers.update(transaction.customer_id, updateData);
+        affectedRecords.push(transaction.customer_id);
+      }
+    }
+
+    // Update supplier balance
+    if (transaction.supplier_id) {
+      const supplier = await db.suppliers.get(transaction.supplier_id);
+      if (supplier) {
+        const isUSD = transaction.currency === 'USD';
+        const previousBalance = isUSD ? (supplier.usd_balance || 0) : (supplier.lb_balance || 0);
+        
+        // For supplier: expense reduces what we owe, income increases it
+        const balanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
+        newBalance = previousBalance + balanceChange;
+
+        const updateData: any = {
+          updated_at: timestamp,
+          _synced: false
+        };
+        
+        if (isUSD) {
+          updateData.usd_balance = newBalance;
+        } else {
+          updateData.lb_balance = newBalance;
+        }
+
+        await db.suppliers.update(transaction.supplier_id, updateData);
+        affectedRecords.push(transaction.supplier_id);
+      }
+    }
+
+    return { newBalance, affectedRecords };
+  }
+
+  /**
+   * Update entity balances (legacy method - delegates to atomic version)
+   * @deprecated Use updateEntityBalancesAtomic within a transaction instead
+   * @internal This method is kept for backward compatibility only
    */
   private async updateEntityBalances(
     transaction: Transaction,
     amountInUSD: number,
     context: TransactionContext
   ): Promise<{ newBalance: number; affectedRecords: string[] }> {
-    const affectedRecords: string[] = [];
-    let newBalance = 0;
+    console.warn('⚠️ updateEntityBalances is deprecated. Use atomic transactions instead.');
+    
+    // For backward compatibility, wrap in transaction
+    let result = { newBalance: 0, affectedRecords: [] as string[] };
+    
+    await db.transaction('rw', [db.customers, db.suppliers], async () => {
+      result = await this.updateEntityBalancesAtomic(transaction, amountInUSD);
+    });
+    
+    return result;
+  }
 
+  /**
+   * Update cash drawer atomically within IndexedDB transaction
+   * This method MUST be called within a db.transaction() block
+   */
+  private async updateCashDrawerAtomic(
+    transaction: Transaction,
+    storeId: string
+  ): Promise<{ previousBalance: number; newBalance: number } | undefined> {
     try {
-      // Update customer balance
-      if (transaction.customer_id) {
-        const customer = await db.customers.get(transaction.customer_id);
-        if (customer) {
-          const isUSD = transaction.currency === 'USD';
-          const previousBalance = isUSD ? (customer.usd_balance || 0) : (customer.lb_balance || 0);
-          
-          // For customer: income reduces debt, expense increases it
-          const balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
-          newBalance = previousBalance + balanceChange;
+      // Get active cash drawer session
+      const activeSession = await db.cash_drawer_sessions
+        .where('store_id')
+        .equals(storeId)
+        .and(session => session.closed_at === null)
+        .first();
 
-          const updateData: any = {
-            updated_at: new Date().toISOString(),
-            _synced: false
-          };
-          
-          if (isUSD) {
-            updateData.usd_balance = newBalance;
-          } else {
-            updateData.lb_balance = newBalance;
-          }
-
-          await db.customers.update(transaction.customer_id, updateData);
-          affectedRecords.push(transaction.customer_id);
-        }
+      if (!activeSession) {
+        console.warn('⚠️ No active cash drawer session found for store:', storeId);
+        return undefined;
       }
 
-      // Update supplier balance
-      if (transaction.supplier_id) {
-        const supplier = await db.suppliers.get(transaction.supplier_id);
-        if (supplier) {
-          const isUSD = transaction.currency === 'USD';
-          const previousBalance = isUSD ? (supplier.usd_balance || 0) : (supplier.lb_balance || 0);
-          
-          // For supplier: expense reduces what we owe, income increases it
-          const balanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
-          newBalance = previousBalance + balanceChange;
-
-          const updateData: any = {
-            updated_at: new Date().toISOString(),
-            _synced: false
-          };
-          
-          if (isUSD) {
-            updateData.usd_balance = newBalance;
-          } else {
-            updateData.lb_balance = newBalance;
-          }
-
-          await db.suppliers.update(transaction.supplier_id, updateData);
-          affectedRecords.push(transaction.supplier_id);
-        }
+      const previousBalance = (activeSession as any).current_amount || 0;
+      
+      // Calculate balance change based on transaction type
+      let balanceChange = 0;
+      if (transaction.type === 'income') {
+        // Income increases cash drawer
+        balanceChange = transaction.amount;
+      } else if (transaction.type === 'expense') {
+        // Expense decreases cash drawer
+        balanceChange = -transaction.amount;
       }
 
-      return { newBalance, affectedRecords };
+      const newBalance = previousBalance + balanceChange;
+      const timestamp = new Date().toISOString();
+
+      // Update cash drawer session
+      await db.cash_drawer_sessions.update(activeSession.id, {
+        current_amount: newBalance,
+        updated_at: timestamp,
+        _synced: false
+      } as any);
+
+      return {
+        previousBalance,
+        newBalance
+      };
 
     } catch (error) {
-      console.error('Error updating entity balances:', error);
-      return { newBalance: 0, affectedRecords };
+      console.error('Error updating cash drawer atomically:', error);
+      throw error; // Re-throw to trigger transaction rollback
     }
   }
 
   /**
-   * Update cash drawer for transaction
+   * Update cash drawer for transaction (legacy method)
+   * @deprecated Use updateCashDrawerAtomic within a transaction instead
+   * @internal This method is kept for backward compatibility only
    */
   private async updateCashDrawerForTransaction(
     transaction: Transaction,
     context: TransactionContext
   ): Promise<{ previousBalance: number; newBalance: number } | undefined> {
+    console.warn('⚠️ updateCashDrawerForTransaction is deprecated. Use atomic transactions instead.');
+    
     try {
-      // Import dynamically to avoid circular dependencies
-      const { cashDrawerUpdateService } = await import('./cashDrawerUpdateService');
+      // For backward compatibility, wrap in transaction
+      let result: { previousBalance: number; newBalance: number } | undefined;
       
-      const result = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-        type: transaction.type === 'income' ? 'payment' : 'expense',
-        amount: transaction.amount,
-        currency: transaction.currency,
-        description: transaction.description,
-        reference: transaction.reference || '',
-        storeId: transaction.store_id,
-        createdBy: transaction.created_by,
-        customerId: transaction.customer_id || undefined,
-        supplierId: transaction.supplier_id || undefined
+      await db.transaction('rw', [db.cash_drawer_sessions], async () => {
+        result = await this.updateCashDrawerAtomic(transaction, context.storeId);
       });
-
-      if (result.success) {
-        return {
-          previousBalance: result.previousBalance,
-          newBalance: result.newBalance
-        };
-      }
+      
+      return result;
     } catch (error) {
       console.error('Error updating cash drawer:', error);
+      return undefined;
     }
-    return undefined;
   }
 
   /**
    * Create audit log for transaction
+   * This is called outside atomic transactions as audit logs are non-critical
    */
   private async createAuditLog(
     transaction: Transaction,
@@ -858,6 +1101,125 @@ export class TransactionService {
         sessionId: context.sessionId
       }
     });
+  }
+
+  /**
+   * Create journal entries for a transaction (Accounting Migration Phase 3)
+   */
+  private async createJournalEntriesForTransaction(transaction: Transaction): Promise<void> {
+    try {
+      // Map transaction categories to journal entry types
+      const entityId = transaction.customer_id || transaction.supplier_id || transaction.employee_id;
+      
+      if (!entityId) {
+        // Use system entities for transactions without specific entities
+        const systemEntityId = this.getSystemEntityForTransaction(transaction);
+        if (systemEntityId) {
+          await this.createJournalEntriesWithEntity(transaction, systemEntityId);
+        }
+        return;
+      }
+
+      // Create journal entries based on transaction category
+      switch (transaction.category) {
+        case TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT:
+          await journalService.recordCustomerPayment(
+            entityId,
+            transaction.amount,
+            transaction.currency,
+            transaction.description
+          );
+          break;
+          
+        case TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT:
+          await journalService.recordSupplierPayment(
+            entityId,
+            transaction.amount,
+            transaction.currency,
+            transaction.description
+          );
+          break;
+          
+        case TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE:
+          await journalService.recordCreditSale(
+            entityId,
+            transaction.amount,
+            transaction.currency,
+            transaction.description
+          );
+          break;
+          
+        case TRANSACTION_CATEGORIES.CASH_DRAWER_SALE:
+          await journalService.recordCashSale(
+            transaction.amount,
+            transaction.currency,
+            entityId,
+            transaction.description
+          );
+          break;
+          
+        case TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT:
+          await journalService.recordSalaryPayment(
+            entityId,
+            transaction.amount,
+            transaction.currency,
+            transaction.description
+          );
+          break;
+          
+        default:
+          console.log(`ℹ️ No journal entry mapping for category: ${transaction.category}`);
+      }
+    } catch (error) {
+      console.error('❌ Failed to create journal entries:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get system entity ID for transactions without specific entities
+   */
+  private getSystemEntityForTransaction(transaction: Transaction): string | null {
+    switch (transaction.category) {
+      case TRANSACTION_CATEGORIES.CASH_DRAWER_SALE:
+      case TRANSACTION_CATEGORIES.CASH_DRAWER_PAYMENT:
+        return 'entity-cash-customer';
+        
+      case TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE:
+        return 'entity-internal';
+        
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Create journal entries with a specific entity
+   */
+  private async createJournalEntriesWithEntity(transaction: Transaction, entityId: string): Promise<void> {
+    switch (transaction.category) {
+      case TRANSACTION_CATEGORIES.CASH_DRAWER_SALE:
+        await journalService.recordCashSale(
+          transaction.amount,
+          transaction.currency,
+          entityId,
+          transaction.description
+        );
+        break;
+        
+      case TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE:
+        await journalService.recordExpensePayment(
+          '5900', // Miscellaneous Expense
+          entityId,
+          transaction.amount,
+          transaction.currency,
+          transaction.description
+        );
+        break;
+        
+      default:
+        console.log(`ℹ️ No system entity journal entry mapping for category: ${transaction.category}`);
+    }
   }
 
   /**
@@ -905,14 +1267,16 @@ export class TransactionService {
    * Generate unique transaction ID
    */
   private generateTransactionId(): string {
-    return `txn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Use proper UUID generation instead of custom format
+    return crypto.randomUUID();
   }
 
   /**
    * Generate correlation ID for grouped transactions
    */
   private generateCorrelationId(): string {
-    return `corr-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Use proper UUID for correlation ID as well
+    return crypto.randomUUID();
   }
 }
 

@@ -309,6 +309,11 @@ export class CRUDHelperService {
       () => this.getEntitiesByStore('cash_drawer_accounts', storeId),
       () => this.getEntitiesByStore('cash_drawer_sessions', storeId),
       () => this.getEntitiesByStore('missed_products', storeId),
+      // NEW: Accounting foundation tables
+      () => this.getEntitiesByStore('journal_entries', storeId),
+      () => this.getEntitiesByStore('entities', storeId),
+      () => this.getEntitiesByStore('chart_of_accounts', storeId),
+      () => this.getEntitiesByStore('balance_snapshots', storeId),
     ];
 
     const startTime = Date.now();
@@ -334,6 +339,11 @@ export class CRUDHelperService {
       cashDrawerAccountsData: results[10],
       cashDrawerSessionsData: results[11],
       missedProductsData: results[12],
+      // NEW: Accounting foundation data
+      journalEntriesData: results[13] || [],
+      entitiesData: results[14] || [],
+      chartOfAccountsData: results[15] || [],
+      balanceSnapshotsData: results[16] || [],
     };
   }
 
@@ -345,7 +355,8 @@ export class CRUDHelperService {
       'stores', 'products', 'suppliers', 'customers', 'users',
       'cash_drawer_accounts',
       'inventory_bills', 'inventory_items', 'transactions', 'bills',
-      'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions'
+      'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',
+      'missed_products', 'reminders' // Include all tables that sync processes
     ];
 
     // Get all table references first
@@ -378,6 +389,81 @@ export class CRUDHelperService {
     return {
       total: counts.reduce((sum, count) => sum + count, 0),
       byTable
+    };
+  }
+
+  /**
+   * Get detailed unsynced count that matches sync logic more closely
+   */
+  async getDetailedUnsyncedCount(): Promise<{ 
+    total: number; 
+    byTable: Record<string, { active: number; deleted: number; total: number }>;
+    summary: string;
+  }> {
+    const tableNames = [
+      'stores', 'products', 'suppliers', 'customers', 'users',
+      'cash_drawer_accounts',
+      'inventory_bills', 'inventory_items', 'transactions', 'bills',
+      'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',
+      'missed_products', 'reminders'
+    ];
+
+    const tables = tableNames.map(name => (db as any)[name]).filter(Boolean);
+
+    const results = await db.transaction('r', tables, async () => {
+      return await Promise.all(
+        tableNames.map(async name => {
+          try {
+            const table = (db as any)[name];
+            if (!table) {
+              return { active: 0, deleted: 0, total: 0 };
+            }
+            
+            // Match sync logic: separate active and deleted records
+            const activeCount = await table.filter((item: any) => !item._synced && !item._deleted).count();
+            const deletedCount = await table.filter((item: any) => !item._synced && item._deleted).count();
+            
+            return {
+              active: activeCount,
+              deleted: deletedCount,
+              total: activeCount + deletedCount
+            };
+          } catch (error) {
+            console.warn(`Table ${name} not found, skipping from detailed unsynced count`);
+            return { active: 0, deleted: 0, total: 0 };
+          }
+        })
+      );
+    });
+
+    const byTable: Record<string, { active: number; deleted: number; total: number }> = {};
+    let totalActive = 0;
+    let totalDeleted = 0;
+
+    tableNames.forEach((name, index) => {
+      byTable[name] = results[index];
+      totalActive += results[index].active;
+      totalDeleted += results[index].deleted;
+    });
+
+    // Generate summary
+    const nonZeroTables = Object.entries(byTable)
+      .filter(([_, counts]) => counts.total > 0)
+      .map(([table, counts]) => {
+        if (counts.deleted > 0) {
+          return `${table}: ${counts.active} active + ${counts.deleted} deleted = ${counts.total}`;
+        }
+        return `${table}: ${counts.total}`;
+      });
+
+    const summary = nonZeroTables.length > 0 
+      ? `Unsynced records: ${nonZeroTables.join(', ')}`
+      : 'No unsynced records';
+
+    return {
+      total: totalActive + totalDeleted,
+      byTable,
+      summary
     };
   }
 
