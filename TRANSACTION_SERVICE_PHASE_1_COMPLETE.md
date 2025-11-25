@@ -301,6 +301,9 @@ Replace all direct DB writes in OfflineDataContext
 │  ├─ createCustomerPayment()                         ✅      │
 │  ├─ createSupplierPayment()                         ✅      │
 │  ├─ createEmployeePayment()                         ✅      │
+
+
+
 │  ├─ createCashDrawerSale()                          ✅      │
 │  ├─ createCashDrawerExpense()                       ✅      │
 │  ├─ createAccountsReceivable()                      ✅      │

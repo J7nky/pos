@@ -1,6 +1,6 @@
 import { createId, db } from '../lib/db';
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
-import { TransactionService } from './transactionService-old';
+import { TransactionService } from './transactionService';
 
 const transactionService = TransactionService.getInstance();
 
@@ -180,16 +180,18 @@ export class InventoryPurchaseService {
       }
 
       // Create transaction record for credit purchase using transactionService
-      const creditPurchaseResult = await transactionService.processSupplierPayment(
+      const creditPurchaseResult = await transactionService.createSupplierPayment(
         data.supplier_id,
         totalAmount,
         'LBP',
         `Credit purchase - ${items.length} items from ${supplier?.name || 'Supplier'}`,
-        data.created_by,
-        data.store_id,
         {
-          updateSupplierBalance: false, // Balance already updated above
-          createPayable: true,
+          userId: data.created_by,
+          module: 'inventory_purchase',
+          storeId: data.store_id,
+          source: 'web'
+        },
+        {
           updateCashDrawer: false // Only fees affect cash drawer, handled separately below
         }
       );

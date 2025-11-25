@@ -1,5 +1,5 @@
 import { db } from '../lib/db';
-import { Transaction } from '../lib/db';
+import { Transaction } from '../types';
 import { accountBalanceService } from './accountBalanceService';
 
 export interface TransactionValidationResult {
@@ -218,16 +218,18 @@ export class TransactionValidationService {
     const query = db.transactions
       .where('store_id')
       .equals(transaction.store_id)
-      .and(t => 
-        t.amount === transaction.amount &&
-        t.type === transaction.type &&
-        t.currency === transaction.currency &&
-        t.created_at >= oneMinuteAgo &&
-        (
-          (transaction.customer_id && t.customer_id === transaction.customer_id) ||
-          (transaction.supplier_id && t.supplier_id === transaction.supplier_id)
-        )
-      );
+      .and(t => {
+        const matchesCustomer = transaction.customer_id ? t.customer_id === transaction.customer_id : false;
+        const matchesSupplier = transaction.supplier_id ? t.supplier_id === transaction.supplier_id : false;
+
+        return (
+          t.amount === transaction.amount &&
+          t.type === transaction.type &&
+          t.currency === transaction.currency &&
+          t.created_at >= oneMinuteAgo &&
+          (matchesCustomer || matchesSupplier)
+        );
+      });
 
     return await query.toArray();
   }
