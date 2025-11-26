@@ -55,6 +55,19 @@ export interface Store {
   created_at: string;
 }
 
+export interface Branch {
+  id: string;
+  store_id: string;
+  name: string;
+  address?: string | null;
+  phone?: string | null;
+  created_at: string;
+  updated_at: string;
+  _synced?: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
 export interface Product {
   id: string;
   name: MultilingualString; // Supports both string (backwards compatible) and multilingual object { en: "apple", ar: "تفاح", fr: "pomme" }
@@ -86,6 +99,7 @@ export interface Supplier {
 export interface InventoryItem {
   id: string;
   store_id: string;
+  branch_id: string;
   product_id: string;
   supplier_id?: string; // Optional: can be obtained from inventory_bills via batch_id, but may exist for legacy data
   quantity: number;
@@ -125,12 +139,13 @@ export interface Customer {
 
 export interface inventory_bills { 
   id: string;
+  store_id: string;
+  branch_id: string;
   supplier_id: string;
   porterage_fee?: number | null;
   transfer_fee?: number | null;
   currency?: 'USD' | 'LBP';
   received_at: string;
-  store_id: string;
   created_by: string;
   status?: string;
   created_at:string;
@@ -150,6 +165,7 @@ export interface inventory_bills {
 export interface Bill {
   id: string;
   store_id: string;
+  branch_id: string;
   bill_number: string;
   customer_id: string | null;
   payment_method: 'cash' | 'card' | 'credit';
@@ -173,6 +189,7 @@ export interface BillLineItem {
   // Core identifiers
   id: string;
   store_id: string;
+  branch_id: string;
   bill_id: string;
   product_id: string;
   inventory_item_id: string | null;
@@ -209,6 +226,7 @@ export interface CartItem extends Omit<BillLineItem, 'id' | 'created_at' | 'rece
 export type BillLineItemDbRow = {
   id: string;
   store_id: string;
+  branch_id: string;
   bill_id: string;
   product_id: string;
   inventory_item_id: string | null;
@@ -237,6 +255,7 @@ export const BillLineItemTransforms = {
   fromDbRow: (dbRow: BillLineItemDbRow): BillLineItem => ({
     id: dbRow.id,
     store_id: dbRow.store_id,
+    branch_id: dbRow.branch_id,
     bill_id: dbRow.bill_id,
     inventory_item_id: dbRow.inventory_item_id,
     product_id: dbRow.product_id,
@@ -258,6 +277,7 @@ export const BillLineItemTransforms = {
   toDbInsert: (billLineItem: BillLineItem): BillLineItemDbInsert => ({
     id: billLineItem.id,
     store_id: billLineItem.store_id,
+    branch_id: billLineItem.branch_id,
     bill_id: billLineItem.bill_id,
     product_id: billLineItem.product_id,
     inventory_item_id: billLineItem.inventory_item_id,
@@ -361,6 +381,7 @@ export interface Transaction {
   description: MultilingualString; // Supports both string (backwards compatible) and multilingual object
   reference: string | null;
   store_id: string;
+  branch_id: string;
   created_by: string;
   created_at: string;
   updated_at?: string;
@@ -461,6 +482,7 @@ export interface Store {
 export interface CashDrawerAccount {
   id: string;
   store_id: string;
+  branch_id: string;
   account_code: string;
   name: string;
   currency: string;
@@ -476,6 +498,7 @@ export interface CashDrawerAccount {
 export interface CashDrawerSession {
   id: string;
   store_id: string;
+  branch_id: string;
   account_id: string;
   opened_by: string;
   opened_at: string;
@@ -497,6 +520,7 @@ export interface CashDrawerSession {
 export interface MissedProduct {
   id: string;
   store_id: string;
+  branch_id: string;
   session_id: string;
   inventory_item_id: string;
   system_quantity: number;
@@ -514,6 +538,7 @@ export interface MissedProduct {
 export interface BillAuditLog {
   id: string;
   store_id: string;
+  branch_id: string;
   bill_id: string;
   action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
   field_changed: string | null;
@@ -656,6 +681,7 @@ export interface NotificationHistoryEntry {
 export interface EmployeeAttendance {
   id: string;
   store_id: string;
+  branch_id: string;
   employee_id: string;
   check_in_at: string; // ISO datetime string
   check_out_at?: string | null; // ISO datetime string, null if still checked in
@@ -671,6 +697,7 @@ export interface Reminder {
   // Primary key and store relationship
   id: string;
   store_id: string;
+  branch_id: string;
   
   // What to remind about
   type: ReminderType;

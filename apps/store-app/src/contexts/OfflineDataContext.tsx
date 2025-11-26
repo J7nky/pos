@@ -22,6 +22,7 @@ import {
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { transactionService } from '../services/transactionService';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
+import { ensureDefaultBranch } from '../lib/branchHelpers';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -30,6 +31,9 @@ type Tables = Database['public']['Tables'];
 // Offline-first data context interface
 interface OfflineDataContextType {
   storeId: any;
+  // Branch context
+  currentBranchId: string | null;
+  setCurrentBranchId: (branchId: string | null) => void;
   // Data - matching exact structure
   products: Tables['products']['Row'][];
   suppliers: Tables['suppliers']['Row'][];
@@ -374,6 +378,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<'en' | 'ar' | 'fr'>('ar');
   const [cashDrawer, setCashDrawer] = useState<any>(null);
   const [stockLevels, setStockLevels] = useState<any[]>([]);
+  
+  // Branch state - for branch-centric operations
+  const [currentBranchId, setCurrentBranchId] = useState<string | null>(null);
+  
   const [receiptSettings, setReceiptSettings] = useState<any>(() => {
     const stored = localStorage.getItem('receiptSettings');
     return stored ? JSON.parse(stored) : {
@@ -443,10 +451,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setCurrency('LBP');
       setDefaultCommissionRate(10);
       setExchangeRate(89500);
-      setLowStockAlertsEnabled(true);
-    }
-  };
-
 
   // Initialize data when store is available
   useEffect(() => {
@@ -464,8 +468,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [storeId, isOnline]);
- // Helper functions defined before they're used
- const refreshCashDrawerStatus = useCallback(async () => {
+
+  // Initialize branch - ensure default branch exists and set it
+  useEffect(() => {
+    const initializeBranch = async () => {
+      if (storeId && !currentBranchId) {
+        try {
+          const branchId = await ensureDefaultBranch(storeId);
+          setCurrentBranchId(branchId);
+          console.log('✅ Initialized default branch:', branchId);
+        } catch (error) {
+          console.error('❌ Failed to initialize default branch:', error);
+        }
+      }
+    };
+    
+    initializeBranch();
+  }, [storeId, currentBranchId]);
+
+  // Helper functions defined before they're used
+  const refreshCashDrawerStatus = useCallback(async () => {
   if (!storeId) return;
 
   try {
@@ -4836,6 +4858,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         receiptSettings: {},
         updateReceiptSettings: async () => { },
         storeId: null,
+        currentBranchId: null,
+        setCurrentBranchId: () => {},
         products: [],
         suppliers: [],
         customers: [],
@@ -4969,6 +4993,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     <OfflineDataContext.Provider value={{
       // Data - exact match
       storeId,
+      currentBranchId,
+      setCurrentBranchId,
       products,
       suppliers,
       expenseCategories,
