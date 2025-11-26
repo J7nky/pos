@@ -6,6 +6,12 @@ import { enhancedTransactionService, EnhancedTransactionResult, TransactionConte
 import { auditLogService, AuditLogEntry, AuditQuery } from '../services/auditLogService';
 import { currencyService } from '../services/currencyService';
 import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable, SaleItem } from '../types';
+import { 
+  TransactionTransformer, 
+  CustomerTransformer, 
+  SupplierTransformer, 
+  CollectionTransformer 
+} from '../utils/dataTransformers';
 
 export interface EnhancedAccountingState {
   // Dashboard data
@@ -89,6 +95,7 @@ export interface EnhancedAccountingActions {
 
 export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState, EnhancedAccountingActions] {
   const raw = useOfflineData();
+  const { currentBranchId } = raw;
   const { userProfile } = useSupabaseAuth();
   const { formatCurrency, getConvertedAmount } = useCurrency();
   
@@ -98,26 +105,24 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [dashboardPeriod, setDashboardPeriod] = useState<'today' | 'week' | 'month' | 'quarter' | 'year'>('today');
   
-  // Processed data
+  // Processed data using standardized transformers
   const customers = useMemo(() => 
-            raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, balance: c.balance})) as Customer[], 
+    CollectionTransformer.transform(raw.customers, CustomerTransformer.fromRaw), 
     [raw.customers]
   );
   
   const suppliers = useMemo(() => 
-    raw.suppliers.map(s => ({...s,  createdAt: s.created_at})) as Supplier[], 
+    CollectionTransformer.transform(raw.suppliers, SupplierTransformer.fromRaw), 
     [raw.suppliers]
   );
 
-  const transactions = useMemo(
-    () =>
-      raw.transactions.map((t) => ({
-        ...t,
-        createdAt: t.created_at,
-        createdBy: t.created_by,
-        storeId: t.store_id,
-      })) as Transaction[],
-    [raw.transactions]
+  const transactions = useMemo(() => 
+    CollectionTransformer.transform(
+      raw.transactions, 
+      TransactionTransformer.fromRaw, 
+      currentBranchId
+    ),
+    [raw.transactions, currentBranchId]
   );
 
   // Create transaction context
@@ -127,8 +132,10 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
     userName: userProfile?.name,
     sessionId: sessionStorage.getItem('audit_session_id') || undefined,
     source: 'web',
-    module: 'accounting'
-  }), [userProfile]);
+    module: 'accounting',
+    storeId: storeId || '',
+    branchId: currentBranchId || ''
+  }), [userProfile, storeId, currentBranchId]);
 
   // Period data calculation with enhanced tracking
   const periodData = useMemo(() => {

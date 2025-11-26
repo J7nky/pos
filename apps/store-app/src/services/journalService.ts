@@ -6,6 +6,7 @@
 import { db } from '../lib/db';
 import { JournalEntry, CreateJournalEntryParams } from '../types/accounting';
 import { accountingInitService } from './accountingInitService';
+import { journalValidationService } from './journalValidationService';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { createId } from '../lib/db';
 
@@ -97,8 +98,23 @@ export class JournalService {
       _synced: false
     };
     
+    // Validate entries before inserting
+    const debitValidation = journalValidationService.validateJournalEntry(debitEntry);
+    const creditValidation = journalValidationService.validateJournalEntry(creditEntry);
+    
+    if (!debitValidation.isValid || !creditValidation.isValid) {
+      const errors = [...debitValidation.errors, ...creditValidation.errors];
+      throw new Error(`Journal entry validation failed: ${errors.join(', ')}`);
+    }
+    
     // Insert both entries atomically
     await db.journal_entries.bulkAdd([debitEntry, creditEntry]);
+    
+    // Verify transaction balance after insertion
+    const balanceCheck = await this.verifyTransactionBalance(transactionId);
+    if (!balanceCheck) {
+      console.warn(`⚠️ Transaction ${transactionId} is not balanced after journal entry creation`);
+    }
     
     console.log(`✅ Journal entry created: ${transactionId} (${currency} ${amount})`);
     return transactionId;

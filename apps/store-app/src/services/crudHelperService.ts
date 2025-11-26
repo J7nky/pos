@@ -141,6 +141,45 @@ export class CRUDHelperService {
   }
 
   /**
+   * Generic query by store and branch for operational tables
+   * Filters by both store_id and branch_id for branch-scoped data
+   */
+  async getEntitiesByStoreBranch<T extends keyof Tables>(
+    tableName: T,
+    storeId: string,
+    branchId?: string | null,
+    includeDeleted = false
+  ): Promise<any[]> {
+    try {
+      const table = (db as any)[tableName];
+      if (!table) {
+        console.error(`❌ Table ${tableName} does not exist in IndexedDB`);
+        return [];
+      }
+
+      // If no branchId provided, fall back to store-only filtering
+      if (!branchId) {
+        return this.getEntitiesByStore(tableName, storeId, includeDeleted);
+      }
+
+      // Query by store_id and branch_id
+      let query = table.where('[store_id+branch_id]').equals([storeId, branchId]);
+      
+      if (!includeDeleted) {
+        query = query.filter((item: any) => !item._deleted);
+      }
+
+      const results = await query.toArray();
+      console.log(`📦 getEntitiesByStoreBranch: ${tableName} - found ${results.length} records for store ${storeId}, branch ${branchId}`);
+      
+      return results;
+    } catch (error) {
+      console.error(`❌ Error querying ${tableName} by store and branch:`, error);
+      return [];
+    }
+  }
+
+  /**
    * Generic query by store
    * Special handling for products: includes both store-specific and global products
    */
@@ -293,27 +332,30 @@ export class CRUDHelperService {
 
   /**
    * Batch query helper for loading all store data efficiently
+   * Now supports branch filtering for operational tables
    */
-  async loadAllStoreData(storeId: string) {
+  async loadAllStoreData(storeId: string, branchId?: string | null) {
     const operations = [
+      // Store-level data (no branch filtering)
       () => this.getEntitiesByStore('products', storeId),
       () => this.getEntitiesByStore('suppliers', storeId),
       () => this.getEntitiesByStore('customers', storeId),
       () => this.getEntitiesByStore('users', storeId),
-      () => this.getEntitiesByStore('inventory_items', storeId),
-      () => this.getEntitiesByStore('transactions', storeId),
-      () => this.getEntitiesByStore('inventory_bills', storeId),
-      () => this.getEntitiesByStore('bills', storeId),
-      () => this.getEntitiesByStore('bill_line_items', storeId),
-      () => this.getEntitiesByStore('bill_audit_logs', storeId),
-      () => this.getEntitiesByStore('cash_drawer_accounts', storeId),
-      () => this.getEntitiesByStore('cash_drawer_sessions', storeId),
-      () => this.getEntitiesByStore('missed_products', storeId),
-      // NEW: Accounting foundation tables
-      () => this.getEntitiesByStore('journal_entries', storeId),
-      () => this.getEntitiesByStore('entities', storeId),
       () => this.getEntitiesByStore('chart_of_accounts', storeId),
-      () => this.getEntitiesByStore('balance_snapshots', storeId),
+      
+      // Branch-specific data (filtered by branch if provided)
+      () => this.getEntitiesByStoreBranch('inventory_items', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('transactions', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('inventory_bills', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('bills', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('bill_line_items', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('bill_audit_logs', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('cash_drawer_accounts', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('cash_drawer_sessions', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('missed_products', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('journal_entries', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('entities', storeId, branchId),
+      () => this.getEntitiesByStoreBranch('balance_snapshots', storeId, branchId),
     ];
 
     const startTime = Date.now();
@@ -330,20 +372,20 @@ export class CRUDHelperService {
       suppliersData: results[1],
       customersData: results[2],
       employeesData: results[3],
-      inventoryData: results[4],
-      transactionsData: results[5],
-      batchesData: results[6],
-      billsData: results[7],
-      billLineItemsData: results[8],
-      billAuditLogsData: results[9],
-      cashDrawerAccountsData: results[10],
-      cashDrawerSessionsData: results[11],
-      missedProductsData: results[12],
-      // NEW: Accounting foundation data
-      journalEntriesData: results[13] || [],
-      entitiesData: results[14] || [],
-      chartOfAccountsData: results[15] || [],
-      balanceSnapshotsData: results[16] || [],
+      chartOfAccountsData: results[5] || [],
+      // Branch-specific data
+      inventoryData: results[6],
+      transactionsData: results[7],
+      batchesData: results[8],
+      billsData: results[9],
+      billLineItemsData: results[10],
+      billAuditLogsData: results[11],
+      cashDrawerAccountsData: results[12],
+      cashDrawerSessionsData: results[13],
+      missedProductsData: results[14],
+      journalEntriesData: results[15] || [],
+      entitiesData: results[16] || [],
+      balanceSnapshotsData: results[17] || [],
     };
   }
 

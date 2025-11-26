@@ -9,6 +9,7 @@ import { db } from '../lib/db';
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
 import { journalService } from './journalService';
+import { transactionService } from './transactionService';
 import { 
   TRANSACTION_CATEGORIES, 
   TransactionCategory, 
@@ -16,6 +17,7 @@ import {
   getTransactionType,
   isValidTransactionCategory 
 } from '../constants/transactionCategories';
+import { getAccountMapping, getEntityIdForTransaction, getJournalDescription } from '../utils/accountMapping';
 import { 
   generatePaymentReference, 
   generateExpenseReference, 
@@ -37,6 +39,7 @@ export interface TransactionContext {
   module: string;
   correlationId?: string;
   storeId: string;
+  branchId: string;
 }
 
 export interface CreateTransactionParams {
@@ -219,7 +222,8 @@ export class TransactionService {
           if (params.updateCashDrawer !== false && this.isCashDrawerCategory(params.category)) {
             cashDrawerImpact = await this.updateCashDrawerAtomic(
               transaction,
-              params.context.storeId
+              params.context.storeId,
+              params.context.branchId
             );
           }
         }
@@ -662,7 +666,7 @@ export class TransactionService {
               category: transaction.category as TransactionCategory,
               description: typeof transaction.description === 'string' ? transaction.description : JSON.stringify(transaction.description)
             };
-            await this.updateCashDrawerAtomic(reversalForCash, context.storeId);
+            await this.updateCashDrawerAtomic(reversalForCash, context.storeId, context.branchId);
           }
 
           // Soft delete the transaction
@@ -988,13 +992,14 @@ export class TransactionService {
    */
   private async updateCashDrawerAtomic(
     transaction: Transaction,
-    storeId: string
+    storeId: string,
+    branchId: string
   ): Promise<{ previousBalance: number; newBalance: number } | undefined> {
     try {
       // Get active cash drawer session
       const activeSession = await db.cash_drawer_sessions
-        .where('store_id')
-        .equals(storeId)
+        .where(['store_id', 'branch_id'])
+        .equals([storeId, branchId])
         .and(session => session.closed_at === null)
         .first();
 
@@ -1052,7 +1057,7 @@ export class TransactionService {
       let result: { previousBalance: number; newBalance: number } | undefined;
       
       await db.transaction('rw', [db.cash_drawer_sessions], async () => {
-        result = await this.updateCashDrawerAtomic(transaction, context.storeId);
+        result = await this.updateCashDrawerAtomic(transaction, context.storeId, context.branchId);
       });
       
       return result;
@@ -1105,136 +1110,59 @@ export class TransactionService {
 
   /**
    * Create journal entries for a transaction (Accounting Migration Phase 3)
+   * Uses account mapping utilities for consistent double-entry bookkeeping
    */
   private async createJournalEntriesForTransaction(transaction: Transaction): Promise<void> {
     try {
-      // Map transaction categories to journal entry types
-      const entityId = transaction.customer_id || transaction.supplier_id || transaction.employee_id;
+      // Get entity ID using account mapping utilities
+      const providedEntityId = transaction.customer_id || transaction.supplier_id || transaction.employee_id;
+      const entityId = getEntityIdForTransaction(transaction.category, providedEntityId);
       
-      if (!entityId) {
-        // Use system entities for transactions without specific entities
-        const systemEntityId = this.getSystemEntityForTransaction(transaction);
-        if (systemEntityId) {
-          await this.createJournalEntriesWithEntity(transaction, systemEntityId);
-        }
-        return;
-      }
-
-      // Create journal entries based on transaction category
-      switch (transaction.category) {
-        case TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT:
-          await journalService.recordCustomerPayment(
-            entityId,
-            transaction.amount,
-            transaction.currency,
-            transaction.description
-          );
-          break;
-          
-        case TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT:
-          await journalService.recordSupplierPayment(
-            entityId,
-            transaction.amount,
-            transaction.currency,
-            transaction.description
-          );
-          break;
-          
-        case TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE:
-          await journalService.recordCreditSale(
-            entityId,
-            transaction.amount,
-            transaction.currency,
-            transaction.description
-          );
-          break;
-          
-        case TRANSACTION_CATEGORIES.CASH_DRAWER_SALE:
-          await journalService.recordCashSale(
-            transaction.amount,
-            transaction.currency,
-            entityId,
-            transaction.description
-          );
-          break;
-          
-        case TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT:
-          await journalService.recordSalaryPayment(
-            entityId,
-            transaction.amount,
-            transaction.currency,
-            transaction.description
-          );
-          break;
-          
-        default:
-          console.log(`ℹ️ No journal entry mapping for category: ${transaction.category}`);
-      }
+      // Get account mapping for this transaction category
+      const accountMapping = getAccountMapping(transaction.category);
+      
+      // Get entity information for description
+      const entity = await db.entities.get(entityId);
+      const description = getJournalDescription(
+        transaction.category,
+        entity?.name,
+        transaction.description
+      );
+      
+      // Create journal entry using the mapping
+      await journalService.createJournalEntry({
+        transactionId: transaction.id,
+        debitAccount: accountMapping.debitAccount,
+        creditAccount: accountMapping.creditAccount,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        entityId,
+        description,
+        postedDate: transaction.created_at.split('T')[0] // Extract date part
+      });
+      
+      console.log(`✅ Journal entries created for ${transaction.category}: ${transaction.id}`);
+      
     } catch (error) {
       console.error('❌ Failed to create journal entries:', error);
       throw error;
     }
   }
 
-  /**
-   * Get system entity ID for transactions without specific entities
-   */
-  private getSystemEntityForTransaction(transaction: Transaction): string | null {
-    switch (transaction.category) {
-      case TRANSACTION_CATEGORIES.CASH_DRAWER_SALE:
-      case TRANSACTION_CATEGORIES.CASH_DRAWER_PAYMENT:
-        return 'entity-cash-customer';
-        
-      case TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE:
-        return 'entity-internal';
-        
-      default:
-        return null;
-    }
-  }
-
-  /**
-   * Create journal entries with a specific entity
-   */
-  private async createJournalEntriesWithEntity(transaction: Transaction, entityId: string): Promise<void> {
-    switch (transaction.category) {
-      case TRANSACTION_CATEGORIES.CASH_DRAWER_SALE:
-        await journalService.recordCashSale(
-          transaction.amount,
-          transaction.currency,
-          entityId,
-          transaction.description
-        );
-        break;
-        
-      case TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE:
-        await journalService.recordExpensePayment(
-          '5900', // Miscellaneous Expense
-          entityId,
-          transaction.amount,
-          transaction.currency,
-          transaction.description
-        );
-        break;
-        
-      default:
-        console.log(`ℹ️ No system entity journal entry mapping for category: ${transaction.category}`);
-    }
-  }
 
   /**
    * Check if category affects cash drawer
+   * Uses account mapping to determine if transaction affects cash (account 1100)
    */
   private isCashDrawerCategory(category: TransactionCategory): boolean {
-    const cashDrawerCategories: readonly TransactionCategory[] = [
-      TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
-      TRANSACTION_CATEGORIES.CASH_DRAWER_PAYMENT,
-      TRANSACTION_CATEGORIES.CASH_DRAWER_REFUND,
-      TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
-      TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT,
-      TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT
-    ];
-    return cashDrawerCategories.includes(category);
+    try {
+      const accountMapping = getAccountMapping(category);
+      // Transaction affects cash drawer if it debits or credits cash account (1100)
+      return accountMapping.debitAccount === '1100' || accountMapping.creditAccount === '1100';
+    } catch (error) {
+      // If no mapping exists, assume it doesn't affect cash drawer
+      return false;
+    }
   }
 
   /**

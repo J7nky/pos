@@ -15,6 +15,7 @@ export interface CashTransactionData {
   description: string;
   reference: string;
   storeId: string;
+  branchId: string;
   createdBy: string;
   sessionId?: string;
   customerId?: string;
@@ -80,6 +81,7 @@ export class CashDrawerUpdateService {
    */
   public async openCashDrawerSession(
     storeId: string,
+    branchId: string,
     openingAmount: number,
     openedBy: string,
     notes?: string
@@ -94,7 +96,7 @@ export class CashDrawerUpdateService {
     return this.acquireOperationLock(storeId, async () => {
       try {
       // Check if there's already an active session
-      const existingSession = await db.getCurrentCashDrawerSession(storeId);
+      const existingSession = await db.getCurrentCashDrawerSession(storeId, branchId);
       if (existingSession && existingSession.status === 'open') {
         return {
           success: false,
@@ -103,7 +105,7 @@ export class CashDrawerUpdateService {
       }
 
       // Get cash drawer account (no auto-create)
-      const account = await this.getOrCreateCashDrawerAccount(storeId);
+      const account = await this.getOrCreateCashDrawerAccount(storeId, branchId);
       if (!account) {
         return {
           success: false,
@@ -112,7 +114,7 @@ export class CashDrawerUpdateService {
       }
 
       // Open new session using database method
-      const sessionId = await db.openCashDrawerSession(storeId, account.id, openingAmount, openedBy);
+      const sessionId = await db.openCashDrawerSession(storeId, branchId, account.id, openingAmount, openedBy);
       
       console.log(`💰 Cash drawer session opened: ${sessionId} with opening amount: $${openingAmount.toFixed(2)}`);
       
@@ -226,7 +228,7 @@ export class CashDrawerUpdateService {
         );
 
         // Get cash drawer account (no auto-create)
-        const account = await this.getOrCreateCashDrawerAccount(transactionData.storeId, storeCurrency);
+        const account = await this.getOrCreateCashDrawerAccount(transactionData.storeId, transactionData.branchId, storeCurrency);
         if (!account) {
           return {
             success: false,
@@ -516,17 +518,17 @@ export class CashDrawerUpdateService {
    * Get current cash drawer balance - SINGLE SOURCE OF TRUTH
    * This method calculates balance from transactions to ensure accuracy
    */
-  public async getCurrentCashDrawerBalance(storeId: string): Promise<number> {
+  public async getCurrentCashDrawerBalance(storeId: string, branchId: string): Promise<number> {
     try {
       // Use the centralized method to get or create account
-      const account = await this.getOrCreateCashDrawerAccount(storeId);
+      const account = await this.getOrCreateCashDrawerAccount(storeId, branchId);
       if (!account) {
         console.warn('No cash drawer account exists for store', storeId);
         return 0;
       }
 
       // SINGLE SOURCE OF TRUTH: Calculate balance from transactions
-      const calculatedBalance = await this.calculateBalanceFromTransactions(storeId);
+      const calculatedBalance = await this.calculateBalanceFromTransactions(storeId, branchId);
       const storedBalance = Number((account as any)?.current_balance || 0);
 
       // If calculated balance differs from stored balance, reconcile
@@ -554,10 +556,10 @@ export class CashDrawerUpdateService {
   /**
    * Calculate balance from current session and transactions - AUTHORITATIVE SOURCE
    */
-  private async calculateBalanceFromTransactions(storeId: string): Promise<number> {
+  private async calculateBalanceFromTransactions(storeId: string, branchId: string): Promise<number> {
     try {
       // Get the current active session
-      const currentSession = await db.getCurrentCashDrawerSession(storeId);
+      const currentSession = await db.getCurrentCashDrawerSession(storeId, branchId);
       
       if (!currentSession) {
         console.log('💰 No active session found, balance is 0');
@@ -726,9 +728,9 @@ export class CashDrawerUpdateService {
   /**
    * Get cash drawer account without creating a new one. Returns null if none exists.
    */
-  private async getOrCreateCashDrawerAccount(storeId: string, storeCurrency?: 'USD' | 'LBP') {
+  private async getOrCreateCashDrawerAccount(storeId: string, branchId: string, storeCurrency?: 'USD' | 'LBP') {
     try {
-      const account = await db.getCashDrawerAccount(storeId);
+      const account = await db.getCashDrawerAccount(storeId, branchId);
       if (!account) {
         console.warn(`❌ No cash drawer account exists for store ${storeId}`);
         return null;
@@ -747,7 +749,7 @@ export class CashDrawerUpdateService {
     transactionData: CashTransactionData, 
     account: any
   ): Promise<any> {
-    let session = await db.getCurrentCashDrawerSession(transactionData.storeId);
+    let session = await db.getCurrentCashDrawerSession(transactionData.storeId, transactionData.branchId);
     
     if (!session || session.status !== 'open') {
       // If auto-open is allowed (for hooks), try to open a session
@@ -756,6 +758,7 @@ export class CashDrawerUpdateService {
         
         const sessionResult = await this.openCashDrawerSession(
           transactionData.storeId,
+          transactionData.branchId,
           0, // Start with 0 opening amount
           transactionData.createdBy,
           `Auto-opened for ${transactionData.type}`
@@ -767,7 +770,7 @@ export class CashDrawerUpdateService {
         }
         
         // Get the newly opened session
-        session = await db.getCurrentCashDrawerSession(transactionData.storeId);
+        session = await db.getCurrentCashDrawerSession(transactionData.storeId, transactionData.branchId);
       } else {
         console.warn('No active cash drawer session and auto-opening not allowed');
         return null;

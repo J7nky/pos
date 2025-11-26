@@ -29,6 +29,7 @@ export interface TransactionContext {
   module: string;
   correlationId?: string;
   storeId: string;
+  branchId: string;
 }
 
 export interface BalanceSnapshot {

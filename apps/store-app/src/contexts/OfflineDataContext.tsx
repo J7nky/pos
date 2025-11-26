@@ -31,9 +31,8 @@ type Tables = Database['public']['Tables'];
 // Offline-first data context interface
 interface OfflineDataContextType {
   storeId: any;
-  // Branch context
+  // Branch context (automatic - no manual selection)
   currentBranchId: string | null;
-  setCurrentBranchId: (branchId: string | null) => void;
   // Data - matching exact structure
   products: Tables['products']['Row'][];
   suppliers: Tables['suppliers']['Row'][];
@@ -379,7 +378,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [cashDrawer, setCashDrawer] = useState<any>(null);
   const [stockLevels, setStockLevels] = useState<any[]>([]);
   
-  // Branch state - for branch-centric operations
+  // Branch state - automatically determined (no manual selection)
   const [currentBranchId, setCurrentBranchId] = useState<string | null>(null);
   
   const [receiptSettings, setReceiptSettings] = useState<any>(() => {
@@ -451,6 +450,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setCurrency('LBP');
       setDefaultCommissionRate(10);
       setExchangeRate(89500);
+    }
+  };
 
   // Initialize data when store is available
   useEffect(() => {
@@ -469,16 +470,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
   }, [storeId, isOnline]);
 
-  // Initialize branch - ensure default branch exists and set it
+  // Initialize branch - automatically determine branch for this store
   useEffect(() => {
     const initializeBranch = async () => {
       if (storeId && !currentBranchId) {
         try {
           const branchId = await ensureDefaultBranch(storeId);
           setCurrentBranchId(branchId);
-          console.log('✅ Initialized default branch:', branchId);
+          console.log('✅ Auto-initialized branch for store:', branchId);
         } catch (error) {
-          console.error('❌ Failed to initialize default branch:', error);
+          console.error('❌ Failed to auto-initialize branch:', error);
         }
       }
     };
@@ -488,10 +489,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // Helper functions defined before they're used
   const refreshCashDrawerStatus = useCallback(async () => {
-  if (!storeId) return;
+  if (!storeId || !currentBranchId) return;
 
   try {
-    const status = await db.getCurrentCashDrawerStatus(storeId);
+    const status = await db.getCurrentCashDrawerStatus(storeId, currentBranchId);
     if (status && status.status === 'active') {
       // Update local state with current session info
       setCashDrawer({
@@ -537,7 +538,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         entitiesData,
         chartOfAccountsData,
         balanceSnapshotsData,
-      } = await crudHelperService.loadAllStoreData(storeId);
+      } = await crudHelperService.loadAllStoreData(storeId, currentBranchId);
       
       console.log(`🔄 refreshData: Loaded ${customersData.length} customers, ${suppliersData.length} suppliers, ${employeesData.length} employees`);
       console.log('🔄 refreshData: Latest customers:', customersData.slice(-3));
@@ -596,6 +597,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               line_total: item.line_total,
               line_order: item.line_order,
               updated_at: item.updated_at,
+              branch_id: item.branch_id
             }
           );
         })
@@ -643,7 +645,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('❌ Error loading data from Dexie:', error);
     }
-  }, [storeId, refreshCashDrawerStatus]);
+  }, [storeId, currentBranchId, refreshCashDrawerStatus]);
 
   // Setup real-time update listeners (separate effect to avoid refreshData dependency issue)
   useEffect(() => {
@@ -1216,6 +1218,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       
       await db.bill_audit_logs.add({
         id: createId(),
+        branch_id: currentBranchId || '',
         store_id: storeId,
         bill_id: billId,
         action: 'created',
@@ -1346,7 +1349,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               userId: currentUserId,
               storeId: storeId,
               module: 'billing',
-              source: 'offline'
+              source: 'offline',
+              branchId: currentBranchId || '',
             },
             updateBalances: false, // Balance already updated above
             updateCashDrawer: false, // Not a cash transaction
@@ -1545,6 +1549,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               user_agent: null,
               created_at: now,
               updated_at: now,
+              branch_id: currentBranchId || '',
               _synced: false
             };
 
@@ -1638,6 +1643,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         user_agent: null,
         created_at: now,
         updated_at: now,
+        branch_id: currentBranchId || '',
         _synced: false
       };
 
@@ -2246,6 +2252,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           commission_rate: commission_rate || undefined,
           created_by,
           store_id: storeId,
+        branch_id: currentBranchId || '',
+
           status: status || undefined
         };
 
@@ -2272,6 +2280,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       type,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+        branch_id: currentBranchId || '',
+
       _synced: false
     };
     // Query products before transaction to use for SKU generation
@@ -2305,6 +2315,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         received_quantity: it.received_quantity ?? 0,
         batch_id: batchId as string | null,
         sku: (it as any).sku ?? null, // Use provided SKU or null
+        branch_id: currentBranchId || '',
         updated_at: now
       }));
 
@@ -2433,6 +2444,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       received_value: item.received_value || item.unit_price * item.quantity,
       created_at: now,
       updated_at: now,
+        branch_id: currentBranchId || '',
+
       _synced: false
     }));
 
@@ -2554,6 +2567,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           storeId: storeId,
           createdBy: currentUserId,
           customerId: cashSaleItemsForDrawer[0]?.customer_id || undefined,
+        branchId: currentBranchId || '',
+
           allowAutoSessionOpen: true
         }, getStore);
 
@@ -2721,6 +2736,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         customer_id: transactionData.customer_id ?? null,
         supplier_id: transactionData.supplier_id ?? null,
         store_id: storeId,
+        branch_id: currentBranchId || '',
+
         created_at: new Date().toISOString(),
         _synced: false,
         amount: transactionData.amount,
@@ -2741,6 +2758,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           userId: currentUserId,
           storeId: storeId,
           module: 'accounting',
+        branch_id: currentBranchId || '',
+
           source: 'offline'
         },
         updateBalances: false, // Caller handles balance updates
@@ -3006,6 +3025,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         ...transactionData,
         storeId,
         createdBy: userProfile.id,
+        branchId: currentBranchId || '',
+
         allowAutoSessionOpen: true
       }, getStore);
 
@@ -3014,7 +3035,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
 
       // Get the cash drawer account ID for undo purposes
-      const account = await db.getCashDrawerAccount(storeId);
+      const account = await db.getCashDrawerAccount(storeId, currentBranchId!);
       const accountId = account?.id;
 
       return {
@@ -3233,7 +3254,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           // Instead, we'll do the cash drawer operations directly within this atomic block
           
           // Get cash drawer account
-          const cashDrawerAccount = await db.getCashDrawerAccount(storeId);
+          const cashDrawerAccount = await db.getCashDrawerAccount(storeId, currentBranchId!);
           if (!cashDrawerAccount) {
             throw new Error('No cash drawer account found. Please create one before processing payments.');
           }
@@ -3271,6 +3292,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             supplier_id: isCustomer ? null : entityId,
             employee_id: null,
             created_by: createdBy,
+        branch_id: currentBranchId || '',
+
             metadata: {
               payment_direction: paymentDirection,
               original_currency: currency,
@@ -3448,7 +3471,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           // Instead, we'll do the cash drawer operations directly within this atomic block
           
           // Get cash drawer account
-          const cashDrawerAccount = await db.getCashDrawerAccount(storeId);
+          const cashDrawerAccount = await db.getCashDrawerAccount(storeId, currentBranchId!);
           if (!cashDrawerAccount) {
             throw new Error('No cash drawer account found. Please create one before processing payments.');
           }
@@ -3484,6 +3507,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             supplier_id: null,
             employee_id: employeeId,
             created_by: createdBy,
+        branch_id: currentBranchId || '',
+
             metadata: {
               payment_type: 'employee_salary',
               original_currency: currency,
@@ -3621,6 +3646,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           userId: userProfile?.id || '',
           storeId: userProfile?.store_id || '',
           module: 'supplier_management',
+        branchId: currentBranchId || '',
+
           source: 'offline'
         },
         updateBalances: false, // Balance already updated above (lines 3365)
@@ -3641,6 +3668,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         try {
           await reminderMonitoringService.createReminder({
             store_id: userProfile?.store_id || '',
+        branch_id: currentBranchId || '',
+
             type: 'supplier_advance_review',
             entity_type: 'supplier',
             entity_id: supplierId,
@@ -4342,19 +4371,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
 
   const openCashDrawer = async (amount: number, openedBy: string) => {
-    if (!storeId) return;
+    if (!storeId || !currentBranchId) return;
 
     try {
       // Use the cash drawer service to open session (handles account creation thread-safely)
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-      const result = await cashDrawerUpdateService.openCashDrawerSession(storeId, amount, openedBy);
+      const result = await cashDrawerUpdateService.openCashDrawerSession(storeId, currentBranchId, amount, openedBy);
 
       if (!result.success) {
         throw new Error(result.error || 'Failed to open cash drawer session');
       }
 
       // Get the account for local state
-      const account = await db.getCashDrawerAccount(storeId);
+      const account = await db.getCashDrawerAccount(storeId, currentBranchId);
       if (!account) {
         throw new Error('Failed to retrieve cash drawer account after opening session');
       }
@@ -4414,7 +4443,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (!session) return;
 
       if (!storeId) return;
-      const account = await db.getCashDrawerAccount(storeId);
+      const account = await db.getCashDrawerAccount(storeId, currentBranchId!);
       if (!account) return;
 
       const previousBalance = account.current_balance || 0;
@@ -4471,13 +4500,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const getCashDrawerBalanceReport = async (startDate?: string, endDate?: string) => {
-    if (!storeId) return [];
-    return await db.getCashDrawerBalanceReport(storeId, startDate, endDate);
+    if (!storeId || !currentBranchId) return [];
+    return await db.getCashDrawerBalanceReport(storeId, currentBranchId, startDate, endDate);
   };
 
   const getCurrentCashDrawerStatus = async () => {
-    if (!storeId) return null;
-    return await db.getCurrentCashDrawerStatus(storeId);
+    if (!storeId || !currentBranchId) return null;
+    return await db.getCurrentCashDrawerStatus(storeId, currentBranchId);
   };
 
   const getCashDrawerSessionDetails = async (sessionId: string) => {
@@ -4820,6 +4849,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           quantity: quantity,
           _synced: false,
           unit: 'box',
+          branch_id: currentBranchId || '',
           weight: null,
           price: null,
           selling_price: null,
@@ -4859,7 +4889,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateReceiptSettings: async () => { },
         storeId: null,
         currentBranchId: null,
-        setCurrentBranchId: () => {},
         products: [],
         suppliers: [],
         customers: [],
@@ -4994,7 +5023,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Data - exact match
       storeId,
       currentBranchId,
-      setCurrentBranchId,
       products,
       suppliers,
       expenseCategories,

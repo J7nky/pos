@@ -23,6 +23,7 @@ export interface InventoryPurchaseData {
   commission_rate?: number;
   created_by: string;
   store_id: string;
+  branch_id: string; // NEW: Branch context required
   status?: string;
 }
 
@@ -130,13 +131,15 @@ export class InventoryPurchaseService {
       await this.getOrCreateTradeSupplier(data.store_id);
       
       // Update cash drawer with the total amount (deduct)
-      await cashDrawerUpdateService.updateCashDrawerForExpense({
+      await cashDrawerUpdateService.updateCashDrawerForTransaction({
+        type: 'expense',
         amount: totalAmount,
         currency: 'USD',
         storeId: data.store_id,
+        branchId: data.branch_id, // NEW: Pass branch context
         createdBy: data.created_by,
         description: `Cash purchase - ${items.length} items from Trade`,
-        category: 'Inventory Purchase',
+        reference: `INV-PURCH-${transactionId.substring(0, 8)}`,
         allowAutoSessionOpen: true
       });
 
@@ -189,7 +192,8 @@ export class InventoryPurchaseService {
           userId: data.created_by,
           module: 'inventory_purchase',
           storeId: data.store_id,
-          source: 'web'
+          source: 'web',
+          branchId: data.branch_id
         },
         {
           updateCashDrawer: false // Only fees affect cash drawer, handled separately below
