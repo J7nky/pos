@@ -40,8 +40,7 @@ ADD COLUMN IF NOT EXISTS branch_id uuid REFERENCES public.branches(id) ON DELETE
 ALTER TABLE public.missed_products 
 ADD COLUMN IF NOT EXISTS branch_id uuid REFERENCES public.branches(id) ON DELETE CASCADE;
 
-ALTER TABLE public.notifications 
-ADD COLUMN IF NOT EXISTS branch_id uuid REFERENCES public.branches(id) ON DELETE CASCADE;
+
 
 ALTER TABLE public.reminders 
 ADD COLUMN IF NOT EXISTS branch_id uuid REFERENCES public.branches(id) ON DELETE CASCADE;
@@ -87,8 +86,6 @@ CREATE INDEX IF NOT EXISTS idx_bill_audit_logs_branch_bill ON public.bill_audit_
 
 -- Operational Indexes
 CREATE INDEX IF NOT EXISTS idx_missed_products_branch_id ON public.missed_products(branch_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_branch_id ON public.notifications(branch_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_branch_read ON public.notifications(branch_id, read);
 CREATE INDEX IF NOT EXISTS idx_reminders_branch_id ON public.reminders(branch_id);
 CREATE INDEX IF NOT EXISTS idx_reminders_branch_status ON public.reminders(branch_id, status);
 CREATE INDEX IF NOT EXISTS idx_employee_attendance_branch_id ON public.employee_attendance(branch_id);
@@ -166,10 +163,6 @@ BEGIN
         SET branch_id = default_branch_id 
         WHERE store_id = store_record.id AND branch_id IS NULL;
         
-        UPDATE public.notifications 
-        SET branch_id = default_branch_id 
-        WHERE store_id = store_record.id AND branch_id IS NULL;
-        
         UPDATE public.reminders 
         SET branch_id = default_branch_id 
         WHERE store_id = store_record.id AND branch_id IS NULL;
@@ -214,8 +207,7 @@ ALTER COLUMN branch_id SET NOT NULL;
 ALTER TABLE public.missed_products 
 ALTER COLUMN branch_id SET NOT NULL;
 
-ALTER TABLE public.notifications 
-ALTER COLUMN branch_id SET NOT NULL;
+
 
 ALTER TABLE public.reminders 
 ALTER COLUMN branch_id SET NOT NULL;
