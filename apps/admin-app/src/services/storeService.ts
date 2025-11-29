@@ -306,7 +306,7 @@ export async function getStoreStats(): Promise<{
 }> {
   const { data, error } = await supabase
     .from('stores')
-    .select('status, subscriptions(status)');
+    .select('status, store_subscriptions(status)');
 
   if (error) {
     console.error('Error fetching store stats:', error);
@@ -337,7 +337,7 @@ export async function getDashboardCounts(): Promise<{
     supabase.from('stores').select('id', { count: 'exact', head: true }),
     supabase.from('branches').select('id', { count: 'exact', head: true }),
     supabase.from('users').select('id', { count: 'exact', head: true }).not('store_id', 'is', null),
-    supabase.from('subscriptions').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+    supabase.from('store_subscriptions').select('id', { count: 'exact', head: true }).eq('status', 'active'),
   ]);
 
   return {

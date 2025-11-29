@@ -28,7 +28,7 @@ export default function Dashboard() {
     active: 0,
     trial: 0,
     expired: 0,
-    byTier: { starter: 0, professional: 0, premium: 0 },
+    byPlan: { basic: 0, premium: 0, enterprise: 0 },
     monthlyRevenue: 0,
   });
   const [recentStores, setRecentStores] = useState<StoreWithStats[]>([]);
@@ -145,28 +145,28 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-gray-400" />
-                <span className="text-sm text-gray-600">Starter</span>
+                <span className="text-sm text-gray-600">Basic</span>
               </div>
               <span className="text-sm font-medium text-gray-900">
-                {subscriptionStats.byTier.starter}
+                {subscriptionStats.byPlan.basic}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-blue-500" />
-                <span className="text-sm text-gray-600">Professional</span>
+                <span className="text-sm text-gray-600">Premium</span>
               </div>
               <span className="text-sm font-medium text-gray-900">
-                {subscriptionStats.byTier.professional}
+                {subscriptionStats.byPlan.premium}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-purple-500" />
-                <span className="text-sm text-gray-600">Premium</span>
+                <span className="text-sm text-gray-600">Enterprise</span>
               </div>
               <span className="text-sm font-medium text-gray-900">
-                {subscriptionStats.byTier.premium}
+                {subscriptionStats.byPlan.enterprise}
               </span>
             </div>
             <hr className="my-4" />
@@ -232,8 +232,8 @@ export default function Dashboard() {
                       {store.status}
                     </Badge>
                     {store.subscription && (
-                      <Badge variant={getTierVariant(store.subscription.tier)} size="sm">
-                        {store.subscription.tier}
+                      <Badge variant={getTierVariant(store.subscription.plan)} size="sm">
+                        {store.subscription.plan}
                       </Badge>
                     )}
                   </div>
