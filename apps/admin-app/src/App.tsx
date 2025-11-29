@@ -1,9 +1,11 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AdminAuthProvider, useAdminAuth } from './contexts/AdminAuthContext';
+import { ToastProvider } from './components/ui';
 import Layout from './layouts/Layout';
 import Dashboard from './pages/Dashboard';
 import GlobalProducts from './pages/GlobalProducts';
 import Stores from './pages/Stores';
+import { StoreDetail } from './components/stores';
 import Subscriptions from './pages/Subscriptions';
 import Payments from './pages/Payments';
 import Analytics from './pages/Analytics';
@@ -28,6 +30,7 @@ function AppRoutes() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/global-products" element={<GlobalProducts />} />
         <Route path="/stores" element={<Stores />} />
+        <Route path="/stores/:storeId" element={<StoreDetail />} />
         <Route path="/subscriptions" element={<Subscriptions />} />
         <Route path="/payments" element={<Payments />} />
         <Route path="/analytics" element={<Analytics />} />
@@ -42,7 +45,9 @@ function AppRoutes() {
 function App() {
   return (
     <AdminAuthProvider>
-      <AppRoutes />
+      <ToastProvider>
+        <AppRoutes />
+      </ToastProvider>
     </AdminAuthProvider>
   );
 }
