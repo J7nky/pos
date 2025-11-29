@@ -45,11 +45,11 @@ export async function getStores(filters?: StoreFilters): Promise<StoreWithStats[
     throw new Error(`Failed to fetch stores: ${error.message}`);
   }
 
-  // Try to fetch subscriptions separately (table may not exist)
+  // Fetch subscriptions from store_subscriptions table
   let subscriptionsMap: Record<string, any> = {};
   try {
     const { data: subs } = await supabase
-      .from('subscriptions')
+      .from('store_subscriptions')
       .select('*');
     if (subs) {
       subscriptionsMap = subs.reduce((acc: Record<string, any>, sub: any) => {
@@ -58,8 +58,7 @@ export async function getStores(filters?: StoreFilters): Promise<StoreWithStats[
       }, {});
     }
   } catch (e) {
-    // Subscriptions table doesn't exist yet - that's OK
-    console.log('Subscriptions table not available yet');
+    console.log('Error fetching subscriptions');
   }
 
   // Transform the response to include counts
@@ -93,17 +92,17 @@ export async function getStore(storeId: string): Promise<StoreWithStats | null> 
     throw new Error(`Failed to fetch store: ${error.message}`);
   }
 
-  // Try to fetch subscription separately
+  // Fetch subscription from store_subscriptions table
   let subscription = null;
   try {
     const { data: sub } = await supabase
-      .from('subscriptions')
+      .from('store_subscriptions')
       .select('*')
       .eq('store_id', storeId)
       .single();
     subscription = sub;
   } catch (e) {
-    // Subscriptions table doesn't exist yet
+    // No subscription found
   }
 
   return {

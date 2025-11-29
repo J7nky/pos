@@ -56,16 +56,16 @@ export function getStatusVariant(
   }
 }
 
-// Helper function to get subscription tier badge variant
+// Helper function to get subscription plan badge variant
 export function getTierVariant(
-  tier: string
+  plan: string
 ): 'default' | 'success' | 'warning' | 'danger' | 'info' | 'purple' {
-  switch (tier) {
-    case 'starter':
+  switch (plan) {
+    case 'basic':
       return 'default';
-    case 'professional':
-      return 'info';
     case 'premium':
+      return 'info';
+    case 'enterprise':
       return 'purple';
     default:
       return 'default';

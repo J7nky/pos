@@ -8,7 +8,7 @@ import {
   UpdateBranchInput,
   BranchFilters,
   getSubscriptionLimits,
-  SubscriptionTier,
+  SubscriptionPlan,
 } from '../types';
 
 // ============================================================================
@@ -93,15 +93,15 @@ export async function canCreateBranch(storeId: string): Promise<{
   // Get current branch count
   const currentCount = await getBranchCount(storeId);
 
-  // Get subscription tier
+  // Get subscription plan
   const { data: subscription } = await supabase
-    .from('subscriptions')
-    .select('tier')
+    .from('store_subscriptions')
+    .select('plan')
     .eq('store_id', storeId)
     .single();
 
-  const tier: SubscriptionTier = subscription?.tier || 'starter';
-  const limits = getSubscriptionLimits(tier);
+  const plan: SubscriptionPlan = subscription?.plan || 'basic';
+  const limits = getSubscriptionLimits(plan);
   const limit = limits.branches;
 
   if (currentCount >= limit) {

@@ -1,5 +1,6 @@
 // Subscription Service - Admin App
 // Handles subscription management via Supabase
+// Uses existing store_subscriptions table
 
 import { supabase } from '../lib/supabase';
 import {
@@ -7,9 +8,12 @@ import {
   SubscriptionUsage,
   CreateSubscriptionInput,
   UpdateSubscriptionInput,
-  SubscriptionTier,
+  SubscriptionPlan,
   getSubscriptionLimits,
 } from '../types';
+
+// Table name in database
+const TABLE_NAME = 'store_subscriptions';
 
 // ============================================================================
 // SUBSCRIPTION CRUD OPERATIONS
@@ -17,12 +21,11 @@ import {
 
 /**
  * Get subscription for a store
- * Note: Returns null if subscriptions table doesn't exist yet
  */
 export async function getSubscription(storeId: string): Promise<Subscription | null> {
   try {
     const { data, error } = await supabase
-      .from('subscriptions')
+      .from(TABLE_NAME)
       .select('*')
       .eq('store_id', storeId)
       .single();
@@ -30,10 +33,6 @@ export async function getSubscription(storeId: string): Promise<Subscription | n
     if (error) {
       if (error.code === 'PGRST116') {
         return null; // Not found
-      }
-      // Table might not exist
-      if (error.code === '42P01' || error.message.includes('does not exist')) {
-        return null;
       }
       console.error('Error fetching subscription:', error);
       return null;
@@ -50,28 +49,31 @@ export async function getSubscription(storeId: string): Promise<Subscription | n
  */
 export async function createSubscription(input: CreateSubscriptionInput): Promise<Subscription> {
   const now = new Date();
-  const periodEnd = new Date();
+  const endDate = new Date();
   
-  // Set period end based on billing cycle
+  // Set end date based on billing cycle
   if (input.billing_cycle === 'yearly') {
-    periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+    endDate.setFullYear(endDate.getFullYear() + 1);
   } else {
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    endDate.setMonth(endDate.getMonth() + 1);
   }
 
   const subscriptionData = {
     store_id: input.store_id,
-    tier: input.tier,
-    status: 'active' as const,
+    plan: input.plan,
+    status: 'active',
     billing_cycle: input.billing_cycle,
-    current_period_start: now.toISOString(),
-    current_period_end: periodEnd.toISOString(),
-    trial_ends_at: null,
+    start_date: now.toISOString(),
+    end_date: endDate.toISOString(),
+    amount: input.amount,
+    currency: input.currency,
+    allowed_branches: input.allowed_branches || 1,
     cancelled_at: null,
+    cancellation_reason: null,
   };
 
   const { data, error } = await supabase
-    .from('subscriptions')
+    .from(TABLE_NAME)
     .insert(subscriptionData)
     .select()
     .single();
@@ -86,11 +88,10 @@ export async function createSubscription(input: CreateSubscriptionInput): Promis
 
 /**
  * Create a trial subscription for a store
- * Note: Silently fails if subscriptions table doesn't exist yet
  */
 export async function createTrialSubscription(
   storeId: string,
-  tier: SubscriptionTier = 'professional',
+  plan: SubscriptionPlan = 'premium',
   trialDays: number = 14
 ): Promise<Subscription | null> {
   try {
@@ -98,36 +99,41 @@ export async function createTrialSubscription(
     const trialEnd = new Date();
     trialEnd.setDate(trialEnd.getDate() + trialDays);
 
+    // Get plan config for pricing
+    const planPricing: Record<SubscriptionPlan, number> = {
+      basic: 20,
+      premium: 50,
+      enterprise: 149,
+    };
+
     const subscriptionData = {
       store_id: storeId,
-      tier,
-      status: 'trial' as const,
-      billing_cycle: 'monthly' as const,
-      current_period_start: now.toISOString(),
-      current_period_end: trialEnd.toISOString(),
-      trial_ends_at: trialEnd.toISOString(),
+      plan,
+      status: 'trial',
+      billing_cycle: 'monthly',
+      start_date: now.toISOString(),
+      end_date: trialEnd.toISOString(),
+      amount: planPricing[plan],
+      currency: 'USD',
+      allowed_branches: plan === 'basic' ? 1 : plan === 'premium' ? 3 : 10,
       cancelled_at: null,
+      cancellation_reason: null,
     };
 
     const { data, error } = await supabase
-      .from('subscriptions')
+      .from(TABLE_NAME)
       .insert(subscriptionData)
       .select()
       .single();
 
     if (error) {
-      // Table might not exist yet - that's OK
-      if (error.code === '42P01' || error.message.includes('does not exist')) {
-        console.log('Subscriptions table not available yet');
-        return null;
-      }
       console.error('Error creating trial subscription:', error);
       return null;
     }
 
     return data;
   } catch (e) {
-    console.log('Failed to create trial subscription - table may not exist');
+    console.log('Failed to create trial subscription');
     return null;
   }
 }
@@ -140,7 +146,7 @@ export async function updateSubscription(
   input: UpdateSubscriptionInput
 ): Promise<Subscription> {
   const { data, error } = await supabase
-    .from('subscriptions')
+    .from(TABLE_NAME)
     .update({
       ...input,
       updated_at: new Date().toISOString(),
@@ -158,15 +164,15 @@ export async function updateSubscription(
 }
 
 /**
- * Upgrade or downgrade subscription tier
+ * Upgrade or downgrade subscription plan
  */
-export async function changeTier(
+export async function changePlan(
   storeId: string,
-  newTier: SubscriptionTier
+  newPlan: SubscriptionPlan
 ): Promise<Subscription> {
   // Check if downgrade is possible (usage within limits)
   const usage = await getSubscriptionUsage(storeId);
-  const newLimits = getSubscriptionLimits(newTier);
+  const newLimits = getSubscriptionLimits(newPlan);
 
   if (usage.branches_count > newLimits.branches) {
     throw new Error(
@@ -182,25 +188,34 @@ export async function changeTier(
     );
   }
 
-  return updateSubscription(storeId, { tier: newTier });
+  return updateSubscription(storeId, { plan: newPlan });
 }
 
 /**
  * Cancel a subscription
  */
-export async function cancelSubscription(storeId: string): Promise<Subscription> {
-  return updateSubscription(storeId, {
-    status: 'cancelled',
-  });
-}
+export async function cancelSubscription(
+  storeId: string,
+  reason?: string
+): Promise<Subscription> {
+  const { data, error } = await supabase
+    .from(TABLE_NAME)
+    .update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancellation_reason: reason || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('store_id', storeId)
+    .select()
+    .single();
 
-/**
- * Suspend a subscription
- */
-export async function suspendSubscription(storeId: string): Promise<Subscription> {
-  return updateSubscription(storeId, {
-    status: 'suspended',
-  });
+  if (error) {
+    console.error('Error cancelling subscription:', error);
+    throw new Error(`Failed to cancel subscription: ${error.message}`);
+  }
+
+  return data;
 }
 
 /**
@@ -208,24 +223,25 @@ export async function suspendSubscription(storeId: string): Promise<Subscription
  */
 export async function reactivateSubscription(storeId: string): Promise<Subscription> {
   const now = new Date();
-  const periodEnd = new Date();
+  const endDate = new Date();
   
   // Get current subscription to determine billing cycle
   const current = await getSubscription(storeId);
   
   if (current?.billing_cycle === 'yearly') {
-    periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+    endDate.setFullYear(endDate.getFullYear() + 1);
   } else {
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    endDate.setMonth(endDate.getMonth() + 1);
   }
 
   const { data, error } = await supabase
-    .from('subscriptions')
+    .from(TABLE_NAME)
     .update({
       status: 'active',
-      current_period_start: now.toISOString(),
-      current_period_end: periodEnd.toISOString(),
+      start_date: now.toISOString(),
+      end_date: endDate.toISOString(),
       cancelled_at: null,
+      cancellation_reason: null,
       updated_at: now.toISOString(),
     })
     .eq('store_id', storeId)
@@ -248,10 +264,10 @@ export async function reactivateSubscription(storeId: string): Promise<Subscript
  * Get subscription usage for a store
  */
 export async function getSubscriptionUsage(storeId: string): Promise<SubscriptionUsage> {
-  // Get subscription tier
+  // Get subscription plan
   const subscription = await getSubscription(storeId);
-  const tier: SubscriptionTier = subscription?.tier || 'starter';
-  const limits = getSubscriptionLimits(tier);
+  const plan: SubscriptionPlan = subscription?.plan || 'basic';
+  const limits = getSubscriptionLimits(plan);
 
   // Get counts
   const [branchesResult, usersResult, productsResult] = await Promise.all([
@@ -287,24 +303,24 @@ export async function isFeatureAvailable(
   feature: 'cloudSync' | 'qrPrinting' | 'notifications' | 'multiDevice' | 'apiAccess'
 ): Promise<boolean> {
   const subscription = await getSubscription(storeId);
-  const tier: SubscriptionTier = subscription?.tier || 'starter';
+  const plan: SubscriptionPlan = subscription?.plan || 'basic';
 
-  const featuresByTier: Record<SubscriptionTier, Record<string, boolean>> = {
-    starter: {
+  const featuresByPlan: Record<SubscriptionPlan, Record<string, boolean>> = {
+    basic: {
       cloudSync: false,
       qrPrinting: false,
       notifications: false,
       multiDevice: false,
       apiAccess: false,
     },
-    professional: {
+    premium: {
       cloudSync: true,
       qrPrinting: true,
       notifications: true,
       multiDevice: true,
       apiAccess: false,
     },
-    premium: {
+    enterprise: {
       cloudSync: true,
       qrPrinting: true,
       notifications: true,
@@ -313,7 +329,7 @@ export async function isFeatureAvailable(
     },
   };
 
-  return featuresByTier[tier][feature] || false;
+  return featuresByPlan[plan][feature] || false;
 }
 
 // ============================================================================
@@ -322,14 +338,13 @@ export async function isFeatureAvailable(
 
 /**
  * Get subscription statistics for dashboard
- * Note: Returns empty stats if subscriptions table doesn't exist yet
  */
 export async function getSubscriptionStats(): Promise<{
   total: number;
   active: number;
   trial: number;
   expired: number;
-  byTier: Record<SubscriptionTier, number>;
+  byPlan: Record<SubscriptionPlan, number>;
   monthlyRevenue: number;
 }> {
   const emptyStats = {
@@ -337,43 +352,31 @@ export async function getSubscriptionStats(): Promise<{
     active: 0,
     trial: 0,
     expired: 0,
-    byTier: { starter: 0, professional: 0, premium: 0 },
+    byPlan: { basic: 0, premium: 0, enterprise: 0 },
     monthlyRevenue: 0,
   };
 
   try {
     const { data, error } = await supabase
-      .from('subscriptions')
-      .select('status, tier, billing_cycle');
+      .from(TABLE_NAME)
+      .select('status, plan, billing_cycle, amount');
 
     if (error) {
-      // Table might not exist yet
-      if (error.code === '42P01' || error.message.includes('does not exist')) {
-        console.log('Subscriptions table not available yet');
-        return emptyStats;
-      }
       console.error('Error fetching subscription stats:', error);
       return emptyStats;
     }
 
     const subscriptions = data || [];
 
-    // Calculate monthly revenue
-    const pricing: Record<SubscriptionTier, { monthly: number; yearly: number }> = {
-      starter: { monthly: 20, yearly: 200 },
-      professional: { monthly: 50, yearly: 500 },
-      premium: { monthly: 149, yearly: 1490 },
-    };
-
+    // Calculate monthly revenue from actual amounts
     let monthlyRevenue = 0;
     subscriptions
       .filter((s: any) => s.status === 'active')
       .forEach((s: any) => {
-        const price = pricing[s.tier as SubscriptionTier];
         if (s.billing_cycle === 'yearly') {
-          monthlyRevenue += price.yearly / 12;
+          monthlyRevenue += (s.amount || 0) / 12;
         } else {
-          monthlyRevenue += price.monthly;
+          monthlyRevenue += s.amount || 0;
         }
       });
 
@@ -382,15 +385,15 @@ export async function getSubscriptionStats(): Promise<{
       active: subscriptions.filter((s: any) => s.status === 'active').length,
       trial: subscriptions.filter((s: any) => s.status === 'trial').length,
       expired: subscriptions.filter((s: any) => s.status === 'expired').length,
-      byTier: {
-        starter: subscriptions.filter((s: any) => s.tier === 'starter').length,
-        professional: subscriptions.filter((s: any) => s.tier === 'professional').length,
-        premium: subscriptions.filter((s: any) => s.tier === 'premium').length,
+      byPlan: {
+        basic: subscriptions.filter((s: any) => s.plan === 'basic').length,
+        premium: subscriptions.filter((s: any) => s.plan === 'premium').length,
+        enterprise: subscriptions.filter((s: any) => s.plan === 'enterprise').length,
       },
       monthlyRevenue: Math.round(monthlyRevenue * 100) / 100,
     };
   } catch (e) {
-    console.log('Subscriptions table not available yet');
+    console.log('Error fetching subscription stats');
     return emptyStats;
   }
 }

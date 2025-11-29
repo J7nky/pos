@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Store, CreateStoreInput, UpdateStoreInput, SubscriptionTier, SUBSCRIPTION_PLANS } from '../../types';
+import { Store, CreateStoreInput, UpdateStoreInput, SubscriptionPlan, SUBSCRIPTION_PLAN_CONFIGS } from '../../types';
 import { Button, Input, Select, Modal, ModalFooter } from '../ui';
 
 interface StoreFormProps {
@@ -28,7 +28,7 @@ export default function StoreForm({
     preferred_language: store?.preferred_language || 'en',
     preferred_commission_rate: store?.preferred_commission_rate?.toString() || '0',
     exchange_rate: store?.exchange_rate?.toString() || '89500',
-    subscription_tier: 'professional' as SubscriptionTier,
+    subscription_plan: 'premium' as SubscriptionPlan,
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -183,42 +183,42 @@ export default function StoreForm({
             <div>
               <h4 className="text-sm font-medium text-gray-900 mb-4">Subscription Plan</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {SUBSCRIPTION_PLANS.map((plan) => (
+                {SUBSCRIPTION_PLAN_CONFIGS.map((config) => (
                   <div
-                    key={plan.tier}
-                    onClick={() => handleChange('subscription_tier', plan.tier)}
+                    key={config.plan}
+                    onClick={() => handleChange('subscription_plan', config.plan)}
                     className={`
                       relative p-4 border-2 rounded-lg cursor-pointer transition-all
                       ${
-                        formData.subscription_tier === plan.tier
+                        formData.subscription_plan === config.plan
                           ? 'border-blue-500 bg-blue-50'
                           : 'border-gray-200 hover:border-gray-300'
                       }
                     `}
                   >
-                    {plan.tier === 'professional' && (
+                    {config.plan === 'premium' && (
                       <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">
                         Popular
                       </span>
                     )}
                     <div className="text-center">
-                      <h5 className="font-semibold text-gray-900">{plan.name}</h5>
-                      <p className="text-xs text-gray-500 mt-1">{plan.subtitle}</p>
+                      <h5 className="font-semibold text-gray-900">{config.name}</h5>
+                      <p className="text-xs text-gray-500 mt-1">{config.subtitle}</p>
                       <p className="text-2xl font-bold text-gray-900 mt-2">
-                        ${plan.monthlyPrice}
+                        ${config.monthlyPrice}
                         <span className="text-sm font-normal text-gray-500">/mo</span>
                       </p>
                       <div className="mt-3 text-xs text-gray-600 space-y-1">
-                        <p>{plan.features.branches} branch{plan.features.branches > 1 ? 'es' : ''}</p>
+                        <p>{config.features.branches} branch{config.features.branches > 1 ? 'es' : ''}</p>
                         <p>
-                          {plan.features.users === 'unlimited'
+                          {config.features.users === 'unlimited'
                             ? 'Unlimited users'
-                            : `${plan.features.users} users`}
+                            : `${config.features.users} users`}
                         </p>
                         <p>
-                          {plan.features.products === 'unlimited'
+                          {config.features.products === 'unlimited'
                             ? 'Unlimited products'
-                            : `${plan.features.products} products`}
+                            : `${config.features.products} products`}
                         </p>
                       </div>
                     </div>

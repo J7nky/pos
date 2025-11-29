@@ -8,7 +8,7 @@ import {
   UpdateUserInput,
   UserFilters,
   getSubscriptionLimits,
-  SubscriptionTier,
+  SubscriptionPlan,
 } from '../types';
 
 // ============================================================================
@@ -101,15 +101,15 @@ export async function canCreateUser(storeId: string): Promise<{
   // Get current user count
   const currentCount = await getUserCount(storeId);
 
-  // Get subscription tier
+  // Get subscription plan
   const { data: subscription } = await supabase
-    .from('subscriptions')
-    .select('tier')
+    .from('store_subscriptions')
+    .select('plan')
     .eq('store_id', storeId)
     .single();
 
-  const tier: SubscriptionTier = subscription?.tier || 'starter';
-  const limits = getSubscriptionLimits(tier);
+  const plan: SubscriptionPlan = subscription?.plan || 'basic';
+  const limits = getSubscriptionLimits(plan);
   const limit = limits.users;
 
   // null means unlimited

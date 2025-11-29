@@ -11,9 +11,7 @@ import {
 import {
   Subscription,
   SubscriptionUsage,
-  SubscriptionTier,
-  getSubscriptionPlan,
-  SUBSCRIPTION_PLANS,
+  getSubscriptionPlanConfig,
 } from '../../types';
 import { Button, Badge, Card, CardHeader, getStatusVariant, getTierVariant } from '../ui';
 
@@ -30,7 +28,7 @@ export default function SubscriptionCard({
   onUpgrade,
   onManage,
 }: SubscriptionCardProps) {
-  const plan = subscription ? getSubscriptionPlan(subscription.tier) : null;
+  const planConfig = subscription ? getSubscriptionPlanConfig(subscription.plan) : null;
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -108,7 +106,7 @@ export default function SubscriptionCard({
     );
   }
 
-  const daysRemaining = getDaysRemaining(subscription.current_period_end);
+  const daysRemaining = getDaysRemaining(subscription.end_date);
   const isExpiringSoon = daysRemaining <= 7 && daysRemaining > 0;
   const isExpired = daysRemaining <= 0;
 
@@ -128,27 +126,27 @@ export default function SubscriptionCard({
       <div className="flex items-start justify-between p-4 bg-gray-50 rounded-lg mb-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <h4 className="font-semibold text-gray-900">{plan?.name} Plan</h4>
-            <Badge variant={getTierVariant(subscription.tier)}>
-              {subscription.tier}
+            <h4 className="font-semibold text-gray-900">{planConfig?.name} Plan</h4>
+            <Badge variant={getTierVariant(subscription.plan)}>
+              {subscription.plan}
             </Badge>
             <Badge variant={getStatusVariant(subscription.status)}>
               {subscription.status}
             </Badge>
           </div>
-          <p className="text-sm text-gray-500">{plan?.description}</p>
+          <p className="text-sm text-gray-500">{planConfig?.description}</p>
           <div className="flex items-center gap-4 mt-3 text-sm text-gray-600">
             <span className="flex items-center gap-1">
               <Calendar className="w-4 h-4" />
               {subscription.billing_cycle === 'yearly' ? 'Annual' : 'Monthly'} billing
             </span>
             <span>
-              ${subscription.billing_cycle === 'yearly' ? plan?.yearlyPrice : plan?.monthlyPrice}
+              ${subscription.amount}
               /{subscription.billing_cycle === 'yearly' ? 'year' : 'month'}
             </span>
           </div>
         </div>
-        {subscription.tier !== 'premium' && (
+        {subscription.plan !== 'enterprise' && (
           <Button
             variant="primary"
             size="sm"
@@ -195,8 +193,8 @@ export default function SubscriptionCard({
                 : `${daysRemaining} days remaining`}
             </p>
             <p className="text-xs text-gray-500">
-              Current period: {formatDate(subscription.current_period_start)} -{' '}
-              {formatDate(subscription.current_period_end)}
+              Current period: {formatDate(subscription.start_date)} -{' '}
+              {formatDate(subscription.end_date)}
             </p>
           </div>
         </div>
@@ -228,11 +226,11 @@ export default function SubscriptionCard({
       )}
 
       {/* Trial Notice */}
-      {subscription.status === 'trial' && subscription.trial_ends_at && (
+      {subscription.status === 'trial' && (
         <div className="mt-6 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <p className="text-sm text-blue-800">
             <strong>Trial Period:</strong> Your trial ends on{' '}
-            {formatDate(subscription.trial_ends_at)}. Upgrade to continue using all
+            {formatDate(subscription.end_date)}. Upgrade to continue using all
             features.
           </p>
         </div>

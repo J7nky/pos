@@ -139,18 +139,18 @@ export default function StoreList({
             className="w-full sm:w-40"
           />
           <Select
-            value={filters.subscriptionTier || ''}
+            value={filters.subscriptionPlan || ''}
             onChange={(e) =>
               onFiltersChange({
                 ...filters,
-                subscriptionTier: e.target.value as StoreFilters['subscriptionTier'] || undefined,
+                subscriptionPlan: e.target.value as StoreFilters['subscriptionPlan'] || undefined,
               })
             }
             options={[
               { value: '', label: 'All Plans' },
-              { value: 'starter', label: 'Starter' },
-              { value: 'professional', label: 'Professional' },
+              { value: 'basic', label: 'Basic' },
               { value: 'premium', label: 'Premium' },
+              { value: 'enterprise', label: 'Enterprise' },
             ]}
             className="w-full sm:w-40"
           />
@@ -186,12 +186,12 @@ export default function StoreList({
                 icon={<Store className="w-12 h-12" />}
                 title="No stores found"
                 description={
-                  filters.search || filters.status || filters.subscriptionTier
+                  filters.search || filters.status || filters.subscriptionPlan
                     ? 'Try adjusting your filters'
                     : 'Get started by creating your first store'
                 }
                 action={
-                  !filters.search && !filters.status && !filters.subscriptionTier ? (
+                  !filters.search && !filters.status && !filters.subscriptionPlan ? (
                     <Button onClick={onCreateStore} leftIcon={<Plus className="w-4 h-4" />}>
                       Create Store
                     </Button>
@@ -224,9 +224,9 @@ export default function StoreList({
                   <TableCell>
                     {store.subscription ? (
                       <div className="flex items-center gap-2">
-                        <Badge variant={getTierVariant(store.subscription.tier)}>
-                          {store.subscription.tier.charAt(0).toUpperCase() +
-                            store.subscription.tier.slice(1)}
+                        <Badge variant={getTierVariant(store.subscription.plan)}>
+                          {store.subscription.plan.charAt(0).toUpperCase() +
+                            store.subscription.plan.slice(1)}
                         </Badge>
                         {store.subscription.status === 'trial' && (
                           <Badge variant="warning" size="sm">

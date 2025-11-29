@@ -121,20 +121,28 @@ export interface UpdateUserInput {
 // SUBSCRIPTION TYPES
 // ============================================================================
 
-export type SubscriptionTier = 'starter' | 'professional' | 'premium';
-export type SubscriptionStatus = 'active' | 'trial' | 'expired' | 'suspended' | 'cancelled';
+// Maps to existing store_subscriptions table
+export type SubscriptionPlan = 'basic' | 'premium' | 'enterprise';
+export type SubscriptionStatus = 'active' | 'trial' | 'expired' | 'cancelled';
 export type BillingCycle = 'monthly' | 'yearly';
+export type Currency = 'USD' | 'LBP';
+
+// Legacy alias for compatibility
+export type SubscriptionTier = SubscriptionPlan;
 
 export interface Subscription {
   id: string;
   store_id: string;
-  tier: SubscriptionTier;
+  plan: SubscriptionPlan;
   status: SubscriptionStatus;
   billing_cycle: BillingCycle;
-  current_period_start: string;
-  current_period_end: string;
-  trial_ends_at: string | null;
+  start_date: string;
+  end_date: string;
+  amount: number;
+  currency: Currency;
+  allowed_branches: number;
   cancelled_at: string | null;
+  cancellation_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -150,22 +158,27 @@ export interface SubscriptionUsage {
 
 export interface CreateSubscriptionInput {
   store_id: string;
-  tier: SubscriptionTier;
+  plan: SubscriptionPlan;
   billing_cycle: BillingCycle;
+  amount: number;
+  currency: Currency;
+  allowed_branches?: number;
 }
 
 export interface UpdateSubscriptionInput {
-  tier?: SubscriptionTier;
+  plan?: SubscriptionPlan;
   billing_cycle?: BillingCycle;
   status?: SubscriptionStatus;
+  amount?: number;
+  allowed_branches?: number;
 }
 
 // ============================================================================
 // SUBSCRIPTION PLAN CONFIGURATION
 // ============================================================================
 
-export interface SubscriptionPlan {
-  tier: SubscriptionTier;
+export interface SubscriptionPlanConfig {
+  plan: SubscriptionPlan;
   name: string;
   subtitle: string;
   description: string;
@@ -184,10 +197,10 @@ export interface SubscriptionPlan {
   };
 }
 
-export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
+export const SUBSCRIPTION_PLAN_CONFIGS: SubscriptionPlanConfig[] = [
   {
-    tier: 'starter',
-    name: 'Starter',
+    plan: 'basic',
+    name: 'Basic',
     subtitle: 'Offline Only',
     description: 'Perfect for very small stores',
     monthlyPrice: 20,
@@ -205,15 +218,15 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     },
   },
   {
-    tier: 'professional',
-    name: 'Professional',
+    plan: 'premium',
+    name: 'Premium',
     subtitle: 'For growing stores',
-    description: 'Everything in Starter +',
+    description: 'Everything in Basic +',
     monthlyPrice: 50,
     yearlyPrice: 500,
     yearlySavings: 100,
     features: {
-      branches: 2,
+      branches: 3,
       users: 10,
       products: 'unlimited',
       cloudSync: true,
@@ -224,15 +237,15 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     },
   },
   {
-    tier: 'premium',
-    name: 'Premium',
+    plan: 'enterprise',
+    name: 'Enterprise',
     subtitle: 'For large wholesalers & chains',
-    description: 'Everything in Pro +',
+    description: 'Everything in Premium +',
     monthlyPrice: 149,
     yearlyPrice: 1490,
     yearlySavings: 298,
     features: {
-      branches: 5,
+      branches: 10,
       users: 'unlimited',
       products: 'unlimited',
       cloudSync: true,
@@ -244,16 +257,16 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   },
 ];
 
-export function getSubscriptionPlan(tier: SubscriptionTier): SubscriptionPlan {
-  return SUBSCRIPTION_PLANS.find(p => p.tier === tier) || SUBSCRIPTION_PLANS[0];
+export function getSubscriptionPlanConfig(plan: SubscriptionPlan): SubscriptionPlanConfig {
+  return SUBSCRIPTION_PLAN_CONFIGS.find(p => p.plan === plan) || SUBSCRIPTION_PLAN_CONFIGS[0];
 }
 
-export function getSubscriptionLimits(tier: SubscriptionTier) {
-  const plan = getSubscriptionPlan(tier);
+export function getSubscriptionLimits(plan: SubscriptionPlan) {
+  const config = getSubscriptionPlanConfig(plan);
   return {
-    branches: plan.features.branches,
-    users: plan.features.users === 'unlimited' ? null : plan.features.users,
-    products: plan.features.products === 'unlimited' ? null : plan.features.products,
+    branches: config.features.branches,
+    users: config.features.users === 'unlimited' ? null : config.features.users,
+    products: config.features.products === 'unlimited' ? null : config.features.products,
   };
 }
 
@@ -282,7 +295,7 @@ export interface PaginatedResponse<T> {
 export interface StoreFilters {
   search?: string;
   status?: Store['status'];
-  subscriptionTier?: SubscriptionTier;
+  subscriptionPlan?: SubscriptionPlan;
 }
 
 export interface BranchFilters {
