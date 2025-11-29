@@ -931,6 +931,104 @@ class POSDatabase extends Dexie {
       license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
     });
 
+    // Migration for version 33 - Link cash_drawer_accounts to chart_of_accounts via account_code
+    // This establishes referential integrity between cash drawers and the accounting system
+    this.version(33).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      branches: 'id, store_id, name, updated_at, _synced, _deleted',
+      
+      // Core tables
+      products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, branch_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, branch_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, _synced, _deleted',
+      transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, _synced, _deleted',
+      inventory_bills: 'id, store_id, branch_id, supplier_id, received_at, created_by, currency, _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, branch_id, bill_number, customer_id, bill_date, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, branch_id, bill_id, product_id, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Cash drawer tables - account_code now references chart_of_accounts
+      // Added compound index [store_id+account_code] for FK relationship
+      cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], updated_at',
+      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, created_at, updated_at',
+      missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification tables
+      notifications: 'id, store_id, branch_id, type, title, created_at, read_at, _synced, _deleted',
+      notification_preferences: 'id, store_id, branch_id, updated_at, _synced, _deleted',
+      
+      // Reminder system
+      reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
+      
+      // Employee attendance
+      employee_attendance: 'id, store_id, branch_id, user_id, date, check_in_time, check_out_time, created_at, updated_at, _synced, _deleted',
+      
+      // Accounting foundation tables - chart_of_accounts has compound index for FK
+      journal_entries: 'id, store_id, branch_id, transaction_date, created_at, _synced, _deleted',
+      balance_snapshots: 'id, store_id, branch_id, entity_id, snapshot_date, created_at, _synced, _deleted',
+      entities: 'id, store_id, branch_id, entity_type, name, updated_at, _synced, _deleted',
+      chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Subscription management tables
+      subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
+    }).upgrade(async (trans) => {
+      console.log('🔗 Running migration v33: Linking cash_drawer_accounts to chart_of_accounts');
+      
+      try {
+        // Get all cash drawer accounts
+        const cashDrawerAccounts = await (trans as any).table('cash_drawer_accounts').toArray();
+        console.log(`   📊 Found ${cashDrawerAccounts.length} cash drawer account(s)`);
+        
+        // Validate each account has a valid account_code in chart_of_accounts
+        for (const account of cashDrawerAccounts) {
+          if (!account.account_code) {
+            // Default to '1100' (Cash) if no account_code
+            await (trans as any).table('cash_drawer_accounts').update(account.id, {
+              account_code: '1100',
+              _synced: false
+            });
+            console.log(`   ✅ Set default account_code '1100' for drawer: ${account.name || account.id}`);
+          } else {
+            // Verify the account_code exists in chart_of_accounts
+            const chartAccount = await (trans as any).table('chart_of_accounts')
+              .where(['store_id', 'account_code'])
+              .equals([account.store_id, account.account_code])
+              .first();
+            
+            if (!chartAccount) {
+              console.warn(`   ⚠️ Cash drawer ${account.id} has account_code '${account.account_code}' not found in chart_of_accounts`);
+              // Default to '1100' (Cash) for safety
+              await (trans as any).table('cash_drawer_accounts').update(account.id, {
+                account_code: '1100',
+                _synced: false
+              });
+              console.log(`   ✅ Reset to default account_code '1100' for drawer: ${account.name || account.id}`);
+            }
+          }
+        }
+        
+        console.log('   🎉 Migration v33 completed successfully!');
+        console.log('   📢 cash_drawer_accounts.account_code now references chart_of_accounts');
+        console.log('   📢 This enables proper accounting integration for cash drawers');
+        
+      } catch (error) {
+        console.error('   ❌ Error during migration v33:', error);
+        // Don't throw - allow migration to complete even if validation fails
+      }
+    });
+
     // Migration for version 5 - update existing records to match new schema
     this.version(5).upgrade(trans => {
       console.log('🔄 Running migration v5: Updating existing records to match new schema');
@@ -1298,6 +1396,76 @@ class POSDatabase extends Dexie {
         _synced: false
       } as any);
     }
+  }
+
+  /**
+   * Get the chart of accounts entry linked to a cash drawer account
+   * This leverages the FK relationship between cash_drawer_accounts and chart_of_accounts
+   * @param cashDrawerAccountId - The ID of the cash drawer account
+   * @returns The linked chart of accounts entry, or null if not found
+   */
+  async getChartOfAccountsForCashDrawer(cashDrawerAccountId: string): Promise<ChartOfAccounts | null> {
+    return this.withDb(async () => {
+      const cashDrawerAccount = await this.cash_drawer_accounts.get(cashDrawerAccountId);
+      if (!cashDrawerAccount) {
+        console.warn(`Cash drawer account not found: ${cashDrawerAccountId}`);
+        return null;
+      }
+
+      // Use the compound index [store_id+account_code] to find the linked chart of accounts entry
+      const chartAccount = await this.chart_of_accounts
+        .where('[store_id+account_code]')
+        .equals([cashDrawerAccount.store_id, cashDrawerAccount.account_code])
+        .first();
+
+      if (!chartAccount) {
+        console.warn(`Chart of accounts entry not found for store: ${cashDrawerAccount.store_id}, account_code: ${cashDrawerAccount.account_code}`);
+      }
+
+      return chartAccount || null;
+    });
+  }
+
+  /**
+   * Validate that a cash drawer account has a valid account_code in chart_of_accounts
+   * @param storeId - The store ID
+   * @param accountCode - The account code to validate
+   * @returns True if the account code exists in chart_of_accounts for the store
+   */
+  async validateCashDrawerAccountCode(storeId: string, accountCode: string): Promise<boolean> {
+    return this.withDb(async () => {
+      const chartAccount = await this.chart_of_accounts
+        .where('[store_id+account_code]')
+        .equals([storeId, accountCode])
+        .first();
+      
+      return !!chartAccount;
+    });
+  }
+
+  /**
+   * Get cash drawer account with its linked chart of accounts info
+   * Returns enriched cash drawer data including account type and name from chart of accounts
+   */
+  async getCashDrawerAccountWithChartInfo(storeId: string, branchId: string): Promise<(CashDrawerAccount & { 
+    chart_account_name?: string; 
+    chart_account_type?: string;
+  }) | null> {
+    return this.withDb(async () => {
+      const account = await this.getCashDrawerAccount(storeId, branchId);
+      if (!account) return null;
+
+      const chartAccount = await this.chart_of_accounts
+        .where('[store_id+account_code]')
+        .equals([storeId, account.account_code])
+        .first();
+
+      return {
+        ...account,
+        chart_account_name: chartAccount?.account_name,
+        chart_account_type: chartAccount?.account_type
+      };
+    });
   }
 
   async getCurrentCashDrawerStatus(storeId: string, branchId: string): Promise<any> {

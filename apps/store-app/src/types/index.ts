@@ -479,10 +479,21 @@ export interface Store {
   _deleted?: boolean;
 }
 
+/**
+ * Cash Drawer Account - Tracks physical cash drawer balances per branch
+ * 
+ * The `account_code` field references `chart_of_accounts.account_code` (FK relationship)
+ * This links each cash drawer to a valid accounting code (typically '1100' for Cash)
+ * enabling proper integration with the double-entry bookkeeping system.
+ */
 export interface CashDrawerAccount {
   id: string;
   store_id: string;
   branch_id: string;
+  /** 
+   * References chart_of_accounts.account_code (FK)
+   * Typically '1100' (Cash) from the standard chart of accounts
+   */
   account_code: string;
   name: string;
   currency: string;

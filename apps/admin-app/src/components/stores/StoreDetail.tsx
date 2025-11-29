@@ -293,8 +293,8 @@ export default function StoreDetail() {
                     {store.status.charAt(0).toUpperCase() + store.status.slice(1)}
                   </Badge>
                   {subscription && (
-                    <Badge variant={getTierVariant(subscription.tier)}>
-                      {subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1)}
+                    <Badge variant={getTierVariant(subscription.plan)}>
+                      {subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1)}
                     </Badge>
                   )}
                 </div>

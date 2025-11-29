@@ -19,6 +19,10 @@ export interface Store {
   status: 'active' | 'suspended' | 'archived';
   created_at: string;
   updated_at: string;
+  // Soft-delete fields (industry standard - stores should NEVER be hard-deleted)
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
 }
 
 export interface StoreWithStats extends Store {
@@ -64,6 +68,10 @@ export interface Branch {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  // Soft-delete fields (industry standard - branches should NEVER be hard-deleted)
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
 }
 
 export interface CreateBranchInput {
@@ -296,11 +304,13 @@ export interface StoreFilters {
   search?: string;
   status?: Store['status'];
   subscriptionPlan?: SubscriptionPlan;
+  includeDeleted?: boolean; // For admin recovery purposes
 }
 
 export interface BranchFilters {
   search?: string;
   isActive?: boolean;
+  includeDeleted?: boolean; // For admin recovery purposes
 }
 
 export interface UserFilters {

@@ -25,6 +25,11 @@ export async function getBranches(storeId: string, filters?: BranchFilters): Pro
     .eq('store_id', storeId)
     .order('created_at', { ascending: true });
 
+  // Filter out soft-deleted branches by default
+  if (!filters?.includeDeleted) {
+    query = query.or('is_deleted.is.null,is_deleted.eq.false');
+  }
+
   if (filters?.isActive !== undefined) {
     query = query.eq('is_active', filters.isActive);
   }
@@ -67,11 +72,18 @@ export async function getBranch(branchId: string): Promise<Branch | null> {
 /**
  * Get branch count for a store
  */
-export async function getBranchCount(storeId: string): Promise<number> {
-  const { count, error } = await supabase
+export async function getBranchCount(storeId: string, includeDeleted = false): Promise<number> {
+  let query = supabase
     .from('branches')
     .select('id', { count: 'exact', head: true })
     .eq('store_id', storeId);
+
+  // Exclude soft-deleted branches by default
+  if (!includeDeleted) {
+    query = query.or('is_deleted.is.null,is_deleted.eq.false');
+  }
+
+  const { count, error } = await query;
 
   if (error) {
     console.error('Error counting branches:', error);
@@ -224,31 +236,79 @@ export async function reactivateBranch(branchId: string): Promise<void> {
 }
 
 /**
- * Delete a branch permanently (use with caution)
- * This will cascade delete all branch data
+ * Soft-delete a branch (industry standard - branches should NEVER be hard-deleted)
+ * This preserves all data for audit trails and potential recovery
  */
 export async function deleteBranch(branchId: string): Promise<void> {
-  // Check if this is the last branch
+  // Check if this is the last non-deleted branch
   const branch = await getBranch(branchId);
   if (!branch) {
     throw new Error('Branch not found');
   }
 
-  const branchCount = await getBranchCount(branch.store_id);
+  // Count active, non-deleted branches (excluding the one being deleted)
+  const activeBranches = await getBranches(branch.store_id, { isActive: true });
+  const otherActiveBranches = activeBranches.filter(b => b.id !== branchId);
   
-  if (branchCount <= 1) {
-    throw new Error('Cannot delete the last branch. A store must have at least one branch.');
+  if (otherActiveBranches.length === 0) {
+    throw new Error('Cannot delete the last active branch. A store must have at least one active branch.');
   }
 
+  // Use soft-delete instead of hard-delete
   const { error } = await supabase
     .from('branches')
-    .delete()
+    .update({
+      is_deleted: true,
+      deleted_at: new Date().toISOString(),
+      is_active: false,
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', branchId);
 
   if (error) {
-    console.error('Error deleting branch:', error);
+    console.error('Error soft-deleting branch:', error);
     throw new Error(`Failed to delete branch: ${error.message}`);
   }
+}
+
+/**
+ * Restore a soft-deleted branch
+ */
+export async function restoreBranch(branchId: string): Promise<void> {
+  const { error } = await supabase
+    .from('branches')
+    .update({
+      is_deleted: false,
+      deleted_at: null,
+      deleted_by: null,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', branchId);
+
+  if (error) {
+    console.error('Error restoring branch:', error);
+    throw new Error(`Failed to restore branch: ${error.message}`);
+  }
+}
+
+/**
+ * Get soft-deleted branches for a store (for admin recovery purposes)
+ */
+export async function getDeletedBranches(storeId: string): Promise<Branch[]> {
+  const { data, error } = await supabase
+    .from('branches')
+    .select('*')
+    .eq('store_id', storeId)
+    .eq('is_deleted', true)
+    .order('deleted_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching deleted branches:', error);
+    throw new Error(`Failed to fetch deleted branches: ${error.message}`);
+  }
+
+  return data || [];
 }
 
 // ============================================================================

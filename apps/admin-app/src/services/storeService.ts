@@ -29,6 +29,11 @@ export async function getStores(filters?: StoreFilters): Promise<StoreWithStats[
     `)
     .order('created_at', { ascending: false });
 
+  // Filter out soft-deleted stores by default
+  if (!filters?.includeDeleted) {
+    query = query.or('is_deleted.is.null,is_deleted.eq.false');
+  }
+
   // Apply filters
   if (filters?.status) {
     query = query.eq('status', filters.status);
@@ -276,18 +281,111 @@ export async function reactivateStore(storeId: string): Promise<void> {
 }
 
 /**
- * Delete a store permanently (use with caution)
+ * Soft-delete a store (industry standard - stores should NEVER be hard-deleted)
+ * This preserves all data for audit trails and potential recovery
  */
 export async function deleteStore(storeId: string): Promise<void> {
+  // Use soft-delete instead of hard-delete
   const { error } = await supabase
     .from('stores')
-    .delete()
+    .update({
+      is_deleted: true,
+      deleted_at: new Date().toISOString(),
+      status: 'archived',
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', storeId);
 
   if (error) {
-    console.error('Error deleting store:', error);
+    console.error('Error soft-deleting store:', error);
     throw new Error(`Failed to delete store: ${error.message}`);
   }
+
+  // Also soft-delete all branches of this store
+  const { error: branchError } = await supabase
+    .from('branches')
+    .update({
+      is_deleted: true,
+      deleted_at: new Date().toISOString(),
+      is_active: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('store_id', storeId);
+
+  if (branchError) {
+    console.error('Error soft-deleting store branches:', branchError);
+    // Don't throw - store is already deleted, branches will be orphaned but recoverable
+  }
+}
+
+/**
+ * Restore a soft-deleted store
+ */
+export async function restoreStore(storeId: string): Promise<void> {
+  const { error } = await supabase
+    .from('stores')
+    .update({
+      is_deleted: false,
+      deleted_at: null,
+      deleted_by: null,
+      status: 'active',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', storeId);
+
+  if (error) {
+    console.error('Error restoring store:', error);
+    throw new Error(`Failed to restore store: ${error.message}`);
+  }
+
+  // Restore the main branch (first branch created)
+  const { data: branches } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('store_id', storeId)
+    .eq('is_deleted', true)
+    .order('created_at', { ascending: true })
+    .limit(1);
+
+  if (branches && branches.length > 0) {
+    await supabase
+      .from('branches')
+      .update({
+        is_deleted: false,
+        deleted_at: null,
+        deleted_by: null,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', branches[0].id);
+  }
+}
+
+/**
+ * Get soft-deleted stores (for admin recovery purposes)
+ */
+export async function getDeletedStores(): Promise<StoreWithStats[]> {
+  const { data, error } = await supabase
+    .from('stores')
+    .select(`
+      *,
+      branches:branches(count),
+      users:users(count)
+    `)
+    .eq('is_deleted', true)
+    .order('deleted_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching deleted stores:', error);
+    throw new Error(`Failed to fetch deleted stores: ${error.message}`);
+  }
+
+  return (data || []).map((store: any) => ({
+    ...store,
+    branches_count: store.branches?.[0]?.count || 0,
+    users_count: store.users?.[0]?.count || 0,
+    subscription: undefined,
+  }));
 }
 
 // ============================================================================
