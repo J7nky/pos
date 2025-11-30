@@ -101,9 +101,9 @@ export async function createTrialSubscription(
 
     // Get plan config for pricing
     const planPricing: Record<SubscriptionPlan, number> = {
-      basic: 20,
-      premium: 50,
-      enterprise: 150,
+      starter: 20,
+      professional: 50,
+      premium: 150,
     };
 
     const subscriptionData = {
@@ -115,7 +115,7 @@ export async function createTrialSubscription(
       end_date: trialEnd.toISOString(),
       amount: planPricing[plan],
       currency: 'USD',
-      allowed_branches: plan === 'basic' ? 1 : plan === 'premium' ? 3 : 10,
+      allowed_branches: plan === 'starter' ? 1 : plan === 'professional' ? 3 : 10,
       cancelled_at: null,
       cancellation_reason: null,
     };
@@ -125,7 +125,7 @@ export async function createTrialSubscription(
       .insert(subscriptionData)
       .select()
       .single();
-
+    console.log('Trial subscription created:', subscriptionData);
     if (error) {
       console.error('Error creating trial subscription:', error);
       return null;
@@ -266,7 +266,7 @@ export async function reactivateSubscription(storeId: string): Promise<Subscript
 export async function getSubscriptionUsage(storeId: string): Promise<SubscriptionUsage> {
   // Get subscription plan
   const subscription = await getSubscription(storeId);
-  const plan: SubscriptionPlan = subscription?.plan || 'basic';
+  const plan: SubscriptionPlan = subscription?.plan || 'starter';
   const limits = getSubscriptionLimits(plan);
 
   // Get counts
@@ -303,24 +303,24 @@ export async function isFeatureAvailable(
   feature: 'cloudSync' | 'qrPrinting' | 'notifications' | 'multiDevice' | 'apiAccess'
 ): Promise<boolean> {
   const subscription = await getSubscription(storeId);
-  const plan: SubscriptionPlan = subscription?.plan || 'basic';
+  const plan: SubscriptionPlan = subscription?.plan || 'starter';
 
   const featuresByPlan: Record<SubscriptionPlan, Record<string, boolean>> = {
-    basic: {
+    starter: {
       cloudSync: false,
       qrPrinting: false,
       notifications: false,
       multiDevice: false,
       apiAccess: false,
     },
-    premium: {
+    professional: {
       cloudSync: true,
       qrPrinting: true,
       notifications: true,
       multiDevice: true,
       apiAccess: false,
     },
-    enterprise: {
+    premium: {
       cloudSync: true,
       qrPrinting: true,
       notifications: true,
@@ -352,7 +352,7 @@ export async function getSubscriptionStats(): Promise<{
     active: 0,
     trial: 0,
     expired: 0,
-    byPlan: { basic: 0, premium: 0, enterprise: 0 },
+    byPlan: { starter: 0, professional: 0, premium: 0 },
     monthlyRevenue: 0,
   };
 
@@ -386,9 +386,9 @@ export async function getSubscriptionStats(): Promise<{
       trial: subscriptions.filter((s: any) => s.status === 'trial').length,
       expired: subscriptions.filter((s: any) => s.status === 'expired').length,
       byPlan: {
-        basic: subscriptions.filter((s: any) => s.plan === 'basic').length,
+        starter: subscriptions.filter((s: any) => s.plan === 'starter').length,
+        professional: subscriptions.filter((s: any) => s.plan === 'professional').length,
         premium: subscriptions.filter((s: any) => s.plan === 'premium').length,
-        enterprise: subscriptions.filter((s: any) => s.plan === 'enterprise').length,
       },
       monthlyRevenue: Math.round(monthlyRevenue * 100) / 100,
     };

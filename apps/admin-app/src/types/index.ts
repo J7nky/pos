@@ -130,7 +130,7 @@ export interface UpdateUserInput {
 // ============================================================================
 
 // Maps to existing store_subscriptions table
-export type SubscriptionPlan = 'basic' | 'premium' | 'enterprise';
+export type SubscriptionPlan = 'starter' | 'professional' | 'premium';
 export type SubscriptionStatus = 'active' | 'trial' | 'expired' | 'cancelled';
 export type BillingCycle = 'monthly' | 'yearly';
 export type Currency = 'USD' | 'LBP';
@@ -207,8 +207,8 @@ export interface SubscriptionPlanConfig {
 
 export const SUBSCRIPTION_PLAN_CONFIGS: SubscriptionPlanConfig[] = [
   {
-    plan: 'basic',
-    name: 'Basic',
+    plan: 'starter',
+    name: 'Starter',
     subtitle: 'Offline Only',
     description: 'Perfect for very small stores',
     monthlyPrice: 20,
@@ -226,8 +226,8 @@ export const SUBSCRIPTION_PLAN_CONFIGS: SubscriptionPlanConfig[] = [
     },
   },
   {
-    plan: 'premium',
-    name: 'Premium',
+    plan: 'professional',
+    name: 'Professional',
     subtitle: 'For growing stores',
     description: 'Everything in Basic +',
     monthlyPrice: 50,
@@ -245,8 +245,8 @@ export const SUBSCRIPTION_PLAN_CONFIGS: SubscriptionPlanConfig[] = [
     },
   },
   {
-    plan: 'enterprise',
-    name: 'Enterprise',
+    plan: 'premium',
+    name: 'Premium',
     subtitle: 'For large wholesalers & chains',
     description: 'Everything in Premium +',
     monthlyPrice: 149,

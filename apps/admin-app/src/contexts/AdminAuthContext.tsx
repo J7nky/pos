@@ -40,6 +40,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
         .eq('role', 'super_admin')
         .is('store_id', null)
         .maybeSingle();
+        console.log(data)
 
       if (error) {
         console.error('Error loading admin user from users table:', error);
@@ -130,7 +131,6 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       if (data.user) {
         // Load user and check if they're super_admin
         const isSuperAdmin = await loadAdminUser(data.user.id);
-        
         // If user is not a super_admin, loadAdminUser will have already logged them out
         if (!isSuperAdmin) {
           return { 

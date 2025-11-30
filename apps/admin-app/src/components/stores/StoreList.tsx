@@ -148,9 +148,9 @@ export default function StoreList({
             }
             options={[
               { value: '', label: 'All Plans' },
-              { value: 'basic', label: 'Basic' },
+              { value: 'starter', label: 'Starter' },
+              { value: 'professional', label: 'Professional' },
               { value: 'premium', label: 'Premium' },
-              { value: 'enterprise', label: 'Enterprise' },
             ]}
             className="w-full sm:w-40"
           />
