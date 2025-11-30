@@ -180,6 +180,12 @@ export async function initializeAccountingFoundation(storeId: string): Promise<v
 /**
  * Create a store with full initialization
  * This is the main function to use when creating a new store
+ * 
+ * Flow:
+ * 1. Store created → trigger_create_default_branch creates "Main Branch"
+ * 2. initializeAccountingFoundation() called:
+ *    - create_system_entities_for_store() creates system customers/suppliers
+ *    - create_default_chart_of_accounts() creates chart AND cash drawer accounts
  */
 export async function createStoreWithInitialization(
   input: CreateStoreInput
@@ -187,13 +193,11 @@ export async function createStoreWithInitialization(
   // 1. Create the store (triggers auto-branch creation)
   const store = await createStore(input);
 
-  // 2. Initialize accounting foundation
-  try {
-    await initializeAccountingFoundation(store.id);
-  } catch (error) {
-    // Log but don't fail - accounting can be initialized later
-    console.error('Warning: Failed to initialize accounting foundation:', error);
-  }
+  // 2. Initialize accounting foundation (includes cash drawer accounts)
+  // Note: create_default_chart_of_accounts() automatically calls 
+  // initialize_cash_drawer_accounts() which creates the cash drawer
+  // account linked to the Main Branch
+  await initializeAccountingFoundation(store.id);
 
   // 3. Return store with stats
   return {

@@ -142,10 +142,14 @@ BEGIN
         deleted_by = NULL,
         is_active = true,
         updated_at = now()
-    WHERE store_id = store_uuid
-      AND is_deleted = true
-    ORDER BY created_at ASC
-    LIMIT 1;
+    WHERE id = (
+        SELECT id
+        FROM public.branches
+        WHERE store_id = store_uuid
+          AND is_deleted = true
+        ORDER BY created_at ASC
+        LIMIT 1
+    );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

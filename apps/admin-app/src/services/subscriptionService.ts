@@ -103,7 +103,7 @@ export async function createTrialSubscription(
     const planPricing: Record<SubscriptionPlan, number> = {
       basic: 20,
       premium: 50,
-      enterprise: 149,
+      enterprise: 150,
     };
 
     const subscriptionData = {

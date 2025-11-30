@@ -50,6 +50,7 @@ export default function Stores() {
 
   // Create store
   const handleCreateStore = async (data: CreateStoreInput | UpdateStoreInput) => {
+    console.log('am here')
     setIsSubmitting(true);
     try {
       // Create store with initialization

@@ -6,8 +6,8 @@
 
 import { db } from '../lib/db';
 import { Entity } from '../types/accounting';
-import { SYSTEM_ENTITY_IDS, createSystemEntities } from '../constants/systemEntities';
-import { generateId } from '../lib/db';
+import { SYSTEM_ENTITY_CODES, createSystemEntities, getSystemEntity } from '../constants/systemEntities';
+import { createId } from '../lib/db';
 
 export interface MigrationResult {
   success: boolean;
@@ -109,10 +109,10 @@ export class EntityMigrationService {
             lb_balance: -(supplier.lb_balance || 0), // Suppliers have negative balance (we owe them)
             usd_balance: -(supplier.usd_balance || 0),
             is_system_entity: false,
-            is_active: supplier.is_active ?? true,
+            is_active: true, // Suppliers don't have is_active field, default to true
             customer_data: null,
             supplier_data: {
-              supplier_type: supplier.type || 'regular',
+              supplier_type: 'regular', // Supplier.type doesn't exist in current type
               payment_terms: 'standard',
               advance_lb_balance: supplier.advance_lb_balance || 0,
               advance_usd_balance: supplier.advance_usd_balance || 0
@@ -139,11 +139,11 @@ export class EntityMigrationService {
             entity_type: 'employee',
             entity_code: `EMP-${employee.id.slice(0, 8)}`,
             name: employee.name,
-            phone: employee.phone,
+            phone: employee.phone || null,
             lb_balance: -(employee.lbp_balance || 0), // Employees have negative balance (we owe them)
             usd_balance: -(employee.usd_balance || 0),
             is_system_entity: false,
-            is_active: employee.is_active ?? true,
+            is_active: true, // Employees don't have is_active field, default to true
             customer_data: null,
             supplier_data: null,
             _synced: employee._synced ?? false
@@ -161,36 +161,39 @@ export class EntityMigrationService {
         // 4. Create system entities
         const systemEntities = createSystemEntities(storeId);
         for (const systemEntity of systemEntities) {
-          // Determine the correct ID based on entity type and code
-          let entityId: string;
+          // Map entity codes to the correct entity codes from our constants
+          let entityCode: string;
           switch (systemEntity.entity_code) {
             case 'CASH':
-              entityId = SYSTEM_ENTITY_IDS.CASH_CUSTOMER;
+              entityCode = SYSTEM_ENTITY_CODES.CASH_CUSTOMER;
               break;
             case 'INTERNAL':
-              entityId = SYSTEM_ENTITY_IDS.INTERNAL;
+              entityCode = SYSTEM_ENTITY_CODES.INTERNAL;
               break;
             case 'BANK':
-              entityId = SYSTEM_ENTITY_IDS.BANK;
+              entityCode = SYSTEM_ENTITY_CODES.BANK;
               break;
             case 'OWNER':
-              entityId = SYSTEM_ENTITY_IDS.OWNER;
+              entityCode = SYSTEM_ENTITY_CODES.OWNER;
               break;
             default:
-              entityId = generateId();
+              // For any other system entities, use the entity_code as-is
+              entityCode = systemEntity.entity_code;
           }
           
-          const entity: Entity = {
-            ...systemEntity,
-            id: entityId,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            _synced: false
-          };
-          
-          // Check if system entity already exists
-          const existing = await db.entities.get(entityId);
+          // Check if system entity already exists by entity_code
+          const existing = await getSystemEntity(db, storeId, entityCode);
           if (!existing) {
+            // Create new entity with proper entity_code and auto-generated UUID
+            const entity: Entity = {
+              ...systemEntity,
+              entity_code: entityCode, // Use the mapped entity_code
+              id: createId(), // Generate proper UUID
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              _synced: false
+            };
+            
             await db.entities.add(entity);
             result.systemEntitiesCount++;
           }

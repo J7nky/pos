@@ -5,7 +5,7 @@
 // This service provides read-only access and validation for the store app
 
 import { db } from '../lib/db';
-import { SYSTEM_ENTITY_IDS } from '../constants/systemEntities';
+import { SYSTEM_ENTITY_CODES, getSystemEntity } from '../constants/systemEntities';
 import { ChartOfAccounts, Entity } from '../types/accounting';
 
 /**
@@ -49,28 +49,29 @@ export class AccountingInitService {
   }
   
   /**
-   * Get system entity by ID
+   * Get system entity by code
+   * @deprecated Use getSystemEntityByType() instead
    */
-  async getSystemEntity(storeId: string, entityId: string): Promise<Entity | null> {
-    const entity = await db.entities.get(entityId);
-    return entity && entity.store_id === storeId && entity.is_system_entity ? entity : null;
+  async getSystemEntityByCode(storeId: string, entityCode: string): Promise<Entity | null> {
+    return await getSystemEntity(db, storeId, entityCode);
   }
   
   /**
    * Get system entity by type
+   * Queries entities by entity_code (unique per store) instead of hardcoded IDs
    */
   async getSystemEntityByType(storeId: string, entityType: 'cash' | 'supplier' | 'employee' | 'internal' | 'bank' | 'tax' | 'utilities' | 'rent'): Promise<Entity | null> {
-    const entityId = entityType === 'cash' ? SYSTEM_ENTITY_IDS.CASH_CUSTOMER :
-                    entityType === 'supplier' ? SYSTEM_ENTITY_IDS.CASH_SUPPLIER :
-                    entityType === 'employee' ? SYSTEM_ENTITY_IDS.SALARIES :
-                    entityType === 'internal' ? SYSTEM_ENTITY_IDS.INTERNAL :
-                    entityType === 'bank' ? SYSTEM_ENTITY_IDS.BANK :
-                    entityType === 'tax' ? SYSTEM_ENTITY_IDS.TAX_AUTHORITY :
-                    entityType === 'utilities' ? SYSTEM_ENTITY_IDS.UTILITIES :
-                    entityType === 'rent' ? SYSTEM_ENTITY_IDS.RENT :
-                    SYSTEM_ENTITY_IDS.OWNER;
+    const entityCode = entityType === 'cash' ? SYSTEM_ENTITY_CODES.CASH_CUSTOMER :
+                      entityType === 'supplier' ? SYSTEM_ENTITY_CODES.CASH_SUPPLIER :
+                      entityType === 'employee' ? SYSTEM_ENTITY_CODES.SALARIES :
+                      entityType === 'internal' ? SYSTEM_ENTITY_CODES.INTERNAL :
+                      entityType === 'bank' ? SYSTEM_ENTITY_CODES.BANK :
+                      entityType === 'tax' ? SYSTEM_ENTITY_CODES.TAX_AUTHORITY :
+                      entityType === 'utilities' ? SYSTEM_ENTITY_CODES.UTILITIES :
+                      entityType === 'rent' ? SYSTEM_ENTITY_CODES.RENT :
+                      SYSTEM_ENTITY_CODES.OWNER;
     
-    return await this.getSystemEntity(storeId, entityId);
+    return await getSystemEntity(db, storeId, entityCode);
   }
   
   /**

@@ -4,27 +4,28 @@
 import { Entity } from '../types/accounting';
 
 /**
- * System entity IDs - These are consistent across all stores
+ * System entity codes - These identify system entities across all stores
+ * Use these codes to query entities by entity_code column
  */
-export const SYSTEM_ENTITY_IDS = {
+export const SYSTEM_ENTITY_CODES = {
   // Customer entities
-  CASH_CUSTOMER: 'entity-cash-customer',
+  CASH_CUSTOMER: 'CASH-CUST',
   
   // Supplier entities  
-  CASH_SUPPLIER: 'entity-cash-supplier',
+  CASH_SUPPLIER: 'CASH-SUPP',
   
   // Employee entities
-  SALARIES: 'entity-salaries',
+  SALARIES: 'SALARIES',
   
   // Internal entities
-  INTERNAL: 'entity-internal',
-  OWNER: 'entity-owner',
+  INTERNAL: 'INTERNAL',
+  OWNER: 'OWNER',
   
   // Financial entities
-  BANK: 'entity-bank',
-  TAX_AUTHORITY: 'entity-tax-authority',
-  UTILITIES: 'entity-utilities',
-  RENT: 'entity-rent'
+  BANK: 'BANK',
+  TAX_AUTHORITY: 'TAX',
+  UTILITIES: 'UTILITIES',
+  RENT: 'RENT'
 } as const;
 
 /**
@@ -97,31 +98,45 @@ export function createSystemEntities(storeId: string): Omit<Entity, 'id' | 'crea
 }
 
 /**
- * Get system entity by type
+ * Get system entity code by type
+ * Returns the entity_code to query the entities table
  */
-export function getSystemEntityId(entityType: 'cash' | 'internal' | 'bank' | 'owner'): string {
+export function getSystemEntityCode(entityType: 'cash' | 'internal' | 'bank' | 'owner'): string {
   switch (entityType) {
     case 'cash':
-      return SYSTEM_ENTITY_IDS.CASH_CUSTOMER;
+      return SYSTEM_ENTITY_CODES.CASH_CUSTOMER;
     case 'internal':
-      return SYSTEM_ENTITY_IDS.INTERNAL;
+      return SYSTEM_ENTITY_CODES.INTERNAL;
     case 'bank':
-      return SYSTEM_ENTITY_IDS.BANK;
+      return SYSTEM_ENTITY_CODES.BANK;
     case 'owner':
-      return SYSTEM_ENTITY_IDS.OWNER;
+      return SYSTEM_ENTITY_CODES.OWNER;
     default:
       throw new Error(`Unknown system entity type: ${entityType}`);
   }
 }
 
 /**
- * Check if an entity ID is a system entity
+ * Check if an entity code represents a system entity
  */
-export function isSystemEntity(entityId: string): boolean {
-  return Object.values(SYSTEM_ENTITY_IDS).includes(entityId as any);
+export function isSystemEntityCode(entityCode: string): boolean {
+  return Object.values(SYSTEM_ENTITY_CODES).includes(entityCode as any);
 }
 
 /**
- * Default entity for cash transactions when no specific customer is provided
+ * Default entity code for cash transactions when no specific customer is provided
  */
-export const DEFAULT_CASH_ENTITY_ID = SYSTEM_ENTITY_IDS.CASH_CUSTOMER;
+export const DEFAULT_CASH_ENTITY_CODE = SYSTEM_ENTITY_CODES.CASH_CUSTOMER;
+
+/**
+ * Helper to get system entity by code and store
+ * @param storeId - The store ID
+ * @param entityCode - The entity code (e.g., 'CASH-CUST')
+ * @returns Promise<Entity | undefined>
+ */
+export async function getSystemEntity(db: any, storeId: string, entityCode: string) {
+  return db.entities
+    .where('[store_id+entity_code]')
+    .equals([storeId, entityCode])
+    .first();
+}

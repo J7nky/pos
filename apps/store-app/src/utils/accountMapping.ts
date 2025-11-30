@@ -2,7 +2,7 @@
 // Maps transaction categories to appropriate chart of accounts for journal entries
 
 import { TransactionCategory, TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
-import { SYSTEM_ENTITY_IDS } from '../constants/systemEntities';
+import { SYSTEM_ENTITY_CODES } from '../constants/systemEntities';
 
 /**
  * Account mapping for journal entries
@@ -13,7 +13,8 @@ export interface AccountMapping {
   creditAccount: string;
   description: string;
   requiresEntity: boolean;
-  defaultEntityId?: string;
+  /** Entity code (not ID) for default entity - will be looked up at runtime */
+  defaultEntityCode?: string;
 }
 
 /**
@@ -106,7 +107,7 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     creditAccount: '4100', // Sales Revenue (increases)
     description: 'Cash sale',
     requiresEntity: false,
-    defaultEntityId: SYSTEM_ENTITY_IDS.CASH_CUSTOMER
+    defaultEntityCode: SYSTEM_ENTITY_CODES.CASH_CUSTOMER
   },
   
   [TRANSACTION_CATEGORIES.CASH_DRAWER_PAYMENT]: {
@@ -114,7 +115,7 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     creditAccount: '1200', // Accounts Receivable (decreases)
     description: 'Cash payment received',
     requiresEntity: false,
-    defaultEntityId: SYSTEM_ENTITY_IDS.CASH_CUSTOMER
+    defaultEntityCode: SYSTEM_ENTITY_CODES.CASH_CUSTOMER
   },
   
   [TRANSACTION_CATEGORIES.CASH_DRAWER_REFUND]: {
@@ -122,7 +123,7 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     creditAccount: '1100', // Cash (decreases)
     description: 'Cash refund issued',
     requiresEntity: false,
-    defaultEntityId: SYSTEM_ENTITY_IDS.CASH_CUSTOMER
+    defaultEntityCode: SYSTEM_ENTITY_CODES.CASH_CUSTOMER
   },
   
   [TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE]: {
@@ -130,7 +131,7 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     creditAccount: '1100', // Cash (decreases)
     description: 'Cash expense',
     requiresEntity: false,
-    defaultEntityId: SYSTEM_ENTITY_IDS.INTERNAL
+    defaultEntityCode: SYSTEM_ENTITY_CODES.INTERNAL
   },
   
   // Employee Transactions
@@ -161,29 +162,30 @@ export function getAccountMapping(category: TransactionCategory): AccountMapping
 }
 
 /**
- * Get entity ID for transaction
- * Returns provided entityId or default entity based on transaction type
+ * Get entity code for transaction
+ * Returns provided entity code or default entity code based on transaction type
+ * Note: Caller must resolve entity code to actual entity ID using getSystemEntity()
  */
-export function getEntityIdForTransaction(
+export function getEntityCodeForTransaction(
   category: TransactionCategory,
-  providedEntityId?: string | null
+  providedEntityCode?: string | null
 ): string {
   const mapping = getAccountMapping(category);
   
-  if (providedEntityId) {
-    return providedEntityId;
+  if (providedEntityCode) {
+    return providedEntityCode;
   }
   
-  if (!mapping.requiresEntity && mapping.defaultEntityId) {
-    return mapping.defaultEntityId;
+  if (!mapping.requiresEntity && mapping.defaultEntityCode) {
+    return mapping.defaultEntityCode;
   }
   
   if (mapping.requiresEntity) {
-    throw new Error(`Transaction category ${category} requires an entity ID`);
+    throw new Error(`Transaction category ${category} requires an entity code`);
   }
   
   // Fallback to cash customer for transactions that don't require entity
-  return SYSTEM_ENTITY_IDS.CASH_CUSTOMER;
+  return SYSTEM_ENTITY_CODES.CASH_CUSTOMER;
 }
 
 /**
