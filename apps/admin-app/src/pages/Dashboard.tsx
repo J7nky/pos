@@ -28,7 +28,7 @@ export default function Dashboard() {
     active: 0,
     trial: 0,
     expired: 0,
-    byPlan: { basic: 0, premium: 0, enterprise: 0 },
+    byPlan: { starter: 0, professional: 0, premium: 0 },
     monthlyRevenue: 0,
   });
   const [recentStores, setRecentStores] = useState<StoreWithStats[]>([]);
@@ -145,28 +145,28 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-gray-400" />
-                <span className="text-sm text-gray-600">Basic</span>
+                <span className="text-sm text-gray-600">Starter</span>
               </div>
               <span className="text-sm font-medium text-gray-900">
-                {subscriptionStats.byPlan.basic}
+                {subscriptionStats.byPlan.starter}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-blue-500" />
-                <span className="text-sm text-gray-600">Premium</span>
+                <span className="text-sm text-gray-600">Professional</span>
               </div>
               <span className="text-sm font-medium text-gray-900">
-                {subscriptionStats.byPlan.premium}
+                {subscriptionStats.byPlan.professional}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-purple-500" />
-                <span className="text-sm text-gray-600">Enterprise</span>
+                <span className="text-sm text-gray-600">Premium</span>
               </div>
               <span className="text-sm font-medium text-gray-900">
-                {subscriptionStats.byPlan.enterprise}
+                {subscriptionStats.byPlan.premium}
               </span>
             </div>
             <hr className="my-4" />

@@ -26,7 +26,7 @@ export default function StoreForm({
     email: store?.email || '',
     preferred_currency: store?.preferred_currency || 'USD',
     preferred_language: store?.preferred_language || 'en',
-    preferred_commission_rate: store?.preferred_commission_rate?.toString() || '0',
+    preferred_commission_rate: store?.preferred_commission_rate?.toString() || '10',
     exchange_rate: store?.exchange_rate?.toString() || '89500',
     subscription_plan: 'premium' as SubscriptionPlan,
   });

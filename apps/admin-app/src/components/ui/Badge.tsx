@@ -61,11 +61,11 @@ export function getTierVariant(
   plan: string
 ): 'default' | 'success' | 'warning' | 'danger' | 'info' | 'purple' {
   switch (plan) {
-    case 'basic':
+    case 'starter':
       return 'default';
-    case 'premium':
+    case 'professional':
       return 'info';
-    case 'enterprise':
+    case 'premium':
       return 'purple';
     default:
       return 'default';

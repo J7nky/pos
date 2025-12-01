@@ -108,7 +108,7 @@ export async function canCreateUser(storeId: string): Promise<{
     .eq('store_id', storeId)
     .single();
 
-  const plan: SubscriptionPlan = subscription?.plan || 'basic';
+  const plan: SubscriptionPlan = subscription?.plan || 'starter';
   const limits = getSubscriptionLimits(plan);
   const limit = limits.users;
 
