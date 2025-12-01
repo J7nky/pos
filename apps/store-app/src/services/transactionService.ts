@@ -9,7 +9,6 @@ import { db } from '../lib/db';
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
 import { journalService } from './journalService';
-import { transactionService } from './transactionService';
 import { 
   TRANSACTION_CATEGORIES, 
   TransactionCategory, 
@@ -17,7 +16,7 @@ import {
   getTransactionType,
   isValidTransactionCategory 
 } from '../constants/transactionCategories';
-import { getAccountMapping, getEntityIdForTransaction, getJournalDescription } from '../utils/accountMapping';
+import { getAccountMapping, getEntityCodeForTransaction, getJournalDescription } from '../utils/accountMapping';
 import { 
   generatePaymentReference, 
   generateExpenseReference, 
@@ -1115,8 +1114,8 @@ export class TransactionService {
   private async createJournalEntriesForTransaction(transaction: Transaction): Promise<void> {
     try {
       // Get entity ID using account mapping utilities
-      const providedEntityId = transaction.customer_id || transaction.supplier_id || transaction.employee_id;
-      const entityId = getEntityIdForTransaction(transaction.category, providedEntityId);
+      const providedEntityCode = transaction.customer_id || transaction.supplier_id || transaction.employee_id;
+      const entityId = getEntityCodeForTransaction(transaction.category, providedEntityCode);
       
       // Get account mapping for this transaction category
       const accountMapping = getAccountMapping(transaction.category);

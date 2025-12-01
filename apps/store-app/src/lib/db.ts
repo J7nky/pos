@@ -1,6 +1,5 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
-import { Database } from '../types/database';
 import { generateBillReference } from '../utils/referenceGenerator';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
@@ -33,7 +32,6 @@ import {
   ChartOfAccounts 
 } from '../types/accounting';
 
-type Tables = Database['public']['Tables'];
 
 // Base interface for all entities with sync support
 interface BaseEntity {
@@ -955,8 +953,8 @@ class POSDatabase extends Dexie {
       bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, _synced, _deleted',
 
       // Cash drawer tables - account_code now references chart_of_accounts
-      // Added compound index [store_id+account_code] for FK relationship
-      cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], updated_at',
+      // Added compound indexes for FK relationships and queries
+      cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+branch_id], [store_id+account_code], updated_at',
       cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, created_at, updated_at',
       missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, _synced, _deleted',
       
@@ -1027,6 +1025,63 @@ class POSDatabase extends Dexie {
         console.error('   ❌ Error during migration v33:', error);
         // Don't throw - allow migration to complete even if validation fails
       }
+    });
+
+    // Migration for version 34 - Fix missing compound index for cash_drawer_accounts queries
+    this.version(34).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      branches: 'id, store_id, name, updated_at, _synced, _deleted',
+      
+      // Core tables
+      products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, branch_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, branch_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, _synced, _deleted',
+      transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, _synced, _deleted',
+      inventory_bills: 'id, store_id, branch_id, supplier_id, received_at, created_by, currency, _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, branch_id, bill_number, customer_id, bill_date, payment_method, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, branch_id, bill_id, product_id, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Cash drawer tables - FIXED: Added missing [store_id+branch_id] compound index
+      cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+branch_id], [store_id+account_code], updated_at',
+      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, created_at, updated_at',
+      missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification tables
+      notifications: 'id, store_id, branch_id, type, title, created_at, read_at, _synced, _deleted',
+      notification_preferences: 'id, store_id, branch_id, updated_at, _synced, _deleted',
+      
+      // Reminder system
+      reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
+      
+      // Employee attendance
+      employee_attendance: 'id, store_id, branch_id, user_id, date, check_in_time, check_out_time, created_at, updated_at, _synced, _deleted',
+      
+      // Accounting foundation tables
+      journal_entries: 'id, store_id, branch_id, transaction_date, created_at, _synced, _deleted',
+      balance_snapshots: 'id, store_id, branch_id, entity_id, snapshot_date, created_at, _synced, _deleted',
+      entities: 'id, store_id, branch_id, entity_type, name, updated_at, _synced, _deleted',
+      chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Subscription management tables
+      subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
+    }).upgrade(trans => {
+      console.log('🔧 Running migration v34: Fix cash_drawer_accounts compound index');
+      console.log('   ✅ Added missing [store_id+branch_id] compound index');
+      console.log('   📢 This fixes Dexie SchemaError for cash drawer queries');
+      // No data migration needed - just index schema fix
     });
 
     // Migration for version 5 - update existing records to match new schema
@@ -2253,6 +2308,7 @@ class POSDatabase extends Dexie {
             await this.bill_audit_logs.add({
               id: uuidv4(),
               store_id: originalItem.store_id,
+              branch_id: originalItem.branch_id,
               created_at: now,
               updated_at: now,
               _synced: false,
@@ -2302,6 +2358,7 @@ class POSDatabase extends Dexie {
       await this.bill_audit_logs.add({
         id: uuidv4(),
         store_id: lineItem.store_id,
+        branch_id: lineItem.branch_id,
         created_at: now,
         updated_at: now,
         _synced: false,

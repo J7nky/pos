@@ -103,6 +103,7 @@ export class CashDrawerUpdateService {
           error: `Cash drawer session already open (opened by ${existingSession.opened_by} at ${new Date(existingSession.opened_at).toLocaleString()})`
         };
       }
+      console.log("storeId 675443");
 
       // Get cash drawer account (no auto-create)
       const account = await this.getOrCreateCashDrawerAccount(storeId, branchId);
@@ -227,6 +228,7 @@ export class CashDrawerUpdateService {
           storeCurrency
         );
 
+      console.log("storeId 675443:::");
         // Get cash drawer account (no auto-create)
         const account = await this.getOrCreateCashDrawerAccount(transactionData.storeId, transactionData.branchId, storeCurrency);
         if (!account) {
@@ -520,6 +522,8 @@ export class CashDrawerUpdateService {
    */
   public async getCurrentCashDrawerBalance(storeId: string, branchId: string): Promise<number> {
     try {
+     
+
       // Use the centralized method to get or create account
       const account = await this.getOrCreateCashDrawerAccount(storeId, branchId);
       if (!account) {
@@ -730,6 +734,9 @@ export class CashDrawerUpdateService {
    */
   private async getOrCreateCashDrawerAccount(storeId: string, branchId: string, storeCurrency?: 'USD' | 'LBP') {
     try {
+      console.log("storeId 675443:", storeId);
+console.log("branchId 675443:", branchId);
+
       const account = await db.getCashDrawerAccount(storeId, branchId);
       if (!account) {
         console.warn(`❌ No cash drawer account exists for store ${storeId}`);

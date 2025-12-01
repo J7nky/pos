@@ -48,6 +48,7 @@ const TABLES_WITH_UPDATED_AT = [
   'bill_audit_logs',
   'missed_products',
   'reminders',
+  'branches',
   // NEW: Accounting foundation tables with updated_at
   'entities'
 ] as const;
@@ -65,6 +66,7 @@ const TABLES_WITH_CREATED_AT_ONLY = [
 // Table sync order (respects foreign key dependencies)
 const SYNC_TABLES = [
   'stores',
+  'branches',
   'products',
   'suppliers',
   'customers',
@@ -91,6 +93,7 @@ type SyncTable = typeof SYNC_TABLES[number];
 const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'products': [],
   'stores': [],
+  'branches': ['stores'], // Branches belong to stores
   'suppliers': [],
   'customers': [],
   'users': ['stores'],
@@ -876,6 +879,13 @@ export class SyncService {
         const table = (db as any)[tableName];
         const localRecordCount = await table.filter((record: any) => !record._deleted).count();
         const shouldDoFullSync = isFirstSync || localRecordCount === 0;
+        
+        // Add debug logging for branches
+        if (tableName === 'branches') {
+          console.log(`🔍 Branch debug: localRecordCount=${localRecordCount}, isFirstSync=${isFirstSync}, shouldDoFullSync=${shouldDoFullSync}`);
+          const localBranches = await table.filter((record: any) => !record._deleted).toArray();
+          console.log(`🔍 Local branches:`, localBranches.map(b => ({ id: b.id, name: b.name, store_id: b.store_id, _synced: b._synced })));
+        }
 
         // Special handling for products: always include global products even in incremental syncs
         // Global products might not have been updated recently, so we need to fetch them separately
@@ -1010,6 +1020,20 @@ export class SyncService {
             const allRemoteQuery = supabase.from('inventory_items').select('id, store_id, created_at').eq('store_id', storeId).limit(5);
             const { data: sampleRecords } = await allRemoteQuery;
             console.log(`🔍 Diagnostic: Found ${sampleRecords?.length || 0} total inventory_items in Supabase for this store (sample check)`);
+          }
+          
+          // For branches specifically, log diagnostic info
+          if (tableName === 'branches') {
+            const allRemoteQuery = supabase.from('branches').select('id, store_id, name, created_at').eq('store_id', storeId).limit(5);
+            const { data: sampleRecords } = await allRemoteQuery;
+            console.log(`🔍 Diagnostic: Found ${sampleRecords?.length || 0} total branches in Supabase for this store (sample check)`);
+            if (sampleRecords && sampleRecords.length > 0) {
+              console.log(`🔍 Branch sample:`, sampleRecords[0]);
+            }
+            
+            // Also check if there are any branches at all (without store filter)
+            const { data: allBranches } = await supabase.from('branches').select('id, store_id, name').limit(5);
+            console.log(`🔍 Diagnostic: Found ${allBranches?.length || 0} total branches in Supabase (all stores)`);
           }
           continue;
         }

@@ -1,7 +1,7 @@
 // User Service - Admin App
 // Handles store user management via Supabase
 
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseAdmin } from '../lib/supabase';
 import {
   StoreUser,
   CreateUserInput,
@@ -161,7 +161,7 @@ export async function createUser(input: CreateUserInput): Promise<StoreUser> {
   }
 
   // Create user in Supabase Auth
-  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: input.email,
     password: input.password,
     email_confirm: true,
@@ -192,7 +192,7 @@ export async function createUser(input: CreateUserInput): Promise<StoreUser> {
 
   if (error) {
     // Rollback: delete auth user if users table insert fails
-    await supabase.auth.admin.deleteUser(authData.user.id);
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
     console.error('Error creating user:', error);
     throw new Error(`Failed to create user: ${error.message}`);
   }
@@ -274,7 +274,7 @@ export async function deleteUser(userId: string): Promise<void> {
   }
 
   // Delete from Supabase Auth
-  const { error: authError } = await supabase.auth.admin.deleteUser(userId);
+  const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
 
   if (authError) {
     console.error('Error deleting auth user:', authError);
@@ -286,7 +286,7 @@ export async function deleteUser(userId: string): Promise<void> {
  * Reset user password
  */
 export async function resetUserPassword(userId: string, newPassword: string): Promise<void> {
-  const { error } = await supabase.auth.admin.updateUserById(userId, {
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
     password: newPassword,
   });
 

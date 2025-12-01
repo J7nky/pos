@@ -30,7 +30,8 @@ export default function CashDrawerMonitor() {
     
     setIsLoading(true);
     try {
-      const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(raw.storeId);
+      console.log('branch 675443',raw.currentBranchId)
+      const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(raw.storeId,raw.currentBranchId as string );
       const history = await cashDrawerUpdateService.getCashDrawerTransactionHistory(raw.storeId);
       console.log('💰 Balance:', balance);
       setCashDrawerStatus({

@@ -35,6 +35,7 @@ export async function getDefaultBranchId(storeId: string): Promise<string | null
     .equals(storeId)
     .and(b => !b._deleted)
     .first();
+  console.log('store 675443 ',db.branches.toArray())
   
   return branch?.id || null;
 }
