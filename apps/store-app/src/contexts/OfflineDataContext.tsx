@@ -476,7 +476,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (storeId && !currentBranchId) {
         try {
           const branchId = await ensureDefaultBranch(storeId);
-          console.log('branch 675443',branchId)
+          console.log("Branch Id Value: ",branchId)
           setCurrentBranchId(branchId);
           console.log('✅ Auto-initialized branch for store:', branchId);
         } catch (error) {
