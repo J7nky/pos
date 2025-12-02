@@ -26,12 +26,12 @@ export default function CashDrawerMonitor() {
   const [range, setRange] = useState<'today' | 'week'>('today');
 
   const loadCashDrawerStatus = async () => {
-    if (!raw.storeId) return;
+    if (!raw.storeId || !raw.currentBranchId) return;
     
     setIsLoading(true);
     try {
       console.log('branch 675443',raw.currentBranchId)
-      const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(raw.storeId,raw.currentBranchId as string );
+      const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(raw.storeId, raw.currentBranchId);
       const history = await cashDrawerUpdateService.getCashDrawerTransactionHistory(raw.storeId);
       console.log('💰 Balance:', balance);
       setCashDrawerStatus({
@@ -49,11 +49,13 @@ export default function CashDrawerMonitor() {
   };
 
   useEffect(() => {
+    if (!raw.storeId || !raw.currentBranchId) return;
+    
     loadCashDrawerStatus();
 
     // Live updates from cash drawer events (local changes)
     const handleCashDrawerUpdated = (e: any) => {
-      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
+      if (!raw.storeId || !raw.currentBranchId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
       loadCashDrawerStatus();
     };
 
@@ -62,28 +64,32 @@ export default function CashDrawerMonitor() {
     }
 
     // Refresh every 30 seconds (fallback)
-    const interval = setInterval(loadCashDrawerStatus, 30000);
+    const interval = setInterval(() => {
+      if (raw.storeId && raw.currentBranchId) {
+        loadCashDrawerStatus();
+      }
+    }, 30000);
     return () => {
       clearInterval(interval);
       if (typeof window !== 'undefined') {
         window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
       }
     };
-  }, [raw.storeId]);
+  }, [raw.storeId, raw.currentBranchId]);
 
   // Re-fetch after initial sync completes
   useEffect(() => {
-    if (!raw.storeId) return;
+    if (!raw.storeId || !raw.currentBranchId) return;
     if (!raw.loading?.sync) {
       loadCashDrawerStatus();
     }
-  }, [raw.storeId, raw.loading?.sync]);
+  }, [raw.storeId, raw.currentBranchId, raw.loading?.sync]);
 
   // Re-fetch when transactions change (e.g., after sync downloads new ones)
   useEffect(() => {
-    if (!raw.storeId) return;
+    if (!raw.storeId || !raw.currentBranchId) return;
     loadCashDrawerStatus();
-  }, [raw.storeId, raw.transactions?.length]);
+  }, [raw.storeId, raw.currentBranchId, raw.transactions?.length]);
 
   const filteredTransactions = (() => {
     if (!Array.isArray(transactionHistory)) return [];

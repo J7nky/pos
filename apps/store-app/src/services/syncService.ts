@@ -1042,11 +1042,19 @@ export class SyncService {
 
         for (const remoteRecord of remoteRecords) {
           try {
+            // Validate that record has required id field
+            if (!remoteRecord || !remoteRecord.id || typeof remoteRecord.id !== 'string') {
+              console.warn(`⚠️ Skipping record in ${tableName} - missing or invalid id:`, remoteRecord);
+              result.errors.push(`Record in ${tableName} missing or invalid id`);
+              continue;
+            }
+
             const localRecord = await (db as any)[tableName].get(remoteRecord.id);
 
-            // Normalize is_global field: convert any truthy value to 1, any falsy to 0 for Dexie compatibility
-            // Supabase returns boolean, but Dexie stores it as 0/1
+            // Normalize fields for Dexie compatibility
             const normalizedRecord = { ...remoteRecord };
+            
+            // Normalize is_global for products: convert boolean to 0/1 for Dexie
             if (tableName === 'products' && normalizedRecord.is_global !== undefined && normalizedRecord.is_global !== null) {
               // Handle boolean, string, or number values
               const isGlobal = normalizedRecord.is_global === true || 
@@ -1057,6 +1065,24 @@ export class SyncService {
             } else if (tableName === 'products') {
               // Default to 0 if undefined or null
               normalizedRecord.is_global = 0;
+            }
+            
+            // Normalize is_deleted for stores: convert to _deleted for IndexedDB
+            if (tableName === 'stores' && normalizedRecord.is_deleted !== undefined) {
+              normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
+              // Remove Supabase-specific fields that aren't in IndexedDB schema
+              delete normalizedRecord.is_deleted;
+              delete normalizedRecord.deleted_at;
+              delete normalizedRecord.deleted_by;
+            }
+            
+            // Normalize is_deleted for branches: convert to _deleted for IndexedDB
+            if (tableName === 'branches' && normalizedRecord.is_deleted !== undefined) {
+              normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
+              // Remove Supabase-specific fields that aren't in IndexedDB schema
+              delete normalizedRecord.is_deleted;
+              delete normalizedRecord.deleted_at;
+              delete normalizedRecord.deleted_by;
             }
 
             if (!localRecord) {
@@ -1075,7 +1101,8 @@ export class SyncService {
               }
             }
           } catch (error) {
-            result.errors.push(`Record process error ${tableName}/${remoteRecord.id}: ${error}`);
+            const recordId = remoteRecord?.id || 'unknown';
+            result.errors.push(`Record process error ${tableName}/${recordId}: ${error}`);
           }
         }
 

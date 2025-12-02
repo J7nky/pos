@@ -133,12 +133,19 @@ export class NotificationService {
    * Get notification preferences
    */
   async getPreferences(storeId: string): Promise<NotificationPreferences> {
-    const prefs = await db.notification_preferences.get(storeId);
+    // Query by store_id since the table uses id as primary key
+    const prefs = await db.notification_preferences
+      .where('store_id')
+      .equals(storeId)
+      .and(p => !p._deleted)
+      .first();
     
     if (!prefs) {
-      // Default preferences
-      const defaults: NotificationPreferences = {
+      // Default preferences - must include id for database primary key
+      const defaults = {
+        id: createId(),
         store_id: storeId,
+        branch_id: '', // Will be set when branch is available
         enabled: true,
         enabled_types: [
           'low_stock',
@@ -154,13 +161,33 @@ export class NotificationService {
         sound_enabled: false,
         show_in_app: true,
         max_notifications_in_history: 1000,
+        updated_at: new Date().toISOString(),
+        _synced: false,
+        _deleted: false,
       };
       
       await db.notification_preferences.add(defaults);
-      return defaults;
+      // Return only the NotificationPreferences fields (without id and sync fields)
+      return {
+        store_id: defaults.store_id,
+        enabled: defaults.enabled,
+        enabled_types: defaults.enabled_types,
+        sound_enabled: defaults.sound_enabled,
+        show_in_app: defaults.show_in_app,
+        max_notifications_in_history: defaults.max_notifications_in_history,
+      };
     }
     
-    return prefs;
+    // Return only the NotificationPreferences fields (without id and sync fields)
+    return {
+      store_id: prefs.store_id,
+      enabled: prefs.enabled,
+      enabled_types: prefs.enabled_types,
+      sound_enabled: prefs.sound_enabled,
+      show_in_app: prefs.show_in_app,
+      max_notifications_in_history: prefs.max_notifications_in_history,
+      auto_dismiss_seconds: (prefs as any).auto_dismiss_seconds,
+    };
   }
 
   /**

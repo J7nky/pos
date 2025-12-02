@@ -284,28 +284,57 @@ export class DownloadOptimizationService {
 
     try {
       // Prepare records with sync metadata
-      const recordsWithSync = records.map(record => {
-        const normalized = { ...record };
+      const recordsWithSync = records
+        .filter(record => {
+          // Validate that record has required id field
+          if (!record || !record.id || typeof record.id !== 'string') {
+            console.warn(`⚠️ Skipping record in ${tableName} - missing or invalid id:`, record);
+            return false;
+          }
+          return true;
+        })
+        .map(record => {
+          const normalized = { ...record };
 
-        // Normalize is_global for products
-        if (tableName === 'products' && normalized.is_global !== undefined) {
-          normalized.is_global = normalized.is_global === true || normalized.is_global === 1 ? 1 : 0;
-        }
+          // Normalize is_global for products
+          if (tableName === 'products' && normalized.is_global !== undefined) {
+            normalized.is_global = normalized.is_global === true || normalized.is_global === 1 ? 1 : 0;
+          }
+          
+          // Normalize is_deleted for stores: convert to _deleted for IndexedDB
+          if (tableName === 'stores' && normalized.is_deleted !== undefined) {
+            normalized._deleted = normalized.is_deleted === true || normalized.is_deleted === 1;
+            delete normalized.is_deleted;
+            delete normalized.deleted_at;
+            delete normalized.deleted_by;
+          }
+          
+          // Normalize is_deleted for branches: convert to _deleted for IndexedDB
+          if (tableName === 'branches' && normalized.is_deleted !== undefined) {
+            normalized._deleted = normalized.is_deleted === true || normalized.is_deleted === 1;
+            delete normalized.is_deleted;
+            delete normalized.deleted_at;
+            delete normalized.deleted_by;
+          }
 
-        return {
-          ...normalized,
-          _synced: true,
-          _lastSyncedAt: new Date().toISOString(),
-        };
-      });
+          return {
+            ...normalized,
+            _synced: true,
+            _lastSyncedAt: new Date().toISOString(),
+          };
+        });
 
       // Bulk insert using single transaction
       await (db as any)[tableName].bulkPut(recordsWithSync);
 
       const duration = performance.now() - startTime;
-      console.log(`✅ Inserted ${records.length} ${tableName} records in ${duration.toFixed(0)}ms`);
+      const skippedCount = records.length - recordsWithSync.length;
+      if (skippedCount > 0) {
+        console.warn(`⚠️ Skipped ${skippedCount} invalid records in ${tableName} (missing id)`);
+      }
+      console.log(`✅ Inserted ${recordsWithSync.length} ${tableName} records in ${duration.toFixed(0)}ms`);
 
-      return { inserted: records.length };
+      return { inserted: recordsWithSync.length };
     } catch (error) {
       console.error(`❌ Failed to insert ${tableName} records:`, error);
       return { inserted: 0, error: String(error) };

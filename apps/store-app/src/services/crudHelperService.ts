@@ -46,10 +46,24 @@ export class CRUDHelperService {
     // Clean entity data - convert empty strings to null for numeric fields
     const cleanedEntityData = this.cleanEntityData(entityData);
     
+    // Create base entity with guaranteed ID
+    const baseEntity = createBaseEntity(storeId);
+    
+    // Ensure ID is valid - use base entity ID if cleaned data has invalid ID
+    const finalId = (cleanedEntityData.id && typeof cleanedEntityData.id === 'string' && cleanedEntityData.id.trim() !== '')
+      ? cleanedEntityData.id
+      : baseEntity.id;
+    
     const entity = {
-      ...createBaseEntity(storeId),
-      ...cleanedEntityData
+      ...baseEntity,
+      ...cleanedEntityData,
+      id: finalId // Ensure ID is always valid
     };
+
+    // Final validation before adding
+    if (!entity.id || typeof entity.id !== 'string' || entity.id.trim() === '') {
+      throw new Error(`Cannot add ${tableName} entity: invalid or missing id field`);
+    }
 
     console.log(`🔧 CRUDHelper: Adding ${tableName} entity:`, entity);
     await (db as any)[tableName].add(entity);

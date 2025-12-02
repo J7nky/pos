@@ -512,7 +512,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   } catch (error) {
     console.error('Error refreshing cash drawer status:', error);
   }
-}, [storeId, currency]);
+}, [storeId, currentBranchId, currency]);
   const refreshData = useCallback(async () => {
     if (!storeId) return;
 
@@ -641,12 +641,57 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Clean up expired notifications
       await notificationService.deleteExpiredNotifications(storeId);
 
+      // Check if we should switch to a synced branch from Supabase
+      if (currentBranchId) {
+        const currentBranch = await db.branches.get(currentBranchId);
+        if (currentBranch && !currentBranch._synced) {
+          // Current branch is local-only, check for synced branch
+          const syncedBranch = await db.branches
+            .where('store_id')
+            .equals(storeId)
+            .and(b => !b._deleted && b._synced === true)
+            .first();
+          
+          if (syncedBranch && syncedBranch.id !== currentBranchId) {
+            console.log(`🔄 Switching from local branch ${currentBranchId.substring(0, 8)}... to synced branch ${syncedBranch.id.substring(0, 8)}...`);
+            setCurrentBranchId(syncedBranch.id);
+          }
+        }
+      }
+
       debug('✅ Data refresh completed successfully');
 
     } catch (error) {
       console.error('❌ Error loading data from Dexie:', error);
     }
   }, [storeId, currentBranchId, refreshCashDrawerStatus]);
+
+  // Update to synced branch when it becomes available (after sync completes)
+  useEffect(() => {
+    const checkForSyncedBranch = async () => {
+      if (!storeId || !currentBranchId) return;
+      
+      // Check if current branch is local-only (not synced)
+      const currentBranch = await db.branches.get(currentBranchId);
+      if (currentBranch && !currentBranch._synced) {
+        // Look for a synced branch from Supabase
+        const syncedBranch = await db.branches
+          .where('store_id')
+          .equals(storeId)
+          .and(b => !b._deleted && b._synced === true)
+          .first();
+        
+        if (syncedBranch && syncedBranch.id !== currentBranchId) {
+          console.log(`🔄 Switching from local branch ${currentBranchId} to synced branch ${syncedBranch.id}`);
+          setCurrentBranchId(syncedBranch.id);
+        }
+      }
+    };
+    
+    // Check after data refresh (when sync might have completed)
+    const timeoutId = setTimeout(checkForSyncedBranch, 2000);
+    return () => clearTimeout(timeoutId);
+  }, [storeId, currentBranchId, refreshData]);
 
   // Setup real-time update listeners (separate effect to avoid refreshData dependency issue)
   useEffect(() => {

@@ -250,6 +250,8 @@ export class CashDrawerUpdateService {
     return PerformanceMonitor.withTracking(
       'cashDrawer:calculateBalance',
       async () => {
+    console.log("verify open session",branchId,storeId)
+
         try {
           // Get the current active session
           const currentSession = await db.getCurrentCashDrawerSession(storeId, branchId);
@@ -359,6 +361,12 @@ export class CashDrawerUpdateService {
    * Returns null if none exists.
    */
   private async getCashDrawerAccount(storeId: string, branchId: string) {
+    // Validate inputs before making database call
+    if (!storeId || !branchId) {
+      console.warn(`⚠️ Invalid parameters for getCashDrawerAccount: storeId=${storeId}, branchId=${branchId}`);
+      return null;
+    }
+    
     try {
       const account = await db.getCashDrawerAccount(storeId, branchId);
       if (!account) {

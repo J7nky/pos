@@ -912,7 +912,7 @@ class POSDatabase extends Dexie {
       reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
       
       // Employee attendance
-      employee_attendance: 'id, store_id, branch_id, user_id, date, check_in_time, check_out_time, created_at, updated_at, _synced, _deleted',
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
       
       // Accounting foundation tables
       journal_entries: 'id, store_id, branch_id, transaction_date, created_at, _synced, _deleted',
@@ -955,7 +955,7 @@ class POSDatabase extends Dexie {
       // Cash drawer tables - account_code now references chart_of_accounts
       // Added compound indexes for FK relationships and queries
       cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+branch_id], [store_id+account_code], updated_at',
-      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, created_at, updated_at',
+      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, [store_id+branch_id], created_at, updated_at',
       missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, _synced, _deleted',
       
       // Notification tables
@@ -966,7 +966,7 @@ class POSDatabase extends Dexie {
       reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
       
       // Employee attendance
-      employee_attendance: 'id, store_id, branch_id, user_id, date, check_in_time, check_out_time, created_at, updated_at, _synced, _deleted',
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
       
       // Accounting foundation tables - chart_of_accounts has compound index for FK
       journal_entries: 'id, store_id, branch_id, transaction_date, created_at, _synced, _deleted',
@@ -1051,7 +1051,7 @@ class POSDatabase extends Dexie {
 
       // Cash drawer tables - FIXED: Added missing [store_id+branch_id] compound index
       cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+branch_id], [store_id+account_code], updated_at',
-      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, created_at, updated_at',
+      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, [store_id+branch_id], created_at, updated_at',
       missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, _synced, _deleted',
       
       // Notification tables
@@ -1062,7 +1062,7 @@ class POSDatabase extends Dexie {
       reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
       
       // Employee attendance
-      employee_attendance: 'id, store_id, branch_id, user_id, date, check_in_time, check_out_time, created_at, updated_at, _synced, _deleted',
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
       
       // Accounting foundation tables
       journal_entries: 'id, store_id, branch_id, transaction_date, created_at, _synced, _deleted',
@@ -1081,6 +1081,130 @@ class POSDatabase extends Dexie {
       console.log('🔧 Running migration v34: Fix cash_drawer_accounts compound index');
       console.log('   ✅ Added missing [store_id+branch_id] compound index');
       console.log('   📢 This fixes Dexie SchemaError for cash drawer queries');
+      // No data migration needed - just index schema fix
+    });
+
+    // Version 35 - Add missing [store_id+branch_id] compound index to cash_drawer_sessions
+    this.version(35).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      branches: 'id, store_id, name, updated_at, _synced, _deleted',
+      
+      // Core tables
+      products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, branch_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, branch_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, _synced, _deleted',
+      transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, _synced, _deleted',
+      inventory_bills: 'id, store_id, branch_id, supplier_id, received_at, created_by, currency, _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, branch_id, bill_number, customer_id, bill_date, payment_method, payment_status, status, created_by, created_at, _synced, _deleted',
+      bill_line_items: 'id, store_id, branch_id, bill_id, product_id, created_at, line_order, inventory_item_id, _synced, _deleted',
+      bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, _synced, _deleted',
+
+      // Cash drawer tables - FIXED: Added [store_id+branch_id] compound index to cash_drawer_sessions
+      cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+branch_id], [store_id+account_code], updated_at',
+      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, [store_id+branch_id], created_at, updated_at',
+      missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, _synced, _deleted',
+      
+      // Notification tables
+      notifications: 'id, store_id, branch_id, type, title, created_at, read_at, _synced, _deleted',
+      notification_preferences: 'id, store_id, branch_id, updated_at, _synced, _deleted',
+      
+      // Reminder system
+      reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
+      
+      // Employee attendance
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
+      
+      // Accounting foundation tables
+      journal_entries: 'id, store_id, branch_id, transaction_date, created_at, _synced, _deleted',
+      balance_snapshots: 'id, store_id, branch_id, entity_id, snapshot_date, created_at, _synced, _deleted',
+      entities: 'id, store_id, branch_id, entity_type, name, updated_at, _synced, _deleted',
+      chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Subscription management tables
+      subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
+    }).upgrade(trans => {
+      console.log('🔧 Running migration v35: Add [store_id+branch_id] compound index to cash_drawer_sessions');
+      console.log('   ✅ Added missing compound index to fix Dexie SchemaError');
+      console.log('   📢 This fixes "KeyPath [store_id+branch_id] on object store cash_drawer_sessions is not indexed" error');
+      // No data migration needed - just index schema fix
+    });
+
+    // Version 36 - Add missing [store_id+branch_id] compound indexes to all branch-scoped tables
+    this.version(36).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      branches: 'id, store_id, name, updated_at, _synced, _deleted',
+      
+      // Core tables
+      products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, branch_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, branch_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables - FIXED: Added [store_id+branch_id] compound index
+      inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, [store_id+branch_id], _synced, _deleted',
+      transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, [store_id+branch_id], _synced, _deleted',
+      inventory_bills: 'id, store_id, branch_id, supplier_id, received_at, created_by, currency, [store_id+branch_id], _synced, _deleted',
+  
+      // Bill management tables - FIXED: Added [store_id+branch_id] compound index
+      bills: 'id, store_id, branch_id, bill_number, customer_id, bill_date, payment_method, payment_status, status, created_by, created_at, [store_id+branch_id], _synced, _deleted',
+      bill_line_items: 'id, store_id, branch_id, bill_id, product_id, created_at, line_order, inventory_item_id, [store_id+branch_id], _synced, _deleted',
+      bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, [store_id+branch_id], _synced, _deleted',
+
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+branch_id], [store_id+account_code], updated_at',
+      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, [store_id+branch_id], created_at, updated_at',
+      missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, [store_id+branch_id], _synced, _deleted',
+      
+      // Notification tables
+      notifications: 'id, store_id, branch_id, type, title, created_at, read_at, _synced, _deleted',
+      notification_preferences: 'id, store_id, branch_id, updated_at, _synced, _deleted',
+      
+      // Reminder system
+      reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
+      
+      // Employee attendance
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
+      
+      // Accounting foundation tables - FIXED: Added [store_id+branch_id] compound index
+      journal_entries: 'id, store_id, branch_id, transaction_date, created_at, [store_id+branch_id], _synced, _deleted',
+      balance_snapshots: 'id, store_id, branch_id, entity_id, snapshot_date, created_at, [store_id+branch_id], _synced, _deleted',
+      entities: 'id, store_id, branch_id, entity_type, name, updated_at, [store_id+branch_id], _synced, _deleted',
+      chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Subscription management tables
+      subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
+    }).upgrade(trans => {
+      console.log('🔧 Running migration v36: Add [store_id+branch_id] compound indexes to branch-scoped tables');
+      console.log('   ✅ Added missing compound indexes to:');
+      console.log('      - inventory_items');
+      console.log('      - transactions');
+      console.log('      - inventory_bills');
+      console.log('      - bills');
+      console.log('      - bill_line_items');
+      console.log('      - bill_audit_logs');
+      console.log('      - missed_products');
+      console.log('      - journal_entries');
+      console.log('      - balance_snapshots');
+      console.log('      - entities');
+      console.log('   📢 This fixes Dexie SchemaError for getEntitiesByStoreBranch queries');
       // No data migration needed - just index schema fix
     });
 
@@ -1284,6 +1408,12 @@ class POSDatabase extends Dexie {
 
   async getCashDrawerAccount(storeId: string, branchId: string): Promise<CashDrawerAccount | null> {
     return this.withDb(async () => {
+      // Validate inputs to prevent IDBKeyRange errors
+      if (!storeId || !branchId || typeof storeId !== 'string' || typeof branchId !== 'string') {
+        console.error('Invalid storeId or branchId:', { storeId, branchId });
+        return null;
+      }
+      
       // Prefer an explicitly active account; treat undefined as active to support older records
       let account = await this.cash_drawer_accounts
         .where(['store_id', 'branch_id'])
@@ -1312,6 +1442,12 @@ class POSDatabase extends Dexie {
 
   async getCurrentCashDrawerSession(storeId: string, branchId: string): Promise<CashDrawerSession | null> {
     return this.withDb(async () => {
+      // Validate inputs to prevent IDBKeyRange errors
+      if (!storeId || !branchId || typeof storeId !== 'string' || typeof branchId !== 'string') {
+        console.error('Invalid storeId or branchId:', { storeId, branchId });
+        return null;
+      }
+      
       // Fetch all sessions for the store and branch
       const all = await this.cash_drawer_sessions
         .where(['store_id', 'branch_id'])
@@ -2416,12 +2552,17 @@ export const createId = () => uuidv4();
 
 export const createBaseEntity = (storeId: string, data: Partial<BaseEntity> = {}): Partial<BaseEntity> => {
   const now = new Date().toISOString();
+  // Ensure ID is always valid - use provided ID only if it's valid, otherwise generate one
+  const providedId = data.id && typeof data.id === 'string' && data.id.trim() !== '' ? data.id : null;
+  const finalId = providedId || createId();
+  
   return {
-    id: createId(),
+    id: finalId,
     store_id: storeId,
     created_at: now,
     updated_at: now,
     _synced: false,
-    ...data
+    ...data,
+    id: finalId // Ensure ID is always set correctly
   };
 };
