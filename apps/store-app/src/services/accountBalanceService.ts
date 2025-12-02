@@ -1,6 +1,10 @@
 import { db } from '../lib/db';
 import { Customer, Supplier, Transaction, LocalSaleItem } from '../lib/db';
 import { transactionService } from './transactionService';
+import { BalanceCalculator } from '../utils/balanceCalculator';
+import { QueryHelpers, DateFilters } from '../utils/queryHelpers';
+import { CacheManager, CacheKeys } from '../utils/cacheManager';
+import { PerformanceMonitor } from '../utils/performanceMonitor';
 
 export interface RunningBalance {
   USD: number;
@@ -27,14 +31,7 @@ export interface BalanceCalculationResult {
  * Fast access: cached balances in customer/supplier tables
  */
 export class AccountBalanceService {
-  private static instance: AccountBalanceService;
-
-  public static getInstance(): AccountBalanceService {
-    if (!AccountBalanceService.instance) {
-      AccountBalanceService.instance = new AccountBalanceService();
-    }
-    return AccountBalanceService.instance;
-  }
+  // Simplified from singleton pattern - this service is stateless
 
   /**
    * Get account balance - uses cached balance with optional verification
@@ -124,70 +121,89 @@ export class AccountBalanceService {
   /**
    * Calculate running balance from transactions - AUTHORITATIVE SOURCE
    * This is the single source of truth for account balances
+   * 🚀 CACHED for 5 seconds to improve performance
    */
   public async calculateBalanceFromTransactions(
     entityType: 'customer' | 'supplier',
     entityId: string,
     dateRange?: { start: string; end?: string }
   ): Promise<{ currentBalance: RunningBalance; openingBalance: RunningBalance }> {
-    try {
-      const now = new Date().toISOString();
-      const startDate = dateRange?.start || new Date(2020, 0, 1).toISOString(); // Default to beginning of system
-      const endDate = dateRange?.end || now;
-
-      // Initialize balances
-      let runningBalanceUSD = 0;
-      let runningBalanceLBP = 0;
-      let openingBalanceUSD = 0;
-      let openingBalanceLBP = 0;
-      let transactionCount = 0;
-      let lastTransactionDate = startDate;
-
-      // Get all relevant transactions and sales
-      const [transactions, sales] = await Promise.all([
-        this.getEntityTransactions(entityType, entityId, startDate, endDate),
-        this.getEntitySales(entityType, entityId, startDate, endDate)
-      ]);
-
-      // Calculate opening balance (transactions before start date)
-      if (dateRange?.start) {
-        const openingTransactions = await this.getEntityTransactions(entityType, entityId, undefined, startDate);
-        const openingSales = await this.getEntitySales(entityType, entityId, undefined, startDate);
+    return PerformanceMonitor.withTracking(
+      `balance:calculate:${entityType}`,
+      async () => {
+        const cacheKey = CacheKeys.entity(
+          `balance_${entityType}`, 
+          `${entityId}_${dateRange?.start || 'all'}_${dateRange?.end || 'now'}`
+        );
         
-        const openingResult = this.processTransactionsAndSales(entityType, openingTransactions, openingSales);
-        openingBalanceUSD = openingResult.usdBalance;
-        openingBalanceLBP = openingResult.lbpBalance;
-      }
+        return CacheManager.withCache(
+          cacheKey,
+          CacheManager.TTL.MEDIUM, // 5 seconds
+          async () => {
+            try {
+              const now = new Date().toISOString();
+              const startDate = dateRange?.start || new Date(2020, 0, 1).toISOString(); // Default to beginning of system
+              const endDate = dateRange?.end || now;
 
-      // Process transactions and sales for the period
-      const periodResult = this.processTransactionsAndSales(entityType, transactions, sales);
-      runningBalanceUSD = openingBalanceUSD + periodResult.usdBalance;
-      runningBalanceLBP = openingBalanceLBP + periodResult.lbpBalance;
-      transactionCount = periodResult.transactionCount;
-      lastTransactionDate = periodResult.lastTransactionDate || lastTransactionDate;
+              // Initialize balances
+              let runningBalanceUSD = 0;
+              let runningBalanceLBP = 0;
+              let openingBalanceUSD = 0;
+              let openingBalanceLBP = 0;
+              let transactionCount = 0;
+              let lastTransactionDate = startDate;
 
-      return {
-        currentBalance: {
-          USD: runningBalanceUSD,
-          LBP: runningBalanceLBP,
-          lastTransactionDate,
-          transactionCount
-        },
-        openingBalance: {
-          USD: openingBalanceUSD,
-          LBP: openingBalanceLBP,
-          lastTransactionDate: startDate,
-          transactionCount: 0
-        }
-      };
-    } catch (error) {
-      console.error(`Error calculating balance from transactions:`, error);
-      throw error;
-    }
+              // Get all relevant transactions and sales
+              const [transactions, sales] = await Promise.all([
+                this.getEntityTransactions(entityType, entityId, startDate, endDate),
+                this.getEntitySales(entityType, entityId, startDate, endDate)
+              ]);
+
+              // Calculate opening balance (transactions before start date)
+              if (dateRange?.start) {
+                const openingTransactions = await this.getEntityTransactions(entityType, entityId, undefined, startDate);
+                const openingSales = await this.getEntitySales(entityType, entityId, undefined, startDate);
+                
+                const openingResult = this.processTransactionsAndSales(entityType, openingTransactions, openingSales);
+                openingBalanceUSD = openingResult.usdBalance;
+                openingBalanceLBP = openingResult.lbpBalance;
+              }
+
+              // Process transactions and sales for the period
+              const periodResult = this.processTransactionsAndSales(entityType, transactions, sales);
+              runningBalanceUSD = openingBalanceUSD + periodResult.usdBalance;
+              runningBalanceLBP = openingBalanceLBP + periodResult.lbpBalance;
+              transactionCount = periodResult.transactionCount;
+              lastTransactionDate = periodResult.lastTransactionDate || lastTransactionDate;
+
+              return {
+                currentBalance: {
+                  USD: runningBalanceUSD,
+                  LBP: runningBalanceLBP,
+                  lastTransactionDate,
+                  transactionCount
+                },
+                openingBalance: {
+                  USD: openingBalanceUSD,
+                  LBP: openingBalanceLBP,
+                  lastTransactionDate: startDate,
+                  transactionCount: 0
+                }
+              };
+            } catch (error) {
+              console.error(`Error calculating balance from transactions:`, error);
+              throw error;
+            }
+          }
+        );
+      },
+      { entityType, entityId, dateRange }
+    );
   }
 
   /**
    * Process transactions and sales to calculate balance changes
+   * Now using BalanceCalculator utility for consistent logic
    */
   private processTransactionsAndSales(
     entityType: 'customer' | 'supplier',
@@ -199,34 +215,20 @@ export class AccountBalanceService {
     transactionCount: number;
     lastTransactionDate?: string;
   } {
-    let usdBalance = 0;
-    let lbpBalance = 0;
-    let transactionCount = 0;
-    let lastTransactionDate: string | undefined;
-
-    // Process direct transactions (payments/receipts)
-    transactions.forEach(transaction => {
-      const amount = transaction.amount;
-      const isPayment = entityType === 'customer' 
-        ? transaction.type === 'income' // Customer payments are income
-        : transaction.type === 'expense'; // Supplier payments are expenses
-
-      if (transaction.currency === 'USD') {
-        usdBalance += isPayment ? -amount : amount; // Payments reduce debt, expenses increase debt
-      } else {
-        lbpBalance += isPayment ? -amount : amount;
-      }
-
-      transactionCount++;
-      lastTransactionDate = transaction.created_at;
-    });
+    // Use BalanceCalculator for consistent balance calculation
+    const balanceResult = BalanceCalculator.calculateFromTransactions(transactions, entityType);
+    
+    let transactionCount = transactions.length;
+    let lastTransactionDate: string | undefined = transactions.length > 0 
+      ? transactions[transactions.length - 1].created_at 
+      : undefined;
 
     // Process sales (only for customers, creates debt)
     if (entityType === 'customer') {
       sales.forEach(sale => {
         if (sale.payment_method === 'credit') {
           // Credit sales increase customer debt
-          lbpBalance += sale.received_value;
+          balanceResult.LBP += sale.received_value;
           transactionCount++;
           lastTransactionDate = sale.created_at;
         }
@@ -234,17 +236,12 @@ export class AccountBalanceService {
     }
 
     // Process commissions (only for suppliers, creates debt to supplier)
-    if (entityType === 'supplier') {
-      sales.forEach(sale => {
-        // Supplier commissions create debt we owe to supplier
-        // Commission calculation would need inventory_bills data
-        // For now, we'll handle this in a separate method if needed
-      });
-    }
+    // Note: Commission calculation would need inventory_bills data
+    // This can be handled in a separate method if needed
 
     return {
-      usdBalance,
-      lbpBalance,
+      usdBalance: balanceResult.USD,
+      lbpBalance: balanceResult.LBP,
       transactionCount,
       lastTransactionDate
     };
@@ -252,6 +249,7 @@ export class AccountBalanceService {
 
   /**
    * Get all transactions for an entity within date range
+   * Optimized using QueryHelpers utility
    */
   private async getEntityTransactions(
     entityType: 'customer' | 'supplier',
@@ -259,19 +257,13 @@ export class AccountBalanceService {
     startDate?: string,
     endDate?: string
   ): Promise<Transaction[]> {
-    const field = entityType === 'customer' ? 'customer_id' : 'supplier_id';
-    
-    let query = db.transactions.where(field).equals(entityId);
-    
-    if (startDate) {
-      query = query.and(transaction => new Date(transaction.created_at) >= new Date(startDate));
-    }
-    
-    if (endDate) {
-      query = query.and(transaction => new Date(transaction.created_at) <= new Date(endDate));
-    }
-
-    return await query.toArray();
+    // Use QueryHelpers for consistent query pattern
+    return await QueryHelpers.query(db.transactions, {
+      entityType,
+      entityId,
+      startDate,
+      endDate
+    });
   }
 
   /**
@@ -559,4 +551,5 @@ export class AccountBalanceService {
 }
 
 // Export singleton instance
-export const accountBalanceService = AccountBalanceService.getInstance();
+// Export service instance (stateless service - no singleton needed)
+export const accountBalanceService = new AccountBalanceService();

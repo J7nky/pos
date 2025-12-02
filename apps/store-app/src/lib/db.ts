@@ -1176,8 +1176,9 @@ class POSDatabase extends Dexie {
     this.inventory_items.hook('creating', this.addCreateFields);
     this.inventory_bills.hook('creating', this.addCreateFields);
 
-    // Add hooks for automatic cash drawer updates
-    (this.transactions as any).hook('creating', this.handleTransactionCreated);
+    // ⚠️ DEPRECATED: Automatic cash drawer updates now handled by transactionService
+    // Cash drawer updates are now atomic within transactionService to prevent race conditions
+    // (this.transactions as any).hook('creating', this.handleTransactionCreated);
 
     // Only add update hooks for tables that have updated_at
     this.products.hook('updating', this.addUpdateFields);
@@ -1717,29 +1718,18 @@ class POSDatabase extends Dexie {
     if (modifications._synced === undefined) modifications._synced = false;
   };
 
-  // Hook for automatic cash drawer updates when transactions are created
+  // ⚠️ DEPRECATED: Hook for automatic cash drawer updates - NO LONGER USED
+  // Cash drawer updates are now handled atomically within transactionService
+  // This prevents race conditions, circular dependencies, and double-processing
+  // Kept for reference only - DO NOT RE-ENABLE
+  /*
   private handleTransactionCreated = async (primKey: any, obj: any, trans: any) => {
     try {
-      // Only process cash drawer related transactions
       if (obj.category && obj.category.startsWith('cash_drawer_')) {
-        return; // Skip to avoid infinite loops
+        return;
       }
-
-      // Import the service dynamically to avoid circular dependencies
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-      
-      // Determine transaction type and update cash drawer accordingly
-      if (obj.type === 'income' && obj.category === 'Customer Payment') {
-        // await cashDrawerUpdateService.updateCashDrawerForCustomerPayment({
-        //   amount: obj.amount,
-        //   currency: obj.currency,
-        //   storeId: obj.store_id,
-        //   createdBy: obj.created_by,
-        //   customerId: obj.reference?.replace('PAY-', '') || '',
-        //   description: obj.description,
-        //   allowAutoSessionOpen: true // Allow automatic session opening for hooks
-        // });
-      } else if (obj.type === 'expense') {
+      if (obj.type === 'expense') {
         await cashDrawerUpdateService.updateCashDrawerForExpense({
           amount: obj.amount,
           currency: obj.currency,
@@ -1747,15 +1737,16 @@ class POSDatabase extends Dexie {
           createdBy: obj.created_by,
           description: obj.description,
           category: obj.category,
-          allowAutoSessionOpen: true // Allow automatic session opening for hooks
+          allowAutoSessionOpen: true
         });
       }
     } catch (error) {
       console.error('Error in transaction created hook:', error);
     }
   };
+  */
 
-  // Sale items hook removed - cash drawer updates now handled directly in addSale function
+  // Cash drawer updates now handled atomically by transactionService
 
   // Utility methods for sync management
   async markAsSynced(tableName: string, recordId: string) {

@@ -42,16 +42,7 @@ export interface BalanceSnapshot {
 }
 
 export class EnhancedTransactionService {
-  private static instance: EnhancedTransactionService;
-
-  private constructor() {}
-
-  public static getInstance(): EnhancedTransactionService {
-    if (!EnhancedTransactionService.instance) {
-      EnhancedTransactionService.instance = new EnhancedTransactionService();
-    }
-    return EnhancedTransactionService.instance;
-  }
+  // Simplified from singleton pattern - this service is stateless
 
   // Enhanced customer payment processing with comprehensive logging
   public async processCustomerPayment(
@@ -857,4 +848,5 @@ export class EnhancedTransactionService {
   }
 }
 
-export const enhancedTransactionService = EnhancedTransactionService.getInstance(); 
+// Export service instance (stateless service - no singleton needed)
+export const enhancedTransactionService = new EnhancedTransactionService(); 

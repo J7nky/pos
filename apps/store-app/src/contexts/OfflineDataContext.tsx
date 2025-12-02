@@ -2549,34 +2549,53 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Note: Cash drawer updates are now handled directly via cashDrawerUpdateService
     // The transaction records created by the service will be cleaned up during undo
 
-    // Update cash drawer for cash sales (following the same pattern as payments)
+    // Update cash drawer for cash sales using transactionService
     const cashSaleItemsForDrawer = lineItems.filter(item => item.payment_method === 'cash');
     if (cashSaleItemsForDrawer.length > 0) {
       try {
+        const { transactionService } = await import('../services/transactionService');
         const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
 
         const totalCashAmount = cashSaleItemsForDrawer.reduce((sum, item) => sum + (item.received_value || 0), 0);
 
-        // console.log(`💰 Updating cash drawer for cash sales: $${totalCashAmount}`);
+        // Verify session is open (with auto-open if needed)
+        const session = await cashDrawerUpdateService.verifySessionOpen(
+          storeId,
+          currentBranchId || '',
+          true, // allowAutoOpen
+          currentUserId,
+          'sale'
+        );
 
-        const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-          type: 'sale',
-          amount: totalCashAmount,
-          currency: 'LBP', // Assuming LBP for now, could be made dynamic
-          description: `Cash sale - ${cashSaleItemsForDrawer.length} items`,
-          reference: generateSaleReference(),
-          storeId: storeId,
-          createdBy: currentUserId,
-          customerId: cashSaleItemsForDrawer[0]?.customer_id || undefined,
-        branchId: currentBranchId || '',
+        if (session) {
+          // Create cash drawer sale transaction atomically
+          const result = await transactionService.createCashDrawerSale(
+            totalCashAmount,
+            'LBP', // Assuming LBP for now, could be made dynamic
+            `Cash sale - ${cashSaleItemsForDrawer.length} items`,
+            {
+              userId: currentUserId,
+              storeId: storeId,
+              branchId: currentBranchId || '',
+              module: 'sales',
+              source: 'web'
+            },
+            {
+              reference: generateSaleReference(),
+              customerId: cashSaleItemsForDrawer[0]?.customer_id || undefined
+            }
+          );
 
-          allowAutoSessionOpen: true
-        }, getStore);
-
-        if (cashDrawerResult.success) {
-          debug(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
+          if (result.success) {
+            debug(`✅ Cash drawer updated: $${result.balanceBefore?.toFixed(2)} → $${result.balanceAfter?.toFixed(2)}`);
+            
+            // Notify UI of cash drawer update
+            cashDrawerUpdateService.notifyCashDrawerUpdate(storeId, result.balanceAfter, result.transactionId || '');
+          } else {
+            console.error('❌ Failed to update cash drawer:', result.error);
+          }
         } else {
-          console.error('❌ Failed to update cash drawer:', cashDrawerResult.error);
+          console.warn('⚠️ No active cash drawer session - sale not recorded in cash drawer');
         }
       } catch (error) {
         console.error('❌ Error updating cash drawer for sales:', error);
@@ -3003,7 +3022,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     isAutoSyncing
   });
 
-  // General utility function for cash drawer transactions (without undo data storage)
+  // General utility function for cash drawer transactions using transactionService
   const processCashDrawerTransaction = async (
     transactionData: {
       type: 'sale' | 'payment' | 'expense' | 'refund';
@@ -3020,30 +3039,122 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
 
     try {
+      const { transactionService } = await import('../services/transactionService');
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
 
-      const cashDrawerResult = await cashDrawerUpdateService.updateCashDrawerForTransaction({
-        ...transactionData,
+      // Verify session is open (with auto-open if needed)
+      const session = await cashDrawerUpdateService.verifySessionOpen(
         storeId,
-        createdBy: userProfile.id,
+        currentBranchId || '',
+        true, // allowAutoOpen
+        userProfile.id,
+        transactionData.type
+      );
+
+      if (!session) {
+        throw new Error('No active cash drawer session');
+      }
+
+      // Create context for transaction
+      const context = {
+        userId: userProfile.id,
+        storeId,
         branchId: currentBranchId || '',
+        module: 'cash_drawer',
+        source: 'web' as const
+      };
 
-        allowAutoSessionOpen: true
-      }, getStore);
+      // Route to appropriate transactionService method based on type
+      let result;
+      
+      if (transactionData.type === 'sale') {
+        result = await transactionService.createCashDrawerSale(
+          transactionData.amount,
+          transactionData.currency,
+          transactionData.description,
+          context,
+          {
+            reference: transactionData.reference,
+            customerId: transactionData.customerId
+          }
+        );
+      } else if (transactionData.type === 'payment') {
+        // Determine if it's customer or supplier payment
+        if (transactionData.customerId) {
+          result = await transactionService.createCustomerPayment(
+            transactionData.customerId,
+            transactionData.amount,
+            transactionData.currency,
+            transactionData.description,
+            context,
+            {
+              reference: transactionData.reference,
+              updateCashDrawer: true
+            }
+          );
+        } else if (transactionData.supplierId) {
+          result = await transactionService.createSupplierPayment(
+            transactionData.supplierId,
+            transactionData.amount,
+            transactionData.currency,
+            transactionData.description,
+            context,
+            {
+              reference: transactionData.reference,
+              updateCashDrawer: true
+            }
+          );
+        } else {
+          throw new Error('Payment type requires either customerId or supplierId');
+        }
+      } else if (transactionData.type === 'expense') {
+        result = await transactionService.createCashDrawerExpense(
+          transactionData.amount,
+          transactionData.currency,
+          transactionData.description,
+          context,
+          {
+            reference: transactionData.reference
+          }
+        );
+      } else if (transactionData.type === 'refund') {
+        // Note: transactionService doesn't have a refund method yet, so we use expense
+        result = await transactionService.createCashDrawerExpense(
+          transactionData.amount,
+          transactionData.currency,
+          `Refund: ${transactionData.description}`,
+          context,
+          {
+            reference: transactionData.reference,
+            category: 'refund'
+          }
+        );
+      } else {
+        throw new Error(`Unsupported transaction type: ${transactionData.type}`);
+      }
 
-      if (!cashDrawerResult.success) {
-        throw new Error(cashDrawerResult.error || 'Failed to update cash drawer');
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create transaction');
       }
 
       // Get the cash drawer account ID for undo purposes
       const account = await db.getCashDrawerAccount(storeId, currentBranchId!);
       const accountId = account?.id;
 
+      // Notify UI of cash drawer update
+      if (result.cashDrawerImpact) {
+        cashDrawerUpdateService.notifyCashDrawerUpdate(
+          storeId, 
+          result.cashDrawerImpact.newBalance, 
+          result.transactionId || ''
+        );
+      }
+
       return {
         success: true,
-        transactionId: cashDrawerResult.transactionId,
-        previousBalance: cashDrawerResult.previousBalance,
-        newBalance: cashDrawerResult.newBalance,
+        transactionId: result.transactionId,
+        previousBalance: result.balanceBefore,
+        newBalance: result.balanceAfter,
         accountId: accountId
       };
     } catch (error) {

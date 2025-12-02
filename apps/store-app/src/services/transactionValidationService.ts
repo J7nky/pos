@@ -18,16 +18,10 @@ export interface TransactionValidationOptions {
 /**
  * Transaction Validation Service
  * Enforces immutability and accounting best practices for transactions
+ * 
+ * Note: Simplified from singleton pattern - this service is stateless
  */
 export class TransactionValidationService {
-  private static instance: TransactionValidationService;
-
-  public static getInstance(): TransactionValidationService {
-    if (!TransactionValidationService.instance) {
-      TransactionValidationService.instance = new TransactionValidationService();
-    }
-    return TransactionValidationService.instance;
-  }
 
   /**
    * Validate transaction before creation
@@ -319,5 +313,5 @@ export class TransactionValidationService {
   }
 }
 
-// Export singleton instance
-export const transactionValidationService = TransactionValidationService.getInstance();
+// Export service instance (stateless service - no singleton needed)
+export const transactionValidationService = new TransactionValidationService();

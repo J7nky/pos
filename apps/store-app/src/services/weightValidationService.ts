@@ -30,14 +30,7 @@ export interface PurchaseWeightValidationInput {
 }
 
 export class WeightValidationService {
-  private static instance: WeightValidationService;
-
-  public static getInstance(): WeightValidationService {
-    if (!WeightValidationService.instance) {
-      WeightValidationService.instance = new WeightValidationService();
-    }
-    return WeightValidationService.instance;
-  }
+  // Simplified from singleton pattern - this service is stateless
 
   /**
    * Validate weight for a sale transaction
@@ -505,5 +498,6 @@ export class WeightValidationService {
   }
 }
 
-export const weightValidationService = WeightValidationService.getInstance();
+// Export service instance (stateless service - no singleton needed)
+export const weightValidationService = new WeightValidationService();
 

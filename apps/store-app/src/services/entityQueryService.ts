@@ -4,6 +4,7 @@
 import { db } from '../lib/db';
 import { Entity } from '../types/accounting';
 import { snapshotService } from './snapshotService';
+import { QueryHelpers } from '../utils/queryHelpers';
 
 export interface EntityWithBalance extends Entity {
   current_balance_usd: number;
@@ -106,14 +107,11 @@ export class EntityQueryService {
         );
       }
       
-      // Apply pagination
-      if (options.offset) {
-        query = query.offset(options.offset);
-      }
-      
-      if (options.limit) {
-        query = query.limit(options.limit);
-      }
+      // Apply pagination using QueryHelpers
+      query = QueryHelpers.applyPagination(query, {
+        offset: options.offset,
+        limit: options.limit
+      });
       
       const entities = await query.toArray();
       
@@ -222,6 +220,7 @@ export class EntityQueryService {
   
   /**
    * Search entities across all types
+   * Optimized using QueryHelpers utility
    */
   async searchEntities(
     storeId: string,
@@ -229,12 +228,13 @@ export class EntityQueryService {
     options: EntityQueryOptions = {}
   ): Promise<EntityWithBalance[]> {
     try {
-      let query = db.entities.where('store_id').equals(storeId);
+      let query = QueryHelpers.byStore(db.entities, storeId);
       
-      // Apply filters
-      if (!options.includeInactive) {
-        query = query.filter(entity => entity.is_active);
-      }
+      // Apply filters using QueryHelpers
+      query = QueryHelpers.applyFilters(query, {
+        includeInactive: options.includeInactive,
+        includeDeleted: false
+      });
       
       if (!options.includeSystemEntities) {
         query = query.filter(entity => !entity.is_system_entity);
@@ -252,10 +252,8 @@ export class EntityQueryService {
         (entity.phone && entity.phone.includes(searchTerm))
       );
       
-      // Apply pagination
-      if (options.limit) {
-        query = query.limit(options.limit);
-      }
+      // Apply pagination using QueryHelpers
+      query = QueryHelpers.applyPagination(query, { limit: options.limit });
       
       const entities = await query.toArray();
       

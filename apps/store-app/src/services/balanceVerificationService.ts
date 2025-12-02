@@ -9,6 +9,7 @@ import { db } from '../lib/db';
 import { TransactionService } from './transactionService';
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
+import { BalanceCalculator } from '../utils/balanceCalculator';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -40,18 +41,11 @@ export interface EntityBalance {
 // ============================================================================
 
 export class BalanceVerificationService {
-  private static instance: BalanceVerificationService;
+  // Simplified from singleton pattern - this service is stateless
   private transactionService: TransactionService;
 
-  private constructor() {
+  constructor() {
     this.transactionService = TransactionService.getInstance();
-  }
-
-  public static getInstance(): BalanceVerificationService {
-    if (!BalanceVerificationService.instance) {
-      BalanceVerificationService.instance = new BalanceVerificationService();
-    }
-    return BalanceVerificationService.instance;
   }
 
   // ==========================================================================
@@ -230,6 +224,7 @@ export class BalanceVerificationService {
 
   /**
    * Calculate entity balance from transaction history
+   * Now using BalanceCalculator utility for consistent calculation
    */
   private async calculateEntityBalanceFromTransactions(
     entityId: string,
@@ -241,24 +236,8 @@ export class BalanceVerificationService {
         entityType
       );
 
-      const balances: EntityBalance = { USD: 0, LBP: 0 };
-
-      for (const txn of transactions) {
-        const amount = txn.amount;
-        const currency = txn.currency as 'USD' | 'LBP';
-
-        if (entityType === 'customer') {
-          // For customers: income (payments) reduces balance, expenses (credit sales) increase it
-          const multiplier = txn.type === 'income' ? -1 : 1;
-          balances[currency] += amount * multiplier;
-        } else if (entityType === 'supplier') {
-          // For suppliers: expenses (payments to them) reduce balance, income increases it
-          const multiplier = txn.type === 'expense' ? -1 : 1;
-          balances[currency] += amount * multiplier;
-        }
-      }
-
-      return balances;
+      // Use BalanceCalculator for consistent balance calculation logic
+      return BalanceCalculator.calculateFromTransactions(transactions, entityType);
 
     } catch (error) {
       console.error(`❌ Balance calculation failed for ${entityType} ${entityId}:`, error);
@@ -521,4 +500,5 @@ export class BalanceVerificationService {
 // SINGLETON INSTANCE
 // ============================================================================
 
-export const balanceVerificationService = BalanceVerificationService.getInstance();
+// Export service instance (stateless service - no singleton needed)
+export const balanceVerificationService = new BalanceVerificationService();

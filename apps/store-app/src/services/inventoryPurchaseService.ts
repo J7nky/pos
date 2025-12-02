@@ -130,20 +130,49 @@ export class InventoryPurchaseService {
       // For cash purchases, always use "Trade" as supplier
       await this.getOrCreateTradeSupplier(data.store_id);
       
-      // Update cash drawer with the total amount (deduct)
-      await cashDrawerUpdateService.updateCashDrawerForTransaction({
-        type: 'expense',
-        amount: totalAmount,
-        currency: 'USD',
-        storeId: data.store_id,
-        branchId: data.branch_id, // NEW: Pass branch context
-        createdBy: data.created_by,
-        description: `Cash purchase - ${items.length} items from Trade`,
-        reference: `INV-PURCH-${transactionId.substring(0, 8)}`,
-        allowAutoSessionOpen: true
-      });
+      // Verify session is open
+      const session = await cashDrawerUpdateService.verifySessionOpen(
+        data.store_id,
+        data.branch_id,
+        true, // allowAutoOpen
+        data.created_by,
+        'expense'
+      );
 
-      // Transaction will be created by cashDrawerUpdateService
+      if (!session) {
+        throw new Error('No active cash drawer session');
+      }
+
+      // Create cash drawer expense transaction atomically
+      const result = await transactionService.createCashDrawerExpense(
+        totalAmount,
+        'USD',
+        `Cash purchase - ${items.length} items from Trade`,
+        {
+          userId: data.created_by,
+          storeId: data.store_id,
+          branchId: data.branch_id,
+          module: 'inventory_purchase',
+          source: 'web'
+        },
+        {
+          reference: `INV-PURCH-${transactionId.substring(0, 8)}`,
+          category: 'Inventory Purchase'
+        }
+      );
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update cash drawer');
+      }
+
+      // Notify UI of cash drawer update
+      if (result.cashDrawerImpact) {
+        cashDrawerUpdateService.notifyCashDrawerUpdate(
+          data.store_id,
+          result.cashDrawerImpact.newBalance,
+          result.transactionId || ''
+        );
+      }
 
       return {
         success: true,
@@ -203,16 +232,41 @@ export class InventoryPurchaseService {
       // Deduct only fees from cash drawer (supplier not responsible for fees)
       let cashDrawerImpact = 0;
       if (fees.total > 0) {
-        await cashDrawerUpdateService.updateCashDrawerForExpense({
-          amount: fees.total,
-          currency: 'USD',
-          storeId: data.store_id,
-          createdBy: data.created_by,
-          description: `Fees for credit purchase from supplier`,
-          category: 'Inventory Purchase Fees',
-          allowAutoSessionOpen: true
-        });
-        cashDrawerImpact = -fees.total;
+        // Verify session is open
+        const session = await cashDrawerUpdateService.verifySessionOpen(
+          data.store_id,
+          data.branch_id,
+          true, // allowAutoOpen
+          data.created_by,
+          'expense'
+        );
+
+        if (session) {
+          const feeResult = await transactionService.createCashDrawerExpense(
+            fees.total,
+            'USD',
+            `Fees for credit purchase from supplier`,
+            {
+              userId: data.created_by,
+              storeId: data.store_id,
+              branchId: data.branch_id,
+              module: 'inventory_purchase',
+              source: 'web'
+            },
+            {
+              category: 'Inventory Purchase Fees'
+            }
+          );
+
+          if (feeResult.success && feeResult.cashDrawerImpact) {
+            cashDrawerImpact = -fees.total;
+            cashDrawerUpdateService.notifyCashDrawerUpdate(
+              data.store_id,
+              feeResult.cashDrawerImpact.newBalance,
+              feeResult.transactionId || ''
+            );
+          }
+        }
       }
 
       return {
@@ -244,19 +298,42 @@ export class InventoryPurchaseService {
       // For commission purchases, only deduct fees from cash drawer
       let cashDrawerImpact = 0;
       if (fees.total > 0) {
-        await cashDrawerUpdateService.updateCashDrawerForExpense({
-          amount: fees.total,
-          currency: 'USD',
-          storeId: data.store_id,
-          createdBy: data.created_by,
-          description: `Fees for commission purchase`,
-          category: 'Inventory Purchase Fees',
-          allowAutoSessionOpen: true
-        });
-        cashDrawerImpact = -fees.total;
-      }
+        // Verify session is open
+        const session = await cashDrawerUpdateService.verifySessionOpen(
+          data.store_id,
+          data.branch_id,
+          true, // allowAutoOpen
+          data.created_by,
+          'expense'
+        );
 
-      // Fees transaction will be created by cashDrawerUpdateService
+        if (session) {
+          const feeResult = await transactionService.createCashDrawerExpense(
+            fees.total,
+            'USD',
+            `Fees for commission purchase`,
+            {
+              userId: data.created_by,
+              storeId: data.store_id,
+              branchId: data.branch_id,
+              module: 'inventory_purchase',
+              source: 'web'
+            },
+            {
+              category: 'Inventory Purchase Fees'
+            }
+          );
+
+          if (feeResult.success && feeResult.cashDrawerImpact) {
+            cashDrawerImpact = -fees.total;
+            cashDrawerUpdateService.notifyCashDrawerUpdate(
+              data.store_id,
+              feeResult.cashDrawerImpact.newBalance,
+              feeResult.transactionId || ''
+            );
+          }
+        }
+      }
 
       return {
         success: true,
