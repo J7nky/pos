@@ -47,7 +47,7 @@ export default function CashDrawerOpeningModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!amount || parseFloat(amount) <= 0) {
+    if (!amount || parseFloat(amount) < 0) {
       setError('Please enter a valid amount greater than 0');
       return;
     }

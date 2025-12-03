@@ -48,9 +48,8 @@ export class AccountBalanceService {
   ): Promise<BalanceCalculationResult> {
     try {
       // Get entity (customer or supplier)
-      const entity = entityType === 'customer' 
-        ? await db.customers.get(entityId)
-        : await db.suppliers.get(entityId);
+      // Get entity from unified entities table
+      const entity = await db.entities.get(entityId);
 
       if (!entity) {
         throw new Error(`${entityType} not found: ${entityId}`);
@@ -312,7 +311,8 @@ export class AccountBalanceService {
   }
 
   /**
-   * Update cached balance in customer/supplier table
+   * Update cached balance in entities table
+   * Updated to use entities table instead of legacy customers/suppliers tables
    */
   private async updateCachedBalance(
     entityType: 'customer' | 'supplier',
@@ -326,11 +326,8 @@ export class AccountBalanceService {
       _synced: false
     };
 
-    if (entityType === 'customer') {
-      await db.customers.update(entityId, updateData);
-    } else {
-      await db.suppliers.update(entityId, updateData);
-    }
+    // Update unified entities table
+    await db.entities.update(entityId, updateData);
 
     console.log(`Updated cached balance for ${entityType} ${entityId}:`, balance);
   }
@@ -351,7 +348,11 @@ export class AccountBalanceService {
 
     try {
       // Reconcile all customers
-      const customers = await db.customers.where('store_id').equals(storeId).toArray();
+      // Get customers from entities table
+      const customers = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'customer'])
+        .toArray();
       
       for (const customer of customers) {
         const result = await this.getAccountBalance('customer', customer.id, true);
@@ -363,8 +364,12 @@ export class AccountBalanceService {
         }
       }
 
-      // Reconcile all suppliers
-      const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
+      // Reconcile all suppliers from entities table
+      const suppliers = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'supplier'])
+        .filter(e => !e._deleted && e.is_active)
+        .toArray();
       
       for (const supplier of suppliers) {
         const result = await this.getAccountBalance('supplier', supplier.id, true);

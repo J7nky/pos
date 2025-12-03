@@ -5,6 +5,7 @@ import { db } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/database';
 import { dataValidationService } from './dataValidationService';
+import { universalChangeDetectionService, TABLES_WITH_UPDATED_AT } from './universalChangeDetectionService';
 
 type Tables = Database['public']['Tables'];
 
@@ -32,30 +33,12 @@ const SYNC_CONFIG = {
   largeTableThreshold: 1000, // Tables with more records are considered "large"
 };
 
-// Tables that have updated_at field for incremental sync
-// Based on db.ts schema comments and indexes
-const TABLES_WITH_UPDATED_AT = [
-  'products',
-  'suppliers', 
-  'customers',
-  'users',
-  'stores',
-  'cash_drawer_accounts',
-  'cash_drawer_sessions',
-  'inventory_bills',
-  'bills',
-  'bill_line_items',
-  'bill_audit_logs',
-  'missed_products',
-  'reminders',
-  'branches',
-  // NEW: Accounting foundation tables with updated_at
-  'entities'
-] as const;
+// TABLES_WITH_UPDATED_AT is now imported from universalChangeDetectionService
+// to avoid duplication and ensure consistency
 
 // Tables that only have created_at (no updated_at)
 const TABLES_WITH_CREATED_AT_ONLY = [
-  'inventory_items',
+  // 'inventory_items', // ❌ REMOVED - it has updated_at in Supabase!
   'transactions',
   // NEW: Accounting foundation tables with created_at only
   'journal_entries',
@@ -834,6 +817,34 @@ export class SyncService {
     }
   }
 
+  /**
+   * Helper: Get timestamp field for a table
+   */
+  private getTimestampField(tableName: string): 'updated_at' | 'created_at' {
+    const hasUpdatedAt = TABLES_WITH_UPDATED_AT.includes(tableName as any);
+    return hasUpdatedAt ? 'updated_at' : 'created_at';
+  }
+
+  /**
+   * Helper: Apply store filter to query based on table type
+   */
+  private applyStoreFilter(query: any, tableName: string, storeId: string): any {
+    // Special case: products - include both store-specific and global
+    if (tableName === 'products') {
+      return query.or(`store_id.eq.${storeId},is_global.eq.true`);
+    }
+    // Special case: stores - filter by id (not store_id)
+    if (tableName === 'stores') {
+      return query.eq('id', storeId);
+    }
+    // Special case: transactions - no store filter
+    if (tableName === 'transactions') {
+      return query; // No filter
+    }
+    // Default: filter by store_id
+    return query.eq('store_id', storeId);
+  }
+
   private async downloadRemoteChanges(storeId: string) {
     const result = { downloaded: 0, conflicts: 0, errors: [] as string[] };
 
@@ -853,39 +864,53 @@ export class SyncService {
           lastSyncAt = '1970-01-01T00:00:00.000Z';
         }
 
-        // Determine which timestamp field to use based on table schema
-        const hasUpdatedAt = TABLES_WITH_UPDATED_AT.includes(tableName as any);
-        const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
-        
-        console.log(`📊 Sync ${tableName}: using ${timestampField} field (hasUpdatedAt: ${hasUpdatedAt})`);
-
-        let query = supabase.from(tableName as any).select('*');
-
-        if (tableName !== 'transactions' && tableName !== 'stores') {
-          // Special handling for products: include both store-specific and global products
-          if (tableName === 'products') {
-            query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
-          } else {
-            query = query.eq('store_id', storeId);
-          }
-        } else if (tableName === 'stores') {
-          query = query.eq('id', storeId);
-        }
-
         const isFirstSync = !lastSyncAt || lastSyncAt === '1970-01-01T00:00:00.000Z';
-
+        const timestampField = this.getTimestampField(tableName);
+        
         // Check if we have any non-deleted local records - if not, do a full sync to catch existing records
         // This prevents the issue where sync metadata exists but local database is empty (manually cleared, migration, etc.)
         const table = (db as any)[tableName];
         const localRecordCount = await table.filter((record: any) => !record._deleted).count();
         const shouldDoFullSync = isFirstSync || localRecordCount === 0;
-        
+
+        // NEW: Change detection - skip sync if no changes detected
+        if (!shouldDoFullSync) {
+          const changeDetection = await universalChangeDetectionService.detectChanges(
+            tableName,
+            storeId,
+            lastSyncAt,
+            isFirstSync
+          );
+
+          if (!changeDetection.hasChanges) {
+            const detectionTime = performance.now() - tableStart;
+            console.log(
+              `⏭️  Skipping ${tableName} sync - no changes detected (${changeDetection.changeCount} changes, ${detectionTime.toFixed(2)}ms)`
+            );
+            // Still update sync metadata to track that we checked
+            await db.updateSyncMetadata(tableName, new Date().toISOString());
+            continue; // Skip to next table
+          }
+
+          console.log(
+            `📊 ${tableName} has ${changeDetection.changeCount} changes - proceeding with sync`
+          );
+        } else {
+          console.log(
+            `📊 Full sync for ${tableName} (${isFirstSync ? 'first sync' : 'no local records found'}, ${localRecordCount} local)`
+          );
+        }
+
         // Add debug logging for branches
         if (tableName === 'branches') {
           console.log(`🔍 Branch debug: localRecordCount=${localRecordCount}, isFirstSync=${isFirstSync}, shouldDoFullSync=${shouldDoFullSync}`);
           const localBranches = await table.filter((record: any) => !record._deleted).toArray();
           console.log(`🔍 Local branches:`, localBranches.map(b => ({ id: b.id, name: b.name, store_id: b.store_id, _synced: b._synced })));
         }
+
+        // Build query with store filter
+        let query = supabase.from(tableName as any).select('*');
+        query = this.applyStoreFilter(query, tableName, storeId);
 
         // Special handling for products: always include global products even in incremental syncs
         // Global products might not have been updated recently, so we need to fetch them separately
@@ -989,11 +1014,10 @@ export class SyncService {
           
           remoteRecords = uniqueRecords;
         } else {
+          // Apply incremental sync filter if not full sync
           if (!shouldDoFullSync) {
             query = query.gte(timestampField, lastSyncAt);
             console.log(`📊 Incremental sync for ${tableName} since ${lastSyncAt} (${localRecordCount} local records)`);
-          } else {
-            console.log(`📊 Full sync for ${tableName} (${isFirstSync ? 'first sync' : 'no local records found'}, ${localRecordCount} local)`);
           }
 
           query = query
@@ -1335,8 +1359,7 @@ export class SyncService {
     }
 
     // Default: timestamp-based resolution
-    const hasUpdatedAt = TABLES_WITH_UPDATED_AT.includes(tableName as any);
-    const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
+    const timestampField = this.getTimestampField(tableName);
 
     const localModifiedAt = new Date(localRecord[timestampField] || localRecord.created_at);
     const remoteModifiedAt = new Date(normalizedRemote[timestampField] || normalizedRemote.created_at);
@@ -1832,15 +1855,9 @@ export class SyncService {
 
           await db.updateSyncMetadata(tableName, new Date().toISOString());
         } else {
-          // For all other tables, use standard query
+          // For all other tables, use standard query with helper method
           let query = supabase.from(tableName as any).select('*');
-
-          if (tableName === 'stores') {
-            query = query.eq('id', storeId);
-          } else {
-            query = query.eq('store_id', storeId);
-          }
-
+          query = this.applyStoreFilter(query, tableName, storeId);
           query = query.limit(SYNC_CONFIG.maxRecordsPerSync);
 
           const { data: remoteRecords, error } = await query;
@@ -1881,6 +1898,7 @@ export class SyncService {
     };
 
     try {
+      // Upload unsynced records
       const unsyncedRecords = await db.getUnsyncedRecords(tableName);
 
       if (unsyncedRecords.length > 0) {
@@ -1901,13 +1919,29 @@ export class SyncService {
         }
       }
 
-      let query = supabase.from(tableName as any).select('*');
+      // Download remote changes with change detection
+      const syncMetadata = await db.getSyncMetadata(tableName);
+      const lastSyncAt = syncMetadata?.last_synced_at || '1970-01-01T00:00:00.000Z';
+      const isFirstSync = !lastSyncAt || lastSyncAt === '1970-01-01T00:00:00.000Z';
 
-      if (tableName === 'stores') {
-        query = query.eq('id', storeId);
-      } else {
-        query = query.eq('store_id', storeId);
+      // Check for changes before querying
+      if (!isFirstSync) {
+        const changeDetection = await universalChangeDetectionService.detectChanges(
+          tableName,
+          storeId,
+          lastSyncAt,
+          isFirstSync
+        );
+
+        if (!changeDetection.hasChanges) {
+          console.log(`⏭️  syncTable: Skipping ${tableName} - no changes detected`);
+          return result; // Return early if no changes
+        }
       }
+
+      // Build query with store filter using helper method
+      let query = supabase.from(tableName as any).select('*');
+      query = this.applyStoreFilter(query, tableName, storeId);
 
       const { data: remoteRecords, error } = await query;
 

@@ -809,6 +809,80 @@ export class TransactionService {
     }
   }
 
+  /**
+   * Get transaction impact summary for preview/display
+   * Shows how a transaction affects cash drawer and entity balances
+   */
+  public async getTransactionImpactSummary(transactionId: string): Promise<{
+    cashDrawerImpact: boolean;
+    entityImpact: {
+      type: 'customer' | 'supplier' | null;
+      entityId: string | null;
+      entityName: string | null;
+    };
+    estimatedBalanceChanges: {
+      cashDrawer?: number;
+      entity?: number;
+    };
+  }> {
+    try {
+      const transaction = await db.transactions.get(transactionId);
+      if (!transaction) {
+        return {
+          cashDrawerImpact: false,
+          entityImpact: { type: null, entityId: null, entityName: null },
+          estimatedBalanceChanges: {}
+        };
+      }
+
+      const amountInUSD = currencyService.convertCurrency(transaction.amount, transaction.currency, 'USD');
+      let entityName: string | null = null;
+      let entityType: 'customer' | 'supplier' | null = null;
+      let entityId: string | null = null;
+
+      if (transaction.customer_id) {
+        const customer = await db.customers.get(transaction.customer_id);
+        entityName = customer?.name || 'Unknown Customer';
+        entityType = 'customer';
+        entityId = transaction.customer_id;
+      } else if (transaction.supplier_id) {
+        const supplier = await db.suppliers.get(transaction.supplier_id);
+        entityName = supplier?.name || 'Unknown Supplier';
+        entityType = 'supplier';
+        entityId = transaction.supplier_id;
+      }
+
+      // Check if transaction affects cash drawer
+      const cashDrawerImpact = this.isCashDrawerCategory(transaction.category as TransactionCategory);
+
+      return {
+        cashDrawerImpact,
+        entityImpact: {
+          type: entityType,
+          entityId,
+          entityName
+        },
+        estimatedBalanceChanges: {
+          cashDrawer: cashDrawerImpact ? 
+            (transaction.type === 'income' ? amountInUSD : -amountInUSD) : undefined,
+          entity: entityType ? 
+            (entityType === 'customer' ? 
+              (transaction.type === 'income' ? -amountInUSD : amountInUSD) :
+              (transaction.type === 'expense' ? -amountInUSD : amountInUSD)
+            ) : undefined
+        }
+      };
+
+    } catch (error) {
+      console.error('Error getting transaction impact summary:', error);
+      return {
+        cashDrawerImpact: false,
+        entityImpact: { type: null, entityId: null, entityName: null },
+        estimatedBalanceChanges: {}
+      };
+    }
+  }
+
   // ==========================================================================
   // PRIVATE HELPER METHODS
   // ==========================================================================
@@ -868,6 +942,7 @@ export class TransactionService {
   /**
    * Get current entity balance
    * Can be called within or outside transactions (read-only operation)
+   * Updated to use entities table instead of legacy customers/suppliers tables
    */
   private async getEntityBalance(
     customerId?: string | null,
@@ -876,18 +951,18 @@ export class TransactionService {
     currency: 'USD' | 'LBP' = 'USD'
   ): Promise<number> {
     try {
-      if (customerId) {
-        const customer = await db.customers.get(customerId);
-        return currency === 'USD' ? (customer?.usd_balance || 0) : (customer?.lb_balance || 0);
+      const entityId = customerId || supplierId || employeeId;
+      if (!entityId) {
+        return 0;
       }
-      
-      if (supplierId) {
-        const supplier = await db.suppliers.get(supplierId);
-        return currency === 'USD' ? (supplier?.usd_balance || 0) : (supplier?.lb_balance || 0);
+
+      // Get entity from unified entities table
+      const entity = await db.entities.get(entityId);
+      if (!entity) {
+        return 0;
       }
-      
-      // Employee balances not yet implemented
-      return 0;
+
+      return currency === 'USD' ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
     } catch (error) {
       console.error('Error getting entity balance:', error);
       return 0;
@@ -897,6 +972,7 @@ export class TransactionService {
   /**
    * Update entity balances atomically within IndexedDB transaction
    * This method MUST be called within a db.transaction() block
+   * Updated to use entities table instead of legacy customers/suppliers tables
    */
   private async updateEntityBalancesAtomic(
     transaction: Transaction,
@@ -906,15 +982,30 @@ export class TransactionService {
     let newBalance = 0;
     const timestamp = new Date().toISOString();
 
-    // Update customer balance
-    if (transaction.customer_id) {
-      const customer = await db.customers.get(transaction.customer_id);
-      if (customer) {
+    // Get entity ID (customer, supplier, or employee)
+    const entityId = transaction.customer_id || transaction.supplier_id || (transaction as any).employee_id;
+    
+    if (entityId) {
+      // Get entity from unified entities table
+      const entity = await db.entities.get(entityId);
+      if (entity) {
         const isUSD = transaction.currency === 'USD';
-        const previousBalance = isUSD ? (customer.usd_balance || 0) : (customer.lb_balance || 0);
+        const previousBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
         
-        // For customer: income reduces debt, expense increases it
-        const balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
+        // Calculate balance change based on entity type and transaction type
+        let balanceChange = 0;
+        
+        if (entity.entity_type === 'customer') {
+          // For customer: income reduces debt, expense increases it
+          balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
+        } else if (entity.entity_type === 'supplier') {
+          // For supplier: expense reduces what we owe, income increases it
+          balanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
+        } else if (entity.entity_type === 'employee') {
+          // For employee: similar to customer (income reduces debt, expense increases it)
+          balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
+        }
+        
         newBalance = previousBalance + balanceChange;
 
         const updateData: any = {
@@ -928,35 +1019,9 @@ export class TransactionService {
           updateData.lb_balance = newBalance;
         }
 
-        await db.customers.update(transaction.customer_id, updateData);
-        affectedRecords.push(transaction.customer_id);
-      }
-    }
-
-    // Update supplier balance
-    if (transaction.supplier_id) {
-      const supplier = await db.suppliers.get(transaction.supplier_id);
-      if (supplier) {
-        const isUSD = transaction.currency === 'USD';
-        const previousBalance = isUSD ? (supplier.usd_balance || 0) : (supplier.lb_balance || 0);
-        
-        // For supplier: expense reduces what we owe, income increases it
-        const balanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
-        newBalance = previousBalance + balanceChange;
-
-        const updateData: any = {
-          updated_at: timestamp,
-          _synced: false
-        };
-        
-        if (isUSD) {
-          updateData.usd_balance = newBalance;
-        } else {
-          updateData.lb_balance = newBalance;
-        }
-
-        await db.suppliers.update(transaction.supplier_id, updateData);
-        affectedRecords.push(transaction.supplier_id);
+        // Update unified entities table
+        await db.entities.update(entityId, updateData);
+        affectedRecords.push(entityId);
       }
     }
 
@@ -978,7 +1043,7 @@ export class TransactionService {
     // For backward compatibility, wrap in transaction
     let result = { newBalance: 0, affectedRecords: [] as string[] };
     
-    await db.transaction('rw', [db.customers, db.suppliers], async () => {
+    await db.transaction('rw', [db.entities], async () => {
       result = await this.updateEntityBalancesAtomic(transaction, amountInUSD);
     });
     

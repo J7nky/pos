@@ -12,6 +12,7 @@ import Settings from './pages/Settings';
 import Employees from './pages/Employees';
 import UnsyncedItems from './pages/UnsyncedItems';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
+import MigrationTest from './pages/MigrationTest';
 import ErrorPage from './components/ErrorPage';
 
 // Use hash router for Electron (file:// protocol) and browser router for web
@@ -71,6 +72,11 @@ export const router = createRouter([
           {
             path: "unsynced",
             element: <UnsyncedItems />,
+            errorElement: <ErrorPage />,
+          },
+          {
+            path: "migration-test",
+            element: <MigrationTest />,
             errorElement: <ErrorPage />,
           },
         ],

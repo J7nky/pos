@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 type AccountingTab =
   | "dashboard"
-  | "expenses"
   | "nonpriced"
   | "bills-management"
   | "received-bills"
@@ -28,7 +27,6 @@ const ActionTabsBar: React.FC<ActionTabsBarProps> = ({
 }) => {
   const tabs: { id: AccountingTab; label: string; icon: React.ElementType }[] = [
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { id: "expenses", label: "Payments", icon: Receipt },
     { id: "nonpriced", label: "Non Priced Items", icon: AlertCircle },
     { id: "bills-management", label: "Bills Management", icon: Document },
     { id: "received-bills", label: "Received Bills", icon: FileText },

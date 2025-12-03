@@ -12,19 +12,13 @@ import {
   generateTransferReference
 } from '../utils/referenceGenerator';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
-import { 
-  TrendingUp,
-  CheckCircle,
-  Clock,
-} from 'lucide-react';
+
 import Toast from '../components/common/Toast';
 import { CurrencyService } from '../services/currencyService';
 import ReceivedBills from '../components/accountingPage/tabs/ReceivedBills';
 import SoldBills from '../components/accountingPage/tabs/SoldBills';
 import DashboardOverview from '../components/accountingPage/tabs/DashboardOverview';
-import ExpenseManagement from '../components/accountingPage/tabs/PaymentsManagement';
 import NonPricedItems from '../components/accountingPage/tabs/NonPricedItems';
-import SupplierAdvances from '../components/accountingPage/tabs/SupplierAdvances';
 import { PaymentsModal } from '../components/accountingPage/modals/PaymentsModal';
 import EditSaleModal from '../components/accountingPage/modals/EditSaleModal';
 import DeleteSaleModal from '../components/accountingPage/modals/DeleteSaleModal';
@@ -99,7 +93,7 @@ export default function Accounting() {
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('accounting_recent_suppliers', []);
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
 
-  const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'expenses' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer'>('accounting_active_tab', 'dashboard');
+  const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer'>('accounting_active_tab', 'dashboard');
   const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
   const [showForm, setShowForm] = useState<"receive" | "pay" | "expense" | null>(null);
   const [dashboardPeriod] = useLocalStorage<'today' | 'week' | 'month' | 'quarter' | 'year'>('accounting_dashboard_period', 'today');
@@ -980,24 +974,6 @@ export default function Accounting() {
         </div>
       )}
 
-      {activeTab === 'expenses' && (
-        <div className="space-y-6">
-          <ExpenseManagement
-            expenseCategories={expenseCategories}
-            transactions={sessionFilteredTransactions}
-            today={today}
-            currency="USD"
-            setShowForm={(formType) => setShowForm(formType)}
-            formatCurrency={formatCurrency}
-            formatCurrencyWithSymbol={formatCurrencyWithSymbol}
-            getConvertedAmount={getConvertedAmount}
-            customers={customers}
-            suppliers={suppliers}
-            onRefresh={refreshData}
-            showToast={showToast}
-          />
-        </div>
-      )}
 
       {activeTab === 'nonpriced' && (
         <div className="space-y-6">
