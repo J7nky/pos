@@ -71,15 +71,15 @@ export class TransactionValidationService {
     }
 
     if (transaction.customer_id) {
-      const customer = await db.customers.get(transaction.customer_id);
-      if (!customer) {
+      const entity = await db.entities.get(transaction.customer_id);
+      if (!entity || entity.entity_type !== 'customer') {
         result.errors.push(`Customer not found: ${transaction.customer_id}`);
       }
     }
 
     if (transaction.supplier_id) {
-      const supplier = await db.suppliers.get(transaction.supplier_id);
-      if (!supplier) {
+      const entity = await db.entities.get(transaction.supplier_id);
+      if (!entity || entity.entity_type !== 'supplier') {
         result.errors.push(`Supplier not found: ${transaction.supplier_id}`);
       }
     }

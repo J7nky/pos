@@ -728,6 +728,208 @@ export interface Database {
           _deleted?: boolean;
         };
       };
+      // Accounting foundation tables
+      entities: {
+        Row: {
+          id: string;
+          store_id: string;
+          branch_id: string | null;
+          entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
+          name: string;
+          phone: string | null;
+          lb_balance: number;
+          usd_balance: number;
+          is_system_entity: boolean;
+          is_active: boolean;
+          customer_data: object | null;
+          supplier_data: object | null;
+          created_at: string;
+          updated_at: string;
+          _synced: boolean;
+          _deleted: boolean;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          branch_id: string | null;
+          entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
+          name: string;
+          phone?: string | null;
+          lb_balance?: number;
+          usd_balance?: number;
+          is_system_entity?: boolean;
+          is_active?: boolean;
+          customer_data?: object | null;
+          supplier_data?: object | null;
+          created_at?: string;
+          updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          branch_id?: string | null;
+          entity_type?: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
+          name?: string;
+          phone?: string | null;
+          lb_balance?: number;
+          usd_balance?: number;
+          is_system_entity?: boolean;
+          is_active?: boolean;
+          customer_data?: object | null;
+          supplier_data?: object | null;
+          updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
+        };
+      };
+      chart_of_accounts: {
+        Row: {
+          id: string;
+          store_id: string;
+          account_code: string;
+          account_name: string;
+          account_type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+          requires_entity: boolean;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+          _synced: boolean;
+          _deleted: boolean;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          account_code: string;
+          account_name: string;
+          account_type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+          requires_entity: boolean;
+          is_active: boolean;
+          created_at?: string;
+          updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          account_code?: string;
+          account_name?: string;
+          account_type?: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+          requires_entity?: boolean;
+          is_active?: boolean;
+          updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
+        };
+      };
+      journal_entries: {
+        Row: {
+          id: string;
+          store_id: string;
+          branch_id: string | null;
+          transaction_id: string;
+          account_code: string;
+          account_name: string;
+          debit: number;
+          credit: number;
+          currency: 'USD' | 'LBP';
+          entity_id: string;
+          entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
+          posted_date: string;
+          fiscal_period: string;
+          is_posted: boolean;
+          description?: string;
+          created_at: string;
+          created_by: string;
+          _synced: boolean;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          branch_id: string | null;
+          transaction_id: string;
+          account_code: string;
+          account_name: string;
+          debit: number;
+          credit: number;
+          currency: 'USD' | 'LBP';
+          entity_id: string;
+          entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
+          posted_date: string;
+          fiscal_period: string;
+          is_posted: boolean;
+          description?: string;
+          created_at?: string;
+          created_by?: string;
+          _synced?: boolean;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          branch_id?: string | null;
+          transaction_id?: string;
+          account_code?: string;
+          account_name?: string;
+          debit?: number;
+          credit?: number;
+          currency?: 'USD' | 'LBP';
+          entity_id?: string;
+          entity_type?: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
+          posted_date?: string;
+          fiscal_period?: string;
+          is_posted?: boolean;
+          description?: string;
+          updated_at?: string;
+          created_by?: string;
+          _synced?: boolean;
+        };
+      };
+      balance_snapshots: {
+        Row: {
+          id: string;
+          store_id: string;
+          branch_id: string | null;
+          account_code: string;
+          entity_id: string | null;
+          balance_usd: number;
+          balance_lbp: number;
+          snapshot_date: string;
+          snapshot_type: 'hourly' | 'daily' | 'end_of_day';
+          verified: boolean;
+          created_at: string;
+          _synced: boolean;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          branch_id: string | null;
+          account_code: string;
+          entity_id: string | null;
+          balance_usd: number;
+          balance_lbp: number;
+          snapshot_date: string;
+          snapshot_type: 'hourly' | 'daily' | 'end_of_day';
+          verified: boolean;
+          created_at?: string;
+          _synced?: boolean;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          branch_id?: string | null;
+          account_code?: string;
+          entity_id?: string | null;
+          balance_usd?: number;
+          balance_lbp?: number;
+          snapshot_date?: string;
+          snapshot_type?: 'hourly' | 'daily' | 'end_of_day';
+          verified?: boolean;
+          updated_at?: string;
+          _synced?: boolean;
+        };
+      };
       
     };
     Views: {

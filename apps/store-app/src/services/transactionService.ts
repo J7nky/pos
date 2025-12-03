@@ -841,13 +841,13 @@ export class TransactionService {
       let entityId: string | null = null;
 
       if (transaction.customer_id) {
-        const customer = await db.customers.get(transaction.customer_id);
-        entityName = customer?.name || 'Unknown Customer';
+        const entity = await db.entities.get(transaction.customer_id);
+        entityName = entity?.name || 'Unknown Customer';
         entityType = 'customer';
         entityId = transaction.customer_id;
       } else if (transaction.supplier_id) {
-        const supplier = await db.suppliers.get(transaction.supplier_id);
-        entityName = supplier?.name || 'Unknown Supplier';
+        const entity = await db.entities.get(transaction.supplier_id);
+        entityName = entity?.name || 'Unknown Supplier';
         entityType = 'supplier';
         entityId = transaction.supplier_id;
       }

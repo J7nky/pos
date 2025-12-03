@@ -52,12 +52,7 @@ export class LegacyCompatibilityService {
       return entities.map(entity => this.entityToLegacyCustomer(entity));
     } catch (error) {
       console.error('Failed to get customers from entities:', error);
-      // Fallback to legacy table
-      return await db.customers
-        .where('store_id')
-        .equals(storeId)
-        .filter(c => !c._deleted)
-        .toArray();
+      throw error; // No fallback - legacy tables removed
     }
   }
   
@@ -74,12 +69,7 @@ export class LegacyCompatibilityService {
       return entities.map(entity => this.entityToLegacySupplier(entity));
     } catch (error) {
       console.error('Failed to get suppliers from entities:', error);
-      // Fallback to legacy table
-      return await db.suppliers
-        .where('store_id')
-        .equals(storeId)
-        .filter(s => !s._deleted)
-        .toArray();
+      throw error; // No fallback - legacy tables removed
     }
   }
   
@@ -99,8 +89,7 @@ export class LegacyCompatibilityService {
       return this.entityToLegacyCustomer(entity);
     } catch (error) {
       console.error('Failed to get customer from entities:', error);
-      // Fallback to legacy table
-      return await db.customers.get(customerId) || null;
+      throw error; // No fallback - legacy tables removed
     }
   }
   
@@ -120,8 +109,7 @@ export class LegacyCompatibilityService {
       return this.entityToLegacySupplier(entity);
     } catch (error) {
       console.error('Failed to get supplier from entities:', error);
-      // Fallback to legacy table
-      return await db.suppliers.get(supplierId) || null;
+      throw error; // No fallback - legacy tables removed
     }
   }
   
@@ -139,17 +127,9 @@ export class LegacyCompatibilityService {
       updateData[balanceField] = newBalance;
       
       await db.entities.update(customerId, updateData);
-      
-      // Also update legacy table for backward compatibility during migration
-      await db.customers.update(customerId, updateData);
-      
     } catch (error) {
       console.error('Failed to update customer balance:', error);
-      // Fallback to legacy table only
-      await db.customers.update(customerId, {
-        [balanceField]: newBalance,
-        _synced: false
-      });
+      throw error; // No fallback - legacy tables removed
     }
   }
   
@@ -167,17 +147,9 @@ export class LegacyCompatibilityService {
       updateData[balanceField] = newBalance;
       
       await db.entities.update(supplierId, updateData);
-      
-      // Also update legacy table for backward compatibility during migration
-      await db.suppliers.update(supplierId, updateData);
-      
     } catch (error) {
       console.error('Failed to update supplier balance:', error);
-      // Fallback to legacy table only
-      await db.suppliers.update(supplierId, {
-        [balanceField]: newBalance,
-        _synced: false
-      });
+      throw error; // No fallback - legacy tables removed
     }
   }
   
@@ -200,13 +172,7 @@ export class LegacyCompatibilityService {
       };
     } catch (error) {
       console.error('Failed to get entity counts from entities table:', error);
-      // Fallback to legacy tables
-      const [customerCount, supplierCount] = await Promise.all([
-        db.customers.where('store_id').equals(storeId).filter(c => !c._deleted).count(),
-        db.suppliers.where('store_id').equals(storeId).filter(s => !s._deleted).count()
-      ]);
-      
-      return { customerCount, supplierCount };
+      throw error; // No fallback - legacy tables removed
     }
   }
   
@@ -227,11 +193,7 @@ export class LegacyCompatibilityService {
       return customersMap;
     } catch (error) {
       console.error('Failed to search customers from entities:', error);
-      // Fallback to legacy table
-      const customersMap = new Map<string, string>();
-      const allCustomers = await db.customers.where('store_id').equals(storeId).toArray();
-      allCustomers.forEach(c => customersMap.set(c.id, c.name.toLowerCase()));
-      return customersMap;
+      throw error; // No fallback - legacy tables removed
     }
   }
   
@@ -263,21 +225,7 @@ export class LegacyCompatibilityService {
       console.warn('Failed to find entity in entities table:', error);
     }
     
-    // Fallback to legacy tables
-    try {
-      const customer = await db.customers.get(entityId);
-      if (customer) {
-        return { entity: customer, type: 'customer' };
-      }
-      
-      const supplier = await db.suppliers.get(entityId);
-      if (supplier) {
-        return { entity: supplier, type: 'supplier' };
-      }
-    } catch (error) {
-      console.error('Failed to find entity in legacy tables:', error);
-    }
-    
+    // No fallback - legacy tables removed
     return { entity: null, type: null };
   }
   

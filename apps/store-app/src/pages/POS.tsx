@@ -560,6 +560,7 @@ ${dashSeparator}`;
 
   // In addToCart, add specific inventory item to cart respecting temporary reservations across all tabs
   const addToCart = (productId: string, inventoryItemId: string) => {
+    if (!activeTab) return;
     const product = products.find(p => p.id === productId);
     const inventoryItem = inventory.find(item => item.id === inventoryItemId);
     if (!product || !inventoryItem) return;
@@ -622,6 +623,7 @@ ${dashSeparator}`;
 
   // In updateCartItem, prevent increasing quantity beyond available stock (considering other cart reservations across all tabs)
   const updateCartItem = (itemId: string, field: keyof BillLineItem, value: any) => {
+    if (!activeTab) return;
     const updatedCart = activeTab.cart.map(item => {
       if (item.id === itemId) {
         let updatedItem = { ...item, [field]: value };
@@ -664,22 +666,23 @@ ${dashSeparator}`;
   };
 
   const removeFromCart = (itemId: string) => {
+    if (!activeTab) return;
     const updatedCart = activeTab.cart.filter(item => item.id !== itemId);
     updateActiveTab({ cart: updatedCart });
   };
 
-  const total = activeTab.cart.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0);
+  const total = activeTab?.cart?.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0) ?? 0;
 
-  const change = activeTab.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
+  const change = activeTab?.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
   // Validation helpers
-  const isWalkInCustomer = activeTab.selectedCustomer === t('common.labels.walkInCustomer'); // Empty string represents Walk-in Customer
-  const hasZeroPricedItem = activeTab.cart.some(i => (i.unitPrice ?? 0) === 0);
+  const isWalkInCustomer = activeTab?.selectedCustomer === t('common.labels.walkInCustomer'); // Empty string represents Walk-in Customer
+  const hasZeroPricedItem = activeTab?.cart?.some(i => (i.unitPrice ?? 0) === 0) ?? false;
 
 
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
   const handleCheckout = async () => {
-    if (activeTab.cart.length === 0) return;
+    if (!activeTab || activeTab.cart.length === 0) return;
     
     // Check if there are non-priced items and automatically switch to credit
     const hasNonPricedItem = activeTab.cart.some(i => (i.unitPrice ?? 0) === 0);
@@ -1041,7 +1044,7 @@ ${dashSeparator}`;
           />
 
           {/* Totals and Payment */}
-          {activeTab.cart.length > 0 && (
+          {activeTab?.cart?.length > 0 && (
             <div className="bg-white rounded-lg shadow-sm p-4 space-y-4">
               <div className="space-y-2">
 

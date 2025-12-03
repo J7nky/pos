@@ -328,7 +328,8 @@ export class ReceivedBillMonitoringService {
         const batch = inventoryItem.batch_id 
           ? await db.inventory_bills.get(inventoryItem.batch_id)
           : null;
-        const supplier = batch ? await db.suppliers.get(batch.supplier_id) : null;
+        const entity = batch ? await db.entities.get(batch.supplier_id) : null;
+        const supplier = entity && entity.entity_type === 'supplier' ? entity : null;
 
         if (product && supplier) {
           await this.handleCompletedBill(storeId, {

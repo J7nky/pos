@@ -184,11 +184,11 @@ export async function validateSaleItemsStructure(): Promise<{
       }
 
       try {
-        const supplier = await db.suppliers.get(item.supplier_id);
-        if (!supplier) {
+        const entity = await db.entities.get(item.supplier_id);
+        if (!entity || entity.entity_type !== 'supplier') {
           result.issues.push({
             id: item.id,
-            issue: `Orphaned record: supplier_id ${item.supplier_id} does not exist`,
+            issue: `Orphaned record: supplier_id ${item.supplier_id} does not exist or is not a supplier`,
             severity: 'warning'
           });
         }

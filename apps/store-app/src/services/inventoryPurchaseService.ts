@@ -200,23 +200,17 @@ export class InventoryPurchaseService {
     const transactionId = createId();
     
     try {
-      // Add total amount to supplier balance (we owe them)
-      const supplier = await db.suppliers.get(data.supplier_id);
-      if (supplier) {
-        const currentBalance = supplier.lb_balance || 0;
-        await db.suppliers.update(data.supplier_id, {
-          lb_balance: currentBalance + totalAmount,
-          updated_at: new Date().toISOString(),
-          _synced: false
-        });
-      }
+      // Get supplier entity (transactionService will handle balance update)
+      const supplierEntity = await db.entities.get(data.supplier_id);
+      const supplierName = supplierEntity?.name || 'Supplier';
 
       // Create transaction record for credit purchase using transactionService
+      // Note: transactionService.createSupplierPayment() now handles entity balance updates
       const creditPurchaseResult = await transactionService.createSupplierPayment(
         data.supplier_id,
         totalAmount,
         'LBP',
-        `Credit purchase - ${items.length} items from ${supplier?.name || 'Supplier'}`,
+        `Credit purchase - ${items.length} items from ${supplierName}`,
         {
           userId: data.created_by,
           module: 'inventory_purchase',
@@ -350,38 +344,49 @@ export class InventoryPurchaseService {
   }
 
   /**
-   * Get or create the "Trade" supplier for cash purchases
+   * Get or create the "Trade" supplier entity for cash purchases
    */
   public async getOrCreateTradeSupplier(storeId: string): Promise<string> {
     try {
-      // Look for existing "Trade" supplier
-      const existingSupplier = await db.suppliers
-        .where('name')
-        .equals('Trade')
-        .and(s => s.store_id === storeId)
+      // Look for existing "Trade" supplier entity
+      const existingSupplier = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'supplier'])
+        .filter(e => e.name === 'Trade' && !e._deleted)
         .first();
 
       if (existingSupplier) {
         return existingSupplier.id;
       }
 
-      // Create new "Trade" supplier
+      // Create new "Trade" supplier entity
       const tradeSupplierId = createId();
+      const now = new Date().toISOString();
       const tradeSupplier = {
         id: tradeSupplierId,
-        name: 'Trade',
-        email: '',
-        phone: '',
-        address: '',
         store_id: storeId,
-        usd_balance: 0,
+        branch_id: null,
+        entity_type: 'supplier' as const,
+        entity_code: `SUPP-TRADE-${tradeSupplierId.slice(0, 8).toUpperCase()}`,
+        name: 'Trade',
+        phone: null,
         lb_balance: 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        _synced: false
+        usd_balance: 0,
+        is_system_entity: false,
+        is_active: true,
+        customer_data: null,
+        supplier_data: {
+          type: 'cash',
+          advance_lb_balance: 0,
+          advance_usd_balance: 0
+        },
+        created_at: now,
+        updated_at: now,
+        _synced: false,
+        _deleted: false
       };
 
-      await db.suppliers.add(tradeSupplier);
+      await db.entities.add(tradeSupplier);
       return tradeSupplierId;
     } catch (error) {
       console.error('Error getting/creating Trade supplier:', error);

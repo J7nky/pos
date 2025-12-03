@@ -94,14 +94,14 @@ export class AccountStatementService {
     startDateISO: string
   ): Promise<{ USD: number; LBP: number }> {
     // 1. Get current stored balance (source of truth)
-    const customer = await db.customers.get(customerId);
-    if (!customer) {
+    const entity = await db.entities.get(customerId);
+    if (!entity || entity.entity_type !== 'customer') {
       return { USD: 0, LBP: 0 };
     }
 
     const currentBalance = {
-      USD: customer.usd_balance || 0,
-      LBP: customer.lb_balance || 0
+      USD: entity.usd_balance || 0,
+      LBP: entity.lb_balance || 0
     };
 
     // 2. Parse start date for comparison

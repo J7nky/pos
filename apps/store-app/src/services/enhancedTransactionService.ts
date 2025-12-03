@@ -61,22 +61,22 @@ export class EnhancedTransactionService {
   ): Promise<EnhancedTransactionResult> {
     try {
       // Get customer data for balance tracking
-      const customerData = await db.customers.get(customerId);
-      if (!customerData) {
+      const entity = await db.entities.get(customerId);
+      if (!entity || entity.entity_type !== 'customer') {
         throw new Error('Customer not found');
       }
       
       const customer: Customer = {
-        id: customerData.id,
-        name: customerData.name,
-        phone: customerData.phone,
-        email: customerData.email || '',
-        address: customerData.address || '',
-        lbBalance: customerData.lb_balance || 0,
-        usdBalance: customerData.usd_balance || 0,
-        isActive: customerData.is_active,
-        createdAt: customerData.created_at,
-        balance: customerData.usd_balance || 0,
+        id: entity.id,
+        name: entity.name,
+        phone: entity.phone || '',
+        email: (entity as any).email || '',
+        address: (entity as any).address || '',
+        lbBalance: entity.lb_balance || 0,
+        usdBalance: entity.usd_balance || 0,
+        isActive: entity.is_active,
+        createdAt: entity.created_at || entity.updated_at,
+        balance: entity.usd_balance || 0,
       };
 
       const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
@@ -95,7 +95,7 @@ export class EnhancedTransactionService {
       
       // ATOMIC TRANSACTION: Create both existing transaction and journal entries
       let result: TransactionResult;
-      await db.transaction('rw', [db.transactions, db.customers, db.journal_entries, db.entities], async () => {
+      await db.transaction('rw', [db.transactions, db.journal_entries, db.entities], async () => {
         // 1. Create existing transaction record
         result = await transactionService.createCustomerPayment(
           customerId,
@@ -230,21 +230,21 @@ export class EnhancedTransactionService {
   ): Promise<EnhancedTransactionResult> {
     try {
       // Get supplier data
-      const supplierData = await db.suppliers.get(supplierId);
-      if (!supplierData) {
+      const entity = await db.entities.get(supplierId);
+      if (!entity || entity.entity_type !== 'supplier') {
         throw new Error('Supplier not found');
       }
       
       const supplier: Supplier = {
-        id: supplierData.id,
-        name: supplierData.name,
-        phone: supplierData.phone,
-        email: supplierData.email || '',
-        address: supplierData.address,
-        lbBalance: supplierData.lb_balance || 0,
-        usdBalance: supplierData.usd_balance || 0,
-        createdAt: supplierData.created_at,
-        balance: supplierData.usd_balance || 0,
+        id: entity.id,
+        name: entity.name,
+        phone: entity.phone || '',
+        email: (entity as any).email || '',
+        address: (entity as any).address || '',
+        lbBalance: entity.lb_balance || 0,
+        usdBalance: entity.usd_balance || 0,
+        createdAt: entity.created_at || entity.updated_at,
+        balance: entity.usd_balance || 0,
       };
 
       // Calculate current balance owed to supplier
@@ -273,7 +273,7 @@ export class EnhancedTransactionService {
       
       // ATOMIC TRANSACTION: Create both existing transaction and journal entries
       let result: TransactionResult;
-      await db.transaction('rw', [db.transactions, db.suppliers, db.journal_entries, db.entities], async () => {
+      await db.transaction('rw', [db.transactions, db.journal_entries, db.entities], async () => {
         // 1. Create existing transaction record
         result = await transactionService.createSupplierPayment(
           supplierId,
@@ -418,19 +418,19 @@ export class EnhancedTransactionService {
       let customer: Customer | undefined;
 
       if (saleData.customerId && saleData.amountDue > 0) {
-        const customerData = await db.customers.get(saleData.customerId);
-        if (customerData) {
+        const entity = await db.entities.get(saleData.customerId);
+        if (entity && entity.entity_type === 'customer') {
           customer = {
-            id: customerData.id,
-            name: customerData.name,
-            phone: customerData.phone,
-            email: customerData.email || '',
-            address: customerData.address || '',
-            lbBalance: customerData.lb_balance || 0,
-            usdBalance: customerData.usd_balance || 0,
-            isActive: customerData.is_active,
-            createdAt: customerData.created_at,
-            balance: customerData.usd_balance || 0,
+            id: entity.id,
+            name: entity.name,
+            phone: entity.phone || '',
+            email: (entity as any).email || '',
+            address: (entity as any).address || '',
+            lbBalance: entity.lb_balance || 0,
+            usdBalance: entity.usd_balance || 0,
+            isActive: entity.is_active,
+            createdAt: entity.created_at || entity.updated_at,
+            balance: entity.usd_balance || 0,
           };
         }
         

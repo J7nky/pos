@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
@@ -35,8 +35,8 @@ interface OfflineDataContextType {
   currentBranchId: string | null;
   // Data - matching exact structure
   products: Tables['products']['Row'][];
-  suppliers: Tables['suppliers']['Row'][];
-  customers: Tables['customers']['Row'][];
+  suppliers: Tables['entities']['Row'][]; // Filtered entities with entity_type='supplier'
+  customers: Tables['entities']['Row'][]; // Filtered entities with entity_type='customer'
   employees: Tables['users']['Row'][];
   sales: BillLineItem[]; // Unified BillLineItem interface
   inventory: any[]; // Complex type with joins (mapped from inventoryItems)
@@ -312,8 +312,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // Data states - offline-first structure
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
-  const [suppliers, setSuppliers] = useState<Tables['suppliers']['Row'][]>([]);
-  const [customers, setCustomers] = useState<Tables['customers']['Row'][]>([]);
+  // Note: customers and suppliers are now computed from entities for backward compatibility
   const [employees, setEmployees] = useState<Tables['users']['Row'][]>([]);
   const [sales, setSales] = useState<BillLineItem[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
@@ -335,6 +334,29 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [entities, setEntities] = useState<any[]>([]);
   const [chartOfAccounts, setChartOfAccounts] = useState<any[]>([]);
   const [balanceSnapshots, setBalanceSnapshots] = useState<any[]>([]);
+
+  // Helper functions to convert entities to legacy format for backward compatibility
+  // Helper function to get advance balances from supplier entity
+  const getSupplierAdvanceBalances = (supplier: Tables['entities']['Row']) => {
+    const supplierData = (supplier.supplier_data as any) || {};
+    return {
+      advance_lb_balance: supplierData.advance_lb_balance || 0,
+      advance_usd_balance: supplierData.advance_usd_balance || 0
+    };
+  };
+
+  // Customers and suppliers are now direct entity arrays (no transformation needed)
+  const customers = useMemo(() => {
+    return entities.filter((e): e is Tables['entities']['Row'] => 
+      e.entity_type === 'customer' && !e._deleted
+    );
+  }, [entities]);
+
+  const suppliers = useMemo(() => {
+    return entities.filter((e): e is Tables['entities']['Row'] => 
+      e.entity_type === 'supplier' && !e._deleted
+    );
+  }, [entities]);
 
   // Loading states - exact match
   const [loading, setLoading] = useState({
@@ -522,8 +544,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Load all data from IndexedDB using optimized batch loading
       const {
         productsData,
-        suppliersData,
-        customersData,
         employeesData,
         inventoryData,
         transactionsData,
@@ -541,9 +561,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         balanceSnapshotsData,
       } = await crudHelperService.loadAllStoreData(storeId, currentBranchId);
       
-      console.log(`🔄 refreshData: Loaded ${customersData.length} customers, ${suppliersData.length} suppliers, ${employeesData.length} employees`);
-      console.log('🔄 refreshData: Latest customers:', customersData.slice(-3));
-      console.log('🔄 refreshData: Latest suppliers:', suppliersData.slice(-3));
+      // Filter entities by type for logging
+      const customerEntities = (entitiesData || []).filter((e: any) => e.entity_type === 'customer');
+      const supplierEntities = (entitiesData || []).filter((e: any) => e.entity_type === 'supplier');
+      console.log(`🔄 refreshData: Loaded ${customerEntities.length} customer entities, ${supplierEntities.length} supplier entities, ${employeesData.length} employees`);
+      console.log('🔄 refreshData: Latest customer entities:', customerEntities.slice(-3).map((e: any) => e.name));
+      console.log('🔄 refreshData: Latest supplier entities:', supplierEntities.slice(-3).map((e: any) => e.name));
       console.log(`🔄 refreshData: Loaded ${inventoryData.length} inventory_items, ${batchesData.length} inventory_bills`);
       console.log(`🔄 refreshData: Loaded ${productsData.length} products (including global products)`);
       console.log('🔄 refreshData: Products from DB:', productsData.map((p: any) => ({ id: p.id, name: p.name, is_global: p.is_global, store_id: p.store_id })));
@@ -553,14 +576,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const storeCount = productsData.length - globalCount;
       console.log(`🔄 refreshData: Breakdown - ${storeCount} store products + ${globalCount} global products`);
 
-      debug(`📊 Loaded data: ${productsData.length} products, ${suppliersData.length} suppliers, ${customersData.length} customers, ${employeesData.length} employees, ${inventoryData.length} inventory items, ${batchesData.length} inventory bills, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
+      debug(`📊 Loaded data: ${productsData.length} products, ${supplierEntities.length} supplier entities, ${customerEntities.length} customer entities, ${employeesData.length} employees, ${inventoryData.length} inventory items, ${batchesData.length} inventory bills, ${billLineItemsData.length} bill line items, ${transactionsData.length} transactions, ${billsData.length} bills, ${cashDrawerAccountsData.length} cash drawer accounts, ${cashDrawerSessionsData.length} cash drawer sessions`);
 
       // Transform data for offline-first structure
       console.log('🔄 refreshData: About to set products in state, count:', productsData.length);
       setProducts(productsData as Tables['products']['Row'][]);
       console.log('🔄 refreshData: Products state updated');
-      setSuppliers(suppliersData.map((s: any) => ({ ...s, lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0 })) as Tables['suppliers']['Row'][]);
-      setCustomers(customersData.map((c: any) => ({ ...c, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0 })) as Tables['customers']['Row'][]);
+      // Note: customers and suppliers are now computed from entities (see computed properties below)
       setEmployees(employeesData.map((e: any) => ({ ...e, lbp_balance: e.lbp_balance || 0, usd_balance: e.usd_balance || 0 })) as Tables['users']['Row'][]);
       setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
 
@@ -573,6 +595,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setEntities(entitiesData || []);
       setChartOfAccounts(chartOfAccountsData || []);
       setBalanceSnapshots(balanceSnapshotsData || []);
+      
+      // Note: customers and suppliers are computed from entities (see computed properties below)
       
       console.log(`🔄 refreshData: Loaded ${journalEntriesData?.length || 0} journal entries, ${entitiesData?.length || 0} entities, ${chartOfAccountsData?.length || 0} chart accounts, ${balanceSnapshotsData?.length || 0} balance snapshots`);
 
@@ -731,17 +755,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Check if local database is empty (no essential data)
       // For products, include both store-specific and global products
-      const [storeProductCount, globalProductCount, supplierCount, customerCount] = await Promise.all([
+      const [storeProductCount, globalProductCount, supplierEntityCount, customerEntityCount] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
         db.products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
-        db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
-        db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
+        db.entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter(item => !item._deleted).count(),
+        db.entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter(item => !item._deleted).count()
       ]);
       const productCount = storeProductCount + globalProductCount;
 
-      debug(`📈 Local data counts: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
+      debug(`📈 Local data counts: ${productCount} products, ${supplierEntityCount} supplier entities, ${customerEntityCount} customer entities`);
 
-      const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
+      const isLocalDatabaseEmpty = productCount === 0 && supplierEntityCount === 0 && customerEntityCount === 0;
 
       // If local database is empty and we're online, sync from cloud
       if (isLocalDatabaseEmpty && isOnline) {
@@ -765,7 +789,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       } else if (isLocalDatabaseEmpty && !isOnline) {
         debug('📴 Local database is empty but offline - will sync when connection is restored');
       } else if (!isLocalDatabaseEmpty) {
-        debug(`📊 Local database loaded: ${productCount} products, ${supplierCount} suppliers, ${customerCount} customers`);
+        debug(`📊 Local database loaded: ${productCount} products, ${supplierEntityCount} supplier entities, ${customerEntityCount} customer entities`);
 
         // If we have local data and we're online, perform a regular sync to get updates
         if (isOnline && unsyncedCount === 0) {
@@ -854,15 +878,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Check if local database is empty
       // For products, include both store-specific and global products
-      const [storeProductCount, globalProductCount, supplierCount, customerCount] = await Promise.all([
+      const [storeProductCount, globalProductCount, supplierEntityCount, customerEntityCount] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
         db.products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
-        db.suppliers.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
-        db.customers.where('store_id').equals(storeId).filter(item => !item._deleted).count()
+        db.entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter(item => !item._deleted).count(),
+        db.entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter(item => !item._deleted).count()
       ]);
       const productCount = storeProductCount + globalProductCount;
 
-      const isLocalDatabaseEmpty = productCount === 0 && supplierCount === 0 && customerCount === 0;
+      const isLocalDatabaseEmpty = productCount === 0 && supplierEntityCount === 0 && customerEntityCount === 0;
 
       if (isLocalDatabaseEmpty) {
         debug('📥 Connection restored with empty database - performing full sync...');
@@ -890,6 +914,40 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       performSync(true);
     }
   };
+  const updateStockLevels = useCallback(() => {
+    const levels = products.map(product => {
+      const productInventory = inventoryItems.filter(item => item.product_id === product.id);
+      const totalStock = productInventory.reduce((sum, item) => sum + item.quantity, 0);
+
+      // Group inventory by supplier for POS component compatibility
+      // Use entities filtered by supplier type instead of suppliers computed property
+      const supplierEntities = entities.filter(e => e.entity_type === 'supplier' && !e._deleted);
+      const supplierStocks = productInventory.reduce((acc, item) => {
+        const existingSupplier = acc.find(s => s.supplierId === item.supplier_id);
+        if (existingSupplier) {
+          existingSupplier.quantity += item.quantity;
+        } else {
+          const supplier = supplierEntities.find(s => s.id === item.supplier_id);
+          acc.push({
+            supplierId: item.supplier_id || '',
+            supplierName: supplier?.name || 'Unknown Supplier',
+            quantity: item.quantity
+          });
+        }
+        return acc;
+      }, [] as Array<{ supplierId: string; supplierName: string; quantity: number }>);
+
+      return {
+        id: product.id,
+        productId: product.id,
+        productName: product.name,
+        currentStock: totalStock,
+        suppliers: supplierStocks,
+        lowStockAlert: lowStockAlertsEnabled && totalStock <= lowStockThreshold
+      };
+    });
+    setStockLevels(levels);
+  }, [products, inventoryItems, entities, lowStockAlertsEnabled, lowStockThreshold]);
 
   // Auto-sync on window focus when online (for when user returns to tab)
   useEffect(() => {
@@ -935,10 +993,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
   }, [isOnline, storeId, isSyncing, unsyncedCount]);
 
-  // Update stock levels when inventory, products, or suppliers change
+  // Update stock levels when inventory, products, or entities change
   useEffect(() => {
     updateStockLevels();
-  }, [inventoryItems, products, suppliers, lowStockAlertsEnabled, lowStockThreshold]);
+  }, [updateStockLevels]);
 
  
 
@@ -1086,39 +1144,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
   }, [resetAutoSyncTimer]);
 
-  const updateStockLevels = () => {
-    const levels = products.map(product => {
-      const productInventory = inventoryItems.filter(item => item.product_id === product.id);
-      const totalStock = productInventory.reduce((sum, item) => sum + item.quantity, 0);
-
-      // Group inventory by supplier for POS component compatibility
-      const supplierStocks = productInventory.reduce((acc, item) => {
-        const existingSupplier = acc.find(s => s.supplierId === item.supplier_id);
-        if (existingSupplier) {
-          existingSupplier.quantity += item.quantity;
-        } else {
-          const supplier = suppliers.find(s => s.id === item.supplier_id);
-          acc.push({
-            supplierId: item.supplier_id || '',
-            supplierName: supplier?.name || 'Unknown Supplier',
-            quantity: item.quantity
-          });
-        }
-        return acc;
-      }, [] as Array<{ supplierId: string; supplierName: string; quantity: number }>);
-
-      return {
-        id: product.id,
-        productId: product.id,
-        productName: product.name,
-        currentStock: totalStock,
-        suppliers: supplierStocks,
-        lowStockAlert: lowStockAlertsEnabled && totalStock <= lowStockThreshold
-      };
-    });
-    setStockLevels(levels);
-  };
-
+ 
   const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
     if (!storeId || isSyncing) {
       console.log('⏭️  [SYNC] Skipping sync:', { hasStoreId: !!storeId, isSyncing });
@@ -1251,7 +1277,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
 
     // Use transaction to ensure atomicity for all operations including inventory, cash drawer, customer balance, and audit logs
-    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.customers, db.suppliers, db.transactions, db.bill_audit_logs], async () => {
+    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.entities, db.transactions, db.bill_audit_logs], async () => {
       // Add bill and line items
       await db.bills.add(bill);
       if (mappedLineItems.length > 0) {
@@ -1355,30 +1381,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Update customer/supplier balance if needed
       if (customerBalanceUpdate) {
-        // First try to find as customer
-        let entity: any = await db.customers.get(customerBalanceUpdate.customerId);
-        let entityType = 'customer';
+        // Get entity (could be customer or supplier)
+        const entity = await db.entities.get(customerBalanceUpdate.customerId);
         
-        // If not found as customer, try as supplier
-        if (!entity) {
-          entity = await db.suppliers.get(customerBalanceUpdate.customerId);
-          entityType = 'supplier';
-        }
-        
-        if (entity) {
+        if (entity && (entity.entity_type === 'customer' || entity.entity_type === 'supplier')) {
+          const entityType = entity.entity_type;
           const newBalance = customerBalanceUpdate.originalBalance + customerBalanceUpdate.amountDue;
           
-          if (entityType === 'customer') {
-            await db.customers.update(customerBalanceUpdate.customerId, {
-              lb_balance: newBalance,
-              _synced: false
-            });
-          } else {
-            await db.suppliers.update(customerBalanceUpdate.customerId, {
-              lb_balance: newBalance,
-              _synced: false
-            });
-          }
+          // Update entity balance
+          await db.entities.update(customerBalanceUpdate.customerId, {
+            lb_balance: newBalance,
+            updated_at: new Date().toISOString(),
+            _synced: false
+          });
 
           // Record the transaction for financial tracking using the unified service
           await transactionService.createTransaction({
@@ -1532,7 +1547,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const auditLogs: any[] = [];
     const auditLogIds: string[] = [];
 
-    await db.transaction('rw', [db.bills, db.bill_audit_logs, db.customers], async () => {
+    await db.transaction('rw', [db.bills, db.bill_audit_logs, db.entities], async () => {
       // Update the bill
       await db.bills.update(billId, {
         ...updates,
@@ -1553,15 +1568,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             // Resolve customer_id to customer name
             if (field === 'customer_id') {
               if (oldValue) {
-                const oldCustomer = await db.customers.get(oldValue);
-                oldValueDisplay = oldCustomer?.name || oldValue;
+                const oldEntity = await db.entities.get(oldValue);
+                oldValueDisplay = oldEntity?.name || oldValue;
               } else {
                 oldValueDisplay = 'Walk-in Customer';
               }
               
               if (newValue) {
-                const newCustomer = await db.customers.get(newValue);
-                newValueDisplay = newCustomer?.name || newValue as string;
+                const newEntity = await db.entities.get(newValue);
+                newValueDisplay = newEntity?.name || newValue as string;
               } else {
                 newValueDisplay = 'Walk-in Customer';
               }
@@ -1781,10 +1796,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Apply search term filter if provided (needs customer lookup, so done in memory)
     if (filters?.searchTerm) {
       const searchLower = filters.searchTerm.toLowerCase();
-      // Get customers for name lookup
+      // Get customer entities for name lookup
       const customersMap = new Map<string, string>();
-      const allCustomers = await db.customers.where('store_id').equals(storeId).toArray();
-      allCustomers.forEach(c => customersMap.set(c.id, c.name.toLowerCase()));
+      const allCustomerEntities = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'customer'])
+        .filter(e => !e._deleted)
+        .toArray();
+      allCustomerEntities.forEach(e => customersMap.set(e.id, e.name.toLowerCase()));
 
       billsData = billsData.filter(bill => {
         const billNumberLower = bill.bill_number?.toLowerCase() || '';
@@ -1915,81 +1934,195 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const addSupplier = async (supplierData: Omit<Tables['suppliers']['Insert'], 'store_id'>): Promise<void> => {
     const supplierId = supplierData.id || createId();
-    const dataWithId = { ...supplierData, id: supplierId };
+    const now = new Date().toISOString();
     
-    await crudHelperService.addEntity('suppliers', storeId!, dataWithId);
+    // Create entity instead of legacy supplier table
+    const entity = {
+      id: supplierId,
+      store_id: storeId!,
+      branch_id: currentBranchId,
+      entity_type: 'supplier' as const,
+      entity_code: `SUPP-${supplierId.slice(0, 8).toUpperCase()}`,
+      name: supplierData.name,
+      phone: supplierData.phone || null,
+      lb_balance: supplierData.lb_balance || 0,
+      usd_balance: supplierData.usd_balance || 0,
+      is_system_entity: false,
+      is_active: true,
+      customer_data: null,
+      supplier_data: {
+        type: (supplierData as any).type || 'standard',
+        advance_lb_balance: (supplierData as any).advance_lb_balance || 0,
+        advance_usd_balance: (supplierData as any).advance_usd_balance || 0,
+        email: (supplierData as any).email || null,
+        address: (supplierData as any).address || null
+      },
+      created_at: now,
+      updated_at: now,
+      _synced: false,
+      _deleted: false
+    };
+    
+    await db.entities.add(entity);
     
     // Store undo data
     pushUndo({
       type: 'add_supplier',
-      affected: [{ table: 'suppliers', id: supplierId }],
-      steps: [{ op: 'delete', table: 'suppliers', id: supplierId }]
+      affected: [{ table: 'entities', id: supplierId }],
+      steps: [{ op: 'update', table: 'entities', id: supplierId, changes: { _deleted: true, _synced: false } }]
     });
     
+    // Refresh entities data
+    await refreshData();
     resetAutoSyncTimer();
   };
 
   const addCustomer = async (customerData: Omit<Tables['customers']['Insert'], 'store_id'>): Promise<void> => {
     const customerId = customerData.id || createId();
-    const dataWithId = { ...customerData, id: customerId };
+    const now = new Date().toISOString();
     
-    await crudHelperService.addEntity('customers', storeId!, dataWithId);
+    // Create entity instead of legacy customer table
+    const entity = {
+      id: customerId,
+      store_id: storeId!,
+      branch_id: currentBranchId,
+      entity_type: 'customer' as const,
+      entity_code: `CUST-${customerId.slice(0, 8).toUpperCase()}`,
+      name: customerData.name,
+      phone: customerData.phone || null,
+      lb_balance: customerData.lb_balance || 0,
+      usd_balance: customerData.usd_balance || 0,
+      is_system_entity: false,
+      is_active: customerData.is_active ?? true,
+      customer_data: {
+        lb_max_balance: customerData.lb_max_balance || 0,
+        credit_limit: customerData.lb_max_balance || 0,
+        email: (customerData as any).email || null,
+        address: (customerData as any).address || null
+      },
+      supplier_data: null,
+      created_at: now,
+      updated_at: now,
+      _synced: false,
+      _deleted: false
+    };
+    
+    await db.entities.add(entity);
     
     // Store undo data
     pushUndo({
       type: 'add_customer',
-      affected: [{ table: 'customers', id: customerId }],
-      steps: [{ op: 'delete', table: 'customers', id: customerId }]
+      affected: [{ table: 'entities', id: customerId }],
+      steps: [{ op: 'update', table: 'entities', id: customerId, changes: { _deleted: true, _synced: false } }]
     });
     
+    // Refresh entities data
+    await refreshData();
     resetAutoSyncTimer();
   };
 
   const updateCustomer = async (id: string, updates: Tables['customers']['Update']): Promise<void> => {
-    // Get original data for undo
-    const originalCustomer = await db.customers.get(id);
-    if (!originalCustomer) throw new Error('Customer not found');
+    // Get original entity data for undo
+    const originalEntity = await db.entities.get(id);
+    if (!originalEntity || originalEntity.entity_type !== 'customer') {
+      throw new Error('Customer entity not found');
+    }
     
-    await crudHelperService.updateEntity('customers', id, updates);
+    // Convert customer updates to entity updates
+    const entityUpdates: any = {
+      name: updates.name,
+      phone: updates.phone ?? null,
+      lb_balance: updates.lb_balance,
+      usd_balance: updates.usd_balance,
+      is_active: updates.is_active,
+      updated_at: new Date().toISOString(),
+      _synced: false
+    };
+    
+    // Update customer_data if needed
+    if (updates.lb_max_balance !== undefined || (updates as any).email !== undefined || (updates as any).address !== undefined) {
+      const customerData = originalEntity.customer_data || {};
+      entityUpdates.customer_data = {
+        ...customerData,
+        lb_max_balance: updates.lb_max_balance ?? (customerData as any).lb_max_balance ?? 0,
+        credit_limit: updates.lb_max_balance ?? (customerData as any).credit_limit ?? 0,
+        email: (updates as any).email ?? (customerData as any).email ?? null,
+        address: (updates as any).address ?? (customerData as any).address ?? null
+      };
+    }
+    
+    await db.entities.update(id, entityUpdates);
     
     // Store undo data with original values
-    const undoChanges: any = {};
-    for (const key of Object.keys(updates)) {
-      if (key !== '_synced' && key !== 'updated_at') {
-        undoChanges[key] = (originalCustomer as any)[key];
-      }
-    }
+    const undoChanges: any = {
+      name: originalEntity.name,
+      phone: originalEntity.phone,
+      lb_balance: originalEntity.lb_balance,
+      usd_balance: originalEntity.usd_balance,
+      is_active: originalEntity.is_active,
+      customer_data: originalEntity.customer_data
+    };
     
     pushUndo({
       type: 'update_customer',
-      affected: [{ table: 'customers', id }],
-      steps: [{ op: 'update', table: 'customers', id, changes: undoChanges }]
+      affected: [{ table: 'entities', id }],
+      steps: [{ op: 'update', table: 'entities', id, changes: undoChanges }]
     });
     
+    // Refresh entities data
+    await refreshData();
     resetAutoSyncTimer();
   };
 
   const updateSupplier = async (id: string, updates: Tables['suppliers']['Update']): Promise<void> => {
-    // Get original data for undo
-    const originalSupplier = await db.suppliers.get(id);
-    if (!originalSupplier) throw new Error('Supplier not found');
+    // Get original entity data for undo
+    const originalEntity = await db.entities.get(id);
+    if (!originalEntity || originalEntity.entity_type !== 'supplier') {
+      throw new Error('Supplier entity not found');
+    }
     
-    await crudHelperService.updateEntity('suppliers', id, updates);
+    // Convert supplier updates to entity updates
+    const entityUpdates: any = {
+      name: updates.name,
+      phone: updates.phone ?? null,
+      lb_balance: updates.lb_balance,
+      usd_balance: updates.usd_balance,
+      updated_at: new Date().toISOString(),
+      _synced: false
+    };
+    
+    // Update supplier_data if needed
+    if (updates.type !== undefined || (updates as any).advance_lb_balance !== undefined || (updates as any).advance_usd_balance !== undefined || (updates as any).email !== undefined || (updates as any).address !== undefined) {
+      const supplierData = originalEntity.supplier_data || {};
+      entityUpdates.supplier_data = {
+        ...supplierData,
+        type: updates.type ?? (supplierData as any).type ?? 'standard',
+        advance_lb_balance: (updates as any).advance_lb_balance ?? (supplierData as any).advance_lb_balance ?? 0,
+        advance_usd_balance: (updates as any).advance_usd_balance ?? (supplierData as any).advance_usd_balance ?? 0,
+        email: (updates as any).email ?? (supplierData as any).email ?? null,
+        address: (updates as any).address ?? (supplierData as any).address ?? null
+      };
+    }
+    
+    await db.entities.update(id, entityUpdates);
     
     // Store undo data with original values
-    const undoChanges: any = {};
-    for (const key of Object.keys(updates)) {
-      if (key !== '_synced' && key !== 'updated_at') {
-        undoChanges[key] = (originalSupplier as any)[key];
-      }
-    }
+    const undoChanges: any = {
+      name: originalEntity.name,
+      phone: originalEntity.phone,
+      lb_balance: originalEntity.lb_balance,
+      usd_balance: originalEntity.usd_balance,
+      supplier_data: originalEntity.supplier_data
+    };
     
     pushUndo({
       type: 'update_supplier',
-      affected: [{ table: 'suppliers', id }],
-      steps: [{ op: 'update', table: 'suppliers', id, changes: undoChanges }]
+      affected: [{ table: 'entities', id }],
+      steps: [{ op: 'update', table: 'entities', id, changes: undoChanges }]
     });
     
+    // Refresh entities data
+    await refreshData();
     resetAutoSyncTimer();
   };
 
@@ -3388,8 +3521,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK - ALL OR NOTHING ⭐⭐⭐
       await db.transaction('rw', 
         [
-          db.customers, 
-          db.suppliers, 
+          db.entities, 
           db.transactions, 
           db.cash_drawer_accounts, 
           db.cash_drawer_sessions
@@ -3398,12 +3530,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           console.log('💳 [ATOMIC] Starting atomic transaction block...');
 
           // 1. Update entity balance atomically
-          const updateData = { [balanceField]: newBalance, _synced: false };
-          if (isCustomer) {
-            await db.customers.update(entityId, updateData);
-          } else {
-            await db.suppliers.update(entityId, updateData);
-          }
+          const updateData = { 
+            [balanceField]: newBalance, 
+            updated_at: new Date().toISOString(),
+            _synced: false 
+          };
+          await db.entities.update(entityId, updateData);
           console.log(`💳 [ATOMIC] Entity balance updated: ${balanceField} = ${newBalance}`);
 
           // 2. Process cash drawer transaction atomically (within existing transaction)
@@ -3741,8 +3873,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
 
       // Get current advance balance
-      const currentAdvanceLBP = supplier.advance_lb_balance || 0;
-      const currentAdvanceUSD = supplier.advance_usd_balance || 0;
+      const { advance_lb_balance: currentAdvanceLBP, advance_usd_balance: currentAdvanceUSD } = getSupplierAdvanceBalances(supplier);
 
       console.log(`💰 Supplier Advance - Supplier: ${supplier.name}, Type: ${type}, Currency: ${currency}, Amount: ${amount}`);
       console.log(`💰 Current Advance Balances - LBP: ${currentAdvanceLBP}, USD: ${currentAdvanceUSD}`);
@@ -3763,7 +3894,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           throw new Error('Cannot deduct more than the current advance balance');
         }
 
-        updateData.advance_lb_balance = newAdvanceBalance;
+        updateData.supplier_data = {
+          ...(supplier.supplier_data as any || {}),
+          advance_lb_balance: newAdvanceBalance
+        };
         console.log(`💰 ${type === 'give' ? 'Giving' : 'Deducting'} advance: LBP advance ${currentAdvanceLBP} → ${newAdvanceBalance}`);
       } else {
         // USD advance
@@ -3776,7 +3910,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           throw new Error('Cannot deduct more than the current advance balance');
         }
 
-        updateData.advance_usd_balance = newAdvanceBalance;
+        updateData.supplier_data = {
+          ...(supplier.supplier_data as any || {}),
+          advance_usd_balance: newAdvanceBalance
+        };
         console.log(`💰 ${type === 'give' ? 'Giving' : 'Deducting'} advance: USD advance ${currentAdvanceUSD} → ${newAdvanceBalance}`);
       }
 
@@ -3901,11 +4038,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           },
           {
             op: 'update',
-            table: 'suppliers',
+            table: 'entities',
             id: supplierId,
-            changes: currency === 'LBP'
-              ? { advance_lb_balance: previousAdvanceLBP, _synced: false }
-              : { advance_usd_balance: previousAdvanceUSD, _synced: false }
+            changes: {
+              supplier_data: {
+                ...(supplier.supplier_data as any || {}),
+                ...(currency === 'LBP' ? { advance_lb_balance: previousAdvanceLBP } : { advance_usd_balance: previousAdvanceUSD })
+              },
+              _synced: false
+            }
           }
         ]
       };
@@ -3966,12 +4107,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const wasGiveAdvance = transaction.type === 'expense';
 
       // Store previous balances for undo
-      const previousAdvanceLBP = supplier.advance_lb_balance || 0;
-      const previousAdvanceUSD = supplier.advance_usd_balance || 0;
+      const { advance_lb_balance: previousAdvanceLBP, advance_usd_balance: previousAdvanceUSD } = getSupplierAdvanceBalances(supplier);
       
       // Reverse the advance balance changes
-      const currentAdvanceLBP = supplier.advance_lb_balance || 0;
-      const currentAdvanceUSD = supplier.advance_usd_balance || 0;
+      const { advance_lb_balance: currentAdvanceLBP, advance_usd_balance: currentAdvanceUSD } = getSupplierAdvanceBalances(supplier);
       let updateData: any = {};
 
       if (transaction.currency === 'LBP') {
@@ -3984,7 +4123,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           throw new Error('Cannot delete: would result in negative advance balance');
         }
         
-        updateData.advance_lb_balance = newBalance;
+        updateData.supplier_data = {
+          ...(supplier.supplier_data as any || {}),
+          advance_lb_balance: newBalance
+        };
         console.log(`💰 Reversing LBP advance: ${currentAdvanceLBP} → ${newBalance}`);
       } else {
         // USD
@@ -3996,7 +4138,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           throw new Error('Cannot delete: would result in negative advance balance');
         }
         
-        updateData.advance_usd_balance = newBalance;
+        updateData.supplier_data = {
+          ...(supplier.supplier_data as any || {}),
+          advance_usd_balance: newBalance
+        };
         console.log(`💰 Reversing USD advance: ${currentAdvanceUSD} → ${newBalance}`);
       }
 
@@ -4046,11 +4191,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           },
           {
             op: 'update',
-            table: 'suppliers',
+            table: 'entities',
             id: transaction.supplier_id,
-            changes: transaction.currency === 'LBP'
-              ? { advance_lb_balance: previousAdvanceLBP, _synced: false }
-              : { advance_usd_balance: previousAdvanceUSD, _synced: false }
+            changes: {
+              supplier_data: {
+                ...(supplier.supplier_data as any || {}),
+                ...(transaction.currency === 'LBP' ? { advance_lb_balance: previousAdvanceLBP } : { advance_usd_balance: previousAdvanceUSD })
+              },
+              _synced: false
+            }
           }
         ]
       };
@@ -4163,18 +4312,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const newIsGiveAdvance = updates.type === 'give';
 
       // Store previous balances for undo
-      const oldPreviousAdvanceLBP = oldSupplier.advance_lb_balance || 0;
-      const oldPreviousAdvanceUSD = oldSupplier.advance_usd_balance || 0;
+      const { advance_lb_balance: oldPreviousAdvanceLBP, advance_usd_balance: oldPreviousAdvanceUSD } = getSupplierAdvanceBalances(oldSupplier);
+      const newSupplierBalances = getSupplierAdvanceBalances(newSupplier);
       const newPreviousAdvanceLBP = updates.supplierId !== oldTransaction.supplier_id 
-        ? (newSupplier.advance_lb_balance || 0)
+        ? newSupplierBalances.advance_lb_balance
         : oldPreviousAdvanceLBP;
       const newPreviousAdvanceUSD = updates.supplierId !== oldTransaction.supplier_id 
-        ? (newSupplier.advance_usd_balance || 0)
+        ? newSupplierBalances.advance_usd_balance
         : oldPreviousAdvanceUSD;
 
       // STEP 1: Reverse old transaction effects
-      const oldCurrentAdvanceLBP = oldSupplier.advance_lb_balance || 0;
-      const oldCurrentAdvanceUSD = oldSupplier.advance_usd_balance || 0;
+      const { advance_lb_balance: oldCurrentAdvanceLBP, advance_usd_balance: oldCurrentAdvanceUSD } = getSupplierAdvanceBalances(oldSupplier);
       let oldReverseData: any = {};
 
       if (oldTransaction.currency === 'LBP') {
@@ -4186,7 +4334,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           throw new Error('Cannot update: reversing old transaction would result in negative balance');
         }
         
-        oldReverseData.advance_lb_balance = reversedBalance;
+        oldReverseData.supplier_data = {
+          ...(oldSupplier.supplier_data as any || {}),
+          advance_lb_balance: reversedBalance
+        };
       } else {
         const reversedBalance = oldWasGiveAdvance
           ? oldCurrentAdvanceUSD - oldTransaction.amount
@@ -4196,7 +4347,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           throw new Error('Cannot update: reversing old transaction would result in negative balance');
         }
         
-        oldReverseData.advance_usd_balance = reversedBalance;
+        oldReverseData.supplier_data = {
+          ...(oldSupplier.supplier_data as any || {}),
+          advance_usd_balance: reversedBalance
+        };
       }
 
       // Reverse old cash drawer transaction if it was a "give" advance
@@ -4233,8 +4387,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         ? { ...oldSupplier, ...oldReverseData }
         : newSupplier;
       
-      const newCurrentAdvanceLBP = supplierToUpdate.advance_lb_balance || 0;
-      const newCurrentAdvanceUSD = supplierToUpdate.advance_usd_balance || 0;
+      const { advance_lb_balance: newCurrentAdvanceLBP, advance_usd_balance: newCurrentAdvanceUSD } = getSupplierAdvanceBalances(supplierToUpdate);
       let newUpdateData: any = {};
 
       if (updates.currency === 'LBP') {
@@ -4246,7 +4399,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           throw new Error('Cannot update: would result in negative advance balance');
         }
 
-        newUpdateData.advance_lb_balance = newBalance;
+        newUpdateData.supplier_data = {
+          ...(supplierToUpdate.supplier_data as any || {}),
+          advance_lb_balance: newBalance
+        };
       } else {
         const newBalance = newIsGiveAdvance
           ? newCurrentAdvanceUSD + updates.amount
@@ -4256,7 +4412,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           throw new Error('Cannot update: would result in negative advance balance');
         }
 
-        newUpdateData.advance_usd_balance = newBalance;
+        newUpdateData.supplier_data = {
+          ...(supplierToUpdate.supplier_data as any || {}),
+          advance_usd_balance: newBalance
+        };
       }
 
       // Update old supplier (if changed, reverse the old transaction)
@@ -4341,11 +4500,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         },
         {
           op: 'update',
-          table: 'suppliers',
+          table: 'entities',
           id: oldTransaction.supplier_id,
-          changes: oldTransaction.currency === 'LBP'
-            ? { advance_lb_balance: oldPreviousAdvanceLBP, _synced: false }
-            : { advance_usd_balance: oldPreviousAdvanceUSD, _synced: false }
+          changes: {
+            supplier_data: {
+              ...(oldSupplier.supplier_data as any || {}),
+              ...(oldTransaction.currency === 'LBP' ? { advance_lb_balance: oldPreviousAdvanceLBP } : { advance_usd_balance: oldPreviousAdvanceUSD })
+            },
+            _synced: false
+          }
         }
       ];
 
@@ -4354,11 +4517,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         affectedTables.push({ table: 'suppliers', id: updates.supplierId });
         undoSteps.push({
           op: 'update',
-          table: 'suppliers',
+          table: 'entities',
           id: updates.supplierId,
-          changes: updates.currency === 'LBP'
-            ? { advance_lb_balance: newPreviousAdvanceLBP, _synced: false }
-            : { advance_usd_balance: newPreviousAdvanceUSD, _synced: false }
+          changes: {
+            supplier_data: {
+              ...(newSupplier.supplier_data as any || {}),
+              ...(updates.currency === 'LBP' ? { advance_lb_balance: newPreviousAdvanceLBP } : { advance_usd_balance: newPreviousAdvanceUSD })
+            },
+            _synced: false
+          }
         });
       }
 

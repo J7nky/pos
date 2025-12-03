@@ -459,6 +459,12 @@ export class DataValidationService {
     } = record;
 
     // Table-specific cleaning
+    if (tableName === 'branches') {
+      // Ensure is_active is set (default to true if not present)
+      if (cleanRecord.is_active === undefined || cleanRecord.is_active === null) {
+        cleanRecord.is_active = true;
+      }
+    }
     if (tableName === 'bills') {
       // Remove deprecated computed fields
       delete cleanRecord.subtotal;

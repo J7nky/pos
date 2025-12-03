@@ -20,18 +20,35 @@ export default function Customers() {
   const { addCustomerRequestedFromPOS, clearAddCustomerRequest } = useCustomerForm();
 
   const { t } = useI18n();
-  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({
-    ...c, 
-    is_active: c.is_active ?? true, 
-    createdAt: c.created_at, 
-    lb_balance: c.lb_balance || 0, 
-    usd_balance: c.usd_balance || 0, 
-    email: c.email || '', 
-    address: c.address || '',
-    lb_max_balance: c.lb_max_balance ?? undefined,
-    usd_max_balance: c.usd_max_balance ?? undefined
-  })) : [];
-  const suppliers = Array.isArray(raw.suppliers) ? raw.suppliers.map(s => ({...s, createdAt: s.created_at || 'commission', email: s.email || '', address: s.address || '', lb_balance: s.lb_balance || 0, usd_balance: s.usd_balance || 0})) : [];
+  const customers =raw.entities.filter(e => e.entity_type === 'customer').map(c => {
+    
+    const customerData = (c.customer_data as any) || {};
+    return {
+      ...c, 
+      is_active: c.is_active ?? true, 
+      createdAt: c.created_at, 
+      lb_balance: c.lb_balance || 0, 
+      usd_balance: c.usd_balance || 0, 
+      email: customerData.email || '', 
+      address: customerData.address || '',
+      lb_max_balance: customerData.lb_max_balance ?? undefined,
+      usd_max_balance: customerData.usd_max_balance ?? undefined
+    };
+  }) ;
+  const suppliers = raw.entities.filter(e => e.entity_type === 'supplier').map(s => {
+    const supplierData = (s.supplier_data as any) || {};
+    return {
+      ...s, 
+      createdAt: s.created_at || 'commission', 
+      email: supplierData.email || '', 
+      address: supplierData.address || '', 
+      lb_balance: s.lb_balance || 0, 
+      usd_balance: s.usd_balance || 0,
+      type: supplierData.type || 'standard',
+      advance_lb_balance: supplierData.advance_lb_balance || 0,
+      advance_usd_balance: supplierData.advance_usd_balance || 0
+    };
+  });
   const addCustomer = raw.addCustomer;
   const updateCustomer = raw.updateCustomer;
   const addSupplier = raw.addSupplier;

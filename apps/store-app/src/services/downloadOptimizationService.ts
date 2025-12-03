@@ -316,6 +316,13 @@ export class DownloadOptimizationService {
             delete normalized.deleted_at;
             delete normalized.deleted_by;
           }
+          
+          // Ensure is_active is set for branches (default to true)
+          if (tableName === 'branches') {
+            if (normalized.is_active === undefined || normalized.is_active === null) {
+              normalized.is_active = true;
+            }
+          }
 
           return {
             ...normalized,

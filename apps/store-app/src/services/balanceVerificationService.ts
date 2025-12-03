@@ -65,10 +65,10 @@ export class BalanceVerificationService {
       discrepancies.push(...customerDiscrepancies);
       
       // Count customers checked
-      const customers = await db.customers
-        .where('store_id')
-        .equals(storeId)
-        .and(c => !c._deleted)
+      const customers = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'customer'])
+        .filter(c => !c._deleted)
         .toArray();
       totalEntitiesChecked += customers.length;
 
@@ -77,10 +77,10 @@ export class BalanceVerificationService {
       discrepancies.push(...supplierDiscrepancies);
       
       // Count suppliers checked
-      const suppliers = await db.suppliers
-        .where('store_id')
-        .equals(storeId)
-        .and(s => !s._deleted)
+      const suppliers = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'supplier'])
+        .filter(s => !s._deleted)
         .toArray();
       totalEntitiesChecked += suppliers.length;
 
@@ -110,12 +110,14 @@ export class BalanceVerificationService {
     entityType: 'customer' | 'supplier'
   ): Promise<BalanceDiscrepancy | null> {
     try {
-      const entity = entityType === 'customer' 
-        ? await db.customers.get(entityId)
-        : await db.suppliers.get(entityId);
+      const entity = await db.entities.get(entityId);
 
       if (!entity) {
         throw new Error(`${entityType} not found: ${entityId}`);
+      }
+
+      if (entity.entity_type !== entityType) {
+        throw new Error(`Entity ${entityId} is not a ${entityType}, it's a ${entity.entity_type}`);
       }
 
       const storedBalance = {
@@ -165,10 +167,10 @@ export class BalanceVerificationService {
     const discrepancies: BalanceDiscrepancy[] = [];
 
     try {
-      const customers = await db.customers
-        .where('store_id')
-        .equals(storeId)
-        .and(c => !c._deleted)
+      const customers = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'customer'])
+        .filter(c => !c._deleted)
         .toArray();
 
       for (const customer of customers) {
@@ -197,10 +199,10 @@ export class BalanceVerificationService {
     const discrepancies: BalanceDiscrepancy[] = [];
 
     try {
-      const suppliers = await db.suppliers
-        .where('store_id')
-        .equals(storeId)
-        .and(s => !s._deleted)
+      const suppliers = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'supplier'])
+        .filter(s => !s._deleted)
         .toArray();
 
       for (const supplier of suppliers) {
@@ -318,11 +320,8 @@ export class BalanceVerificationService {
         _synced: false
       };
 
-      if (discrepancy.entityType === 'customer') {
-        await db.customers.update(discrepancy.entityId, updateData);
-      } else {
-        await db.suppliers.update(discrepancy.entityId, updateData);
-      }
+      // Update entities table directly
+      await db.entities.update(discrepancy.entityId, updateData);
 
       // Log the correction
       const balanceAction = discrepancy.entityType === 'customer' ? 'customer_balance_adjusted' : 'supplier_balance_adjusted';
@@ -453,16 +452,16 @@ export class BalanceVerificationService {
     lastVerificationTime?: string;
   }> {
     try {
-      const customers = await db.customers
-        .where('store_id')
-        .equals(storeId)
-        .and(c => !c._deleted)
+      const customers = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'customer'])
+        .filter(c => !c._deleted)
         .toArray();
 
-      const suppliers = await db.suppliers
-        .where('store_id')
-        .equals(storeId)
-        .and(s => !s._deleted)
+      const suppliers = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'supplier'])
+        .filter(s => !s._deleted)
         .toArray();
 
       let customersWithDiscrepancies = 0;

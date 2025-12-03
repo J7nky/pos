@@ -108,11 +108,13 @@ export class WeightManagementService {
     try {
       // Get product and supplier info
       const product = await db.products.get(productId);
-      const supplier = await db.suppliers.get(supplierId);
+      const entity = await db.entities.get(supplierId);
       
-      if (!product || !supplier) {
+      if (!product || !entity || entity.entity_type !== 'supplier') {
         return null;
       }
+      
+      const supplier = entity;
 
       // Get inventory items (received items)
       let inventoryItems = await db.inventory_items
@@ -275,8 +277,9 @@ export class WeightManagementService {
       if (!bill) return null;
 
       // Get supplier info
-      const supplier = await db.suppliers.get(bill.supplier_id);
-      if (!supplier) return null;
+      const entity = await db.entities.get(bill.supplier_id);
+      if (!entity || entity.entity_type !== 'supplier') return null;
+      const supplier = entity;
 
       // Get all inventory items for this bill
       const inventoryItems = await db.inventory_items
@@ -374,7 +377,11 @@ export class WeightManagementService {
 
       // Get all products and suppliers (including global products)
       const products = await db.getAvailableProducts(storeId);
-      const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
+      const suppliers = await db.entities
+        .where('[store_id+entity_type]')
+        .equals([storeId, 'supplier'])
+        .filter(s => !s._deleted)
+        .toArray();
 
       // Check each product-supplier combination
       for (const product of products) {

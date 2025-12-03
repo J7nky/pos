@@ -164,6 +164,7 @@ export class CRUDHelperService {
     branchId?: string | null,
     includeDeleted = false
   ): Promise<any[]> {
+    
     try {
       const table = (db as any)[tableName];
       if (!table) {
@@ -352,8 +353,8 @@ export class CRUDHelperService {
     const operations = [
       // Store-level data (no branch filtering)
       () => this.getEntitiesByStore('products', storeId),
-      () => this.getEntitiesByStore('suppliers', storeId),
-      () => this.getEntitiesByStore('customers', storeId),
+      () => this.getEntitiesByStore('suppliers', storeId), // Legacy - will be empty after migration
+      () => this.getEntitiesByStore('customers', storeId), // Legacy - will be empty after migration
       () => this.getEntitiesByStore('users', storeId),
       () => this.getEntitiesByStore('chart_of_accounts', storeId),
       
@@ -368,7 +369,8 @@ export class CRUDHelperService {
       () => this.getEntitiesByStoreBranch('cash_drawer_sessions', storeId, branchId),
       () => this.getEntitiesByStoreBranch('missed_products', storeId, branchId),
       () => this.getEntitiesByStoreBranch('journal_entries', storeId, branchId),
-      () => this.getEntitiesByStoreBranch('entities', storeId, branchId),
+      // Entities are store-level (not branch-specific) - customers/suppliers have branch_id: null
+      () => this.getEntitiesByStore('entities', storeId),
       () => this.getEntitiesByStoreBranch('balance_snapshots', storeId, branchId),
     ];
 
@@ -380,27 +382,29 @@ export class CRUDHelperService {
 
     const loadTime = Date.now() - startTime;
     console.log(`⚡ IndexedDB batch load completed in ${loadTime}ms`);
+    console.log(`📦 Loaded ${results[15]?.length || 0} entities for store ${storeId}`);
 
     return {
       productsData: results[0],
       suppliersData: results[1],
       customersData: results[2],
       employeesData: results[3],
-      chartOfAccountsData: results[5] || [],
+      chartOfAccountsData: results[4] || [],
       // Branch-specific data
-      inventoryData: results[6],
-      transactionsData: results[7],
-      batchesData: results[8],
-      billsData: results[9],
-      billLineItemsData: results[10],
-      billAuditLogsData: results[11],
-      cashDrawerAccountsData: results[12],
-      cashDrawerSessionsData: results[13],
-      missedProductsData: results[14],
-      journalEntriesData: results[15] || [],
-      entitiesData: results[16] || [],
-      balanceSnapshotsData: results[17] || [],
+      inventoryData: results[5],
+      transactionsData: results[6],
+      batchesData: results[7],
+      billsData: results[8],
+      billLineItemsData: results[9],
+      billAuditLogsData: results[10],
+      cashDrawerAccountsData: results[11],
+      cashDrawerSessionsData: results[12],
+      missedProductsData: results[13],
+      journalEntriesData: results[14] || [],
+      entitiesData: results[15] || [],
+      balanceSnapshotsData: results[16] || [],
     };
+    
   }
 
   /**

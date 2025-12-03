@@ -78,8 +78,8 @@ class POSDatabase extends Dexie {
   
   // Core tables
   products!: Table<Product, string>;
-  suppliers!: Table<Supplier, string>;
-  customers!: Table<Customer, string>;
+  // suppliers!: Table<Supplier, string>; // REMOVED in v38 - migrated to entities table
+  // customers!: Table<Customer, string>; // REMOVED in v38 - migrated to entities table
   inventory_items!: Table<InventoryItem, string>;
   transactions!: Table<Transaction, string>;
   inventory_bills!: Table<inventory_bills, string>;
@@ -1208,6 +1208,137 @@ class POSDatabase extends Dexie {
       // No data migration needed - just index schema fix
     });
 
+    this.version(37).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      branches: 'id, store_id, name, updated_at, _synced, _deleted',
+      
+      // Core tables
+      products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
+      suppliers: 'id, store_id, branch_id, name, type, updated_at, lb_balance, usd_balance, advance_lb_balance, advance_usd_balance, _synced, _deleted',
+      customers: 'id, store_id, branch_id, name, phone, updated_at, lb_balance, usd_balance, _synced, _deleted',
+      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, [store_id+branch_id], _synced, _deleted',
+      transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, [store_id+branch_id], _synced, _deleted',
+      inventory_bills: 'id, store_id, branch_id, supplier_id, received_at, created_by, currency, [store_id+branch_id], _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, branch_id, bill_number, customer_id, bill_date, payment_method, payment_status, status, created_by, created_at, [store_id+branch_id], _synced, _deleted',
+      bill_line_items: 'id, store_id, branch_id, bill_id, product_id, created_at, line_order, inventory_item_id, [store_id+branch_id], _synced, _deleted',
+      bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, [store_id+branch_id], _synced, _deleted',
+
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+branch_id], [store_id+account_code], updated_at',
+      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, [store_id+branch_id], created_at, updated_at',
+      missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, [store_id+branch_id], _synced, _deleted',
+      
+      // Notification tables
+      notifications: 'id, store_id, branch_id, type, title, created_at, read_at, _synced, _deleted',
+      notification_preferences: 'id, store_id, branch_id, updated_at, _synced, _deleted',
+      
+      // Reminder system
+      reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
+      
+      // Employee attendance
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
+      
+      // Accounting foundation tables - FIXED: Added [store_id+entity_type] compound index for entity queries
+      journal_entries: 'id, store_id, branch_id, transaction_date, created_at, [store_id+branch_id], _synced, _deleted',
+      balance_snapshots: 'id, store_id, branch_id, entity_id, snapshot_date, created_at, [store_id+branch_id], _synced, _deleted',
+      entities: 'id, store_id, branch_id, entity_type, name, updated_at, [store_id+branch_id], [store_id+entity_type], _synced, _deleted',
+      chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Subscription management tables
+      subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
+    }).upgrade(trans => {
+      console.log('🔧 Running migration v37: Add [store_id+entity_type] compound index to entities table');
+      console.log('   ✅ Added [store_id+entity_type] compound index to entities table');
+      console.log('   📢 This fixes Dexie SchemaError for getEntitiesByType queries');
+      // No data migration needed - just index schema fix
+    });
+
+    this.version(38).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      branches: 'id, store_id, name, is_active, updated_at, _synced, _deleted',
+      
+      // Core tables - REMOVED: customers and suppliers (migrated to entities table)
+      products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
+      // suppliers: REMOVED - migrated to entities table
+      // customers: REMOVED - migrated to entities table
+      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, [store_id+branch_id], _synced, _deleted',
+      transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, [store_id+branch_id], _synced, _deleted',
+      inventory_bills: 'id, store_id, branch_id, supplier_id, received_at, created_by, currency, [store_id+branch_id], _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, branch_id, bill_number, customer_id, bill_date, payment_method, payment_status, status, created_by, created_at, [store_id+branch_id], _synced, _deleted',
+      bill_line_items: 'id, store_id, branch_id, bill_id, product_id, created_at, line_order, inventory_item_id, [store_id+branch_id], _synced, _deleted',
+      bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, [store_id+branch_id], _synced, _deleted',
+
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+branch_id], [store_id+account_code], updated_at',
+      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, [store_id+branch_id], created_at, updated_at',
+      missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, [store_id+branch_id], _synced, _deleted',
+      
+      // Notification tables
+      notifications: 'id, store_id, branch_id, type, title, created_at, read_at, _synced, _deleted',
+      notification_preferences: 'id, store_id, branch_id, updated_at, _synced, _deleted',
+      
+      // Reminder system
+      reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
+      
+      // Employee attendance
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
+      
+      // Accounting foundation tables - Entities table replaces customers/suppliers
+      journal_entries: 'id, store_id, branch_id, transaction_date, created_at, [store_id+branch_id], _synced, _deleted',
+      balance_snapshots: 'id, store_id, branch_id, entity_id, snapshot_date, created_at, [store_id+branch_id], _synced, _deleted',
+      entities: 'id, store_id, branch_id, entity_type, name, updated_at, [store_id+branch_id], [store_id+entity_type], _synced, _deleted',
+      chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Subscription management tables
+      subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
+    }).upgrade(async (trans) => {
+      console.log('🗑️ Running migration v38: Remove legacy customers and suppliers tables');
+      console.log('   ✅ Removed customers table (data migrated to entities table)');
+      console.log('   ✅ Removed suppliers table (data migrated to entities table)');
+      console.log('   📢 All customer/supplier data is now in the entities table');
+      console.log('   📢 Foreign keys (customer_id, supplier_id) still reference entity.id');
+      
+      // Note: Dexie will automatically delete the tables when they're removed from schema
+      // All data has already been migrated to entities table in previous phases
+      // No data migration needed - tables will be dropped automatically
+      
+      // Set is_active = true for existing branches (Supabase requires this field)
+      const branches = await trans.table('branches').toCollection().toArray();
+      let updatedCount = 0;
+      for (const branch of branches) {
+        // Ensure is_active is always set (default to true for existing branches)
+        if (branch.is_active === undefined || branch.is_active === null || typeof branch.is_active !== 'boolean') {
+          await trans.table('branches').update(branch.id, { is_active: true });
+          updatedCount++;
+        }
+      }
+      if (updatedCount > 0) {
+        console.log(`   ✅ Set is_active=true for ${updatedCount} existing branches`);
+      }
+    });
+
     // Migration for version 5 - update existing records to match new schema
     this.version(5).upgrade(trans => {
       console.log('🔄 Running migration v5: Updating existing records to match new schema');
@@ -1289,10 +1420,10 @@ class POSDatabase extends Dexie {
     this.missed_products.hook('updating', this.addUpdateFields);
 
     // Add hooks for automatic timestamping and ID generation
-    // Tables WITH updated_at: products, suppliers, customers, users, branches
+    // Tables WITH updated_at: products, users, branches (suppliers/customers removed - migrated to entities)
     this.products.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.suppliers.hook('creating', this.addCreateFieldsWithUpdatedAt);
-    this.customers.hook('creating', this.addCreateFieldsWithUpdatedAt);
+    // this.suppliers.hook - REMOVED (migrated to entities)
+    // this.customers.hook - REMOVED (migrated to entities)
     this.users.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.branches.hook('creating', this.addCreateFieldsWithUpdatedAt);
 
@@ -1306,8 +1437,8 @@ class POSDatabase extends Dexie {
 
     // Only add update hooks for tables that have updated_at
     this.products.hook('updating', this.addUpdateFields);
-    this.suppliers.hook('updating', this.addUpdateFields);
-    this.customers.hook('updating', this.addUpdateFields);
+    // this.suppliers.hook - REMOVED (migrated to entities)
+    // this.customers.hook - REMOVED (migrated to entities)
     this.users.hook('updating', this.addUpdateFields);
     this.branches.hook('updating', this.addUpdateFields);
 
@@ -1435,8 +1566,37 @@ class POSDatabase extends Dexie {
      
       if (account) return account;
 
-      console.log('❌ No cash drawer account found for store:', storeId, 'branch:', branchId);
-      return null;
+      // If no account found for specific branch, create a new one
+      console.log(`⚠️ No cash drawer account found for store ${storeId}, branch ${branchId}. Creating new account...`);
+      
+      // Get store to retrieve preferred currency
+      const store = await this.stores.get(storeId);
+      if (!store) {
+        console.error(`❌ Store ${storeId} not found. Cannot create cash drawer account.`);
+        return null;
+      }
+
+      // Create new cash drawer account
+      const now = new Date().toISOString();
+      const newAccount: CashDrawerAccount = {
+        id: uuidv4(),
+        store_id: storeId,
+        branch_id: branchId,
+        account_code: '1100', // Cash account code
+        name: 'Main Cash Drawer',
+        currency: store.preferred_currency || 'USD',
+        is_active: true,
+        current_balance: 0,
+        created_at: now,
+        updated_at: now,
+        _synced: false
+      };
+
+      // Add the new account to the database
+      await this.cash_drawer_accounts.add(newAccount);
+      
+      console.log(`✅ Created new cash drawer account for store ${storeId}, branch ${branchId} (${newAccount.id})`);
+      return newAccount;
     });
   }
 
@@ -1970,14 +2130,13 @@ class POSDatabase extends Dexie {
       
       // Include both store-specific and global products (inventory can reference global products)
       const products = await this.getAvailableProducts(storeId);
-      const suppliers = await this.suppliers.where('store_id').equals(storeId).toArray();
       const productIds = new Set(products.map(p => p.id));
-      const supplierIds = new Set(suppliers.map(s => s.id));
       
-      // Clean up orphaned inventory items
+      // Clean up orphaned inventory items (supplier_id was removed from inventory_items)
+      // Inventory items now reference suppliers via inventory_bills.batch_id -> inventory_bills.supplier_id
       const orphanedInventory = await this.inventory_items
         .where('store_id').equals(storeId)
-        .filter(item => !productIds.has(item.product_id) || !supplierIds.has(item.supplier_id))
+        .filter(item => !productIds.has(item.product_id))
         .toArray();
       
       let cleaned = 0;
@@ -2557,12 +2716,11 @@ export const createBaseEntity = (storeId: string, data: Partial<BaseEntity> = {}
   const finalId = providedId || createId();
   
   return {
-    id: finalId,
+    ...data,
+    id: finalId, // Ensure ID is always set correctly
     store_id: storeId,
     created_at: now,
     updated_at: now,
-    _synced: false,
-    ...data,
-    id: finalId // Ensure ID is always set correctly
+    _synced: false
   };
 };

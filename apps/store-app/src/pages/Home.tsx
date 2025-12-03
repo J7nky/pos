@@ -32,6 +32,7 @@ interface CashDrawerStatus {
 }
 
 export default function Home() {
+  
   const navigate = useNavigate();
   const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
   const [isLoadingCashDrawer, setIsLoadingCashDrawer] = useState(false);
@@ -114,6 +115,7 @@ export default function Home() {
   }, [transactions, raw.storeId]);
 
   const loadCashDrawerStatus = useCallback(async (showLoading = false) => {
+   
     if (!raw.storeId) return;
     
     // Only show loading spinner on initial load or when explicitly requested

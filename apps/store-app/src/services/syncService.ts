@@ -51,13 +51,13 @@ const SYNC_TABLES = [
   'stores',
   'branches',
   'products',
-  'suppliers',
-  'customers',
+  // 'suppliers', // REMOVED - migrated to entities table
+  // 'customers', // REMOVED - migrated to entities table
   'users', // Employees with auth accounts - synced to Supabase
   'cash_drawer_accounts',
   // NEW: Accounting foundation tables (sync early for dependencies)
   'chart_of_accounts', // Must sync before journal_entries
-  'entities', // Must sync before journal_entries and balance_snapshots
+  'entities', // Must sync before journal_entries and balance_snapshots (replaces customers/suppliers)
   'inventory_bills',
   'inventory_items',
   'transactions',
@@ -77,21 +77,21 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'products': [],
   'stores': [],
   'branches': ['stores'], // Branches belong to stores
-  'suppliers': [],
-  'customers': [],
+  // 'suppliers': [], // REMOVED - migrated to entities
+  // 'customers': [], // REMOVED - migrated to entities
   'users': ['stores'],
   'cash_drawer_accounts': [],
   // NEW: Accounting foundation dependencies
   'chart_of_accounts': ['stores'], // Chart of accounts belongs to stores
-  'entities': ['stores'], // Entities belong to stores
+  'entities': ['stores'], // Entities belong to stores (replaces customers/suppliers)
   'journal_entries': ['stores', 'entities', 'chart_of_accounts'], // Journal entries reference entities and accounts
   'balance_snapshots': ['stores', 'entities'], // Balance snapshots reference entities
-  'inventory_bills': ['suppliers'],
+  'inventory_bills': ['entities'], // supplier_id references entity.id
   // supplier_id was removed from inventory_items; depend on batch linkage only
   'inventory_items': ['products', 'inventory_bills'],
   'transactions': [],
-  'bills': ['customers'],
-  'bill_line_items': ['bills', 'products', 'suppliers', 'inventory_items'],
+  'bills': ['entities'], // customer_id references entity.id
+  'bill_line_items': ['bills', 'products', 'entities', 'inventory_items'], // supplier_id references entity.id
   'bill_audit_logs': ['bills'],
   'cash_drawer_sessions': ['cash_drawer_accounts'],
   'missed_products': ['cash_drawer_sessions', 'inventory_items'],
@@ -641,6 +641,52 @@ export class SyncService {
             }
           }
 
+          // Special handling for cash_drawer_sessions: don't upload open sessions if one already exists in Supabase
+          if (tableName === 'cash_drawer_sessions') {
+            try {
+              const openSessions = (cleanedBatch as any[]).filter(s => s.status === 'open');
+              if (openSessions.length > 0) {
+                const accountIds = [...new Set(openSessions.map(s => s.account_id))] as string[];
+                
+                // Check for existing open sessions in Supabase for these accounts
+                const { data: existingOpenSessions, error: checkError } = await supabase
+                  .from('cash_drawer_sessions')
+                  .select('id, account_id, opened_at')
+                  .in('account_id', accountIds)
+                  .eq('status', 'open');
+                
+                if (!checkError && existingOpenSessions && existingOpenSessions.length > 0) {
+                  // Don't upload local open sessions if there's already an open session in Supabase
+                  // Instead, mark them as synced and let the download phase bring in the remote session
+                  for (const existingSession of existingOpenSessions) {
+                    const conflictingLocalSessions = openSessions.filter(
+                      s => s.account_id === existingSession.account_id && s.id !== existingSession.id
+                    );
+                    
+                    for (const conflictingLocalSession of conflictingLocalSessions) {
+                      console.log(`⏭️  Skipping upload of local open session ${conflictingLocalSession.id.substring(0, 8)}... - open session ${existingSession.id.substring(0, 8)}... already exists in Supabase for account ${existingSession.account_id.substring(0, 8)}...`);
+                      // Remove from batch to prevent upload
+                      cleanedBatch = (cleanedBatch as any[]).filter(s => s.id !== conflictingLocalSession.id);
+                      batch = batch.filter((r: any) => r.id !== conflictingLocalSession.id);
+                      // Close the local session since there's already an open one remotely
+                      // This prevents the local app from thinking it has an open session
+                      await (db as any).cash_drawer_sessions.update(conflictingLocalSession.id, {
+                        status: 'closed',
+                        closed_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                        _synced: false
+                      });
+                      // Mark original as synced to prevent retry
+                      await db.markAsSynced(tableName, conflictingLocalSession.id);
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('Preflight check for cash_drawer_sessions failed:', e);
+            }
+          }
+
           const { error } = await supabase
             .from(tableName as any)
             .upsert(cleanedBatch, { onConflict: 'id' });
@@ -649,17 +695,24 @@ export class SyncService {
             console.error(`❌ Upload failed for ${tableName}:`, error);
             result.errors.push(`Upload failed for ${tableName}: ${error.message}`);
 
-            // Check if this is an unrecoverable error
-            const hasUnrecoverableError = cleanedBatch.some((record, idx) =>
-              this.isUnrecoverableError(error, tableName, record)
-            );
-
-            // Try individual uploads for constraint/FK errors or batch errors
-            if (error.code === '23503' || error.message.includes('foreign key') || hasUnrecoverableError) {
-              await this.handleFailedBatch(tableName, cleanedBatch, batch);
+            // Special handling for cash_drawer_sessions unique constraint violation
+            if (tableName === 'cash_drawer_sessions' && error.code === '23505' && 
+                error.message.includes('uniq_open_session_per_account')) {
+              console.log('🔄 Handling cash_drawer_sessions unique constraint violation...');
+              await this.handleCashDrawerSessionConflict(cleanedBatch, batch);
             } else {
-              // For other errors, try individual uploads to identify the problematic records
-              await this.handleFailedBatch(tableName, cleanedBatch, batch);
+              // Check if this is an unrecoverable error
+              const hasUnrecoverableError = cleanedBatch.some((record, idx) =>
+                this.isUnrecoverableError(error, tableName, record)
+              );
+
+              // Try individual uploads for constraint/FK errors or batch errors
+              if (error.code === '23503' || error.message.includes('foreign key') || hasUnrecoverableError) {
+                await this.handleFailedBatch(tableName, cleanedBatch, batch);
+              } else {
+                // For other errors, try individual uploads to identify the problematic records
+                await this.handleFailedBatch(tableName, cleanedBatch, batch);
+              }
             }
           } else {
             for (const record of batch as any[]) {
@@ -813,6 +866,94 @@ export class SyncService {
         } else {
           await db.addPendingSync(tableName, record.id, 'update', record);
         }
+      }
+    }
+  }
+
+  /**
+   * Handle cash drawer session conflicts when unique constraint is violated
+   * If there's already an open session in Supabase, don't upload the local one
+   * Instead, close the local session and let the remote one be downloaded
+   */
+  private async handleCashDrawerSessionConflict(cleanedBatch: any[], originalBatch: any[]): Promise<void> {
+    console.log(`🔍 Handling cash_drawer_sessions conflicts individually...`);
+    
+    for (let i = 0; i < cleanedBatch.length; i++) {
+      const record = cleanedBatch[i];
+      const original = originalBatch[i];
+      
+      // Only handle open sessions (closed sessions don't have the constraint)
+      if (record.status !== 'open') {
+        // Closed sessions can be uploaded normally
+        try {
+          const { error } = await supabase
+            .from('cash_drawer_sessions')
+            .upsert([record], { onConflict: 'id' });
+          
+          if (!error) {
+            await db.markAsSynced('cash_drawer_sessions', original.id);
+            console.log(`✅ Synced closed session ${original.id.substring(0, 8)}...`);
+          } else {
+            console.error(`❌ Failed to sync closed session ${original.id}:`, error);
+            await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
+          }
+        } catch (e) {
+          console.error(`❌ Error syncing closed session:`, e);
+          await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
+        }
+        continue;
+      }
+      
+      try {
+        // Check if there's an existing open session in Supabase for this account
+        const { data: existingSessions, error: checkError } = await supabase
+          .from('cash_drawer_sessions')
+          .select('id, opened_at, status')
+          .eq('account_id', record.account_id)
+          .eq('status', 'open')
+          .limit(1);
+        
+        if (checkError) {
+          console.error(`❌ Error checking for existing session:`, checkError);
+          await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
+          continue;
+        }
+        
+        const existingSession = existingSessions && existingSessions.length > 0 ? existingSessions[0] : null;
+        
+        if (existingSession && existingSession.id !== record.id) {
+          // There's already an open session in Supabase - don't upload the local one
+          console.log(`⏭️  Skipping upload of local open session ${record.id.substring(0, 8)}... - open session ${existingSession.id.substring(0, 8)}... already exists in Supabase for account ${record.account_id.substring(0, 8)}...`);
+          
+          // Close the local session since there's already an open one remotely
+          // This prevents the local app from thinking it has an open session
+          await (db as any).cash_drawer_sessions.update(original.id, {
+            status: 'closed',
+            closed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            _synced: false
+          });
+          
+          // Mark as synced to prevent retry
+          await db.markAsSynced('cash_drawer_sessions', original.id);
+          continue;
+        }
+        
+        // No conflict - try to upload the session
+        const { error: uploadError } = await supabase
+          .from('cash_drawer_sessions')
+          .upsert([record], { onConflict: 'id' });
+        
+        if (!uploadError) {
+          await db.markAsSynced('cash_drawer_sessions', original.id);
+          console.log(`✅ Synced cash_drawer_session ${original.id.substring(0, 8)}...`);
+        } else {
+          console.error(`❌ Failed to sync session ${original.id}:`, uploadError);
+          await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
+        }
+      } catch (e) {
+        console.error(`❌ Error handling session conflict:`, e);
+        await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
       }
     }
   }
@@ -1339,7 +1480,8 @@ export class SyncService {
       return await this.resolveCashDrawerAccountConflict(localRecord, normalizedRemote);
     }
 
-    if (tableName === 'customers' || tableName === 'suppliers') {
+    // Entity balance conflict resolution (replaces customers/suppliers)
+    if (tableName === 'entities' && (localRecord.entity_type === 'customer' || localRecord.entity_type === 'supplier')) {
       return await this.resolveBalanceConflict(tableName, localRecord, normalizedRemote);
     }
 
@@ -1481,7 +1623,7 @@ export class SyncService {
     if (Math.abs(localUsdBalance - remoteUsdBalance) > 0.01 || Math.abs(localLbpBalance - remoteLbpBalance) > 0.01) {
       console.warn(`💰 Employee balance conflict: Local USD: $${localUsdBalance.toFixed(2)}, Remote USD: $${remoteUsdBalance.toFixed(2)}`);
 
-      // For employees, use max balance (similar to customers/suppliers)
+      // For employees, use max balance (similar to entities)
       const finalUsdBalance = Math.max(localUsdBalance, remoteUsdBalance);
       const finalLbpBalance = Math.max(localLbpBalance, remoteLbpBalance);
 
