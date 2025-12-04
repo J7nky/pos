@@ -23,6 +23,7 @@ import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { transactionService } from '../services/transactionService';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 import { ensureDefaultBranch } from '../lib/branchHelpers';
+import { BranchAccessValidationService } from '../services/branchAccessValidationService';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -1238,6 +1239,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       throw new Error('No user ID available - user not authenticated');
     }
 
+    // ✅ Validate branch access before creating bill
+    if (!currentBranchId) {
+      throw new Error('No branch selected. Please select a branch before creating a bill.');
+    }
+    
+    try {
+      await BranchAccessValidationService.validateBranchAccess(
+        currentUserId,
+        storeId,
+        currentBranchId
+      );
+    } catch (error) {
+      throw new Error(
+        error instanceof Error ? error.message : 'Access denied to this branch'
+      );
+    }
+
     // Ensure bill data is clean and doesn't contain line item fields
     const cleanBillData = { ...billData };
     const lineItemFields = ['inventory_item_id', 'product_id', 'supplier_id', 'quantity', 'unit_price', 'line_total', 'weight', 'line_order'];
@@ -1539,6 +1557,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Get original bill for undo and comparison
     const originalBill = await db.bills.get(billId);
     if (!originalBill) throw new Error('Bill not found');
+    
+    // ✅ Validate branch access before updating bill
+    if (!originalBill.branch_id) {
+      throw new Error('Bill does not have a branch assigned');
+    }
+    
+    try {
+      await BranchAccessValidationService.validateBranchAccess(
+        changedBy,
+        storeId,
+        originalBill.branch_id
+      );
+    } catch (error) {
+      throw new Error(
+        error instanceof Error ? error.message : 'Access denied to this branch'
+      );
+    }
     
     const now = new Date().toISOString();
 
@@ -3431,6 +3466,24 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   }): Promise<{ success: boolean; error?: string }> => {
     try {
       const { entityType, entityId, amount, currency, description, reference, storeId, createdBy, paymentDirection } = params;
+      
+      // ✅ Validate branch access before processing payment
+      if (!currentBranchId) {
+        return { success: false, error: 'No branch selected. Please select a branch before processing payment.' };
+      }
+      
+      try {
+        await BranchAccessValidationService.validateBranchAccess(
+          createdBy,
+          storeId,
+          currentBranchId
+        );
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Access denied to this branch'
+        };
+      }
       
       // Validate amount
       const numAmount = parseFloat(amount);

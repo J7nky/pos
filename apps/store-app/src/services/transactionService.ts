@@ -9,6 +9,7 @@ import { db } from '../lib/db';
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
 import { journalService } from './journalService';
+import { BranchAccessValidationService } from './branchAccessValidationService';
 import { 
   TRANSACTION_CATEGORIES, 
   TransactionCategory, 
@@ -125,6 +126,23 @@ export class TransactionService {
    */
   public async createTransaction(params: CreateTransactionParams): Promise<TransactionResult> {
     try {
+      // ✅ 0. VALIDATE BRANCH ACCESS (before any other validation)
+      try {
+        await BranchAccessValidationService.validateBranchAccess(
+          params.context.userId,
+          params.context.storeId,
+          params.context.branchId
+        );
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Access denied to this branch',
+          balanceBefore: 0,
+          balanceAfter: 0,
+          affectedRecords: []
+        };
+      }
+      
       // 1. VALIDATION (outside transaction)
       const validationResult = this.validateTransaction(params);
       if (!validationResult.isValid) {

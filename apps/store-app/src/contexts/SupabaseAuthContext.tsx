@@ -9,6 +9,7 @@ interface UserProfile {
   name: string;
   role: 'admin' | 'manager' | 'cashier';
   store_id: string;
+  branch_id: string | null; // null for admin (can access all branches), branch ID for manager/cashier
   stores?: {
     id: string;
     name: string;

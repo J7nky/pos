@@ -18,6 +18,7 @@ export interface Employee {
   email: string;
   name: string;
   role: 'admin' | 'manager' | 'cashier';
+  branch_id: string | null; // null for admin (can access all branches), branch ID for manager/cashier
   phone?: string | null;
   address?: string | null;
   monthly_salary?: string | null; // Stored as string to match database schema

@@ -4,6 +4,7 @@ import { BalanceCalculator } from '../utils/balanceCalculator';
 import { QueryHelpers, DateFilters } from '../utils/queryHelpers';
 import { CacheManager, CacheKeys } from '../utils/cacheManager';
 import { PerformanceMonitor } from '../utils/performanceMonitor';
+import { BranchAccessValidationService } from './branchAccessValidationService';
 
 /**
  * CASH DRAWER UPDATE SERVICE
@@ -84,6 +85,20 @@ export class CashDrawerUpdateService {
   }> {
     console.log('Opening cash drawer session');
     
+    // ✅ Validate branch access before opening session
+    try {
+      await BranchAccessValidationService.validateBranchAccess(
+        openedBy,
+        storeId,
+        branchId
+      );
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Access denied to this branch'
+      };
+    }
+    
     // Use operation lock to prevent concurrent session operations
     return this.acquireOperationLock(storeId, async () => {
       try {
@@ -141,7 +156,7 @@ export class CashDrawerUpdateService {
     error?: string;
   }> {
     
-    // Get session to determine store ID for locking
+    // Get session to determine store ID and branch ID for validation
     const session = await db.cash_drawer_sessions.get(sessionId);
     if (!session) {
       return {
@@ -151,6 +166,24 @@ export class CashDrawerUpdateService {
         actualAmount: 0,
         variance: 0,
         error: 'Session not found'
+      };
+    }
+    
+    // ✅ Validate branch access before closing session
+    try {
+      await BranchAccessValidationService.validateBranchAccess(
+        closedBy,
+        session.store_id,
+        session.branch_id
+      );
+    } catch (error) {
+      return {
+        success: false,
+        sessionId,
+        expectedAmount: 0,
+        actualAmount: 0,
+        variance: 0,
+        error: error instanceof Error ? error.message : 'Access denied to this branch'
       };
     }
     
@@ -366,7 +399,6 @@ export class CashDrawerUpdateService {
       console.warn(`⚠️ Invalid parameters for getCashDrawerAccount: storeId=${storeId}, branchId=${branchId}`);
       return null;
     }
-    
     try {
       const account = await db.getCashDrawerAccount(storeId, branchId);
       if (!account) {
@@ -390,6 +422,19 @@ export class CashDrawerUpdateService {
     createdBy: string,
     transactionType: string
   ): Promise<any> {
+    // ✅ Validate branch access before getting/creating session
+    try {
+      await BranchAccessValidationService.validateBranchAccess(
+        createdBy,
+        storeId,
+        branchId
+      );
+    } catch (error) {
+      throw new Error(
+        error instanceof Error ? error.message : 'Access denied to this branch'
+      );
+    }
+    
     let session = await db.getCurrentCashDrawerSession(storeId, branchId);
     
     if (!session || session.status !== 'open') {
