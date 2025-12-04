@@ -1545,26 +1545,55 @@ class POSDatabase extends Dexie {
         return null;
       }
       
+      // First, check if any accounts exist for this store/branch (for debugging)
+      const allAccounts = await this.cash_drawer_accounts
+        .where(['store_id', 'branch_id'])
+        .equals([storeId, branchId])
+        .toArray();
+      
+      if (allAccounts.length > 0) {
+        console.log(`🔍 Found ${allAccounts.length} cash drawer account(s) for store ${storeId}, branch ${branchId}:`, 
+          allAccounts.map(acc => ({
+            id: acc.id,
+            _deleted: acc._deleted,
+            is_active: (acc as any).is_active,
+            isActive: (acc as any).isActive
+          }))
+        );
+      }
+      
       // Prefer an explicitly active account; treat undefined as active to support older records
       let account = await this.cash_drawer_accounts
         .where(['store_id', 'branch_id'])
         .equals([storeId, branchId])
         .filter(acc => {
           // Don't include deleted accounts
-          if (acc._deleted) return false;
+          if (acc._deleted) {
+            console.log(`   ⚠️ Account ${acc.id} filtered out: _deleted=true`);
+            return false;
+          }
           
           // Check is_active field (primary field in interface)
-          if ((acc as any).is_active === false) return false;
+          if ((acc as any).is_active === false) {
+            console.log(`   ⚠️ Account ${acc.id} filtered out: is_active=false`);
+            return false;
+          }
           
           // Also check legacy isActive field for backward compatibility
-          if ((acc as any).isActive === false) return false;
+          if ((acc as any).isActive === false) {
+            console.log(`   ⚠️ Account ${acc.id} filtered out: isActive=false`);
+            return false;
+          }
           
           // If neither field is explicitly false, consider it active
           return true;
         })
         .first();
      
-      if (account) return account;
+      if (account) {
+        console.log(`✅ Found active cash drawer account: ${account.id}`);
+        return account;
+      }
 
       // If no account found for specific branch, create a new one
       console.log(`⚠️ No cash drawer account found for store ${storeId}, branch ${branchId}. Creating new account...`);
@@ -1573,6 +1602,13 @@ class POSDatabase extends Dexie {
       const store = await this.stores.get(storeId);
       if (!store) {
         console.error(`❌ Store ${storeId} not found. Cannot create cash drawer account.`);
+        return null;
+      }
+
+      // Verify branch exists
+      const branch = await this.branches.get(branchId);
+      if (!branch) {
+        console.error(`❌ Branch ${branchId} not found. Cannot create cash drawer account.`);
         return null;
       }
 
@@ -1592,11 +1628,23 @@ class POSDatabase extends Dexie {
         _synced: false
       };
 
-      // Add the new account to the database
-      await this.cash_drawer_accounts.add(newAccount);
-      
-      console.log(`✅ Created new cash drawer account for store ${storeId}, branch ${branchId} (${newAccount.id})`);
-      return newAccount;
+      try {
+        // Add the new account to the database
+        await this.cash_drawer_accounts.add(newAccount);
+        
+        // Verify the account was created successfully
+        const verifiedAccount = await this.cash_drawer_accounts.get(newAccount.id);
+        if (!verifiedAccount) {
+          console.error(`❌ Failed to verify cash drawer account creation. Account ${newAccount.id} not found after add.`);
+          return null;
+        }
+        
+        console.log(`✅ Created new cash drawer account for store ${storeId}, branch ${branchId} (${newAccount.id})`);
+        return verifiedAccount;
+      } catch (error) {
+        console.error(`❌ Error creating cash drawer account:`, error);
+        throw error;
+      }
     });
   }
 

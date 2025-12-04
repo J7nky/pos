@@ -1533,7 +1533,7 @@ export class SyncService {
       // This ensures accuracy and prevents balance inflation
       try {
         const { cashDrawerUpdateService } = await import('./cashDrawerUpdateService');
-        const calculatedBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(localRecord.store_id);
+        const calculatedBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(localRecord.store_id,localRecord.branch_id);
 
         console.log(`💰 Recalculated balance from transactions: $${calculatedBalance.toFixed(2)}`);
 
