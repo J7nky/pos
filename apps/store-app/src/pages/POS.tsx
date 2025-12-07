@@ -27,6 +27,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
 import { useQRCodeGeneration } from '../hooks/useQRCodeGeneration';
 import { generateBillReference } from '../utils/referenceGenerator';
+import { accountingInitService } from '../services/accountingInitService';
 
 
 interface BillTab {
@@ -710,6 +711,25 @@ ${dashSeparator}`;
     setCustomerError(null);
     
     try {
+      // Validate accounting foundation is synced before selling
+      const storeId = raw.storeId || userProfile?.store_id;
+      if (!storeId) {
+        showToast('error', 'Store ID not found. Please refresh the page and try again.');
+        setIsProcessing(false);
+        return;
+      }
+      
+      try {
+        await accountingInitService.validateAccountingSetup(storeId);
+      } catch (accountingError) {
+        const errorMessage = accountingError instanceof Error 
+          ? accountingError.message 
+          : 'Accounting foundation not initialized. Please contact admin to set up the store properly.';
+        showToast('error', errorMessage);
+        setIsProcessing(false);
+        return;
+      }
+      
       // Check if cash drawer is open
       const currentCashDrawerStatus = await raw.getCurrentCashDrawerStatus();
       console.log('Current cash drawer status:', currentCashDrawerStatus);
@@ -778,6 +798,14 @@ ${dashSeparator}`;
     setIsProcessing(true);
     
     try {
+      // Validate accounting foundation is synced before processing sale
+      // This is a safety check in case processSale is called from elsewhere
+      const storeId = raw.storeId || userProfile?.store_id;
+      if (!storeId) {
+        throw new Error('Store ID not found. Please refresh the page and try again.');
+      }
+      
+      await accountingInitService.validateAccountingSetup(storeId);
 
       // Prepare bill data
       const amountReceived = parseFloat(activeTab.amountReceived) || 0;
@@ -805,6 +833,7 @@ ${dashSeparator}`;
         inventory_item_id: item.inventory_item_id || item.inventoryItemId,
         product_id: item.product_id || item.productId, // Handle both snake_case and camelCase
         quantity: item.quantity,
+        branch_id: raw.currentBranchId,
         unit_price: item.unit_price || item.unitPrice || 0,
         line_total: item.line_total || item.lineTotal || 0,
         weight: item.weight || null,
