@@ -830,7 +830,6 @@ class POSDatabase extends Dexie {
             const records = await table.toArray();
             
             if (records.length === 0) {
-              console.log(`   ⏭️  Skipping ${tableName} - no records`);
               continue;
             }
             
@@ -1339,6 +1338,62 @@ class POSDatabase extends Dexie {
       }
     });
 
+    // Version 39: Add entity_code field and [store_id+entity_code] compound index to entities table
+    this.version(39).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      branches: 'id, store_id, name, is_active, updated_at, _synced, _deleted',
+      
+      // Core tables
+      products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
+      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, [store_id+branch_id], _synced, _deleted',
+      transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, [store_id+branch_id], _synced, _deleted',
+      inventory_bills: 'id, store_id, branch_id, supplier_id, received_at, created_by, currency, [store_id+branch_id], _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, branch_id, bill_number, customer_id, bill_date, payment_method, payment_status, status, created_by, created_at, [store_id+branch_id], _synced, _deleted',
+      bill_line_items: 'id, store_id, branch_id, bill_id, product_id, created_at, line_order, inventory_item_id, [store_id+branch_id], _synced, _deleted',
+      bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, [store_id+branch_id], _synced, _deleted',
+      
+      // Cash drawer tables
+      cash_drawer_accounts: 'id, store_id, branch_id, account_code, [store_id+branch_id], [store_id+account_code], updated_at',
+      cash_drawer_sessions: 'id, store_id, branch_id, account_id, status, [store_id+branch_id], created_at, updated_at',
+      missed_products: 'id, store_id, branch_id, session_id, inventory_item_id, created_at, [store_id+branch_id], _synced, _deleted',
+      
+      // Notification tables
+      notifications: 'id, store_id, branch_id, type, title, created_at, read_at, _synced, _deleted',
+      notification_preferences: 'id, store_id, branch_id, updated_at, _synced, _deleted',
+      
+      // Reminder system
+      reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
+      
+      // Employee attendance
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
+      
+      // Accounting foundation tables - FIXED: Added entity_code and [store_id+entity_code] compound index
+      journal_entries: 'id, store_id, branch_id, transaction_date, created_at, [store_id+branch_id], _synced, _deleted',
+      balance_snapshots: 'id, store_id, branch_id, entity_id, snapshot_date, created_at, [store_id+branch_id], _synced, _deleted',
+      entities: 'id, store_id, branch_id, entity_type, entity_code, name, updated_at, [store_id+branch_id], [store_id+entity_type], [store_id+entity_code], _synced, _deleted',
+      chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      
+      // Subscription management tables
+      subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
+    }).upgrade(async (trans) => {
+      console.log('🔧 Running migration v39: Add entity_code field and [store_id+entity_code] compound index to entities table');
+      console.log('   ✅ Added entity_code to entities table schema');
+      console.log('   ✅ Added [store_id+entity_code] compound index for getSystemEntity() queries');
+      console.log('   📢 This fixes Dexie SchemaError: KeyPath [store_id+entity_code] on object store entities is not indexed');
+      // No data migration needed - entity_code should already exist in data, just adding to index
+    });
+
     // Migration for version 5 - update existing records to match new schema
     this.version(5).upgrade(trans => {
       console.log('🔄 Running migration v5: Updating existing records to match new schema');
@@ -1545,34 +1600,87 @@ class POSDatabase extends Dexie {
         return null;
       }
       
+      // First, check if any accounts exist for this store/branch (for debugging)
+      const allAccounts = await this.cash_drawer_accounts
+        .where(['store_id', 'branch_id'])
+        .equals([storeId, branchId])
+        .toArray();
+      
+      if (allAccounts.length > 0) {
+        console.log(`🔍 Found ${allAccounts.length} cash drawer account(s) for store ${storeId}, branch ${branchId}:`, 
+          allAccounts.map(acc => ({
+            id: acc.id,
+            _deleted: acc._deleted,
+            is_active: (acc as any).is_active,
+            isActive: (acc as any).isActive
+          }))
+        );
+      }
+      
       // Prefer an explicitly active account; treat undefined as active to support older records
       let account = await this.cash_drawer_accounts
         .where(['store_id', 'branch_id'])
         .equals([storeId, branchId])
         .filter(acc => {
           // Don't include deleted accounts
-          if (acc._deleted) return false;
+          if (acc._deleted) {
+            console.log(`   ⚠️ Account ${acc.id} filtered out: _deleted=true`);
+            return false;
+          }
           
           // Check is_active field (primary field in interface)
-          if ((acc as any).is_active === false) return false;
+          if ((acc as any).is_active === false) {
+            console.log(`   ⚠️ Account ${acc.id} filtered out: is_active=false`);
+            return false;
+          }
           
           // Also check legacy isActive field for backward compatibility
-          if ((acc as any).isActive === false) return false;
+          if ((acc as any).isActive === false) {
+            console.log(`   ⚠️ Account ${acc.id} filtered out: isActive=false`);
+            return false;
+          }
           
           // If neither field is explicitly false, consider it active
           return true;
         })
         .first();
      
-      if (account) return account;
+      if (account) {
+        console.log(`✅ Found active cash drawer account: ${account.id}`);
+        return account;
+      }
+
+      // Before creating a new account, check if cash_drawer_accounts table has been synced yet
+      // This prevents creating duplicates when a full resync is still downloading the table
+      // During full resync, tables are cleared first, then downloaded sequentially
+      const syncMetadata = await this.getSyncMetadata('cash_drawer_accounts');
+      const { syncService } = await import('../services/syncService');
+      const isSyncing = syncService.isCurrentlyRunning();
+      
+      // If sync is running or table hasn't been synced yet, don't create a new account
+      // Components should wait for sync to complete before accessing cash drawer accounts
+      if (isSyncing || !syncMetadata) {
+        console.log(`⏳ Sync in progress or table not synced yet. Returning null - account will be available after sync completes.`);
+        return null;
+      }
 
       // If no account found for specific branch, create a new one
+      // NOTE: This account will be synced to Supabase. If a duplicate exists in Supabase,
+      // the sync service will handle the conflict by deleting this local duplicate.
       console.log(`⚠️ No cash drawer account found for store ${storeId}, branch ${branchId}. Creating new account...`);
+      console.log(`   ℹ️  Note: If account exists in Supabase, sync will resolve the duplicate automatically.`);
       
       // Get store to retrieve preferred currency
       const store = await this.stores.get(storeId);
       if (!store) {
         console.error(`❌ Store ${storeId} not found. Cannot create cash drawer account.`);
+        return null;
+      }
+
+      // Verify branch exists
+      const branch = await this.branches.get(branchId);
+      if (!branch) {
+        console.error(`❌ Branch ${branchId} not found. Cannot create cash drawer account.`);
         return null;
       }
 
@@ -1589,14 +1697,27 @@ class POSDatabase extends Dexie {
         current_balance: 0,
         created_at: now,
         updated_at: now,
-        _synced: false
+        _synced: false // Mark as unsynced so it will be uploaded to Supabase
       };
 
-      // Add the new account to the database
-      await this.cash_drawer_accounts.add(newAccount);
-      
-      console.log(`✅ Created new cash drawer account for store ${storeId}, branch ${branchId} (${newAccount.id})`);
-      return newAccount;
+      try {
+        // Add the new account to the database
+        await this.cash_drawer_accounts.add(newAccount);
+        
+        // Verify the account was created successfully
+        const verifiedAccount = await this.cash_drawer_accounts.get(newAccount.id);
+        if (!verifiedAccount) {
+          console.error(`❌ Failed to verify cash drawer account creation. Account ${newAccount.id} not found after add.`);
+          return null;
+        }
+        
+        console.log(`✅ Created new cash drawer account for store ${storeId}, branch ${branchId} (${newAccount.id})`);
+        console.log(`   ℹ️  This account will be synced to Supabase. If a duplicate exists, sync service will handle it.`);
+        return verifiedAccount;
+      } catch (error) {
+        console.error(`❌ Error creating cash drawer account:`, error);
+        throw error;
+      }
     });
   }
 

@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback, us
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
-import { BillLineItem, BillLineItemTransforms, NotificationRecord, NotificationType, NotificationPreferences, InventoryItem, Transaction } from '../types';
+import { BillLineItem, BillLineItemTransforms, NotificationRecord, NotificationType, NotificationPreferences, InventoryItem, Transaction, CashDrawerAccount } from '../types';
 import {
   db,
   createId,
@@ -727,6 +727,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return;
 
     debug('🔄 Initializing data for store:', storeId);
+    
+    let didFullResync = false; // Track if we did a full resync
 
     try {
       // Clean up any invalid/orphaned data first
@@ -779,6 +781,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           if (syncResult.success) {
             debug(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
             await refreshDataAndUpdateCount();
+            
+            // ✅ AFTER full resync completes, ensure cash drawer accounts are available
+            // This is called AFTER sync so getCashDrawerAccount() can safely access synced data
+            didFullResync = true;
+            if (currentBranchId) {
+              try {
+                debug('🔄 Ensuring cash drawer accounts are available after sync...');
+                await ensureCashDrawerAccountsSynced(storeId, currentBranchId);
+              } catch (error) {
+                console.warn('⚠️ Failed to ensure cash drawer accounts after sync:', error);
+              }
+            }
           } else {
             console.error('❌ Initial sync failed:', syncResult.errors);
           }
@@ -809,10 +823,92 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await migrateExistingTransactions();
     await migrateTransactionIds();
 
+    // ✅ Ensure cash drawer accounts are synced from Supabase before they're accessed
+    // Only do this if we didn't just do a full resync (which already handles this above)
+    // This handles the case where local data exists and we're just doing a regular sync
+    if (isOnline && currentBranchId && !didFullResync) {
+      try {
+        debug('🔄 Ensuring cash drawer accounts are synced from Supabase...');
+        await ensureCashDrawerAccountsSynced(storeId, currentBranchId);
+      } catch (error) {
+        console.warn('⚠️ Failed to sync cash drawer accounts during initialization:', error);
+        // Don't fail initialization if this fails - account will be created on-demand
+      }
+    }
+
     // Start monitoring for completed bills
     if (storeId) {
       receivedBillMonitoringService.startMonitoring(storeId);
       reminderMonitoringService.startMonitoring(storeId);
+    }
+  };
+
+  // Helper function to ensure cash drawer accounts are synced from Supabase
+  const ensureCashDrawerAccountsSynced = async (storeId: string, branchId: string): Promise<void> => {
+    if (!isOnline) {
+      debug('📴 Skipping cash drawer account sync - offline');
+      return;
+    }
+
+    try {
+      // Check if account already exists locally (direct DB query to avoid auto-creation)
+      const localAccounts = await db.cash_drawer_accounts
+        .where(['store_id', 'branch_id'])
+        .equals([storeId, branchId])
+        .filter(acc => !acc._deleted && (acc.is_active !== false))
+        .toArray();
+      
+      if (localAccounts.length > 0) {
+        debug(`✅ Cash drawer account already exists locally (${localAccounts.length} account(s))`);
+        return;
+      }
+
+      // Account doesn't exist locally - check Supabase before creating
+      debug('🔍 Checking Supabase for existing cash drawer account...');
+      const { supabase } = await import('../lib/supabase');
+      
+      const { data: supabaseAccounts, error } = await supabase
+        .from('cash_drawer_accounts')
+        .select('*')
+        .eq('store_id', storeId)
+        .eq('branch_id', branchId)
+        .eq('account_code', '1100')
+        .eq('is_active', true)
+        .limit(1);
+
+      if (error) {
+        console.warn('⚠️ Error checking Supabase for cash drawer account:', error);
+        return; // Continue - account will be created on-demand if needed
+      }
+
+      if (supabaseAccounts && supabaseAccounts.length > 0) {
+        // Account exists in Supabase - sync it down to local DB
+        const remoteAccount = supabaseAccounts[0];
+        debug(`📥 Found cash drawer account in Supabase (${remoteAccount.id}), syncing to local DB...`);
+        
+        const localAccountData: CashDrawerAccount = {
+          id: remoteAccount.id,
+          store_id: remoteAccount.store_id,
+          branch_id: remoteAccount.branch_id,
+          account_code: remoteAccount.account_code,
+          name: remoteAccount.name,
+          currency: remoteAccount.currency,
+          is_active: remoteAccount.is_active,
+          current_balance: remoteAccount.current_balance || 0,
+          created_at: remoteAccount.created_at,
+          updated_at: remoteAccount.updated_at,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        };
+
+        await db.cash_drawer_accounts.put(localAccountData);
+        debug(`✅ Synced cash drawer account from Supabase to local DB`);
+      } else {
+        debug('ℹ️ No cash drawer account found in Supabase - will be created on-demand');
+      }
+    } catch (error) {
+      console.warn('⚠️ Error ensuring cash drawer accounts are synced:', error);
+      // Don't throw - account will be created on-demand if needed
     }
   };
 
@@ -1270,6 +1366,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const bill = {
       id: billId,
       store_id: storeId,
+      branch_id: currentBranchId, // ✅ Ensure branch_id is always included
       created_at: now,
       updated_at: now,
       _synced: false,

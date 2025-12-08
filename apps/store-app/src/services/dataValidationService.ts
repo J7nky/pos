@@ -3,8 +3,9 @@ import { db } from '../lib/db';
 
 interface ValidationCache {
   products: Set<string>;
-  suppliers: Set<string>;
-  customers: Set<string>;
+  suppliers: Set<string>; // Entity IDs with entity_type = 'supplier'
+  customers: Set<string>; // Entity IDs with entity_type = 'customer'
+  entities: Set<string>; // All entity IDs (for general entity validation)
   users: Set<string>;
   batches: Set<string>;
   bills: Set<string>;
@@ -27,7 +28,7 @@ interface ValidationRule {
   min?: number;
   max?: number;
   enum?: any[];
-  foreignKey?: { table: string; cacheKey: keyof ValidationCache };
+  foreignKey?: { table: string; cacheKey: keyof ValidationCache; entityType?: 'customer' | 'supplier' };
 }
 
 // Table-specific validation rules configuration
@@ -44,7 +45,7 @@ const VALIDATION_RULES: Record<string, ValidationRule[]> = {
     { field: 'payment_method', required: true, enum: ['cash', 'card', 'credit'] },
     { field: 'amount_paid', required: true, type: 'number', min: 0 },
     { field: 'created_by', required: true, type: 'uuid', foreignKey: { table: 'users', cacheKey: 'users' } },
-    { field: 'customer_id', type: 'uuid', foreignKey: { table: 'customers', cacheKey: 'customers' } },
+    { field: 'customer_id', type: 'uuid', foreignKey: { table: 'entities', cacheKey: 'customers', entityType: 'customer' } },
   ],
   bill_line_items: [
     { field: 'bill_id', required: true, type: 'uuid', foreignKey: { table: 'bills', cacheKey: 'bills' } },
@@ -76,13 +77,19 @@ const VALIDATION_RULES: Record<string, ValidationRule[]> = {
     { field: 'expected_amount', type: 'number' },
     { field: 'actual_amount', type: 'number' },
   ],
+  inventory_bills: [
+    { field: 'store_id', required: true, type: 'uuid' },
+    { field: 'supplier_id', required: true, type: 'uuid', foreignKey: { table: 'entities', cacheKey: 'suppliers', entityType: 'supplier' } },
+    { field: 'created_by', required: true, type: 'uuid', foreignKey: { table: 'users', cacheKey: 'users' } },
+  ],
 };
 
 export class DataValidationService {
   private cache: ValidationCache = {
     products: new Set(),
-    suppliers: new Set(),
-    customers: new Set(),
+    suppliers: new Set(), // Entity IDs with entity_type = 'supplier'
+    customers: new Set(), // Entity IDs with entity_type = 'customer'
+    entities: new Set(), // All entity IDs
     users: new Set(),
     batches: new Set(),
     bills: new Set(),
@@ -143,7 +150,7 @@ export class DataValidationService {
         this.cache.storeId = storeId;
         
         const refreshTime = performance.now() - refreshStart;
-        console.log(`✅ Validation cache updated in ${refreshTime.toFixed(2)}ms: ${this.cache.products.size} products, ${this.cache.suppliers.size} suppliers, ${this.cache.users.size} users`);
+        console.log(`✅ Validation cache updated in ${refreshTime.toFixed(2)}ms: ${this.cache.products.size} products, ${this.cache.suppliers.size} suppliers, ${this.cache.customers.size} customers, ${this.cache.entities.size} entities, ${this.cache.users.size} users`);
       } catch (error) {
         console.warn('Failed to refresh validation cache:', error);
       } finally {
@@ -157,19 +164,82 @@ export class DataValidationService {
 
   /**
    * Full cache refresh with pagination for large tables
+   * UPDATED: Uses entities table instead of customers/suppliers tables
    */
   private async fullCacheRefresh(storeId: string, supabase: any): Promise<void> {
-    const tables = [
-      { name: 'products', cacheKey: 'products', filter: `store_id.eq.${storeId},is_global.eq.true`, useOr: true },
-      { name: 'suppliers', cacheKey: 'suppliers', filter: 'store_id', value: storeId },
-      { name: 'customers', cacheKey: 'customers', filter: 'store_id', value: storeId },
+    // Fetch products (store-specific + global)
+    const productIds = await this.fetchAllIds(supabase, 'products', `store_id.eq.${storeId},is_global.eq.true`, undefined, true);
+    this.cache.products = new Set(productIds);
+    this.cache.recordCounts['products'] = productIds.length;
+
+    // Fetch entities and split by type (offline-first: check local first, then Supabase)
+    const allEntityIds: string[] = [];
+    const supplierIds: string[] = [];
+    const customerIds: string[] = [];
+
+    // First, try to get from local IndexedDB (offline-first)
+    try {
+      const localEntities = await db.entities
+        .where('store_id')
+        .equals(storeId)
+        .toArray();
+      
+      localEntities.forEach(entity => {
+        allEntityIds.push(entity.id);
+        if (entity.entity_type === 'supplier') {
+          supplierIds.push(entity.id);
+        } else if (entity.entity_type === 'customer') {
+          customerIds.push(entity.id);
+        }
+      });
+    } catch (error) {
+      console.warn('Could not fetch entities from local DB:', error);
+    }
+
+    // Then fetch from Supabase to ensure we have all entities
+    try {
+      const supabaseEntityIds = await this.fetchAllIds(supabase, 'entities', 'store_id', storeId);
+      supabaseEntityIds.forEach(id => {
+        if (!allEntityIds.includes(id)) {
+          allEntityIds.push(id);
+        }
+      });
+
+      // Fetch entity types from Supabase to categorize
+      const { data: entitiesData, error } = await supabase
+        .from('entities')
+        .select('id, entity_type')
+        .eq('store_id', storeId);
+
+      if (!error && entitiesData) {
+        entitiesData.forEach((entity: any) => {
+          if (entity.entity_type === 'supplier' && !supplierIds.includes(entity.id)) {
+            supplierIds.push(entity.id);
+          } else if (entity.entity_type === 'customer' && !customerIds.includes(entity.id)) {
+            customerIds.push(entity.id);
+          }
+        });
+      }
+    } catch (error) {
+      console.warn('Could not fetch entities from Supabase:', error);
+    }
+
+    this.cache.entities = new Set(allEntityIds);
+    this.cache.suppliers = new Set(supplierIds);
+    this.cache.customers = new Set(customerIds);
+    this.cache.recordCounts['entities'] = allEntityIds.length;
+    this.cache.recordCounts['suppliers'] = supplierIds.length;
+    this.cache.recordCounts['customers'] = customerIds.length;
+
+    // Fetch other tables
+    const otherTables = [
       { name: 'users', cacheKey: 'users', filter: 'store_id', value: storeId },
       { name: 'inventory_bills', cacheKey: 'batches', filter: 'store_id', value: storeId },
       { name: 'bills', cacheKey: 'bills', filter: 'store_id', value: storeId },
     ];
 
-    for (const table of tables) {
-      const ids = await this.fetchAllIds(supabase, table.name, table.filter, table.value, table.useOr);
+    for (const table of otherTables) {
+      const ids = await this.fetchAllIds(supabase, table.name, table.filter, table.value, false);
       (this.cache as any)[table.cacheKey] = new Set(ids);
       this.cache.recordCounts[table.cacheKey] = ids.length;
     }
@@ -177,42 +247,80 @@ export class DataValidationService {
 
   /**
    * Delta-based cache refresh - only fetch changes since last update
+   * UPDATED: Uses entities table instead of customers/suppliers tables
    */
   private async deltaCacheRefresh(storeId: string, supabase: any): Promise<boolean> {
     try {
-      const tables = [
-        { name: 'products', cacheKey: 'products', hasUpdatedAt: true },
-        { name: 'suppliers', cacheKey: 'suppliers', hasUpdatedAt: true },
-        { name: 'customers', cacheKey: 'customers', hasUpdatedAt: true },
+      // Handle products
+      const productsLastTimestamp = this.cache.lastSyncTimestamps['products'] || '1970-01-01T00:00:00.000Z';
+      let productsQuery = supabase
+        .from('products')
+        .select('id')
+        .gte('updated_at', productsLastTimestamp)
+        .or(`store_id.eq.${storeId},is_global.eq.true`)
+        .limit(5000);
+      
+      const { data: productsData, error: productsError } = await productsQuery;
+      if (productsError) {
+        console.warn('Delta refresh failed for products:', productsError);
+        return false;
+      }
+      if (productsData && productsData.length > 0) {
+        productsData.forEach((record: any) => this.cache.products.add(record.id));
+        console.log(`  ⚡ products: Added ${productsData.length} new/updated IDs to cache`);
+      }
+      this.cache.lastSyncTimestamps['products'] = new Date().toISOString();
+
+      // Handle entities (replaces customers and suppliers)
+      const entitiesLastTimestamp = this.cache.lastSyncTimestamps['entities'] || '1970-01-01T00:00:00.000Z';
+      const { data: entitiesData, error: entitiesError } = await supabase
+        .from('entities')
+        .select('id, entity_type')
+        .eq('store_id', storeId)
+        .gte('updated_at', entitiesLastTimestamp)
+        .limit(5000);
+      
+      if (entitiesError) {
+        console.warn('Delta refresh failed for entities:', entitiesError);
+        return false;
+      }
+      
+      if (entitiesData && entitiesData.length > 0) {
+        entitiesData.forEach((entity: any) => {
+          this.cache.entities.add(entity.id);
+          if (entity.entity_type === 'supplier') {
+            this.cache.suppliers.add(entity.id);
+          } else if (entity.entity_type === 'customer') {
+            this.cache.customers.add(entity.id);
+          }
+        });
+        console.log(`  ⚡ entities: Added ${entitiesData.length} new/updated IDs to cache`);
+      }
+      this.cache.lastSyncTimestamps['entities'] = new Date().toISOString();
+
+      // Handle other tables
+      const otherTables = [
         { name: 'users', cacheKey: 'users', hasUpdatedAt: true },
         { name: 'inventory_bills', cacheKey: 'batches', hasUpdatedAt: false },
         { name: 'bills', cacheKey: 'bills', hasUpdatedAt: true },
       ];
 
-      for (const table of tables) {
+      for (const table of otherTables) {
         const lastTimestamp = this.cache.lastSyncTimestamps[table.cacheKey] || '1970-01-01T00:00:00.000Z';
         const timestampField = table.hasUpdatedAt ? 'updated_at' : 'created_at';
         
-        // Fetch only records updated since last refresh
-        let query = supabase
+        const { data, error } = await supabase
           .from(table.name)
           .select('id')
-          .gte(timestampField, lastTimestamp);
-        
-        if (table.name === 'products') {
-          query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
-        } else {
-          query = query.eq('store_id', storeId);
-        }
-        
-        const { data, error } = await query.limit(5000);
+          .eq('store_id', storeId)
+          .gte(timestampField, lastTimestamp)
+          .limit(5000);
         
         if (error) {
           console.warn(`Delta refresh failed for ${table.name}:`, error);
           return false;
         }
         
-        // Update cache with new/updated IDs
         if (data && data.length > 0) {
           const cacheSet = (this.cache as any)[table.cacheKey] as Set<string>;
           data.forEach((record: any) => cacheSet.add(record.id));
@@ -258,6 +366,11 @@ export class DataValidationService {
       const { data, error } = await query;
       
       if (error) {
+        // Handle case where table doesn't exist (e.g., customers/suppliers migrated to entities)
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+          console.log(`ℹ️ Table ${tableName} does not exist (may have been migrated). Skipping...`);
+          return []; // Return empty array - validation will fall back to local IndexedDB
+        }
         console.warn(`Error fetching ${tableName} IDs:`, error);
         break;
       }
@@ -373,10 +486,23 @@ export class DataValidationService {
       if (rule.foreignKey && value) {
         const cacheSet = this.cache[rule.foreignKey.cacheKey];
         
-        // Also check local database (especially important for users table which might not filter by store_id)
+        // For entities table, also validate entity_type if specified
         let localExists = null;
         try {
-          localExists = await (db as any)[rule.foreignKey.table].get(value);
+          if (rule.foreignKey.table === 'entities') {
+            // Check local entities table with entity_type filter if specified
+            const entity = await db.entities.get(value);
+            if (entity) {
+              // Validate entity_type matches if specified
+              if (rule.foreignKey.entityType && entity.entity_type !== rule.foreignKey.entityType) {
+                errors.push(`Invalid ${rule.field}: entity ${value} is not of type '${rule.foreignKey.entityType}' (found: '${entity.entity_type}')`);
+                continue;
+              }
+              localExists = entity;
+            }
+          } else {
+            localExists = await (db as any)[rule.foreignKey.table].get(value);
+          }
         } catch (error) {
           console.warn(`Could not check local ${rule.foreignKey.table} for ${value}:`, error);
         }

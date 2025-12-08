@@ -467,7 +467,6 @@ export class SyncService {
         const deletedRecords = await table.filter((record: any) => record._deleted && !record._synced).toArray();
 
         if (activeRecords.length === 0 && deletedRecords.length === 0) {
-          console.log(`  ⏭️  No unsynced records for ${tableName}`);
           continue;
         }
 
@@ -664,7 +663,6 @@ export class SyncService {
                     );
                     
                     for (const conflictingLocalSession of conflictingLocalSessions) {
-                      console.log(`⏭️  Skipping upload of local open session ${conflictingLocalSession.id.substring(0, 8)}... - open session ${existingSession.id.substring(0, 8)}... already exists in Supabase for account ${existingSession.account_id.substring(0, 8)}...`);
                       // Remove from batch to prevent upload
                       cleanedBatch = (cleanedBatch as any[]).filter(s => s.id !== conflictingLocalSession.id);
                       batch = batch.filter((r: any) => r.id !== conflictingLocalSession.id);
@@ -923,7 +921,6 @@ export class SyncService {
         
         if (existingSession && existingSession.id !== record.id) {
           // There's already an open session in Supabase - don't upload the local one
-          console.log(`⏭️  Skipping upload of local open session ${record.id.substring(0, 8)}... - open session ${existingSession.id.substring(0, 8)}... already exists in Supabase for account ${record.account_id.substring(0, 8)}...`);
           
           // Close the local session since there's already an open one remotely
           // This prevents the local app from thinking it has an open session
@@ -1025,9 +1022,6 @@ export class SyncService {
 
           if (!changeDetection.hasChanges) {
             const detectionTime = performance.now() - tableStart;
-            console.log(
-              `⏭️  Skipping ${tableName} sync - no changes detected (${changeDetection.changeCount} changes, ${detectionTime.toFixed(2)}ms)`
-            );
             // Still update sync metadata to track that we checked
             await db.updateSyncMetadata(tableName, new Date().toISOString());
             continue; // Skip to next table
@@ -1533,7 +1527,7 @@ export class SyncService {
       // This ensures accuracy and prevents balance inflation
       try {
         const { cashDrawerUpdateService } = await import('./cashDrawerUpdateService');
-        const calculatedBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(localRecord.store_id);
+        const calculatedBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(localRecord.store_id,localRecord.branch_id);
 
         console.log(`💰 Recalculated balance from transactions: $${calculatedBalance.toFixed(2)}`);
 

@@ -18,6 +18,7 @@ import {
   isValidTransactionCategory 
 } from '../constants/transactionCategories';
 import { getAccountMapping, getEntityCodeForTransaction, getJournalDescription } from '../utils/accountMapping';
+import { getSystemEntity } from '../constants/systemEntities';
 import { 
   generatePaymentReference, 
   generateExpenseReference, 
@@ -183,6 +184,7 @@ export class TransactionService {
       const transaction: Transaction = {
         id: transactionId,
         store_id: params.context.storeId,
+        branch_id: params.context.branchId, // ✅ Ensure branch_id is always included
         type,
         category: params.category,
         amount: params.amount,
@@ -212,7 +214,7 @@ export class TransactionService {
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
       // ALL database write operations happen atomically
       await db.transaction('rw', 
-        [db.transactions, db.customers, db.suppliers, db.cash_drawer_sessions, db.journal_entries, db.entities], 
+        [db.transactions, db.cash_drawer_sessions, db.journal_entries, db.entities, db.chart_of_accounts], 
         async () => {
           // 5. CREATE TRANSACTION RECORD
           await db.transactions.add(transaction);
@@ -515,7 +517,7 @@ export class TransactionService {
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
       await db.transaction('rw', 
-        [db.transactions, db.customers, db.suppliers, db.cash_drawer_sessions], 
+        [db.transactions, db.entities, db.cash_drawer_sessions], 
         async () => {
           // Get current balance before update
           balanceBefore = await this.getEntityBalance(
@@ -652,7 +654,7 @@ export class TransactionService {
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
       await db.transaction('rw', 
-        [db.transactions, db.customers, db.suppliers, db.cash_drawer_sessions], 
+        [db.transactions, db.entities, db.cash_drawer_sessions], 
         async () => {
           // Get current balance before deletion
           balanceBefore = await this.getEntityBalance(
@@ -1090,7 +1092,7 @@ export class TransactionService {
         return undefined;
       }
 
-      const previousBalance = (activeSession as any).current_amount || 0;
+      const previousBalance = (activeSession).actual_amount || 0;
       
       // Calculate balance change based on transaction type
       let balanceChange = 0;
@@ -1107,7 +1109,7 @@ export class TransactionService {
 
       // Update cash drawer session
       await db.cash_drawer_sessions.update(activeSession.id, {
-        current_amount: newBalance,
+        actual_amount: newBalance,
         updated_at: timestamp,
         _synced: false
       } as any);
@@ -1196,18 +1198,43 @@ export class TransactionService {
    */
   private async createJournalEntriesForTransaction(transaction: Transaction): Promise<void> {
     try {
-      // Get entity ID using account mapping utilities
+      // Get entity CODE using account mapping utilities
+      // Note: getEntityCodeForTransaction returns an entity CODE (e.g., "CASH-CUST"), not an entity ID
       const providedEntityCode = transaction.customer_id || transaction.supplier_id || transaction.employee_id;
-      const entityId = getEntityCodeForTransaction(transaction.category, providedEntityCode);
+      const entityCode = getEntityCodeForTransaction(transaction.category, providedEntityCode);
+      
+      // Convert entity CODE to entity ID by querying the entities table
+      // If providedEntityCode is a UUID (customer_id, supplier_id, employee_id), use it directly
+      // Otherwise, it's a system entity code and we need to look it up
+      let entityId: string;
+      let entity: any = null;
+      
+      // Check if providedEntityCode is a UUID (starts with valid UUID pattern)
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (providedEntityCode && uuidPattern.test(providedEntityCode)) {
+        // It's already a UUID (customer/supplier/employee ID), use it directly
+        entityId = providedEntityCode;
+        entity = await db.entities.get(entityId);
+      } else {
+        // It's a system entity code (e.g., "CASH-CUST"), need to look it up
+        entity = await getSystemEntity(db, transaction.store_id, entityCode);
+        if (!entity) {
+          throw new Error(`System entity not found: ${entityCode} for store ${transaction.store_id}. Make sure system entities are initialized.`);
+        }
+        entityId = entity.id;
+      }
+      
+      if (!entity) {
+        throw new Error(`Entity not found: ${entityCode} (code) or ${entityId} (id)`);
+      }
       
       // Get account mapping for this transaction category
       const accountMapping = getAccountMapping(transaction.category);
       
       // Get entity information for description
-      const entity = await db.entities.get(entityId);
       const description = getJournalDescription(
         transaction.category,
-        entity?.name,
+        entity.name,
         transaction.description
       );
       
@@ -1218,12 +1245,12 @@ export class TransactionService {
         creditAccount: accountMapping.creditAccount,
         amount: transaction.amount,
         currency: transaction.currency,
-        entityId,
+        entityId, // Now using actual UUID entity ID
         description,
         postedDate: transaction.created_at.split('T')[0] // Extract date part
       });
       
-      console.log(`✅ Journal entries created for ${transaction.category}: ${transaction.id}`);
+      console.log(`✅ Journal entries created for ${transaction.category}: ${transaction.id} (entity: ${entity.name}, id: ${entityId})`);
       
     } catch (error) {
       console.error('❌ Failed to create journal entries:', error);

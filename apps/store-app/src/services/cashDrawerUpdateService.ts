@@ -113,6 +113,7 @@ export class CashDrawerUpdateService {
 
         // Get cash drawer account (no auto-create)
         const account = await this.getCashDrawerAccount(storeId, branchId);
+
         if (!account) {
           return {
             success: false,
@@ -226,6 +227,7 @@ export class CashDrawerUpdateService {
    * 🚀 CACHED for 5 seconds to improve performance
    */
   public async getCurrentCashDrawerBalance(storeId: string, branchId: string): Promise<number> {
+
     return PerformanceMonitor.withTracking(
       'cashDrawer:getBalance',
       async () => {
@@ -401,7 +403,7 @@ export class CashDrawerUpdateService {
     }
     try {
       const account = await db.getCashDrawerAccount(storeId, branchId);
-      if (!account) {
+      if (!account && !OfflineDataProvider.didFullResync) {
         console.warn(`❌ No cash drawer account exists for store ${storeId}, branch ${branchId}`);
         return null;
       }
