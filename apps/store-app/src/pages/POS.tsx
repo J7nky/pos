@@ -28,6 +28,8 @@ import { useI18n } from '../i18n';
 import { useQRCodeGeneration } from '../hooks/useQRCodeGeneration';
 import { generateBillReference } from '../utils/referenceGenerator';
 import { accountingInitService } from '../services/accountingInitService';
+import { useProductMultilingual } from '../hooks/useMultilingual';
+import { parseMultilingualString } from '../utils/multilingual';
 
 
 interface BillTab {

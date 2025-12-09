@@ -403,7 +403,7 @@ export class CashDrawerUpdateService {
     }
     try {
       const account = await db.getCashDrawerAccount(storeId, branchId);
-      if (!account && !OfflineDataProvider.didFullResync) {
+      if (!account ) {
         console.warn(`❌ No cash drawer account exists for store ${storeId}, branch ${branchId}`);
         return null;
       }

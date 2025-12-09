@@ -6,6 +6,7 @@ import CurrencySwitch from '../common/CurrencySwitch';
 import MoneyInput from '../common/MoneyInput';
 import { useI18n } from '../../i18n';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
+import { saveProductTag, saveNote, getLastThreeNotes, getMatchingNotes, getAllNotes } from '../../utils/productTags';
 interface ReceiveFormModalProps {
   open: boolean;
   onClose: () => void;
@@ -64,6 +65,11 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [originalFormValues, setOriginalFormValues] = useState<any>(null);
   const modalInstanceRef = useRef<number>(0);
+  const [showAsTag, setShowAsTag] = useState(false);
+  const [notesSuggestions, setNotesSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
 
   // // Auto-focus first field when modal opens
   // useEffect(() => {
@@ -79,6 +85,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       setBulkItems({});
       setErrors({});
       setOriginalFormValues(null);
+      setShowAsTag(false);
+      setNotesSuggestions([]);
+      setShowSuggestions(false);
       modalInstanceRef.current += 1; // Force new instance
     }
   }, [open]);
@@ -161,11 +170,167 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   // Keyboard support - Escape to close
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open) onClose();
+      if (e.key === 'Escape' && open) {
+        if (showSuggestions) {
+          setShowSuggestions(false);
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [open, onClose]);
+  }, [open, onClose, showSuggestions]);
+
+  // Handle notes field focus - show suggestions
+  const handleNotesFocus = () => {
+    const currentNote = form.status || '';
+    
+    // Get selected product IDs
+    const selectedProductIds = bulkProducts
+      .map(pid => bulkItems[pid]?.product_id)
+      .filter(Boolean) as string[];
+    
+    if (!currentNote.trim()) {
+      // Show last 3 notes if field is empty
+      // If product is selected, show notes for that specific product only
+      if (selectedProductIds.length > 0) {
+        const lastThree = getLastThreeNotes(selectedProductIds[0]);
+        setNotesSuggestions(lastThree);
+        setShowSuggestions(lastThree.length > 0);
+      } else {
+        // No product selected, show last 3 from all products
+        const lastThree = getLastThreeNotes();
+        setNotesSuggestions(lastThree);
+        setShowSuggestions(lastThree.length > 0);
+      }
+    } else {
+      // Show matching notes for selected products
+      if (selectedProductIds.length > 0) {
+        // Use the first selected product for matching
+        const matching = getMatchingNotes(selectedProductIds[0], currentNote);
+        setNotesSuggestions(matching);
+        setShowSuggestions(matching.length > 0);
+      } else {
+        // If no product selected, show matching notes from all products
+        const allNotes = getAllNotes();
+        const searchLower = currentNote.toLowerCase().trim();
+        const matching = allNotes
+          .filter(note => note.note.toLowerCase().includes(searchLower))
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, 10)
+          .map(n => n.note);
+        
+        // Remove duplicates
+        const uniqueMatching = Array.from(new Set(matching));
+        setNotesSuggestions(uniqueMatching);
+        setShowSuggestions(uniqueMatching.length > 0);
+      }
+    }
+  };
+
+  // Handle notes field change - update suggestions
+  const handleNotesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setForm({ ...form, status: value });
+    
+    // Get selected product IDs
+    const selectedProductIds = bulkProducts
+      .map(pid => bulkItems[pid]?.product_id)
+      .filter(Boolean) as string[];
+    
+    if (!value.trim()) {
+      // Show last 3 notes if field is empty
+      // If product is selected, show notes for that specific product only
+      if (selectedProductIds.length > 0) {
+        const lastThree = getLastThreeNotes(selectedProductIds[0]);
+        setNotesSuggestions(lastThree);
+        setShowSuggestions(lastThree.length > 0);
+      } else {
+        // No product selected, show last 3 from all products
+        const lastThree = getLastThreeNotes();
+        setNotesSuggestions(lastThree);
+        setShowSuggestions(lastThree.length > 0);
+      }
+    } else {
+      // Show matching notes for selected products
+      if (selectedProductIds.length > 0) {
+        // Use the first selected product for matching
+        const matching = getMatchingNotes(selectedProductIds[0], value);
+        setNotesSuggestions(matching);
+        setShowSuggestions(matching.length > 0);
+      } else {
+        // If no product selected, show matching notes from all products
+        const allNotes = getAllNotes();
+        const searchLower = value.toLowerCase().trim();
+        const matching = allNotes
+          .filter(note => note.note.toLowerCase().includes(searchLower))
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, 10)
+          .map(n => n.note);
+        
+        // Remove duplicates
+        const uniqueMatching = Array.from(new Set(matching));
+        setNotesSuggestions(uniqueMatching);
+        setShowSuggestions(uniqueMatching.length > 0);
+      }
+    }
+  };
+
+  // Handle suggestion click
+  const handleSuggestionClick = (suggestion: string) => {
+    setForm({ ...form, status: suggestion });
+    setShowSuggestions(false);
+    notesTextareaRef.current?.focus();
+  };
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        suggestionsRef.current &&
+        !suggestionsRef.current.contains(event.target as Node) &&
+        notesTextareaRef.current &&
+        !notesTextareaRef.current.contains(event.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+
+    if (showSuggestions) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showSuggestions]);
+
+  // Update suggestions when products are selected/changed (if notes field has focus)
+  useEffect(() => {
+    if (notesTextareaRef.current === document.activeElement) {
+      const currentNote = form.status || '';
+      const selectedProductIds = bulkProducts
+        .map(pid => bulkItems[pid]?.product_id)
+        .filter(Boolean) as string[];
+      
+      if (!currentNote.trim()) {
+        // Show last 3 notes for selected product
+        if (selectedProductIds.length > 0) {
+          const lastThree = getLastThreeNotes(selectedProductIds[0]);
+          setNotesSuggestions(lastThree);
+          setShowSuggestions(lastThree.length > 0);
+        } else {
+          const lastThree = getLastThreeNotes();
+          setNotesSuggestions(lastThree);
+          setShowSuggestions(lastThree.length > 0);
+        }
+      } else if (selectedProductIds.length > 0) {
+        // Update matching notes for the selected product
+        const matching = getMatchingNotes(selectedProductIds[0], currentNote);
+        setNotesSuggestions(matching);
+        setShowSuggestions(matching.length > 0);
+      }
+    }
+  }, [bulkProducts, bulkItems, form.status]);
+
   const { t } = useI18n();
   const { getProductName } = useProductMultilingual();
 
@@ -294,6 +459,27 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         }
       });
 
+      // Save tags if checkbox is checked and notes are provided
+      if (showAsTag && form.status && form.status.trim()) {
+        bulkProducts.forEach(pid => {
+          const bi = bulkItems[pid];
+          if (bi.product_id) {
+            saveProductTag(bi.product_id, form.status);
+          }
+        });
+      }
+
+      // Always save note for autocomplete suggestions
+      if (form.status && form.status.trim()) {
+        // Save note for each product in the batch
+        bulkProducts.forEach(pid => {
+          const bi = bulkItems[pid];
+          if (bi.product_id) {
+            saveNote(form.status, bi.product_id);
+          }
+        });
+      }
+
       // Reset form after successful submission - preserve supplier selection
       setForm({
         supplier_id: form.supplier_id, // Preserve current supplier selection
@@ -310,6 +496,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       setBulkProducts([]);
       setBulkItems({});
       setErrors({});
+      setShowAsTag(false);
+      setNotesSuggestions([]);
+      setShowSuggestions(false);
       onClose();
     } catch (e) {
       setErrors({ form: 'Failed to receive inventory.' });
@@ -700,15 +889,47 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                     {errors.received_at && <p className="text-xs text-red-600 mt-1">{errors.received_at}</p>}
                   </div>
                   
-                  <div>
+                  <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('inventory.notes')} </label>
                     <textarea
+                      ref={notesTextareaRef}
                       value={form.status}
-                      onChange={(e) => setForm({ ...form, status: e.target.value })}
+                      onChange={handleNotesChange}
+                      onFocus={handleNotesFocus}
                       className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                       rows={4}
                       placeholder={t('inventory.addAnyAdditionalStatusOrComments')}
                     />
+                    {showSuggestions && notesSuggestions.length > 0 && (
+                      <div
+                        ref={suggestionsRef}
+                        className="absolute z-50 mt-1 w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+                      >
+                        {notesSuggestions.map((suggestion, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            onClick={() => handleSuggestionClick(suggestion)}
+                            className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-slate-700 text-sm text-gray-700 dark:text-slate-300 border-b border-gray-200 dark:border-slate-700 last:border-b-0"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {form.status && form.status.trim() && (
+                      <label className="flex items-center space-x-2 mt-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={showAsTag}
+                          onChange={(e) => setShowAsTag(e.target.checked)}
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-slate-300">
+                          Show as tag in POS page
+                        </span>
+                      </label>
+                    )}
                   </div>
                 </div>
               </div>

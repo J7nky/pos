@@ -4,7 +4,7 @@ import { Product, getTranslatedString, type MultilingualString } from '@pos-plat
 import { supabase } from '../lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 
-type ProductCategory = 'Fruits' | 'Vegetables' | 'Herbs/Leafy' | 'Nuts' | 'Others';
+type ProductCategory = 'Fruits' | 'Vegetables' | 'Herbs/Leafy' | 'Nuts' | 'Others' | 'Tropical Fruits';
 
 interface ProductFormData {
   nameEn: string;
@@ -520,6 +520,7 @@ export default function GlobalProducts() {
                   <option value="Herbs/Leafy">Herbs/Leafy</option>
                   <option value="Nuts">Nuts</option>
                   <option value="Others">Others</option>
+                  <option value="Tropical Fruits">Tropical Fruits</option>
                 </select>
               </div>
 
