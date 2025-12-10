@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Package } from "lucide-react";
 import AccessibleButton from "./common/AccessibleButton";
 import { useI18n } from "../i18n";
 import { useProductMultilingual } from "../hooks/useMultilingual";
+import { getProductTags } from "../utils/productTags";
 interface InventoryItem {
   inventoryItemId: string;
   supplierName: string;
@@ -56,6 +57,22 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
   const { t } = useI18n();
   const { getProductName } = useProductMultilingual();
   const productName = getProductName(product);
+  
+  // Get tags for this product
+  const tags = useMemo(() => {
+    const productTags = getProductTags(product.id);
+    // Get unique tags (most recent for each unique note text)
+    const uniqueTags = new Map<string, string>();
+    productTags
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .forEach(tag => {
+        if (!uniqueTags.has(tag.note.toLowerCase())) {
+          uniqueTags.set(tag.note.toLowerCase(), tag.note);
+        }
+      });
+    return Array.from(uniqueTags.values()).slice(0, 3); // Show max 3 tags
+  }, [product.id]);
+
   return (
     <div className="group border border-gray-200 rounded-xl p-3 hover:shadow-lg hover:border-blue-300 transition-all duration-200 bg-white">
       {/* Product Image */}
@@ -78,13 +95,27 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
         <h3 className="font-semibold text-gray-900 text-xs leading-tight group-hover:text-blue-600 transition-colors duration-200">
           {productName}
         </h3>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-1">
           {product.category && (
             <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
               {product.category}
             </span>
           )}
         </div>
+        {/* Product Tags */}
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {tags.map((tag, index) => (
+              <span
+                key={index}
+                className="text-[9px] text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded-full border border-blue-200"
+                title={tag}
+              >
+                {tag.length > 15 ? `${tag.substring(0, 15)}...` : tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Inventory Items */}

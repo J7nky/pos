@@ -398,7 +398,7 @@ export interface Transaction {
 export interface CashDrawer {
   id: string;
   opening_amount: number;
-  current_amount: number;
+  actual_amount: number;
   total_cash_sales: number;
   total_cash_payments: number;
   total_expenses: number;
