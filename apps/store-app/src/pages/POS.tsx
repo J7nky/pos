@@ -28,6 +28,7 @@ import { useI18n } from '../i18n';
 import { useQRCodeGeneration } from '../hooks/useQRCodeGeneration';
 import { generateBillReference } from '../utils/referenceGenerator';
 import { accountingInitService } from '../services/accountingInitService';
+import { useProductMultilingual } from '../hooks/useMultilingual';
 
 
 interface BillTab {
@@ -71,6 +72,7 @@ export default function POS() {
   const { formatCurrency } = useCurrency();
   const { t } = useI18n();
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
+  const { getProductName } = useProductMultilingual();
 
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
   const [searchTerm, setSearchTerm] = useState('');
@@ -283,7 +285,7 @@ ${dashSeparator}`;
 
     lineItemsData.forEach((item) => {
       const product = products.find(p => p.id === item.product_id);
-      const productName = product ? product.name : 'Unknown Product';
+      const productName = product ? getProductName(product) : 'Unknown Product';
       const quantity = item.quantity || 0;
       const weight = item.weight || 0;
       const price = item.unit_price || 0;
@@ -540,8 +542,9 @@ ${dashSeparator}`;
 
     const searchLower = searchTerm.toLowerCase();
 
-    // Search by product name
-    if (product.name.toLowerCase().includes(searchLower)) {
+    // Search by product name (multilingual)
+    const productName = getProductName(product);
+    if (productName.toLowerCase().includes(searchLower)) {
       return true;
     }
 
@@ -1375,6 +1378,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
 };
 const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, products, suppliers }: any) => {
   const { t } = useI18n();
+  const { getProductName } = useProductMultilingual();
   return (
     <div className="bg-white rounded-lg shadow-sm relative">
     {/* Enhanced Cart Header */}
@@ -1423,13 +1427,14 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
               return null;
             }
             
+            const productName = getProductName(product);
             return (
               <div key={item.id} className="p-4 hover:bg-gray-50 transition-colors duration-150">
                 {/* Product Header */}
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="flex items-center space-x-2 mb-1">
-                      <h4 className="font-semibold text-gray-900 text-base">{product?.name || 'Unknown Product'}</h4>
+                      <h4 className="font-semibold text-gray-900 text-base">{productName || 'Unknown Product'}</h4>
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full font-medium">
                         #{index + 1}
                       </span>
@@ -1445,7 +1450,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     variant="ghost"
                     size="sm"
                     className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors duration-150 min-h-[44px]"
-                    ariaLabel={`Remove ${product?.name || 'item'} from cart`}
+                    ariaLabel={`Remove ${productName || 'item'} from cart`}
                     tabIndex={-1}
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1477,7 +1482,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                         }}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white"
                         tabIndex={200 + index * 4 + 1}
-                        aria-label={`Quantity for ${product?.name || 'product'}`}
+                        aria-label={`Quantity for ${productName || 'product'}`}
                       />
                       <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
                         {item.quantity===''? t('common.labels.units') : ''}
@@ -1496,14 +1501,14 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                         value={item.weight ?? ''}
                         onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
                         className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
-                          product?.name?.toLowerCase().includes('plastic') 
+                          productName.toLowerCase().includes('plastic') 
                             ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
                             : 'bg-white'
                         }`}
                         placeholder="0.00"
-                        disabled={product?.name?.toLowerCase()==='plastic'}
+                        disabled={productName.toLowerCase()==='plastic'}
                         tabIndex={200 + index * 4 + 2}
-                        aria-label={`Weight for ${product?.name || 'product'}`}
+                        aria-label={`Weight for ${productName || 'product'}`}
                       />
                       <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
                         {item.weight===''? t('common.labels.kg') : ''}
@@ -1522,7 +1527,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       className="w-full border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] bg-white px-0 py-0 mb-0"
                       placeholder="0.00"
                       tabIndex={200 + index * 4 + 3}
-                      ariaLabel={`Price for ${product?.name || 'product'}`}
+                      ariaLabel={`Price for ${productName || 'product'}`}
                     />
                   </div>
 
@@ -1534,7 +1539,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       tabIndex={200 + index * 4 + 4}
                       style={{ padding: '8px'}}
                       role="status"
-                        aria-label={`Total for ${product?.name || 'product'} is ${formatCurrency(item.lineTotal)}`}
+                        aria-label={`Total for ${productName || 'product'} is ${formatCurrency(item.lineTotal)}`}
                     >
                       <div className="text-lg font-bold text-blue-700 text-center" aria-hidden="true" style={{ height: '26.4px' }}>
                         {formatCurrency(item.lineTotal)}

@@ -2,6 +2,7 @@ import React from "react";
 import { Package } from "lucide-react";
 import AccessibleButton from "./common/AccessibleButton";
 import { useI18n } from "../i18n";
+import { useProductMultilingual } from "../hooks/useMultilingual";
 interface InventoryItem {
   inventoryItemId: string;
   supplierName: string;
@@ -53,6 +54,8 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
   formatCurrency,
 }) => {
   const { t } = useI18n();
+  const { getProductName } = useProductMultilingual();
+  const productName = getProductName(product);
   return (
     <div className="group border border-gray-200 rounded-xl p-3 hover:shadow-lg hover:border-blue-300 transition-all duration-200 bg-white">
       {/* Product Image */}
@@ -60,7 +63,7 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
         {product.image ? (
           <img
             src={product.image}
-            alt={product.name}
+            alt={productName}
             className="w-full h-40 object-cover rounded-lg group-hover:scale-105 transition-transform duration-200"
           />
         ) : (
@@ -73,7 +76,7 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
       {/* Product Info */}
       <div className="space-y-2 mb-3">
         <h3 className="font-semibold text-gray-900 text-xs leading-tight group-hover:text-blue-600 transition-colors duration-200">
-          {product.name}
+          {productName}
         </h3>
         <div className="flex items-center justify-between">
           {product.category && (
@@ -106,7 +109,7 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
                   ? "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
                   : "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 hover:shadow-md"
               }`}
-              ariaLabel={`Add ${product.name} from ${item.supplierName}`}
+              ariaLabel={`Add ${productName} from ${item.supplierName}`}
               tabIndex={100 + index}
             >
               <div className="space-y-1">
