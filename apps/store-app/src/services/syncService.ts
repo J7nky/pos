@@ -68,7 +68,10 @@ const SYNC_TABLES = [
   'bill_audit_logs',
   'cash_drawer_sessions',
   'missed_products',
-  'reminders'
+  'reminders',
+  // RBAC tables (Role-Based Access Control) - sync for cross-device permissions
+  'role_operation_limits', // Operation limits (discount, void, return amounts)
+  'user_module_access' // Per-user module access (POS, Inventory, Accounting, etc.)
 ] as const;
 
 type SyncTable = typeof SYNC_TABLES[number];
@@ -95,7 +98,9 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'bill_audit_logs': ['bills'],
   'cash_drawer_sessions': ['cash_drawer_accounts'],
   'missed_products': ['cash_drawer_sessions', 'inventory_items'],
-  'reminders': ['users'] // Reminders reference users (created_by, completed_by)
+  'reminders': ['users'], // Reminders reference users (created_by, completed_by)
+  'role_operation_limits': ['stores', 'users'], // RBAC: Operation limits reference stores and users
+  'user_module_access': ['stores', 'users'] // RBAC: Module access references stores and users
 };
 
 export interface SyncResult {

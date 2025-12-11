@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { Plus, Search, Edit, Trash2, Users as UsersIcon, Clock, DollarSign, Phone, MapPin, User, Calendar } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Users as UsersIcon, Clock, DollarSign, Phone, MapPin, User, Calendar, Shield, Lock } from 'lucide-react';
 import { Employee } from '../types';
 import { EmployeeService } from '../services/employeeService';
 import Toast from '../components/common/Toast';
+import { ModuleAccessManager } from '../components/rbac/ModuleAccessManager';
+import { OperationLimitsManager } from '../components/rbac/OperationLimitsManager';
 
 export default function Employees() {
   const { userProfile } = useSupabaseAuth();
@@ -37,6 +39,7 @@ export default function Employees() {
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [roleCounts, setRoleCounts] = useState({ cashier: 0, manager: 0 });
+  const [activeTab, setActiveTab] = useState<'info' | 'modules' | 'limits'>('info');
 
   // Check if user is admin
   const isAdmin = userProfile?.role === 'admin';
@@ -199,6 +202,7 @@ console.log(userProfile,123123123);
     setEditingEmployee(employee);
     // Clear any existing errors
     setFormErrors({});
+    setActiveTab('info'); // Reset to info tab
     
     setFormData({
       name: employee.name,
@@ -317,7 +321,10 @@ console.log(userProfile,123123123);
           <p className="text-gray-600 mt-1">Manage employees, roles, and working hours</p>
         </div>
         <button
-          onClick={() => setShowForm(true)}
+          onClick={() => {
+            setShowForm(true);
+            setActiveTab('info');
+          }}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center"
         >
           <Plus className="w-5 h-5 mr-2" />
@@ -368,11 +375,55 @@ console.log(userProfile,123123123);
       {/* Employee Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">
               {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
             </h2>
-            
+
+            {/* Tabs - Only show for editing existing employee */}
+            {editingEmployee && (
+              <div className="flex border-b border-gray-200 mb-6">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('info')}
+                  className={`px-4 py-2 font-medium text-sm transition-colors ${
+                    activeTab === 'info'
+                      ? 'border-b-2 border-blue-600 text-blue-600'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <User className="w-4 h-4 inline mr-2" />
+                  Employee Info
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('modules')}
+                  className={`px-4 py-2 font-medium text-sm transition-colors ${
+                    activeTab === 'modules'
+                      ? 'border-b-2 border-blue-600 text-blue-600'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Shield className="w-4 h-4 inline mr-2" />
+                  Module Access
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('limits')}
+                  className={`px-4 py-2 font-medium text-sm transition-colors ${
+                    activeTab === 'limits'
+                      ? 'border-b-2 border-blue-600 text-blue-600'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Lock className="w-4 h-4 inline mr-2" />
+                  Operation Limits
+                </button>
+              </div>
+            )}
+
+            {/* Tab Content: Employee Info */}
+            {(!editingEmployee || activeTab === 'info') && (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -641,6 +692,66 @@ console.log(userProfile,123123123);
                 </button>
               </div>
             </form>
+            )}
+
+            {/* Tab Content: Module Access */}
+            {editingEmployee && activeTab === 'modules' && (
+              <div className="py-4">
+                <ModuleAccessManager
+                  userId={editingEmployee.id}
+                  userRole={editingEmployee.role}
+                  storeId={storeId || ''}
+                  onUpdate={() => {
+                    // Optionally reload employees or show success message
+                    setToast({ message: 'Module access updated successfully', type: 'success', visible: true });
+                  }}
+                />
+                
+                {/* Close button for tabs */}
+                <div className="mt-6 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForm(false);
+                      setEditingEmployee(null);
+                      setActiveTab('info');
+                    }}
+                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Tab Content: Operation Limits */}
+            {editingEmployee && activeTab === 'limits' && (
+              <div className="py-4">
+                <OperationLimitsManager
+                  userId={editingEmployee.id}
+                  userRole={editingEmployee.role}
+                  storeId={storeId || ''}
+                  onUpdate={() => {
+                    setToast({ message: 'Operation limits updated successfully', type: 'success', visible: true });
+                  }}
+                />
+
+                {/* Close button for tabs */}
+                <div className="mt-6 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForm(false);
+                      setEditingEmployee(null);
+                      setActiveTab('info');
+                    }}
+                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

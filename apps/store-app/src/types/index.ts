@@ -34,6 +34,42 @@ export interface Employee {
   _deleted?: boolean;
 }
 
+// RBAC (Role-Based Access Control) Types
+export type ModuleName = 'pos' | 'inventory' | 'accounting' | 'reports' | 'settings' | 'users';
+
+export type OperationType = 
+  | 'max_discount_percent'
+  | 'max_return_amount_usd'
+  | 'max_return_amount_lbp'
+  | 'max_void_amount_usd'
+  | 'max_void_amount_lbp';
+
+export interface RoleOperationLimit {
+  id: string;
+  store_id: string;
+  role: 'admin' | 'manager' | 'cashier';
+  user_id: string | null; // NULL = role default, NOT NULL = user-specific override
+  operation_type: OperationType;
+  limit_value: number;
+  limit_currency?: 'USD' | 'LBP';
+  created_at: string;
+  updated_at: string;
+  _synced?: boolean;
+  _deleted?: boolean;
+}
+
+export interface UserModuleAccess {
+  id: string;
+  user_id: string;
+  store_id: string;
+  module: ModuleName;
+  can_access: boolean;
+  created_at: string;
+  updated_at: string;
+  _synced?: boolean;
+  _deleted?: boolean;
+}
+
 export interface Sale {
   id: string;
   store_id: string;

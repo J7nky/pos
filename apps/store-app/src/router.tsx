@@ -13,6 +13,7 @@ import Employees from './pages/Employees';
 import UnsyncedItems from './pages/UnsyncedItems';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
 import ErrorPage from './components/ErrorPage';
+import { ProtectedRoute } from './components/ProtectedRoute';
 
 // Use hash router for Electron (file:// protocol) and browser router for web
 const isElectron = typeof window !== 'undefined' && window.electronAPI;
@@ -35,22 +36,38 @@ export const router = createRouter([
           },
           {
             path: "inventory",
-            element: <Inventory />,
+            element: (
+              <ProtectedRoute module="inventory">
+                <Inventory />
+              </ProtectedRoute>
+            ),
             errorElement: <ErrorPage />,
           },
           {
             path: "pos",
-            element: <POS />,
+            element: (
+              <ProtectedRoute module="pos">
+                <POS />
+              </ProtectedRoute>
+            ),
             errorElement: <ErrorPage />,
           },
           {
             path: "reports",
-            element: <Reports />,
+            element: (
+              <ProtectedRoute module="reports">
+                <Reports />
+              </ProtectedRoute>
+            ),
             errorElement: <ErrorPage />,
           },
           {
             path: "accounting",
-            element: <Accounting />,
+            element: (
+              <ProtectedRoute module="accounting">
+                <Accounting />
+              </ProtectedRoute>
+            ),
             errorElement: <ErrorPage />,
           },
           {
@@ -60,12 +77,20 @@ export const router = createRouter([
           },
           {
             path: "settings",
-            element: <Settings />,
+            element: (
+              <ProtectedRoute module="settings">
+                <Settings />
+              </ProtectedRoute>
+            ),
             errorElement: <ErrorPage />,
           },
           {
             path: "employees",
-            element: <Employees />,
+            element: (
+              <ProtectedRoute module="users">
+                <Employees />
+              </ProtectedRoute>
+            ),
             errorElement: <ErrorPage />,
           },
           {
