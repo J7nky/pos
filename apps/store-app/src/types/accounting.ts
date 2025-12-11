@@ -22,7 +22,7 @@ export interface JournalEntry {
   is_posted: boolean;
   description?: string;           // Optional description for the entry
   created_at: string;
-  created_by: string;
+  created_by: string | null;  // User ID (UUID) - null for system-generated
   _synced: boolean;
 }
 
@@ -136,6 +136,7 @@ export interface CreateJournalEntryParams {
   entityId: string;
   description?: string;
   postedDate?: string;
+  createdBy?: string | null;  // User ID (UUID) - null for system-generated
 }
 
 /**

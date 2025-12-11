@@ -32,10 +32,12 @@ type Tables = Database['public']['Tables'];
 // Offline-first data context interface
 interface OfflineDataContextType {
   storeId: any;
-  // Branch context (automatic - no manual selection)
+  // Branch context (automatic - no manual selection for manager/cashier, manual for admin)
   currentBranchId: string | null;
+  setCurrentBranchId: (branchId: string | null) => void;
   // Data - matching exact structure
   products: Tables['products']['Row'][];
+  branches: Branch[]; // Store branches for multi-branch support
   suppliers: Tables['entities']['Row'][]; // Filtered entities with entity_type='supplier'
   customers: Tables['entities']['Row'][]; // Filtered entities with entity_type='customer'
   employees: Tables['users']['Row'][];
@@ -311,6 +313,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   debug('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline, 'justCameOnline:', justCameOnline);
 
+  // Reset branch when user logs out
+  useEffect(() => {
+    if (!userProfile) {
+      // User logged out, reset currentBranchId
+      setCurrentBranchId(null);
+      console.log('🔄 User logged out, branch ID reset');
+    }
+  }, [userProfile]);
+
   // Data states - offline-first structure
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
   // Note: customers and suppliers are now computed from entities for backward compatibility
@@ -319,6 +330,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [inventory, setInventory] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<Tables['transactions']['Row'][]>([]);
   const [expenseCategories] = useState<any[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
 
   // Raw internal data
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
@@ -476,14 +488,28 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Initialize data when store is available
+  // Initialize data when BOTH store AND branch are available
+  // This prevents loading data before admin selects a branch
   useEffect(() => {
-    if (storeId) {
+    // CRITICAL: Wait for both storeId AND currentBranchId before loading data
+    // Admin users must select a branch first, manager/cashier get auto-assigned
+    if (storeId && currentBranchId) {
+      console.log('✅ Both storeId and currentBranchId available, initializing data...', {
+        storeId,
+        currentBranchId,
+        userRole: userProfile?.role
+      });
       loadStoreData();
       initializeData();
       // initializeExchangeRates();
       // Check undo validity after data is loaded
       setTimeout(() => checkUndoValidity(), 1000);
+    } else {
+      console.log('⏳ Waiting for branch selection before loading data...', {
+        hasStoreId: !!storeId,
+        hasCurrentBranchId: !!currentBranchId,
+        userRole: userProfile?.role
+      });
     }
     
     // Cleanup real-time sync when storeId changes or component unmounts
@@ -491,25 +517,73 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (storeId) {
       }
     };
-  }, [storeId, isOnline]);
+  }, [storeId, currentBranchId, isOnline]);
 
-  // Initialize branch - automatically determine branch for this store
+  // Initialize branch - automatically determine branch based on user role
   useEffect(() => {
     const initializeBranch = async () => {
-      if (storeId && !currentBranchId) {
-        try {
-          const branchId = await ensureDefaultBranch(storeId);
-          console.log("Branch Id Value: ",branchId)
-          setCurrentBranchId(branchId);
-          console.log('✅ Auto-initialized branch for store:', branchId);
-        } catch (error) {
-          console.error('❌ Failed to auto-initialize branch:', error);
+      // Wait for both storeId and userProfile to be available
+      if (!storeId || !userProfile) {
+        return;
+      }
+      
+      // Only initialize if we don't have a branch yet
+      if (currentBranchId) {
+        return;
+      }
+      
+      try {
+        // Admin users (branch_id: null) - Don't auto-initialize
+        // They should select a branch via BranchSelectionScreen
+        if (userProfile.role === 'admin' && userProfile.branch_id === null) {
+          // Check if there's a stored preference
+          const storedBranchId = localStorage.getItem(`branch_preference_${storeId}`);
+          if (storedBranchId) {
+            // Validate the stored branch exists and is accessible
+            const branch = await db.branches.get(storedBranchId);
+            if (branch && !branch._deleted && branch.store_id === storeId) {
+              setCurrentBranchId(storedBranchId);
+              console.log('✅ Admin: Restored preferred branch:', storedBranchId);
+              return;
+            } else {
+              // Stored preference is invalid, clear it
+              localStorage.removeItem(`branch_preference_${storeId}`);
+              console.log('⚠️ Admin: Stored branch preference was invalid, cleared');
+            }
+          }
+          // No valid stored preference - admin needs to select branch
+          // DO NOT call ensureDefaultBranch - let them choose
+          console.log('⏳ Admin: Waiting for branch selection via BranchSelectionScreen');
+          return;
         }
+        
+        // Manager/Cashier - Use their assigned branch_id
+        if ((userProfile.role === 'manager' || userProfile.role === 'cashier') && userProfile.branch_id) {
+          // Validate their assigned branch
+          const branch = await db.branches.get(userProfile.branch_id);
+          if (branch && !branch._deleted && branch.store_id === storeId) {
+            setCurrentBranchId(userProfile.branch_id);
+            console.log(`✅ ${userProfile.role}: Auto-assigned to branch:`, userProfile.branch_id);
+          } else {
+            console.error(`❌ ${userProfile.role}: Assigned branch is invalid or deleted`);
+          }
+          return;
+        }
+        
+        // Fallback: Only for users without proper role setup or missing branch assignment
+        // This should rarely be reached in normal operation
+        console.warn('⚠️ User does not match expected role patterns, attempting fallback branch initialization');
+        const branchId = await ensureDefaultBranch(storeId);
+        console.log("Branch Id Value: ", branchId);
+        setCurrentBranchId(branchId);
+        console.log('✅ Fallback: Auto-initialized default branch for store:', branchId);
+      } catch (error) {
+        console.error('❌ Failed to initialize branch:', error);
       }
     };
     
     initializeBranch();
-  }, [storeId, currentBranchId]);
+  }, [storeId, currentBranchId, userProfile]);
 
   // Helper functions defined before they're used
   const refreshCashDrawerStatus = useCallback(async () => {
@@ -542,6 +616,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     debug('🔄 Refreshing data for store:', storeId);
 
     try {
+      // Load branches FIRST - critical for branch selection screen
+      const branchesData = await db.branches
+        .where('store_id')
+        .equals(storeId)
+        .filter(b => !b._deleted && !b.is_deleted)
+        .toArray();
+      setBranches(branchesData);
+      debug(`🏢 Loaded ${branchesData.length} branches`);
+
       // Load all data from IndexedDB using optimized batch loading
       const {
         productsData,
@@ -741,12 +824,28 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         debug(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
       }
 
-      // Clean up duplicate cash drawer accounts
+      // Clean up duplicate cash drawer accounts for all branches
       try {
         const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-        const cleanupResult = await cashDrawerUpdateService.cleanupDuplicateAccounts(storeId);
-        if (cleanupResult.success && cleanupResult.duplicatesRemoved > 0) {
-          debug(`🧹 Cleaned up ${cleanupResult.duplicatesRemoved} duplicate cash drawer accounts`);
+        
+        // Get all branches for this store
+        const branches = await db.branches
+          .where('store_id')
+          .equals(storeId)
+          .filter(b => !b.is_deleted)
+          .toArray();
+        
+        // Clean up duplicates for each branch
+        let totalDuplicatesRemoved = 0;
+        for (const branch of branches) {
+          const cleanupResult = await cashDrawerUpdateService.cleanupDuplicateAccounts(storeId, branch.id);
+          if (cleanupResult.success && cleanupResult.duplicatesRemoved > 0) {
+            totalDuplicatesRemoved += cleanupResult.duplicatesRemoved;
+          }
+        }
+        
+        if (totalDuplicatesRemoved > 0) {
+          debug(`🧹 Cleaned up ${totalDuplicatesRemoved} duplicate cash drawer accounts across all branches`);
         }
       } catch (cleanupError) {
         console.warn('Failed to cleanup duplicate cash drawer accounts:', cleanupError);
@@ -1179,8 +1278,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       autoSyncTimerRef.current = null;
     }
 
-    // Always set new timer if online (we'll check unsyncedCount when timer fires)
-    if (isOnline && storeId && !isSyncing) {
+    // CRITICAL: Wait for BOTH storeId AND currentBranchId before setting sync timer
+    // This prevents sync from running before admin selects a branch
+    if (isOnline && storeId && currentBranchId && !isSyncing) {
       // Use shorter delay for immediate changes, longer for idle state
       const syncDelay = unsyncedCount > 0 ? 5000 : 30000; // 5s for active changes, 30s for idle
       console.log(`⏰ [AUTO-SYNC] Setting auto-sync timer (${syncDelay}ms delay, ${unsyncedCount} unsynced records)`);
@@ -1224,10 +1324,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.log('⏭️  [AUTO-SYNC] Not setting timer:', {
         isOnline,
         hasStoreId: !!storeId,
+        hasCurrentBranchId: !!currentBranchId,
         isSyncing
       });
     }
-  }, [isOnline, storeId, isSyncing, unsyncedCount]);
+  }, [isOnline, storeId, currentBranchId, isSyncing, unsyncedCount]);
 
   // Auto-sync with reset on every change - ensures full undo window
   useEffect(() => {
@@ -1243,9 +1344,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
  
   const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
-    if (!storeId || isSyncing) {
-      console.log('⏭️  [SYNC] Skipping sync:', { hasStoreId: !!storeId, isSyncing });
-      return { success: false, errors: ['No store ID or sync in progress'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
+    // CRITICAL: Require BOTH storeId AND currentBranchId before syncing
+    if (!storeId || !currentBranchId || isSyncing) {
+      console.log('⏭️  [SYNC] Skipping sync:', { 
+        hasStoreId: !!storeId, 
+        hasCurrentBranchId: !!currentBranchId, 
+        isSyncing 
+      });
+      return { success: false, errors: ['No store ID, branch ID, or sync in progress'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
     }
 
     console.log(`🔄 [SYNC] Starting ${isAutomatic ? 'AUTO' : 'MANUAL'} sync at ${new Date().toLocaleTimeString()}`);
@@ -1294,7 +1400,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // Debounced sync to batch rapid changes and prevent excessive sync calls
   const debouncedSync = useCallback(() => {
-    if (!isOnline || isSyncing) return;
+    // CRITICAL: Don't start debounced sync without branch ID
+    if (!isOnline || !currentBranchId || isSyncing) return;
 
     // Clear existing timeout
     if (debouncedSyncTimeout) {
@@ -3262,8 +3369,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const fullResync = async (): Promise<SyncResult> => {
-    if (!storeId) {
-      return { success: false, errors: ['No store ID available'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
+    // CRITICAL: Require BOTH storeId AND currentBranchId before full resync
+    if (!storeId || !currentBranchId) {
+      console.log('⏭️  [FULL-RESYNC] Skipping full resync:', { 
+        hasStoreId: !!storeId, 
+        hasCurrentBranchId: !!currentBranchId 
+      });
+      return { success: false, errors: ['No store ID or branch ID available'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
     }
 
     setIsSyncing(true);
@@ -5363,7 +5475,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateReceiptSettings: async () => { },
         storeId: null,
         currentBranchId: null,
+        setCurrentBranchId: () => {},
         products: [],
+        branches: [],
         suppliers: [],
         customers: [],
         employees: [],
@@ -5497,7 +5611,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Data - exact match
       storeId,
       currentBranchId,
+      setCurrentBranchId,
       products,
+      branches,
       suppliers,
       expenseCategories,
       customers,

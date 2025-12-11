@@ -918,7 +918,7 @@ console.log("periodPayments", periodPayments);
         line_order: 1,
         created_at: item.createdAt,
         updated_at: item.createdAt,
-        created_by: 'system',
+        created_by: null,  // System-generated for display
         _synced: true,
         _lastSyncedAt: undefined,
         _deleted: false

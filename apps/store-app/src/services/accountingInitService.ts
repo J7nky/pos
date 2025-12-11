@@ -19,12 +19,16 @@ export class AccountingInitService {
    * This validates that admin-app has properly set up the store
    */
   async isInitialized(storeId: string): Promise<boolean> {
-    const [accountsCount, entitiesCount] = await Promise.all([
-      db.chart_of_accounts.where('store_id').equals(storeId).count(),
-      db.entities.where('[store_id+is_system_entity]').equals([storeId, true]).count()
-    ]);
+    const accountsCount = await db.chart_of_accounts.where('store_id').equals(storeId).count();
     
-    return accountsCount > 0 && entitiesCount >= 9; // All 9 system entities
+    // Query system entities using filter instead of compound index to handle missing/null values
+    const systemEntities = await db.entities
+      .where('store_id')
+      .equals(storeId)
+      .filter(entity => entity.is_system_entity === true)
+      .toArray();
+    
+    return accountsCount > 0 && systemEntities.length >= 9; // All 9 system entities
   }
   
   /**

@@ -29,7 +29,8 @@ export class JournalService {
       currency,
       entityId,
       description,
-      postedDate = new Date().toISOString().split('T')[0]
+      postedDate = new Date().toISOString().split('T')[0],
+      createdBy = null  // Default to null for system-generated entries
     } = params;
     
     // Validate accounting setup
@@ -73,7 +74,7 @@ export class JournalService {
       is_posted: true,
       description: description || `${debitAccountInfo.account_name} - ${entity.name}`,
       created_at: now,
-      created_by: 'system', // TODO: Get from auth context
+      created_by: createdBy,
       _synced: false
     };
     
@@ -94,7 +95,7 @@ export class JournalService {
       is_posted: true,
       description: description || `${creditAccountInfo.account_name} - ${entity.name}`,
       created_at: now,
-      created_by: 'system', // TODO: Get from auth context
+      created_by: createdBy,
       _synced: false
     };
     

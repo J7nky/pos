@@ -1247,7 +1247,8 @@ export class TransactionService {
         currency: transaction.currency,
         entityId, // Now using actual UUID entity ID
         description,
-        postedDate: transaction.created_at.split('T')[0] // Extract date part
+        postedDate: transaction.created_at.split('T')[0], // Extract date part
+        createdBy: transaction.created_by // Pass user ID from transaction
       });
       
       console.log(`✅ Journal entries created for ${transaction.category}: ${transaction.id} (entity: ${entity.name}, id: ${entityId})`);

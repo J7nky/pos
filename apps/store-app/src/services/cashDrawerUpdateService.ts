@@ -489,20 +489,22 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Clean up duplicate cash drawer accounts for a store
+   * Clean up duplicate cash drawer accounts for a branch
    * This method should be called during app initialization to fix existing duplicates
+   * NOTE: Multiple accounts per store are now valid (one per branch)
+   * This only cleans up duplicates within the same branch
    */
-  public async cleanupDuplicateAccounts(storeId: string): Promise<{
+  public async cleanupDuplicateAccounts(storeId: string, branchId: string): Promise<{
     success: boolean;
     duplicatesRemoved: number;
     error?: string;
   }> {
-    return this.acquireOperationLock(`cleanup_${storeId}`, async () => {
+    return this.acquireOperationLock(`cleanup_${storeId}_${branchId}`, async () => {
       try {
-        // Get all accounts for this store
+        // Get all accounts for this store AND branch
         const allAccounts = await db.cash_drawer_accounts
-          .where('store_id')
-          .equals(storeId)
+          .where(['store_id', 'branch_id'])
+          .equals([storeId, branchId])
           .toArray();
 
         if (allAccounts.length <= 1) {
@@ -512,7 +514,7 @@ export class CashDrawerUpdateService {
           };
         }
 
-        console.log(`🧹 Found ${allAccounts.length} cash drawer accounts for store ${storeId}, cleaning up duplicates...`);
+        console.log(`🧹 Found ${allAccounts.length} cash drawer accounts for store ${storeId}, branch ${branchId}, cleaning up duplicates...`);
 
         // Find the best account to keep (most recent, active, with transactions)
         let accountToKeep = allAccounts[0];
@@ -561,7 +563,7 @@ export class CashDrawerUpdateService {
         }
 
         const duplicatesRemoved = duplicateAccountIds.length;
-        console.log(`✅ Cleaned up ${duplicatesRemoved} duplicate cash drawer accounts for store ${storeId}`);
+        console.log(`✅ Cleaned up ${duplicatesRemoved} duplicate cash drawer accounts for store ${storeId}, branch ${branchId}`);
         console.log(`💰 Consolidated balance: $${totalBalance.toFixed(2)} in account ${accountToKeep.id}`);
 
         return {

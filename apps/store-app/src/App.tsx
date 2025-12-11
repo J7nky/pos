@@ -1,9 +1,10 @@
 // src/App.jsx
 import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthContext';
-import { OfflineDataProvider } from './contexts/OfflineDataContext';
+import { OfflineDataProvider, useOfflineData } from './contexts/OfflineDataContext';
 import { CustomerFormProvider } from './contexts/CustomerFormContext';
 
 import SupabaseLogin from './components/SupabaseLogin';
+import BranchSelectionScreen from './components/BranchSelectionScreen';
 import { I18nProvider, useI18n } from './i18n';
 import OnScreenKeyboard from './components/common/OnScreenKeyboard';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -55,6 +56,36 @@ function AppContent() {
   );
 }
 
+// Wrapper component to handle branch selection for admin users
+function BranchAwareAppContent() {
+  const { userProfile } = useSupabaseAuth();
+  const { currentBranchId, setCurrentBranchId, loading } = useOfflineData();
+  const { t } = useI18n();
+
+  // Check if admin user needs to select a branch
+  const isAdmin = userProfile?.role === 'admin' && userProfile?.branch_id === null;
+  const needsBranchSelection = isAdmin && !currentBranchId;
+
+  // If admin user needs branch selection, show it immediately
+  // The BranchSelectionScreen has its own retry logic to wait for branch data
+  // Don't wait for loading.sync here - that creates a chicken-and-egg problem
+  // (sync won't start until branch is selected, per OfflineDataContext logic)
+  if (needsBranchSelection) {
+    return (
+      <BranchSelectionScreen 
+        onBranchSelected={(branchId) => {
+          console.log('🏢 Admin selected branch:', branchId);
+          setCurrentBranchId(branchId);
+          // Data loading will automatically start now that branchId is set
+        }} 
+      />
+    );
+  }
+
+  // Otherwise, render the normal app content
+  return <AppContent />;
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -63,7 +94,7 @@ export default function App() {
           <I18nErrorBoundary>
             <I18nProvider>
               <CustomerFormProvider>
-                <AppContent />
+                <BranchAwareAppContent />
               </CustomerFormProvider>
             </I18nProvider>
           </I18nErrorBoundary>

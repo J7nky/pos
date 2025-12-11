@@ -329,6 +329,28 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         }
       }
       
+      // Clear branch preference for this store before signing out
+      if (userProfile?.store_id) {
+        try {
+          const branchPreferenceKey = `branch_preference_${userProfile.store_id}`;
+          localStorage.removeItem(branchPreferenceKey);
+          console.log('✅ Branch preference cleared for store:', userProfile.store_id);
+        } catch (storageError) {
+          console.warn('Failed to clear branch preference:', storageError);
+        }
+      }
+      
+      // Clear all branch preferences (in case multiple stores)
+      try {
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('branch_preference_')) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch (err) {
+        console.warn('Failed to clear all branch preferences:', err);
+      }
+      
       await supabase.auth.signOut();
       setUserProfile(null);
       
