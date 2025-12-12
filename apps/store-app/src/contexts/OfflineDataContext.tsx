@@ -1608,16 +1608,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         
         if (entity && (entity.entity_type === 'customer' || entity.entity_type === 'supplier')) {
           const entityType = entity.entity_type;
-          const newBalance = customerBalanceUpdate.originalBalance + customerBalanceUpdate.amountDue;
           
-          // Update entity balance
-          await db.entities.update(customerBalanceUpdate.customerId, {
-            lb_balance: newBalance,
-            updated_at: new Date().toISOString(),
-            _synced: false
-          });
-
-          // Record the transaction for financial tracking using the unified service
+          // ✅ ACCOUNTING RULE: Let transactionService handle balance updates atomically
+          // This ensures balance updates happen together with journal entries in a single transaction
+          // Creating proper double-entry: Debit AR (1200) / Credit Revenue (4100) for customers
           await transactionService.createTransaction({
             category: entityType === 'customer' 
               ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
@@ -1635,7 +1629,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               source: 'offline',
               branchId: currentBranchId || '',
             },
-            updateBalances: false, // Balance already updated above
+            updateBalances: true, // ✅ FIXED: Let service handle balance update atomically with journal entries
             updateCashDrawer: false, // Not a cash transaction
             createAuditLog: true,
             _synced: false
@@ -3769,146 +3763,129 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         balanceField = 'usd_balance';
       }
 
-      console.log(`💳 [ATOMIC] ${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${isCustomer ? 'customer' : 'supplier'}: ${currency} balance ${currency === 'LBP' ? currentLbBalance : currentUsdBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
+      console.log(`💳 [PAYMENT] ${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${isCustomer ? 'customer' : 'supplier'}: ${currency} balance ${currency === 'LBP' ? currentLbBalance : currentUsdBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
 
-      // Prepare transaction data
-      const cashDrawerType = paymentDirection === 'receive' ? 'payment' : 'expense';
+      // Prepare transaction context
       const transactionDescription = `${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${entity.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`;
       
-      let cashDrawerResult: any;
-      let transactionId: string | undefined;
-      let previousBalance: number | undefined;
-      let accountId: string | undefined;
+      const context = {
+        userId: createdBy,
+        storeId,
+        branchId: currentBranchId || '',
+        module: 'payments' as const,
+        source: 'web' as const
+      };
 
-      // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK - ALL OR NOTHING ⭐⭐⭐
-      await db.transaction('rw', 
-        [
-          db.entities, 
-          db.transactions, 
-          db.cash_drawer_accounts, 
-          db.cash_drawer_sessions
-        ], 
-        async () => {
-          console.log('💳 [ATOMIC] Starting atomic transaction block...');
-
-          // 1. Update entity balance atomically
-          const updateData = { 
-            [balanceField]: newBalance, 
-            updated_at: new Date().toISOString(),
-            _synced: false 
-          };
-          await db.entities.update(entityId, updateData);
-          console.log(`💳 [ATOMIC] Entity balance updated: ${balanceField} = ${newBalance}`);
-
-          // 2. Process cash drawer transaction atomically (within existing transaction)
-          // NOTE: We can't call processCashDrawerTransaction() here because it creates its own transaction
-          // Instead, we'll do the cash drawer operations directly within this atomic block
-          
-          // Get cash drawer account
-          const cashDrawerAccount = await db.getCashDrawerAccount(storeId, currentBranchId!);
-          if (!cashDrawerAccount) {
-            throw new Error('No cash drawer account found. Please create one before processing payments.');
-          }
-
-          // Calculate balance change
-          const previousCashBalance = Number(cashDrawerAccount.current_balance ?? 0) || 0;
-          const balanceChange = paymentDirection === 'receive' ? amountInLBP : -amountInLBP;
-          const newCashBalance = previousCashBalance + balanceChange;
-
-          // Validate cash drawer balance for outgoing payments
-          if (paymentDirection === 'pay' && newCashBalance < 0) {
-            throw new Error(`Insufficient cash drawer balance. Required: ${Math.round(amountInLBP).toLocaleString()} LBP, Available: ${Math.round(previousCashBalance).toLocaleString()} LBP`);
-          }
-
-          // Update cash drawer balance atomically
-          await db.cash_drawer_accounts.update(cashDrawerAccount.id, {
-            current_balance: newCashBalance,
-            updated_at: new Date().toISOString(),
+      // ✅ ACCOUNTING RULE: Use transactionService for ALL financial operations
+      // This ensures balance updates, journal entries, and cash drawer updates happen atomically
+      let result;
+      
+      if (isCustomer) {
+        if (paymentDirection === 'receive') {
+          // Customer paying us: Debit Cash (1100) / Credit AR (1200)
+          console.log('💳 [PAYMENT] Processing customer payment via transactionService...');
+          result = await transactionService.createCustomerPayment(
+            entityId,
+            numAmount,
+            currency,
+            transactionDescription,
+            context,
+            {
+              reference: reference || generatePaymentReference(),
+              updateCashDrawer: true  // ✅ Increases cash, decreases AR
+            }
+          );
+        } else {
+          // Refund to customer: Debit AR (1200) / Credit Cash (1100)
+          console.log('💳 [PAYMENT] Processing customer refund via transactionService...');
+          result = await transactionService.createTransaction({
+            category: TRANSACTION_CATEGORIES.CUSTOMER_REFUND,
+            amount: numAmount,
+            currency,
+            description: transactionDescription,
+            customerId: entityId,
+            reference: reference || generatePaymentReference(),
+            context,
+            updateBalances: true,   // ✅ Increases AR (customer owes us more/we owe them more)
+            updateCashDrawer: true, // ✅ Decreases cash
+            createAuditLog: true,
             _synced: false
           });
-
-          // Create transaction record atomically
-          const transactionRecord = {
-            id: crypto.randomUUID(),
-            store_id: storeId,
-            type: (paymentDirection === 'receive' ? 'income' : 'expense') as 'income' | 'expense',
-            category: isCustomer 
-              ? (paymentDirection === 'receive' ? 'Customer Payment' : 'Customer Payment')
-              : (paymentDirection === 'receive' ? 'Supplier Payment' : 'Supplier Payment'),
-            amount: numAmount,
-            currency: currency,
-            description: transactionDescription,
-            reference: reference || generatePaymentReference(),
-            customer_id: isCustomer ? entityId : null,
-            supplier_id: isCustomer ? null : entityId,
-            employee_id: null,
-            created_by: createdBy,
-        branch_id: currentBranchId || '',
-
-            metadata: {
-              payment_direction: paymentDirection,
-              original_currency: currency,
-              cash_drawer_amount: amountInLBP,
-              exchange_rate: currency === 'USD' ? exchangeRate : 1
-            },
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            _synced: false
-          };
-
-          await db.transactions.add(transactionRecord);
-
-          // Set result for undo data creation
-          cashDrawerResult = {
-            success: true,
-            transactionId: transactionRecord.id,
-            previousBalance: previousCashBalance,
-            newBalance: newCashBalance,
-            accountId: cashDrawerAccount.id
-          };
-
-          console.log(`💳 [ATOMIC] Cash drawer updated: ${previousCashBalance} → ${newCashBalance} LBP`);
-          console.log(`💳 [ATOMIC] Transaction created: ${transactionRecord.id}`);
-
-          transactionId = cashDrawerResult.transactionId;
-          previousBalance = cashDrawerResult.previousBalance;
-          accountId = cashDrawerResult.accountId;
-
-          console.log('💳 [ATOMIC] Cash drawer transaction created successfully');
         }
-      );
-      // ⭐⭐⭐ END ATOMIC TRANSACTION - ALL OPERATIONS COMMITTED ⭐⭐⭐
-
-      console.log('✅ [ATOMIC] All operations completed successfully - transaction committed');
-
-      // Create undo data (outside transaction - non-critical)
-      try {
-        const baseUndoData = {
-          affected: [
-            { table: isCustomer ? 'customers' : 'suppliers', id: entityId }
-          ],
-          steps: [
+      } else {
+        // Supplier transactions
+        if (paymentDirection === 'pay') {
+          // Paying supplier: Debit AP (2100) / Credit Cash (1100)
+          console.log('💳 [PAYMENT] Processing supplier payment via transactionService...');
+          result = await transactionService.createSupplierPayment(
+            entityId,
+            numAmount,
+            currency,
+            transactionDescription,
+            context,
             {
-              op: 'update',
-              table: isCustomer ? 'customers' : 'suppliers',
-              id: entityId,
-              changes: currency === 'LBP'
-                ? { lb_balance: currentLbBalance, _synced: false }
-                : { usd_balance: currentUsdBalance, _synced: false }
+              reference: reference || generatePaymentReference(),
+              updateCashDrawer: true  // ✅ Decreases cash, decreases AP
             }
-          ]
-        };
+          );
+        } else {
+          // Supplier paying us (rare): Debit Cash (1100) / Credit AP (2100)
+          console.log('💳 [PAYMENT] Processing supplier refund via transactionService...');
+          result = await transactionService.createTransaction({
+            category: TRANSACTION_CATEGORIES.SUPPLIER_REFUND,
+            amount: numAmount,
+            currency,
+            description: transactionDescription,
+            supplierId: entityId,
+            reference: reference || generatePaymentReference(),
+            context,
+            updateBalances: true,   // ✅ Increases AP (we owe supplier more)
+            updateCashDrawer: true, // ✅ Increases cash
+            createAuditLog: true,
+            _synced: false
+          });
+        }
+      }
 
-        const undoData = createCashDrawerUndoData(
-          transactionId,
-          previousBalance,
-          accountId,
-          baseUndoData
-        );
+      // Check if transaction was successful
+      if (!result.success) {
+        console.error('❌ [PAYMENT] Transaction failed:', result.error);
+        return { success: false, error: result.error || 'Payment processing failed' };
+      }
 
-        pushUndo(undoData);
-      } catch (undoError) {
-        console.warn('⚠️ Undo data creation failed (non-critical):', undoError);
+      console.log(`✅ [PAYMENT] Transaction completed successfully: ${result.transactionId}`);
+
+      // Create undo data using the result from transactionService
+      if (result.cashDrawerImpact) {
+        try {
+          const baseUndoData = {
+            affected: [
+              { table: isCustomer ? 'customers' : 'suppliers', id: entityId },
+              { table: 'transactions', id: result.transactionId }
+            ],
+            steps: [
+              {
+                op: 'update',
+                table: isCustomer ? 'customers' : 'suppliers',
+                id: entityId,
+                changes: currency === 'LBP'
+                  ? { lb_balance: currentLbBalance, _synced: false }
+                  : { usd_balance: currentUsdBalance, _synced: false }
+              }
+            ]
+          };
+
+          const undoData = createCashDrawerUndoData(
+            result.transactionId,
+            result.cashDrawerImpact.previousBalance,
+            undefined, // accountId is handled internally by transactionService
+            baseUndoData
+          );
+
+          pushUndo(undoData);
+        } catch (undoError) {
+          console.warn('⚠️ Undo data creation failed (non-critical):', undoError);
+        }
       }
 
       // Refresh data (outside transaction - non-critical)

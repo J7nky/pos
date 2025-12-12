@@ -219,13 +219,10 @@ export class TransactionService {
           // 5. CREATE TRANSACTION RECORD
           await db.transactions.add(transaction);
 
-          // 6. CREATE JOURNAL ENTRIES (NEW - ACCOUNTING MIGRATION)
-          try {
-            await this.createJournalEntriesForTransaction(transaction);
-          } catch (journalError) {
-            console.warn('⚠️ Journal entry creation failed:', journalError);
-            // Don't fail the transaction for journal errors during migration period
-          }
+          // 6. CREATE JOURNAL ENTRIES (MANDATORY - ACCOUNTING RULE)
+          // ✅ Journal entries are the source of truth for financial data
+          // If journal entries fail, the entire transaction must be rolled back
+          await this.createJournalEntriesForTransaction(transaction);
 
           // 7. UPDATE ENTITY BALANCES (if enabled)
           if (params.updateBalances !== false) {
@@ -1012,18 +1009,42 @@ export class TransactionService {
         const isUSD = transaction.currency === 'USD';
         const previousBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
         
-        // Calculate balance change based on entity type and transaction type
+        // Calculate balance change based on category (not just type)
+        // This handles AR/AP transactions correctly
         let balanceChange = 0;
         
         if (entity.entity_type === 'customer') {
-          // For customer: income reduces debt, expense increases it
-          balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
+          // Customer balance logic:
+          // - Credit sales INCREASE AR (they owe us more) = positive balance
+          // - Payments DECREASE AR (they owe us less) = negative balance
+          if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE) {
+            balanceChange = transaction.amount; // Increase AR
+          } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT || 
+                     transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED) {
+            balanceChange = -transaction.amount; // Decrease AR
+          } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND) {
+            balanceChange = transaction.amount; // Increase AR (we owe them or they owe us more)
+          } else {
+            // Fallback: income reduces AR, expense increases AR
+            balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
+          }
         } else if (entity.entity_type === 'supplier') {
-          // For supplier: expense reduces what we owe, income increases it
-          balanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
+          // Supplier balance logic:
+          // - Credit purchases INCREASE AP (we owe them more) = positive balance
+          // - Payments DECREASE AP (we owe them less) = negative balance
+          if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE) {
+            balanceChange = transaction.amount; // Increase AP
+          } else if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT) {
+            balanceChange = -transaction.amount; // Decrease AP
+          } else if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND) {
+            balanceChange = transaction.amount; // Increase AP (we owe them more)
+          } else {
+            // Fallback: expense reduces AP, income increases AP
+            balanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
+          }
         } else if (entity.entity_type === 'employee') {
-          // For employee: similar to customer (income reduces debt, expense increases it)
-          balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
+          // For employee: payments increase what we owe, receipts decrease it
+          balanceChange = transaction.type === 'expense' ? transaction.amount : -transaction.amount;
         }
         
         newBalance = previousBalance + balanceChange;

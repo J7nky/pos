@@ -44,6 +44,13 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     requiresEntity: true
   },
   
+  [TRANSACTION_CATEGORIES.CUSTOMER_REFUND]: {
+    debitAccount: '1200', // Accounts Receivable (increases - customer owes us more or we owe them more)
+    creditAccount: '1100', // Cash (decreases)
+    description: 'Refund to customer',
+    requiresEntity: true
+  },
+  
   // Supplier Transactions
   [TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT]: {
     debitAccount: '2100', // Accounts Payable (decreases)
@@ -63,6 +70,13 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     debitAccount: '1300', // Inventory (increases)
     creditAccount: '2100', // Accounts Payable (increases)
     description: 'Credit purchase from supplier',
+    requiresEntity: true
+  },
+  
+  [TRANSACTION_CATEGORIES.SUPPLIER_REFUND]: {
+    debitAccount: '1100', // Cash (increases)
+    creditAccount: '2100', // Accounts Payable (increases - we owe supplier more)
+    description: 'Refund from supplier',
     requiresEntity: true
   },
   
@@ -146,6 +160,21 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     debitAccount: '1100', // Cash (increases)
     creditAccount: '5200', // Salaries Expense (decreases - contra entry)
     description: 'Payment received from employee',
+    requiresEntity: true
+  },
+  
+  // Accounting Transactions
+  [TRANSACTION_CATEGORIES.ACCOUNTS_RECEIVABLE]: {
+    debitAccount: '1200', // Accounts Receivable (increases)
+    creditAccount: '4100', // Sales Revenue (increases)
+    description: 'Accounts receivable recorded',
+    requiresEntity: true
+  },
+  
+  [TRANSACTION_CATEGORIES.ACCOUNTS_PAYABLE]: {
+    debitAccount: '5100', // Cost of Goods Sold (increases)
+    creditAccount: '2100', // Accounts Payable (increases)
+    description: 'Accounts payable recorded',
     requiresEntity: true
   }
 };

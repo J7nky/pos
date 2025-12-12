@@ -193,3 +193,4 @@ The implementation relies on existing schema:
 4. **Branch statistics**: Show quick stats (e.g., "5 active transactions") on selection screen
 5. **Branch permissions**: Fine-grained permissions per branch (e.g., read-only access)
 
+

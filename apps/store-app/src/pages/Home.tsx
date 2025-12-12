@@ -98,8 +98,11 @@ export default function Home() {
     if (!currentSession) {
       return 0;
     }
-    let totalBalance = currentSession.opening_amount || currentSession.currentBalance || 0;
-    return totalBalance;
+    // ✅ ACCOUNTING FIX: Use actual_amount from session which is updated by transactionService
+    // The session's actual_amount is kept in sync with the cash drawer account balance
+    // which is kept in sync with journal entries (via transactionService)
+    const balance = currentSession.actual_amount || currentSession.opening_amount || currentSession.currentBalance || 0;
+    return balance;
   }, []);
 
   // Helper function to get cash drawer transaction history from local data
@@ -116,7 +119,7 @@ export default function Home() {
 
   const loadCashDrawerStatus = useCallback(async (showLoading = false) => {
    
-    if (!raw.storeId) return;
+    if (!raw.storeId || !raw.currentBranchId) return;
     
     // Only show loading spinner on initial load or when explicitly requested
     if (showLoading || isInitialLoad) {
@@ -124,7 +127,11 @@ export default function Home() {
     }
     
     try {
-      // Use ONLY local data - completely offline-capable
+      // ✅ ACCOUNTING FIX: Use proper cash drawer service
+      // This gets balance from cash_drawer_accounts which is kept in sync with journals
+      const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+      
+      // Get current session
       const currentSession = getLocalCurrentSession();
       
       // If there's no active session, set status to null
@@ -135,18 +142,23 @@ export default function Home() {
         return;
       }
       
-      const localBalance = calculateLocalCashDrawerBalance(currentSession);
+      // Get balance from service (uses cash_drawer_accounts table which is synced with journals)
+      const currentBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(
+        raw.storeId,
+        raw.currentBranchId
+      );
+      
       const localHistory = getLocalCashDrawerHistory();
       
       // Smooth transition: only update if value actually changed
-      if (lastCashDrawerValue !== localBalance) {
+      if (lastCashDrawerValue !== currentBalance) {
         setCashDrawerStatus({
-          currentBalance: localBalance,
+          currentBalance,
           lastUpdated: new Date().toISOString(),
           transactionCount: localHistory.length,
           openedAt: currentSession?.opened_at || currentSession?.lastUpdated || ''
         });
-        setLastCashDrawerValue(localBalance);
+        setLastCashDrawerValue(currentBalance);
       }
       
       setIsInitialLoad(false);
@@ -155,7 +167,7 @@ export default function Home() {
     } finally {
       setIsLoadingCashDrawer(false);
     }
-  }, [raw.storeId, raw.currency, getLocalCurrentSession, calculateLocalCashDrawerBalance, getLocalCashDrawerHistory, lastCashDrawerValue, isInitialLoad]);
+  }, [raw.storeId, raw.currentBranchId, getLocalCurrentSession, getLocalCashDrawerHistory, lastCashDrawerValue, isInitialLoad]);
 
   // Debounced update function to prevent excessive reloading
   const debouncedLoadCashDrawerStatus = useCallback(() => {
