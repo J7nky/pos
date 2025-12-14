@@ -194,3 +194,4 @@ The implementation relies on existing schema:
 5. **Branch permissions**: Fine-grained permissions per branch (e.g., read-only access)
 
 
+

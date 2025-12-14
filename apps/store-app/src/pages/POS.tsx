@@ -876,6 +876,7 @@ ${dashSeparator}`;
             amountDue: amountDue,
             originalBalance: entity.lb_balance || 0
           };
+          console.log(9343,customerBalanceUpdate);
         }
       }
 

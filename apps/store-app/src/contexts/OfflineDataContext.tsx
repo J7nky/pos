@@ -9,6 +9,8 @@ import {
 } from '../lib/db';
 import { InventoryPurchaseService } from '../services/inventoryPurchaseService';
 import { syncService, SyncResult } from '../services/syncService';
+import { eventStreamService } from '../services/eventStreamService';
+import { eventEmissionService } from '../services/eventEmissionService';
 import { crudHelperService } from '../services/crudHelperService';
 import { notificationService } from '../services/notificationService';
 import { receivedBillMonitoringService } from '../services/receivedBillMonitoringService';
@@ -24,6 +26,7 @@ import { transactionService } from '../services/transactionService';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 import { ensureDefaultBranch } from '../lib/branchHelpers';
 import { BranchAccessValidationService } from '../services/branchAccessValidationService';
+import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -1318,8 +1321,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // CRITICAL: Wait for BOTH storeId AND currentBranchId before setting sync timer
     // This prevents sync from running before admin selects a branch
     if (isOnline && storeId && currentBranchId && !isSyncing) {
-      // Use shorter delay for immediate changes, longer for idle state
-      const syncDelay = unsyncedCount > 0 ? 5000 : 30000; // 5s for active changes, 30s for idle
+      // Optimized sync intervals to reduce Supabase requests:
+      // - 15s for active changes (reduced from 5s to minimize requests)
+      // - 60s for idle state (increased from 30s for better efficiency)
+      const syncDelay = unsyncedCount > 0 ? 15000 : 60000; // 15s for active changes, 60s for idle
       console.log(`⏰ [AUTO-SYNC] Setting auto-sync timer (${syncDelay}ms delay, ${unsyncedCount} unsynced records)`);
       console.log(`⏰ [AUTO-SYNC] Timer will fire at: ${new Date(Date.now() + syncDelay).toLocaleTimeString()}`);
       
@@ -1378,6 +1383,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [resetAutoSyncTimer]);
+
+  // Event Stream Service - Start when branch is selected
+  useEffect(() => {
+    if (storeId && currentBranchId && isOnline) {
+      console.log(`🎯 [EventStream] Starting event stream for branch ${currentBranchId}`);
+      
+      // Start event stream service
+      eventStreamService.start(currentBranchId, storeId).catch((error) => {
+        console.error('[EventStream] Failed to start event stream:', error);
+      });
+
+      return () => {
+        console.log(`🛑 [EventStream] Stopping event stream for branch ${currentBranchId}`);
+        eventStreamService.stop(currentBranchId);
+      };
+    }
+  }, [storeId, currentBranchId, isOnline]);
 
  
   const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
@@ -1535,8 +1557,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Store original inventory states for undo
     const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
 
+    // ✅ PRE-FETCH ENTITY: Avoid nested transaction by fetching entity before main transaction
+    let preFetchedEntity = null;
+    if (customerBalanceUpdate) {
+      preFetchedEntity = await db.entities.get(customerBalanceUpdate.customerId);
+      if (!preFetchedEntity || (preFetchedEntity.entity_type !== 'customer' && preFetchedEntity.entity_type !== 'supplier')) {
+        throw new Error('Invalid entity for balance update');
+      }
+    }
+
     // Use transaction to ensure atomicity for all operations including inventory, cash drawer, customer balance, and audit logs
-    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.entities, db.transactions, db.bill_audit_logs], async () => {
+    // ✅ OPTIMIZED: Added journal_entries and chart_of_accounts to avoid nested transaction
+    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.entities, db.transactions, db.journal_entries, db.chart_of_accounts, db.bill_audit_logs], async () => {
       // Add bill and line items
       await db.bills.add(bill);
       if (mappedLineItems.length > 0) {
@@ -1566,34 +1598,53 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       });
 
       // Deduct inventory quantities for all line items (regardless of payment method)
-      for (const item of mappedLineItems) {
-        if (item.inventory_item_id) {
-          // Use the specific inventory item ID if provided
-          const inventoryItem = await db.inventory_items.get(item.inventory_item_id);
+      // ✅ OPTIMIZED: Use bulk operations for items with inventory_item_id
+      const itemsWithInventoryId = mappedLineItems.filter(item => item.inventory_item_id);
+      
+      if (itemsWithInventoryId.length > 0) {
+        // Bulk fetch all inventory items at once
+        const inventoryIds = itemsWithInventoryId.map(item => item.inventory_item_id!);
+        const inventoryItems = await db.inventory_items.bulkGet(inventoryIds);
+        
+        // Create a map for efficient lookup
+        const inventoryMap = new Map(inventoryItems
+          .filter((item): item is NonNullable<typeof item> => item !== undefined)
+          .map(item => [item.id, item])
+        );
+        
+        // Process updates and prepare bulk update data
+        const inventoryUpdatesToSave: any[] = [];
+        
+        for (const item of itemsWithInventoryId) {
+          const inventoryItem = inventoryMap.get(item.inventory_item_id!);
+          
           if (inventoryItem && inventoryItem.quantity >= item.quantity) {
             // Store original state for undo
             inventoryStates.push({
-              id: item.inventory_item_id,
+              id: item.inventory_item_id!,
               originalQuantity: inventoryItem.quantity
             });
 
-            const newQuantity = inventoryItem.quantity - item.quantity;
-
-            if (newQuantity <= 0) {
-              // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(item.inventory_item_id, {
-                quantity: 0,
-                _synced: false
-              });
-            } else {
-              // Update with new quantity
-              await db.inventory_items.update(item.inventory_item_id, {
-                quantity: newQuantity,
-                _synced: false
-              });
-            }
+            const newQuantity = Math.max(0, inventoryItem.quantity - item.quantity);
+            
+            // Prepare full inventory item object for bulkPut
+            inventoryUpdatesToSave.push({
+              ...inventoryItem,
+              quantity: newQuantity,
+              _synced: false
+            });
           }
-        } else {
+        }
+        
+        // Bulk update all inventory items at once
+        if (inventoryUpdatesToSave.length > 0) {
+          await db.inventory_items.bulkPut(inventoryUpdatesToSave);
+        }
+      }
+      
+      // Process items without inventory_item_id (FIFO fallback - not optimized yet)
+      for (const item of mappedLineItems) {
+        if (!item.inventory_item_id) {
           // Fallback to FIFO if no specific inventory item ID (legacy support)
           // Validate product_id before using it in database query
           if (!item.product_id || (typeof item.product_id !== 'string' && typeof item.product_id !== 'number')) {
@@ -1638,40 +1689,117 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Update customer/supplier balance if needed
-      if (customerBalanceUpdate) {
-        // Get entity (could be customer or supplier)
-        const entity = await db.entities.get(customerBalanceUpdate.customerId);
+      // ✅ OPTIMIZED: Handle credit sale transaction WITHOUT nested transaction
+      // Use pre-fetched entity to avoid nested db.transaction()
+      if (customerBalanceUpdate && preFetchedEntity) {
+        const entity = preFetchedEntity;
+        const entityType = entity.entity_type as 'customer' | 'supplier';
+        const transactionId = createId();
+        const journalTransactionId = createId();
         
-        if (entity && (entity.entity_type === 'customer' || entity.entity_type === 'supplier')) {
-          const entityType = entity.entity_type;
-          
-          // ✅ ACCOUNTING RULE: Let transactionService handle balance updates atomically
-          // This ensures balance updates happen together with journal entries in a single transaction
-          // Creating proper double-entry: Debit AR (1200) / Credit Revenue (4100) for customers
-          await transactionService.createTransaction({
-            category: entityType === 'customer' 
-              ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
-              : TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
-            amount: customerBalanceUpdate.amountDue,
-            currency: 'LBP',
-            description: `Credit sale - Bill ${bill.bill_number} (${entityType})`,
-            reference: bill.bill_number,
-            customerId: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
-            supplierId: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
-            context: {
-              userId: currentUserId,
-              storeId: storeId,
-              module: 'billing',
-              source: 'offline',
-              branchId: currentBranchId || '',
-            },
-            updateBalances: true, // ✅ FIXED: Let service handle balance update atomically with journal entries
-            updateCashDrawer: false, // Not a cash transaction
-            createAuditLog: true,
-            _synced: false
-          });
+        // 1. Create transaction record directly (avoiding nested transaction)
+        const creditSaleTransaction: Transaction = {
+          id: transactionId,
+          store_id: storeId,
+          branch_id: currentBranchId,
+          type: 'income',
+          category: entityType === 'customer' 
+            ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
+            : TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
+          amount: customerBalanceUpdate.amountDue,
+          currency: 'LBP',
+          description: `Credit sale - Bill ${bill.bill_number} (${entityType})`,
+          reference: bill.bill_number,
+          customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
+          supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
+          employee_id: null,
+          created_at: now,
+          created_by: currentUserId,
+          _synced: false,
+          _deleted: false,
+          metadata: {
+            correlationId: createId(),
+            source: 'offline',
+            module: 'billing'
+          }
+        };
+        
+        await db.transactions.add(creditSaleTransaction);
+        
+        // 2. Create journal entries directly (double-entry bookkeeping)
+        // ✅ IMPORTANT: Each entry must have ONLY debit OR credit, not both (database constraint)
+        const postedDate = now.split('T')[0];
+        const fiscalPeriod = getFiscalPeriodForDate(now).period; // Extract the period string
+        
+        // For credit sales:
+        // Customer: Debit AR (1200) / Credit Revenue (4100)
+        // Supplier: Debit AP (2100) / Credit Revenue (4100) - rare case
+        const debitAccountCode = entityType === 'customer' ? '1200' : '2100';
+        const debitAccountName = entityType === 'customer' ? 'Accounts Receivable' : 'Accounts Payable';
+        
+        const debitEntry = {
+          id: createId(),
+          store_id: storeId,
+          branch_id: currentBranchId,
+          transaction_id: journalTransactionId,
+          account_code: debitAccountCode,
+          account_name: debitAccountName,
+          entity_id: customerBalanceUpdate.customerId,
+          entity_type: entityType,
+          debit: customerBalanceUpdate.amountDue,  // ✅ Only debit field set
+          credit: 0,  // ✅ Credit is zero (satisfies constraint)
+          currency: 'LBP' as const,
+          description: `Credit sale - Bill ${bill.bill_number}`,
+          posted_date: postedDate,
+          fiscal_period: fiscalPeriod,
+          is_posted: true,
+          created_by: currentUserId,
+          created_at: now,
+          _synced: false
+        };
+        
+        const creditEntry = {
+          id: createId(),
+          store_id: storeId,
+          branch_id: currentBranchId,
+          transaction_id: journalTransactionId,
+          account_code: '4100', // Revenue
+          account_name: 'Revenue',
+          entity_id: customerBalanceUpdate.customerId,
+          entity_type: entityType,
+          debit: 0,  // ✅ Debit is zero (satisfies constraint)
+          credit: customerBalanceUpdate.amountDue,  // ✅ Only credit field set
+          currency: 'LBP' as const,
+          description: `Credit sale - Bill ${bill.bill_number}`,
+          posted_date: postedDate,
+          fiscal_period: fiscalPeriod,
+          is_posted: true,
+          created_by: currentUserId,
+          created_at: now,
+          _synced: false
+        };
+        
+        await db.journal_entries.bulkAdd([debitEntry, creditEntry]);
+        
+        // 3. Update entity balance directly
+        const isUSD = creditSaleTransaction.currency === 'USD';
+        const previousBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
+        
+        // For credit sale: increase AR (customer owes us more) or increase AP (we owe supplier more)
+        const newBalance = previousBalance + customerBalanceUpdate.amountDue;
+        
+        const updateData: any = {
+          updated_at: now,
+          _synced: false
+        };
+        
+        if (isUSD) {
+          updateData.usd_balance = newBalance;
+        } else {
+          updateData.lb_balance = newBalance;
         }
+        
+        await db.entities.update(customerBalanceUpdate.customerId, updateData);
       }
     });
 
@@ -1773,6 +1901,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     resetAutoSyncTimer();
 
     debouncedSync();
+
+    // NOTE: Event emission moved to syncService.ts
+    // Events are emitted AFTER successful upload to Supabase
+    // This ensures the record exists when other devices receive the event
 
     // Check if any inventory items are now 100% complete
     for (const item of mappedLineItems) {

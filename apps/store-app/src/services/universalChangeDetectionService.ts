@@ -43,9 +43,14 @@ export interface ChangeDetectionResult {
 }
 
 export class UniversalChangeDetectionService {
+  // Cache for change detection results to avoid repeated queries
+  private changeDetectionCache: Map<string, { result: ChangeDetectionResult; timestamp: number }> = new Map();
+  private readonly CACHE_TTL = 15000; // Cache results for 15 seconds
+
   /**
    * Detects if a table has changes since lastSyncAt
    * Uses fast count queries to avoid downloading full records
+   * Caches results for 15 seconds to reduce Supabase requests
    * 
    * @param tableName - Name of the table to check
    * @param storeId - Store ID for filtering (if applicable)
@@ -59,6 +64,12 @@ export class UniversalChangeDetectionService {
     lastSyncAt: string,
     isFirstSync: boolean
   ): Promise<ChangeDetectionResult> {
+    // Check cache first
+    const cacheKey = `${tableName}:${storeId}:${lastSyncAt}`;
+    const cached = this.changeDetectionCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.result;
+    }
     try {
       // For first sync, always assume changes exist (need to download everything)
       if (isFirstSync) {
@@ -74,9 +85,11 @@ export class UniversalChangeDetectionService {
       const timestampField = hasUpdatedAt ? 'updated_at' : 'created_at';
 
       // Build count query with appropriate filters
+      // Use GET with count instead of HEAD to avoid CORS OPTIONS preflight requests
       let countQuery = supabase
         .from(tableName)
-        .select('*', { count: 'exact', head: true });
+        .select('id', { count: 'exact' })
+        .limit(0); // Limit to 0 to avoid downloading data, just get count
 
       // Apply store filter based on table type
       countQuery = this.applyStoreFilter(countQuery, tableName, storeId);
@@ -103,22 +116,51 @@ export class UniversalChangeDetectionService {
 
       const changeCount = count || 0;
 
-      return {
+      const result: ChangeDetectionResult = {
         hasChanges: changeCount > 0,
         changeCount
       };
+
+      // Cache the result
+      this.changeDetectionCache.set(cacheKey, {
+        result,
+        timestamp: Date.now()
+      });
+
+      // Clean up old cache entries (keep cache size manageable)
+      if (this.changeDetectionCache.size > 100) {
+        const now = Date.now();
+        for (const [key, value] of this.changeDetectionCache.entries()) {
+          if (now - value.timestamp > this.CACHE_TTL) {
+            this.changeDetectionCache.delete(key);
+          }
+        }
+      }
+
+      return result;
     } catch (error) {
       // On exception, assume changes exist (conservative approach)
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.warn(
         `⚠️ Change detection exception for ${tableName}: ${errorMessage}. Assuming changes exist.`
       );
-      return {
+      const errorResult: ChangeDetectionResult = {
         hasChanges: true,
         changeCount: 0,
         error: errorMessage
       };
+
+      // Don't cache error results - retry next time
+      return errorResult;
     }
+  }
+
+  /**
+   * Clear the change detection cache
+   * Useful when forcing a fresh check
+   */
+  clearCache(): void {
+    this.changeDetectionCache.clear();
   }
 
   /**

@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import { Database } from '../types/database';
 import { dataValidationService } from './dataValidationService';
 import { universalChangeDetectionService, TABLES_WITH_UPDATED_AT } from './universalChangeDetectionService';
+import { eventEmissionService } from './eventEmissionService';
 
 type Tables = Database['public']['Tables'];
 
@@ -44,6 +45,16 @@ const TABLES_WITH_CREATED_AT_ONLY = [
   'journal_entries',
   'balance_snapshots',
   'chart_of_accounts'
+] as const;
+
+// Tables that rarely change - can skip change detection more often
+const RARELY_CHANGING_TABLES = [
+  'stores',
+  'branches',
+  'chart_of_accounts',
+  'cash_drawer_accounts',
+  'role_operation_limits',
+  'user_module_access'
 ] as const;
 
 // Table sync order (respects foreign key dependencies)
@@ -747,6 +758,29 @@ export class SyncService {
               await db.markAsSynced(tableName, record.id);
             }
             result.uploaded += batch.length;
+            
+            // 🎯 EMIT EVENTS: After successful upload to Supabase
+            // This ensures the record exists when other devices receive the event
+            if (tableName === 'bills') {
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitSalePosted(
+                    record.store_id,
+                    record.branch_id,
+                    record.id,
+                    record.created_by,
+                    {
+                      total: record.total_amount || 0,
+                      line_items_count: 0 // We don't have line items count here, but event still useful
+                    }
+                  );
+                  console.log(`🎯 [Event] Emitted sale_posted event for bill ${record.id}`);
+                } catch (eventError) {
+                  // Event emission failure is not critical
+                  console.error('[Event] Failed to emit sale_posted event:', eventError);
+                }
+              }
+            }
           }
         }
 
@@ -1041,7 +1075,14 @@ export class SyncService {
         const shouldDoFullSync = isFirstSync || localRecordCount === 0;
 
         // NEW: Change detection - skip sync if no changes detected
-        if (!shouldDoFullSync) {
+        // For rarely-changing tables, skip change detection on frequent syncs (every 15s)
+        // Only check them every 60 seconds to reduce requests
+        const isRarelyChanging = RARELY_CHANGING_TABLES.includes(tableName as any);
+        const shouldSkipChangeDetection = isRarelyChanging && 
+          this.lastSyncAttempt && 
+          Date.now() - this.lastSyncAttempt.getTime() < 60000; // Skip if last sync was < 60s ago
+        
+        if (!shouldDoFullSync && !shouldSkipChangeDetection) {
           const changeDetection = await universalChangeDetectionService.detectChanges(
             tableName,
             storeId,
@@ -1056,11 +1097,9 @@ export class SyncService {
             continue; // Skip to next table
           }
 
-          console.log(
-          );
+          console.log(`📊 Incremental sync for ${tableName} since ${lastSyncAt} (${localRecordCount} local records) - changes detected`);
         } else {
-          console.log(
-          );
+          console.log(`📊 Full sync for ${tableName} (${localRecordCount} local records)`);
         }
 
         // Add debug logging for branches

@@ -1046,9 +1046,9 @@ export class TransactionService {
           // For employee: payments increase what we owe, receipts decrease it
           balanceChange = transaction.type === 'expense' ? transaction.amount : -transaction.amount;
         }
-        
-        newBalance = previousBalance + balanceChange;
 
+        newBalance = previousBalance + balanceChange;
+        console.log(9343,transaction.category);
         const updateData: any = {
           updated_at: timestamp,
           _synced: false
