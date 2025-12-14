@@ -91,7 +91,7 @@ export async function calculateCashDrawerBalance(
     const entries = await db.journal_entries
       .where('[store_id+currency+account_code]')
       .equals([storeId, currency, '1100'])
-      .and(e => e.is_posted === true && (!e.branch_id || e.branch_id === branchId))
+      .and(e => e.is_posted === true && e.branch_id === branchId)
       .toArray();
 
     return calculateBalance(entries);
@@ -99,7 +99,7 @@ export async function calculateCashDrawerBalance(
     // Fallback: If compound index doesn't exist, use simpler index and filter manually
     console.warn('Compound index [store_id+currency+account_code] not available, using fallback query');
     
-    // Use store_id+branch_id index first to narrow down results
+    // Use store_id+branch_id index for exact match
     const entries = await db.journal_entries
       .where('[store_id+branch_id]')
       .equals([storeId, branchId])

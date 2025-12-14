@@ -185,7 +185,6 @@ export class CRUDHelperService {
       }
 
       const results = await query.toArray();
-      console.log(`📦 getEntitiesByStoreBranch: ${tableName} - found ${results.length} records for store ${storeId}, branch ${branchId}`);
       
       return results;
     } catch (error) {
@@ -242,7 +241,6 @@ export class CRUDHelperService {
 
         // Combine all results
         const results = [...storeProducts, ...globalProducts, ...missedGlobalProducts];
-        // console.log(`📦 getEntitiesByStore: ${tableName} - found ${storeProducts.length} store products + ${globalProducts.length} global products + ${missedGlobalProducts.length} recovered global products = ${results.length} total for store ${storeId}`);
         
         if (missedGlobalProducts.length > 0) {
           console.warn(`⚠️ Found ${missedGlobalProducts.length} global products with unexpected is_global values:`, 
@@ -260,7 +258,6 @@ export class CRUDHelperService {
       }
 
       const results = await query.toArray();
-      console.log(`📦 getEntitiesByStore: ${tableName} - found ${results.length} records for store ${storeId}`);
       
       return results;
     } catch (error) {

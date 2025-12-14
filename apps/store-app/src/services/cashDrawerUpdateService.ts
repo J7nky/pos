@@ -1,6 +1,5 @@
 import { db } from '../lib/db';
 import { currencyService } from './currencyService';
-import { BalanceCalculator } from '../utils/balanceCalculator';
 import { QueryHelpers, DateFilters } from '../utils/queryHelpers';
 import { CacheManager, CacheKeys } from '../utils/cacheManager';
 import { PerformanceMonitor } from '../utils/performanceMonitor';
@@ -222,12 +221,18 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Get current cash drawer balance - SINGLE SOURCE OF TRUTH
-   * This method calculates balance from transactions to ensure accuracy
+   * Get current cash drawer balance - PURE GETTER
+   * 
+   * ✅ Returns cached balance from cash_drawer_accounts table
+   * ✅ Zero side effects - never recalculates or reconciles
+   * ✅ Fast and safe - no database writes during reads
+   * 
+   * The balance is updated ONLY when posting journal entries (in transactionService).
+   * For explicit reconciliation, use reconcileCashDrawerBalance().
+   * 
    * 🚀 CACHED for 5 seconds to improve performance
    */
   public async getCurrentCashDrawerBalance(storeId: string, branchId: string): Promise<number> {
-
     return PerformanceMonitor.withTracking(
       'cashDrawer:getBalance',
       async () => {
@@ -241,30 +246,14 @@ export class CashDrawerUpdateService {
               // Get cash drawer account
               const account = await this.getCashDrawerAccount(storeId, branchId);
               if (!account) {
-                console.warn('No cash drawer account exists for store', storeId);
+                console.warn('No cash drawer account exists for store', storeId, 'branch', branchId);
                 return 0;
               }
 
-              // SINGLE SOURCE OF TRUTH: Calculate balance from transactions
-              const calculatedBalance = await this.calculateBalanceFromTransactions(storeId, branchId);
-              const storedBalance = Number((account as any)?.current_balance || 0);
-
-              // If calculated balance differs from stored balance, reconcile
-              if (Math.abs(calculatedBalance - storedBalance) > 0.01) {
-                console.warn(`💰 Balance discrepancy detected: Stored: $${storedBalance.toFixed(2)}, Calculated: $${calculatedBalance.toFixed(2)}`);
-                
-                // Update stored balance to match calculated balance
-                await db.cash_drawer_accounts.update(account?.id as string, {
-                  current_balance: calculatedBalance as any,
-                  updated_at: new Date().toISOString(),
-                  _synced: false
-                });
-                
-                console.log(`💰 Balance reconciled: $${storedBalance.toFixed(2)} → $${calculatedBalance.toFixed(2)}`);
-                return calculatedBalance;
-              }
-
-              return calculatedBalance;
+              // ✅ PURE GETTER: Return cached balance only
+              // Balance is updated when posting journal entries, not during reads
+              const balance = Number((account as any)?.current_balance || 0);
+              return balance;
             } catch (error) {
               console.error('Error getting cash drawer balance:', error);
               return 0;
@@ -277,44 +266,89 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Calculate balance from current session and transactions - AUTHORITATIVE SOURCE
-   * Uses BalanceCalculator utility for consistent calculation logic
-   * 🚀 Performance monitored for optimization
+   * Reconcile cash drawer balance from journal entries - EXPLICIT RECONCILIATION
+   * 
+   * ✅ Calculates TRUE balance from journal entries (account_code = 1100)
+   * ✅ Updates cash_drawer_accounts.current_balance to match
+   * ✅ Logs the reconciliation for auditability
+   * ✅ Should be called explicitly: end-of-day, session close, admin reconcile, sync repair
+   * 
+   * @param storeId - Store ID
+   * @param branchId - Branch ID
+   * @param reason - Reason for reconciliation (for audit log)
+   * @returns Reconciliation result with old and new balances
    */
-  private async calculateBalanceFromTransactions(storeId: string, branchId: string): Promise<number> {
+  public async reconcileCashDrawerBalance(
+    storeId: string,
+    branchId: string,
+    reason: string = 'Manual reconciliation'
+  ): Promise<{
+    success: boolean;
+    oldBalance: number;
+    newBalance: number;
+    discrepancy: number;
+    error?: string;
+  }> {
     return PerformanceMonitor.withTracking(
-      'cashDrawer:calculateBalance',
+      'cashDrawer:reconcile',
       async () => {
-    console.log("verify open session",branchId,storeId)
-
         try {
-          // Get the current active session
-          const currentSession = await db.getCurrentCashDrawerSession(storeId, branchId);
-          
-          if (!currentSession) {
-            console.log('💰 No active session found, balance is 0');
-            return 0;
+          // Get cash drawer account
+          const account = await this.getCashDrawerAccount(storeId, branchId);
+          if (!account) {
+            return {
+              success: false,
+              oldBalance: 0,
+              newBalance: 0,
+              discrepancy: 0,
+              error: 'No cash drawer account found'
+            };
           }
 
-          // Get all cash drawer transactions since session opened
-          const cashTransactions = await QueryHelpers.byStore(db.transactions, storeId)
-            .filter(trans => 
-              trans.category.startsWith('cash_drawer_') &&
-              new Date(trans.created_at) >= new Date(currentSession.opened_at)
-            )
-            .toArray();
+          const oldBalance = Number((account as any)?.current_balance || 0);
 
-          // Use BalanceCalculator for consistent balance calculation
-          const result = BalanceCalculator.calculateRunningBalance(
-            cashTransactions,
-            currentSession.opening_amount || 0
-          );
+          // ✅ Calculate TRUE balance from journal entries (account_code = 1100)
+          // This is the SINGLE SOURCE OF TRUTH
+          const { calculateCashDrawerBalance } = await import('../utils/balanceCalculation');
+          const trueBalance = await calculateCashDrawerBalance(storeId, branchId, 'USD'); // TODO: Support LBP
+          
+          const discrepancy = trueBalance - oldBalance;
 
-          console.log(`💰 Balance calculated: ${result.balance} (${result.transactionCount} transactions)`);
-          return result.balance;
+          // Update stored balance to match journal entries
+          if (Math.abs(discrepancy) > 0.01) {
+            await db.cash_drawer_accounts.update(account.id as string, {
+              current_balance: trueBalance as any,
+              updated_at: new Date().toISOString(),
+              _synced: false
+            });
+
+            // Log reconciliation for auditability
+            console.log(`💰 Cash drawer balance reconciled:`, {
+              storeId,
+              branchId,
+              oldBalance,
+              newBalance: trueBalance,
+              discrepancy,
+              reason,
+              timestamp: new Date().toISOString()
+            });
+          }
+
+          return {
+            success: true,
+            oldBalance,
+            newBalance: trueBalance,
+            discrepancy
+          };
         } catch (error) {
-          console.error('Error calculating balance from transactions:', error);
-          return 0;
+          console.error('Error reconciling cash drawer balance:', error);
+          return {
+            success: false,
+            oldBalance: 0,
+            newBalance: 0,
+            discrepancy: 0,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          };
         }
       },
       { storeId, branchId }
@@ -395,7 +429,7 @@ export class CashDrawerUpdateService {
    * Get cash drawer account (doesn't create - name was misleading before)
    * Returns null if none exists.
    */
-  private async getCashDrawerAccount(storeId: string, branchId: string) {
+  public async getCashDrawerAccount(storeId: string, branchId: string) {
     // Validate inputs before making database call
     if (!storeId || !branchId) {
       console.warn(`⚠️ Invalid parameters for getCashDrawerAccount: storeId=${storeId}, branchId=${branchId}`);

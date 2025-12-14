@@ -30,8 +30,13 @@ export class JournalService {
       entityId,
       description,
       postedDate = new Date().toISOString().split('T')[0],
-      createdBy = null  // Default to null for system-generated entries
+      createdBy = null,  // Default to null for system-generated entries
+      branchId  // Branch ID from transaction - required
     } = params;
+    
+    if (!branchId) {
+      throw new Error('branchId is required for journal entry creation');
+    }
     
     // Validate accounting setup
     const storeId = await this.getStoreIdFromEntity(entityId);
@@ -60,7 +65,7 @@ export class JournalService {
     const debitEntry: JournalEntry = {
       id: createId(),
       store_id: storeId,
-      branch_id: null,
+      branch_id: branchId,  // ✅ Use branch_id from transaction
       transaction_id: transactionId,
       account_code: debitAccount,
       account_name: debitAccountInfo.account_name,
@@ -81,7 +86,7 @@ export class JournalService {
     const creditEntry: JournalEntry = {
       id: createId(),
       store_id: storeId,
-      branch_id: null,
+      branch_id: branchId,  // ✅ Use branch_id from transaction
       transaction_id: transactionId,
       account_code: creditAccount,
       account_name: creditAccountInfo.account_name,

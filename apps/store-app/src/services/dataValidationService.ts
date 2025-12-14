@@ -724,6 +724,46 @@ export class DataValidationService {
           delete cleanRecord[camel];
         }
       });
+
+      // CRITICAL: Ensure store_id and branch_id are preserved and valid for RLS policies
+      if (tableName === 'cash_drawer_accounts') {
+        // Validate required fields for RLS policy compliance
+        if (!cleanRecord.store_id) {
+          console.error('❌ cash_drawer_accounts record missing store_id:', cleanRecord);
+          // Return null to signal this record should be skipped
+          return null;
+        }
+        if (!cleanRecord.branch_id) {
+          console.error('❌ cash_drawer_accounts record missing branch_id:', cleanRecord);
+          // Return null to signal this record should be skipped
+          return null;
+        }
+        // Ensure account_code is set (required for FK constraint)
+        if (!cleanRecord.account_code) {
+          console.warn('⚠️ cash_drawer_accounts record missing account_code, defaulting to 1100');
+          cleanRecord.account_code = '1100';
+        }
+        // Ensure currency is set (required field)
+        if (!cleanRecord.currency) {
+          console.warn('⚠️ cash_drawer_accounts record missing currency, defaulting to USD');
+          cleanRecord.currency = 'USD';
+        }
+        // Ensure is_active is set (default to true)
+        if (cleanRecord.is_active === undefined || cleanRecord.is_active === null) {
+          cleanRecord.is_active = true;
+        }
+        // Ensure name is set (required field)
+        if (!cleanRecord.name) {
+          cleanRecord.name = 'Main Cash Drawer';
+        }
+        // Ensure current_balance is a number (default to 0)
+        if (cleanRecord.current_balance === undefined || cleanRecord.current_balance === null) {
+          cleanRecord.current_balance = 0;
+        }
+        
+        // Log the record being uploaded for debugging RLS issues
+        console.log(`📤 Uploading cash_drawer_accounts: store_id=${cleanRecord.store_id}, branch_id=${cleanRecord.branch_id}, account_code=${cleanRecord.account_code}`);
+      }
     }
 
     return cleanRecord;

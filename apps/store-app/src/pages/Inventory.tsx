@@ -21,8 +21,6 @@ const Inventory: React.FC = () => {
   // Data from context
   const raw = useOfflineData();
   const products = raw.products.map(p => ({ ...p, createdAt: p.created_at })) as Product[];
-  console.log('📦 Inventory page: Received products from context:', products.length);
-  console.log('📦 Inventory page: Products details:', products.map(p => ({ id: p.id, name: p.name, is_global: p.is_global })));
   const suppliers = raw.suppliers.map(s => ({ ...s, createdAt: s.created_at, type: 'commission' as const })) as Supplier[];
   const inventoryBills = raw.inventoryBills || [];
   // Create batch map for supplier lookup
@@ -204,17 +202,13 @@ const Inventory: React.FC = () => {
 
   // Filter products based on search term (handle multilingual names)
   const filteredProducts = useMemo(() => {
-    console.log('📦 Inventory page: useMemo recalculating, products.length:', products.length);
-    console.log('📦 Inventory page: Products in useMemo:', products.map(p => ({ id: p.id, name: p.name, is_global: p.is_global })));
     
     if (!searchTerm) {
-      console.log('📦 Inventory page: No search term, returning all products:', products.length);
       return products;
     }
     
     const searchLower = searchTerm.toLowerCase();
     const filtered = products.filter(p => {
-      // Parse stringified JSON if needed
       const parsedName = parseMultilingualString(p.name);
       
       if (!parsedName) return false;

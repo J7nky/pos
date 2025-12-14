@@ -616,9 +616,15 @@ export class SyncService {
         // Upload in batches
         for (let i = 0; i < validRecords.length; i += SYNC_CONFIG.batchSize) {
           const batch = validRecords.slice(i, i + SYNC_CONFIG.batchSize);
-          let cleanedBatch = batch.map((record: any) =>
-            dataValidationService.cleanRecordForUpload(record, tableName)
-          );
+          let cleanedBatch = batch
+            .map((record: any) => dataValidationService.cleanRecordForUpload(record, tableName))
+            .filter((cleaned: any) => cleaned !== null); // Remove null records (invalid/missing required fields)
+          
+          // Skip batch if all records were filtered out
+          if (cleanedBatch.length === 0) {
+            console.warn(`⚠️ Skipping ${tableName} batch - all records were invalid`);
+            continue;
+          }
 
           // Preflight: for bill_line_items, nullify inventory_item_id if the referenced item doesn't exist in Supabase
           if (tableName === 'bill_line_items') {
@@ -642,6 +648,25 @@ export class SyncService {
               }
             } catch (e) {
               console.warn('Preflight check for bill_line_items inventory_item_id failed:', e);
+            }
+          }
+
+          // Special handling for cash_drawer_accounts: validate store_id matches user's store
+          if (tableName === 'cash_drawer_accounts') {
+            // Verify all records have valid store_id and branch_id
+            const invalidRecords = (cleanedBatch as any[]).filter((r: any) => 
+              !r.store_id || !r.branch_id || !r.account_code
+            );
+            if (invalidRecords.length > 0) {
+              console.error(`❌ Found ${invalidRecords.length} cash_drawer_accounts records with missing required fields:`, invalidRecords);
+              // Remove invalid records from batch
+              cleanedBatch = (cleanedBatch as any[]).filter((r: any) => 
+                r.store_id && r.branch_id && r.account_code
+              );
+              if (cleanedBatch.length === 0) {
+                console.warn('⚠️ Skipping cash_drawer_accounts batch - all records were invalid');
+                continue;
+              }
             }
           }
 
@@ -810,7 +835,6 @@ export class SyncService {
       }
     }
 
-    console.log(`📊 Sync upload summary: ${result.uploaded} records uploaded`);
     return result;
   }
 
@@ -1033,11 +1057,9 @@ export class SyncService {
           }
 
           console.log(
-            `📊 ${tableName} has ${changeDetection.changeCount} changes - proceeding with sync`
           );
         } else {
           console.log(
-            `📊 Full sync for ${tableName} (${isFirstSync ? 'first sync' : 'no local records found'}, ${localRecordCount} local)`
           );
         }
 
@@ -1177,7 +1199,6 @@ export class SyncService {
 
         if (!remoteRecords || remoteRecords.length === 0) {
           const tableTime = performance.now() - tableStart;
-          console.log(`📊 No records found for ${tableName} (${tableTime.toFixed(2)}ms) - query: store_id=${storeId}, ${!shouldDoFullSync ? `${timestampField}>=${lastSyncAt}` : 'full sync'}`);
 
           // For inventory_items specifically, log diagnostic info
           if (tableName === 'inventory_items') {
@@ -2006,11 +2027,31 @@ export class SyncService {
           if (error) {
             result.errors.push(`Download failed for ${tableName}: ${error.message}`);
           } else if (remoteRecords && remoteRecords.length > 0) {
-            const recordsWithSync = remoteRecords.map(record => ({
-              ...record,
-              _synced: true,
-              _lastSyncedAt: new Date().toISOString()
-            }));
+            const recordsWithSync = remoteRecords.map(record => {
+              const normalized = { ...record };
+              
+              // Normalize is_deleted for branches: convert to _deleted for IndexedDB
+              if (tableName === 'branches' && normalized.is_deleted !== undefined) {
+                normalized._deleted = normalized.is_deleted === true || normalized.is_deleted === 1;
+                delete normalized.is_deleted;
+                delete normalized.deleted_at;
+                delete normalized.deleted_by;
+              }
+              
+              // Normalize is_deleted for stores: convert to _deleted for IndexedDB
+              if (tableName === 'stores' && normalized.is_deleted !== undefined) {
+                normalized._deleted = normalized.is_deleted === true || normalized.is_deleted === 1;
+                delete normalized.is_deleted;
+                delete normalized.deleted_at;
+                delete normalized.deleted_by;
+              }
+              
+              return {
+                ...normalized,
+                _synced: true,
+                _lastSyncedAt: new Date().toISOString()
+              };
+            });
 
             await (db as any)[tableName].bulkPut(recordsWithSync);
             result.synced.downloaded += remoteRecords.length;
@@ -2090,8 +2131,27 @@ export class SyncService {
         result.errors.push(`Download failed: ${error.message}`);
       } else if (remoteRecords) {
         for (const record of remoteRecords as any[]) {
+          const normalizedRecord = { ...record };
+          
+          // Normalize is_deleted for branches: convert to _deleted for IndexedDB
+          if (tableName === 'branches' && normalizedRecord.is_deleted !== undefined) {
+            normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
+            // Remove Supabase-specific fields that aren't in IndexedDB schema
+            delete normalizedRecord.is_deleted;
+            delete normalizedRecord.deleted_at;
+            delete normalizedRecord.deleted_by;
+          }
+          
+          // Normalize is_deleted for stores: convert to _deleted for IndexedDB
+          if (tableName === 'stores' && normalizedRecord.is_deleted !== undefined) {
+            normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
+            delete normalizedRecord.is_deleted;
+            delete normalizedRecord.deleted_at;
+            delete normalizedRecord.deleted_by;
+          }
+          
           await (db as any)[tableName].put({
-            ...record,
+            ...normalizedRecord,
             _synced: true,
             _lastSyncedAt: new Date().toISOString()
           });
@@ -2104,6 +2164,49 @@ export class SyncService {
     } catch (error) {
       result.success = false;
       result.errors.push(error instanceof Error ? error.message : 'Unknown error');
+    }
+
+    return result;
+  }
+
+  /**
+   * Syncs stores and branches immediately (for admin users before branch selection)
+   * This ensures branches are available in IndexedDB before BranchSelectionScreen tries to load them
+   */
+  async syncStoresAndBranches(storeId: string): Promise<SyncResult> {
+    const result: SyncResult = {
+      success: true,
+      errors: [],
+      synced: { uploaded: 0, downloaded: 0 },
+      conflicts: 0
+    };
+
+    try {
+      console.log('🔄 Syncing stores and branches for immediate branch selection...');
+      
+      // First sync stores (dependency for branches)
+      const storesResult = await this.syncTable(storeId, 'stores');
+      result.synced.downloaded += storesResult.synced.downloaded;
+      result.synced.uploaded += storesResult.synced.uploaded;
+      result.errors.push(...storesResult.errors);
+      
+      // Then sync branches
+      const branchesResult = await this.syncTable(storeId, 'branches');
+      result.synced.downloaded += branchesResult.synced.downloaded;
+      result.synced.uploaded += branchesResult.synced.uploaded;
+      result.errors.push(...branchesResult.errors);
+      
+      result.success = result.errors.length === 0;
+      
+      if (result.success) {
+        console.log(`✅ Stores and branches synced: ${result.synced.downloaded} records downloaded`);
+      } else {
+        console.error(`❌ Stores and branches sync had errors:`, result.errors);
+      }
+    } catch (error) {
+      result.success = false;
+      result.errors.push(error instanceof Error ? error.message : 'Unknown error syncing stores and branches');
+      console.error('❌ Error syncing stores and branches:', error);
     }
 
     return result;

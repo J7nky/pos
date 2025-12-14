@@ -214,7 +214,7 @@ export class TransactionService {
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
       // ALL database write operations happen atomically
       await db.transaction('rw', 
-        [db.transactions, db.cash_drawer_sessions, db.journal_entries, db.entities, db.chart_of_accounts], 
+        [db.transactions, db.cash_drawer_sessions, db.journal_entries, db.entities, db.chart_of_accounts, db.cash_drawer_accounts], 
         async () => {
           // 5. CREATE TRANSACTION RECORD
           await db.transactions.add(transaction);
@@ -1092,8 +1092,11 @@ export class TransactionService {
   }
 
   /**
-   * Update cash drawer atomically within IndexedDB transaction
+   * Update cash drawer account balance atomically within IndexedDB transaction
    * This method MUST be called within a db.transaction() block
+   * 
+   * ✅ Updates cash_drawer_accounts.current_balance based on journal entries (account_code = 1100)
+   * ✅ Journal entries are the single source of truth for balance changes
    */
   private async updateCashDrawerAtomic(
     transaction: Transaction,
@@ -1101,39 +1104,57 @@ export class TransactionService {
     branchId: string
   ): Promise<{ previousBalance: number; newBalance: number } | undefined> {
     try {
-      // Get active cash drawer session
-      const activeSession = await db.cash_drawer_sessions
-        .where(['store_id', 'branch_id'])
-        .equals([storeId, branchId])
-        .and(session => session.closed_at === null)
-        .first();
+      // ✅ Get cash drawer ACCOUNT (not session) - this is what we update
+      const account = await db.getCashDrawerAccount(storeId, branchId);
 
-      if (!activeSession) {
-        console.warn('⚠️ No active cash drawer session found for store:', storeId);
+      if (!account) {
+        console.warn('⚠️ No cash drawer account found for store:', storeId, 'branch:', branchId);
         return undefined;
       }
 
-      const previousBalance = (activeSession).actual_amount || 0;
-      
-      // Calculate balance change based on transaction type
+      const previousBalance = Number((account as any)?.current_balance || 0);
+
+      // ✅ Calculate balance change from journal entries (account_code = 1100) for this transaction
+      // Journal entries are the single source of truth
+      const cashJournalEntries = await db.journal_entries
+        .where('transaction_id')
+        .equals(transaction.id)
+        .and(entry => entry.account_code === '1100' && entry.is_posted === true)
+        .toArray();
+
+      // Calculate balance change: sum of (debit - credit) for cash account entries
+      // ✅ IMPORTANT: Cash drawer balance is always in LBP, so convert USD entries to LBP
       let balanceChange = 0;
-      if (transaction.type === 'income') {
-        // Income increases cash drawer
-        balanceChange = transaction.amount;
-      } else if (transaction.type === 'expense') {
-        // Expense decreases cash drawer
-        balanceChange = -transaction.amount;
+      for (const entry of cashJournalEntries) {
+        const entryAmount = (entry.debit || 0) - (entry.credit || 0);
+        
+        // Convert to LBP if entry is in USD (cash drawer always stores in LBP)
+        if (entry.currency === 'USD') {
+          const amountInLBP = currencyService.convertCurrency(entryAmount, 'USD', 'LBP');
+          balanceChange += amountInLBP;
+        } else {
+          // Entry is already in LBP
+          balanceChange += entryAmount;
+        }
+      }
+
+      // If no cash journal entries found, this transaction doesn't affect cash drawer
+      if (cashJournalEntries.length === 0) {
+        console.warn(`⚠️ No cash journal entries (account_code=1100) found for transaction ${transaction.id}. Cash drawer not updated.`);
+        return undefined;
       }
 
       const newBalance = previousBalance + balanceChange;
       const timestamp = new Date().toISOString();
 
-      // Update cash drawer session
-      await db.cash_drawer_sessions.update(activeSession.id, {
-        actual_amount: newBalance,
+      // ✅ Update cash_drawer_accounts.current_balance (not session.actual_amount)
+      await db.cash_drawer_accounts.update(account.id as string, {
+        current_balance: newBalance as any,
         updated_at: timestamp,
         _synced: false
       } as any);
+
+      console.log(`💰 Cash drawer account balance updated: ${previousBalance.toLocaleString()} LBP → ${newBalance.toLocaleString()} LBP (change: ${balanceChange > 0 ? '+' : ''}${balanceChange.toLocaleString()} LBP)`);
 
       return {
         previousBalance,
@@ -1259,6 +1280,11 @@ export class TransactionService {
         transaction.description
       );
       
+      // Validate branch_id is present
+      if (!transaction.branch_id) {
+        throw new Error(`Transaction ${transaction.id} is missing branch_id. All transactions must have a branch_id for proper accounting.`);
+      }
+
       // Create journal entry using the mapping
       await journalService.createJournalEntry({
         transactionId: transaction.id,
@@ -1269,7 +1295,8 @@ export class TransactionService {
         entityId, // Now using actual UUID entity ID
         description,
         postedDate: transaction.created_at.split('T')[0], // Extract date part
-        createdBy: transaction.created_by // Pass user ID from transaction
+        createdBy: transaction.created_by, // Pass user ID from transaction
+        branchId: transaction.branch_id  // ✅ Pass branch_id from transaction to journal entry (required)
       });
       
       console.log(`✅ Journal entries created for ${transaction.category}: ${transaction.id} (entity: ${entity.name}, id: ${entityId})`);

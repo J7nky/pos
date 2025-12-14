@@ -519,6 +519,49 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
   }, [storeId, currentBranchId, isOnline]);
 
+  // CRITICAL: Sync branches immediately for admin users before branch selection
+  // This ensures branches are available in IndexedDB when BranchSelectionScreen loads
+  useEffect(() => {
+    const syncBranchesForAdmin = async () => {
+      // Only sync for admin users who need branch selection
+      if (!storeId || !userProfile || !isOnline) {
+        return;
+      }
+      
+      // Only for admin users without a branch selected yet
+      if (userProfile.role !== 'admin' || userProfile.branch_id !== null || currentBranchId) {
+        return;
+      }
+      
+      // Check if branches already exist locally
+      const existingBranches = await db.branches
+        .where('store_id')
+        .equals(storeId)
+        .filter(b => !b._deleted && !b.is_deleted)
+        .count();
+      
+      if (existingBranches > 0) {
+        console.log(`✅ Branches already synced (${existingBranches} branches found)`);
+        return;
+      }
+      
+      // Branches not available - sync them immediately
+      console.log('🔄 Admin user detected - syncing branches immediately for branch selection...');
+      try {
+        const syncResult = await syncService.syncStoresAndBranches(storeId);
+        if (syncResult.success) {
+          console.log(`✅ Branches synced successfully: ${syncResult.synced.downloaded} branches downloaded`);
+        } else {
+          console.error('❌ Failed to sync branches:', syncResult.errors);
+        }
+      } catch (error) {
+        console.error('❌ Error syncing branches for admin:', error);
+      }
+    };
+    
+    syncBranchesForAdmin();
+  }, [storeId, userProfile, isOnline, currentBranchId]);
+
   // Initialize branch - automatically determine branch based on user role
   useEffect(() => {
     const initializeBranch = async () => {
@@ -648,13 +691,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Filter entities by type for logging
       const customerEntities = (entitiesData || []).filter((e: any) => e.entity_type === 'customer');
       const supplierEntities = (entitiesData || []).filter((e: any) => e.entity_type === 'supplier');
-      console.log(`🔄 refreshData: Loaded ${customerEntities.length} customer entities, ${supplierEntities.length} supplier entities, ${employeesData.length} employees`);
-      console.log('🔄 refreshData: Latest customer entities:', customerEntities.slice(-3).map((e: any) => e.name));
-      console.log('🔄 refreshData: Latest supplier entities:', supplierEntities.slice(-3).map((e: any) => e.name));
-      console.log(`🔄 refreshData: Loaded ${inventoryData.length} inventory_items, ${batchesData.length} inventory_bills`);
-      console.log(`🔄 refreshData: Loaded ${productsData.length} products (including global products)`);
-      console.log('🔄 refreshData: Products from DB:', productsData.map((p: any) => ({ id: p.id, name: p.name, is_global: p.is_global, store_id: p.store_id })));
-      
+
       // Count global vs store products
       const globalCount = productsData.filter((p: any) => p.is_global === true || p.is_global === 1).length;
       const storeCount = productsData.length - globalCount;

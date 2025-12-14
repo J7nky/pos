@@ -137,6 +137,7 @@ export interface CreateJournalEntryParams {
   description?: string;
   postedDate?: string;
   createdBy?: string | null;  // User ID (UUID) - null for system-generated
+  branchId: string;  // Branch ID - required, must match transaction.branch_id
 }
 
 /**
