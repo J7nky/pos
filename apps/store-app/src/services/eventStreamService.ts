@@ -51,12 +51,20 @@ export class EventStreamService {
   private isProcessing: Map<string, boolean> = new Map();
   private eventQueue: Map<string, BranchEvent[]> = new Map();
   private catchUpInterval: Map<string, NodeJS.Timeout> = new Map();
+  private onEventsProcessedCallback?: (result: EventProcessingResult) => void;
   
   // Configuration
   private readonly BATCH_SIZE = 100;
   private readonly CATCH_UP_INTERVAL_MS = 60000; // 1 minute safety net
   private readonly MAX_RETRIES = 3;
   private readonly RETRY_DELAY_MS = 2000;
+
+  /**
+   * Set callback to be notified when events are processed
+   */
+  setOnEventsProcessed(callback: ((result: EventProcessingResult) => void) | undefined): void {
+    this.onEventsProcessedCallback = callback;
+  }
 
   /**
    * Start event stream for a branch
@@ -172,11 +180,38 @@ export class EventStreamService {
       console.log(`[EventStream] Found ${events.length} new events for branch ${branchId}`);
 
       // 3. Process events sequentially
+      console.log(`[EventStream] About to call processEvents with ${events.length} events`);
       const result = await this.processEvents(branchId, storeId, events);
+      console.log(`[EventStream] processEvents returned:`, {
+        processed: result.processed,
+        errors: result.errors.length,
+        last_version: result.last_version,
+        lastVersion_before: lastVersion
+      });
 
       // 4. Update last seen version
       if (result.last_version > lastVersion) {
+        console.log(`[EventStream] Updating sync state from version ${lastVersion} to ${result.last_version}`);
         await this.updateSyncState(branchId, result.last_version);
+        console.log(`[EventStream] Sync state updated successfully`);
+      } else {
+        console.log(`[EventStream] Not updating sync state: result.last_version (${result.last_version}) <= lastVersion (${lastVersion})`);
+      }
+
+      // 5. Notify callback if events were processed
+      if (result.processed > 0 && this.onEventsProcessedCallback) {
+        console.log(`[EventStream] Notifying callback: ${result.processed} events processed`);
+        try {
+          this.onEventsProcessedCallback(result);
+          console.log(`[EventStream] Callback executed successfully`);
+        } catch (callbackError) {
+          console.error(`[EventStream] Error in callback:`, callbackError);
+        }
+      } else {
+        console.log(`[EventStream] Not calling callback:`, {
+          processed: result.processed,
+          hasCallback: !!this.onEventsProcessedCallback
+        });
       }
 
       return result;
@@ -225,19 +260,51 @@ export class EventStreamService {
     let processed = 0;
     let lastVersion = 0;
 
-    for (const event of events) {
+    console.log(`[EventStream] Processing ${events.length} events for branch ${branchId}`);
+    console.log(`[EventStream] Events array:`, events.map(e => ({ id: e.id, version: e.version, entity_type: e.entity_type, entity_id: e.entity_id })));
+
+    if (!events || events.length === 0) {
+      console.warn(`[EventStream] Events array is empty or null`);
+      return { processed: 0, errors: [], last_version: 0 };
+    }
+
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
+      if (!event) {
+        console.warn(`[EventStream] Event at index ${i} is null or undefined`);
+        continue;
+      }
+
       try {
+        console.log(`[EventStream] Starting to process event ${event.id} (version ${event.version}, index ${i}/${events.length})`);
+        console.log(`[EventStream] Event details:`, {
+          id: event.id,
+          event_type: event.event_type,
+          entity_type: event.entity_type,
+          entity_id: event.entity_id,
+          operation: event.operation,
+          version: event.version
+        });
         await this.processEvent(event, storeId);
         processed++;
         lastVersion = Math.max(lastVersion, event.version);
+        console.log(`[EventStream] Successfully processed event ${event.id} (version ${event.version})`);
       } catch (error) {
         const errorMsg = `Failed to process event ${event.id} (${event.event_type}): ${
           error instanceof Error ? error.message : 'Unknown error'
         }`;
-        console.error(`[EventStream] ${errorMsg}`);
+        console.error(`[EventStream] ${errorMsg}`, error);
+        if (error instanceof Error) {
+          console.error(`[EventStream] Error stack:`, error.stack);
+        }
         errors.push(errorMsg);
         // Continue processing (don't block on one bad event)
       }
+    }
+
+    console.log(`[EventStream] Processed ${processed}/${events.length} events, last version: ${lastVersion}`);
+    if (errors.length > 0) {
+      console.warn(`[EventStream] ${errors.length} errors during processing:`, errors);
     }
 
     return { processed, errors, last_version: lastVersion };
@@ -254,11 +321,14 @@ export class EventStreamService {
 
     // Handle reverse operations (deletions)
     if (event.operation === 'reverse') {
+      console.log(`[EventStream] Handling reverse operation for ${event.entity_type}/${event.entity_id}`);
       await this.handleReverse(event);
+      console.log(`[EventStream] Reverse operation completed for ${event.entity_type}/${event.entity_id}`);
       return;
     }
 
     // Fetch the affected record from Supabase
+    console.log(`[EventStream] Fetching record ${event.entity_type}/${event.entity_id} from Supabase`);
     const record = await this.fetchAffectedRecord(event.entity_type, event.entity_id, storeId);
 
     if (!record) {
@@ -270,8 +340,10 @@ export class EventStreamService {
       return;
     }
 
+    console.log(`[EventStream] Fetched record ${event.entity_type}/${event.entity_id}, updating IndexedDB`);
     // Update IndexedDB
     await this.updateIndexedDB(event.entity_type, record, event.operation === 'insert');
+    console.log(`[EventStream] Completed processing event ${event.id}`);
   }
 
   /**

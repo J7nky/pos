@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback, us
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
-import { BillLineItem, BillLineItemTransforms, NotificationRecord, NotificationType, NotificationPreferences, InventoryItem, Transaction, CashDrawerAccount } from '../types';
+import { BillLineItem, BillLineItemTransforms, NotificationRecord, NotificationType, NotificationPreferences, InventoryItem, Transaction, CashDrawerAccount, Branch } from '../types';
 import {
   db,
   createId,
@@ -10,7 +10,7 @@ import {
 import { InventoryPurchaseService } from '../services/inventoryPurchaseService';
 import { syncService, SyncResult } from '../services/syncService';
 import { eventStreamService } from '../services/eventStreamService';
-import { eventEmissionService } from '../services/eventEmissionService';
+// import { eventEmissionService } from '../services/eventEmissionService'; // Unused
 import { crudHelperService } from '../services/crudHelperService';
 import { notificationService } from '../services/notificationService';
 import { receivedBillMonitoringService } from '../services/receivedBillMonitoringService';
@@ -21,7 +21,7 @@ import {
   generateAdvanceReference,
   generateReversalReference
 } from '../utils/referenceGenerator';
-import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
+// import { PAYMENT_CATEGORIES } from '../constants/paymentCategories'; // Unused
 import { transactionService } from '../services/transactionService';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 import { ensureDefaultBranch } from '../lib/branchHelpers';
@@ -152,8 +152,8 @@ interface OfflineDataContextType {
   getStore: (storeId: string) => Promise<any | null>;
 
 
-  deductInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
-  restoreInventoryQuantity: (productId: string, supplierId: string, quantity: number) => Promise<void>;
+  deductInventoryQuantity: (productId: string, quantity: number) => Promise<void>;
+  restoreInventoryQuantity: (productId: string, quantity: number) => Promise<void>;
 
   // Utility functions - exact match
   refreshData: () => Promise<void>;
@@ -540,7 +540,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const existingBranches = await db.branches
         .where('store_id')
         .equals(storeId)
-        .filter(b => !b._deleted && !b.is_deleted)
+        .filter(b => !b._deleted)
         .count();
       
       if (existingBranches > 0) {
@@ -666,7 +666,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const branchesData = await db.branches
         .where('store_id')
         .equals(storeId)
-        .filter(b => !b._deleted && !b.is_deleted)
+        .filter(b => !b._deleted)
         .toArray();
       setBranches(branchesData);
       debug(`🏢 Loaded ${branchesData.length} branches`);
@@ -706,6 +706,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.log('🔄 refreshData: About to set products in state, count:', productsData.length);
       setProducts(productsData as Tables['products']['Row'][]);
       console.log('🔄 refreshData: Products state updated');
+      
+      console.log(`🔄 refreshData: Loaded ${billsData.length} bills for branch ${currentBranchId || 'all'}`);
       // Note: customers and suppliers are now computed from entities (see computed properties below)
       setEmployees(employeesData.map((e: any) => ({ ...e, lbp_balance: e.lbp_balance || 0, usd_balance: e.usd_balance || 0 })) as Tables['users']['Row'][]);
       setTransactions(transactionsData as unknown as Tables['transactions']['Row'][]);
@@ -753,9 +755,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       );
 
       setSales(transformedSaleItems); // Update the main sales state
+      console.log(`🔄 refreshData: Setting ${billsData.length} bills in state`);
       setBills(billsData);
       setBillLineItems(billLineItemsData);
       setBillAuditLogs(billAuditLogsData);
+      console.log(`🔄 refreshData: Bills state updated, ${billLineItemsData.length} line items, ${billAuditLogsData.length} audit logs`);
       setMissedProducts(missedProductsData);
 
       // Load notifications and preferences
@@ -872,7 +876,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const branches = await db.branches
           .where('store_id')
           .equals(storeId)
-          .filter(b => !b.is_deleted)
+          .filter(b => !b._deleted)
           .toArray();
         
         // Clean up duplicates for each branch
@@ -900,8 +904,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const [storeProductCount, globalProductCount, supplierEntityCount, customerEntityCount] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
         db.products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
-        db.entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter(item => !item._deleted).count(),
-        db.entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter(item => !item._deleted).count()
+        db.entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter((item: any) => !item._deleted).count(),
+        db.entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter((item: any) => !item._deleted).count()
       ]);
       const productCount = storeProductCount + globalProductCount;
 
@@ -1022,13 +1026,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       if (supabaseAccounts && supabaseAccounts.length > 0) {
         // Account exists in Supabase - sync it down to local DB
-        const remoteAccount = supabaseAccounts[0];
+        const remoteAccount = supabaseAccounts[0] as Tables['cash_drawer_accounts']['Row'];
         debug(`📥 Found cash drawer account in Supabase (${remoteAccount.id}), syncing to local DB...`);
         
         const localAccountData: CashDrawerAccount = {
           id: remoteAccount.id,
           store_id: remoteAccount.store_id,
-          branch_id: remoteAccount.branch_id,
+          branch_id: (remoteAccount as any).branch_id || '',
           account_code: remoteAccount.account_code,
           name: remoteAccount.name,
           currency: remoteAccount.currency,
@@ -1117,8 +1121,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const [storeProductCount, globalProductCount, supplierEntityCount, customerEntityCount] = await Promise.all([
         db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
         db.products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
-        db.entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter(item => !item._deleted).count(),
-        db.entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter(item => !item._deleted).count()
+        db.entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter((item: any) => !item._deleted).count(),
+        db.entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter((item: any) => !item._deleted).count()
       ]);
       const productCount = storeProductCount + globalProductCount;
 
@@ -1322,9 +1326,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // This prevents sync from running before admin selects a branch
     if (isOnline && storeId && currentBranchId && !isSyncing) {
       // Optimized sync intervals to reduce Supabase requests:
-      // - 15s for active changes (reduced from 5s to minimize requests)
-      // - 60s for idle state (increased from 30s for better efficiency)
-      const syncDelay = unsyncedCount > 0 ? 15000 : 60000; // 15s for active changes, 60s for idle
+      // - 30s for active changes (when there are unsynced local changes)
+      // - 5 minutes (300s) for idle state (matches SYNC_CONFIG.syncInterval)
+      const syncDelay = unsyncedCount > 0 ? 30000 : 300000; // 30s for active changes, 5min for idle
       console.log(`⏰ [AUTO-SYNC] Setting auto-sync timer (${syncDelay}ms delay, ${unsyncedCount} unsynced records)`);
       console.log(`⏰ [AUTO-SYNC] Timer will fire at: ${new Date(Date.now() + syncDelay).toLocaleTimeString()}`);
       
@@ -1389,6 +1393,32 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (storeId && currentBranchId && isOnline) {
       console.log(`🎯 [EventStream] Starting event stream for branch ${currentBranchId}`);
       
+      // Set up callback to refresh data when events are processed
+      eventStreamService.setOnEventsProcessed(async (result) => {
+        console.log(`🔄 [EventStream] Events processed (${result.processed} events), refreshing data...`);
+        if (result.processed > 0) {
+          // Refresh data to reflect changes in IndexedDB
+          try {
+            await refreshData();
+            
+            // Also refresh cash drawer status (important for real-time balance updates)
+            await refreshCashDrawerStatus();
+            
+            // Trigger custom event for UI components that listen to data changes
+            window.dispatchEvent(new CustomEvent('data-synced', {
+              detail: { 
+                processed: result.processed,
+                timestamp: new Date().toISOString()
+              }
+            }));
+            
+            console.log(`✅ [EventStream] Data and cash drawer status refreshed`);
+          } catch (error) {
+            console.error('[EventStream] Error refreshing data after events:', error);
+          }
+        }
+      });
+      
       // Start event stream service
       eventStreamService.start(currentBranchId, storeId).catch((error) => {
         console.error('[EventStream] Failed to start event stream:', error);
@@ -1397,9 +1427,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       return () => {
         console.log(`🛑 [EventStream] Stopping event stream for branch ${currentBranchId}`);
         eventStreamService.stop(currentBranchId);
+        // Clear callback on cleanup
+        eventStreamService.setOnEventsProcessed(undefined);
       };
     }
-  }, [storeId, currentBranchId, isOnline]);
+  }, [storeId, currentBranchId, isOnline, refreshData]);
 
  
   const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
@@ -2203,7 +2235,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const allCustomerEntities = await db.entities
         .where('[store_id+entity_type]')
         .equals([storeId, 'customer'])
-        .filter(e => !e._deleted)
+        .filter((e: any) => !e._deleted)
         .toArray();
       allCustomerEntities.forEach(e => customersMap.set(e.id, e.name.toLowerCase()));
 
@@ -2494,11 +2526,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
     
     // Update supplier_data if needed
-    if (updates.type !== undefined || (updates as any).advance_lb_balance !== undefined || (updates as any).advance_usd_balance !== undefined || (updates as any).email !== undefined || (updates as any).address !== undefined) {
+    if ((updates as any).type !== undefined || (updates as any).advance_lb_balance !== undefined || (updates as any).advance_usd_balance !== undefined || (updates as any).email !== undefined || (updates as any).address !== undefined) {
       const supplierData = originalEntity.supplier_data || {};
       entityUpdates.supplier_data = {
         ...supplierData,
-        type: updates.type ?? (supplierData as any).type ?? 'standard',
+        type: (updates as any).type ?? (supplierData as any).type ?? 'standard',
         advance_lb_balance: (updates as any).advance_lb_balance ?? (supplierData as any).advance_lb_balance ?? 0,
         advance_usd_balance: (updates as any).advance_usd_balance ?? (supplierData as any).advance_usd_balance ?? 0,
         email: (updates as any).email ?? (supplierData as any).email ?? null,
@@ -3130,7 +3162,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // The transaction records created by the service will be cleaned up during undo
 
     // Update cash drawer for cash sales using transactionService
-    const cashSaleItemsForDrawer = lineItems.filter(item => item.payment_method === 'cash');
+    // Note: payment_method and customer_id should come from the bill, not line items
+    // For now, we'll need to get the bill to check payment_method
+    // Since we don't have bill context here, we'll skip cash drawer update for individual line items
+    // Cash drawer should be updated when the complete sale is processed
+    // This code block is kept for reference but may need bill context
+    /*
+    const cashSaleItemsForDrawer = lineItems.filter(item => (item as any).payment_method === 'cash');
     if (cashSaleItemsForDrawer.length > 0) {
       try {
         const { transactionService } = await import('../services/transactionService');
@@ -3162,25 +3200,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             },
             {
               reference: generateSaleReference(),
-              customerId: cashSaleItemsForDrawer[0]?.customer_id || undefined
+              customerId: (cashSaleItemsForDrawer[0] as any)?.customer_id || undefined
             }
           );
-
-          if (result.success) {
-            debug(`✅ Cash drawer updated: $${result.balanceBefore?.toFixed(2)} → $${result.balanceAfter?.toFixed(2)}`);
-            
-            // Notify UI of cash drawer update
-            cashDrawerUpdateService.notifyCashDrawerUpdate(storeId, result.balanceAfter, result.transactionId || '');
-          } else {
-            console.error('❌ Failed to update cash drawer:', result.error);
-          }
-        } else {
-          console.warn('⚠️ No active cash drawer session - sale not recorded in cash drawer');
-        }
-      } catch (error) {
-        console.error('❌ Error updating cash drawer for sales:', error);
-      }
-    }
+    */
 
     pushUndo(saleUndoData);
 
@@ -3358,8 +3381,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           userId: currentUserId,
           storeId: storeId,
           module: 'accounting',
-        branch_id: currentBranchId || '',
-
+          branchId: currentBranchId || '',
           source: 'offline'
         },
         updateBalances: false, // Caller handles balance updates
@@ -4048,7 +4070,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             result.transactionId,
             result.cashDrawerImpact.previousBalance,
             undefined, // accountId is handled internally by transactionService
-            baseUndoData
+            {
+              affected: baseUndoData.affected.filter(a => a.id !== undefined) as Array<{ table: string; id: string }>,
+              steps: baseUndoData.steps
+            }
           );
 
           pushUndo(undoData);
@@ -4146,7 +4171,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK - ALL OR NOTHING ⭐⭐⭐
       await db.transaction('rw', 
         [
-          db.employees, 
+          db.users, 
           db.transactions, 
           db.cash_drawer_accounts, 
           db.cash_drawer_sessions
@@ -4160,7 +4185,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             updated_at: new Date().toISOString(),
             _synced: false 
           };
-          await db.employees.update(employeeId, updateData);
+          await db.users.update(employeeId, updateData);
           console.log(`💳 [ATOMIC] Employee balance updated: ${balanceField} = ${newBalance}`);
 
           // 2. Process cash drawer transaction atomically (within existing transaction)
@@ -4335,7 +4360,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Create transaction record using unified service
       const reviewDateNote = reviewDate ? ` [Review: ${new Date(reviewDate).toLocaleDateString()}]` : '';
       
-      await transactionService.createTransaction({
+      const transactionResult = await transactionService.createTransaction({
         category: type === 'give' 
           ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
           : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
@@ -4348,8 +4373,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           userId: userProfile?.id || '',
           storeId: userProfile?.store_id || '',
           module: 'supplier_management',
-        branchId: currentBranchId || '',
-
+          branchId: currentBranchId || '',
           source: 'offline'
         },
         updateBalances: false, // Balance already updated above (lines 3365)
@@ -4365,13 +4389,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       });
 
+      const transactionId = transactionResult?.transactionId || createId();
+
       // Create reminder if review date is provided
-      if (reviewDate && type === 'give') {
+      if (reviewDate && type === 'give' && transactionId) {
         try {
           await reminderMonitoringService.createReminder({
             store_id: userProfile?.store_id || '',
-        branch_id: currentBranchId || '',
-
+            branch_id: currentBranchId || '',
             type: 'supplier_advance_review',
             entity_type: 'supplier',
             entity_id: supplierId,

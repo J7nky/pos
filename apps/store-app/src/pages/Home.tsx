@@ -218,8 +218,15 @@ export default function Home() {
       debouncedLoadCashDrawerStatus();
     };
     
+    // Handle data synced events (from event stream) - refresh cash drawer when remote changes arrive
+    const handleDataSynced = (e: any) => {
+      console.log('🔄 [Home] Data synced event received, refreshing cash drawer status...');
+      debouncedLoadCashDrawerStatus();
+    };
+    
     window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
     window.addEventListener('undo-completed', handleUndoCompleted as any);
+    window.addEventListener('data-synced', handleDataSynced as any);
 
     // Refresh every 60 seconds as a fallback (reduced frequency)
     const interval = setInterval(() => loadCashDrawerStatus(), 60000);
@@ -227,6 +234,7 @@ export default function Home() {
       clearInterval(interval);
       window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
       window.removeEventListener('undo-completed', handleUndoCompleted as any);
+      window.removeEventListener('data-synced', handleDataSynced as any);
     };
   }, [raw.storeId, loadCashDrawerStatus, debouncedLoadCashDrawerStatus]);
 

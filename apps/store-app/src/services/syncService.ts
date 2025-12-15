@@ -14,7 +14,7 @@ const SYNC_CONFIG = {
   batchSize: 100,
   maxRetries: 2,
   retryDelay: 2000,
-  syncInterval: 30000,
+  syncInterval: 300000, // 5 minutes (was 30 seconds)
   maxRecordsPerSync: 1000,
   incrementalSyncThreshold: 50,
   validationCacheExpiry: 900000,
@@ -23,7 +23,7 @@ const SYNC_CONFIG = {
   maxConcurrentBatches: 3, // Limit concurrent batch operations
   connectionTimeout: 10000, // Connection timeout in ms
   queryTimeout: 30000, // Query timeout for individual queries (30s)
-  idleSyncInterval: 60000, // Sync interval when idle (1 minute)
+  idleSyncInterval: 300000, // Sync interval when idle (5 minutes, matches syncInterval)
   // Deletion detection - optimized
   enableDeletionDetection: true, // Enable detection of remote deletions
   deletionDetectionInterval: 300000, // Run full deletion check every 5 minutes
@@ -48,13 +48,27 @@ const TABLES_WITH_CREATED_AT_ONLY = [
 ] as const;
 
 // Tables that rarely change - can skip change detection more often
+// Note: cash_drawer_accounts is now event-driven, removed from this list
 const RARELY_CHANGING_TABLES = [
   'stores',
   'branches',
   'chart_of_accounts',
-  'cash_drawer_accounts',
   'role_operation_limits',
   'user_module_access'
+] as const;
+
+// Tables that are event-driven only - should NOT be polled by periodic sync
+// These tables are handled by EventStreamService via branch_event_log
+const EVENT_DRIVEN_TABLES = [
+  'bills',
+  'bill_line_items',
+  'bill_audit_logs',
+  'transactions',
+  'journal_entries',
+  'cash_drawer_sessions',
+  'cash_drawer_accounts',
+  'inventory_bills',
+  'inventory_items',
 ] as const;
 
 // Table sync order (respects foreign key dependencies)
@@ -780,6 +794,118 @@ export class SyncService {
                   console.error('[Event] Failed to emit sale_posted event:', eventError);
                 }
               }
+            } else if (tableName === 'transactions') {
+              // Emit events for transactions (affects cash drawer balance)
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitPaymentPosted(
+                    record.store_id,
+                    record.branch_id,
+                    record.id,
+                    record.created_by,
+                    {
+                      amount: record.amount || 0,
+                      currency: record.currency || 'USD',
+                      method: record.payment_method || 'cash'
+                    }
+                  );
+                  console.log(`🎯 [Event] Emitted payment_posted event for transaction ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit payment_posted event:', eventError);
+                }
+              }
+            } else if (tableName === 'journal_entries') {
+              // Emit events for journal entries (source of truth for cash drawer balance)
+              // Group by transaction_id to emit one event per transaction
+              const transactionGroups = new Map<string, any[]>();
+              for (const record of batch as any[]) {
+                const txId = record.transaction_id || 'standalone';
+                if (!transactionGroups.has(txId)) {
+                  transactionGroups.set(txId, []);
+                }
+                transactionGroups.get(txId)!.push(record);
+              }
+              
+              for (const [txId, entries] of transactionGroups) {
+                try {
+                  // Use first entry for store/branch info
+                  const firstEntry = entries[0];
+                  await eventEmissionService.emitJournalEntryCreated(
+                    firstEntry.store_id,
+                    firstEntry.branch_id,
+                    firstEntry.id, // Use first journal entry ID as entity_id
+                    firstEntry.created_by,
+                    {
+                      entries_count: entries.length
+                    }
+                  );
+                  console.log(`🎯 [Event] Emitted journal_entry_created event for ${entries.length} entries (transaction ${txId})`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit journal_entry_created event:', eventError);
+                }
+              }
+            } else if (tableName === 'cash_drawer_accounts') {
+              // Emit events for cash drawer account updates (balance changes)
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: record.branch_id || '',
+                    event_type: 'cash_drawer_account_updated',
+                    entity_type: 'cash_drawer_account',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      current_balance: record.current_balance || 0
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted cash_drawer_account_updated event for account ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit cash_drawer_account_updated event:', eventError);
+                }
+              }
+            } else if (tableName === 'inventory_items') {
+              // Emit events for inventory item updates (quantity changes from sales)
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: record.branch_id || '',
+                    event_type: 'inventory_item_updated',
+                    entity_type: 'inventory_item',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      quantity: record.quantity || 0,
+                      received_quantity: record.received_quantity || 0
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted inventory_item_updated event for item ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit inventory_item_updated event:', eventError);
+                }
+              }
+            } else if (tableName === 'inventory_bills') {
+              // Emit events for inventory bills (inventory receipts)
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitInventoryReceived(
+                    record.store_id,
+                    record.branch_id,
+                    record.id,
+                    record.created_by,
+                    {
+                      items_count: 0, // We don't have count here, but event still useful
+                      total_value: 0
+                    }
+                  );
+                  console.log(`🎯 [Event] Emitted inventory_received event for bill ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit inventory_received event:', eventError);
+                }
+              }
             }
           }
         }
@@ -1052,6 +1178,12 @@ export class SyncService {
     for (const tableName of SYNC_TABLES) {
       const tableStart = performance.now();
       try {
+        // Skip event-driven tables - they are handled by EventStreamService
+        if (EVENT_DRIVEN_TABLES.includes(tableName as any)) {
+          console.log(`⏭️  Skipping ${tableName} - handled by event-driven sync`);
+          continue;
+        }
+
         if (!await this.validateDependencies(tableName, storeId)) {
           console.log(`⏳ Skipping download for ${tableName} - dependencies not met`);
           continue;
@@ -1360,6 +1492,11 @@ export class SyncService {
     for (const tableName of SYNC_TABLES) {
       const tableStart = performance.now();
       try {
+        // Skip event-driven tables - deletions are handled via events (reverse operation)
+        if (EVENT_DRIVEN_TABLES.includes(tableName as any)) {
+          continue;
+        }
+
         const table = (db as any)[tableName];
         
         // Get all synced local records (only check synced records, as unsynced are local-only)
