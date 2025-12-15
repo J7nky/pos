@@ -10,7 +10,17 @@ import {
 import { InventoryPurchaseService } from '../services/inventoryPurchaseService';
 import { syncService, SyncResult } from '../services/syncService';
 import { eventStreamService } from '../services/eventStreamService';
-// import { eventEmissionService } from '../services/eventEmissionService'; // Unused
+import { 
+  emitProductEvent,
+  emitProductsBulkEvent,
+  emitEntityEvent,
+  emitEntitiesBulkEvent,
+  emitUserEvent,
+  emitStoreEvent,
+  emitBranchEvent,
+  emitReminderEvent,
+  buildEventOptions,
+} from '../services/eventEmissionHelper';
 import { crudHelperService } from '../services/crudHelperService';
 import { notificationService } from '../services/notificationService';
 import { receivedBillMonitoringService } from '../services/receivedBillMonitoringService';
@@ -790,6 +800,44 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Refresh cash drawer status
       await refreshCashDrawerStatus();
 
+      // Reload store settings from IndexedDB (important for real-time updates from other devices)
+      console.log(`🔄 refreshData: Reloading store settings for store ${storeId}`);
+      const storeData = await db.stores.get(storeId);
+      if (storeData) {
+        console.log(`🔄 refreshData: Store data loaded:`, {
+          id: storeData.id,
+          preferred_commission_rate: storeData.preferred_commission_rate,
+          exchange_rate: storeData.exchange_rate,
+          preferred_currency: storeData.preferred_currency
+        });
+        if (storeData.preferred_currency) {
+          console.log(`🔄 refreshData: Setting currency to ${storeData.preferred_currency}`);
+          setCurrency(storeData.preferred_currency);
+        }
+        if (storeData.preferred_commission_rate !== undefined) {
+          console.log(`🔄 refreshData: Updating commission rate from ${defaultCommissionRate} to ${storeData.preferred_commission_rate}`);
+          setDefaultCommissionRate(storeData.preferred_commission_rate);
+        }
+        if (storeData.low_stock_alert !== undefined) {
+          console.log(`🔄 refreshData: Setting low stock alerts to ${storeData.low_stock_alert}`);
+          setLowStockAlertsEnabled(storeData.low_stock_alert);
+        }
+        if (storeData.exchange_rate !== undefined) {
+          console.log(`🔄 refreshData: Updating exchange rate from ${exchangeRate} to ${storeData.exchange_rate}`);
+          setExchangeRate(storeData.exchange_rate);
+          // Refresh CurrencyService with updated exchange rate
+          const { CurrencyService } = await import('../services/currencyService');
+          await CurrencyService.getInstance().refreshExchangeRate(storeId);
+        }
+        if (storeData.preferred_language) {
+          console.log(`🔄 refreshData: Setting language to ${storeData.preferred_language}`);
+          setLanguage(storeData.preferred_language);
+        }
+        console.log(`✅ refreshData: Store settings reloaded successfully`);
+      } else {
+        console.warn(`⚠️ refreshData: Store data not found for store ${storeId}`);
+      }
+
       // Clean up expired notifications
       await notificationService.deleteExpiredNotifications(storeId);
 
@@ -1317,62 +1365,47 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const resetAutoSyncTimer = useCallback(() => {
     // Clear existing timer
     if (autoSyncTimerRef.current) {
-      console.log('🔄 [AUTO-SYNC] Resetting auto-sync timer (clearing existing timer)');
+      console.log('🔄 [AUTO-SYNC] Clearing existing auto-sync timer');
       clearTimeout(autoSyncTimerRef.current);
       autoSyncTimerRef.current = null;
     }
 
-    // CRITICAL: Wait for BOTH storeId AND currentBranchId before setting sync timer
-    // This prevents sync from running before admin selects a branch
-    if (isOnline && storeId && currentBranchId && !isSyncing) {
-      // Optimized sync intervals to reduce Supabase requests:
-      // - 30s for active changes (when there are unsynced local changes)
-      // - 5 minutes (300s) for idle state (matches SYNC_CONFIG.syncInterval)
-      const syncDelay = unsyncedCount > 0 ? 30000 : 300000; // 30s for active changes, 5min for idle
-      console.log(`⏰ [AUTO-SYNC] Setting auto-sync timer (${syncDelay}ms delay, ${unsyncedCount} unsynced records)`);
-      console.log(`⏰ [AUTO-SYNC] Timer will fire at: ${new Date(Date.now() + syncDelay).toLocaleTimeString()}`);
+    // FULLY EVENT-DRIVEN MODE:
+    // - Local changes are uploaded immediately via debouncedSync()
+    // - Remote changes are received via EventStreamService (real-time events)
+    // - NO periodic polling for downloads
+    // 
+    // This timer is now only for uploading unsynced local changes after a delay
+    // (in case debounced sync missed something or network was temporarily down)
+    
+    if (isOnline && storeId && currentBranchId && !isSyncing && unsyncedCount > 0) {
+      // Only set timer if there are unsynced local changes to upload
+      const syncDelay = 30000; // 30 seconds safety net for upload
+      console.log(`⏰ [AUTO-SYNC] Setting upload safety timer (${syncDelay}ms delay, ${unsyncedCount} unsynced records)`);
       
       autoSyncTimerRef.current = setTimeout(async () => {
-        console.log('⏰ [AUTO-SYNC] ========================================');
-        console.log('⏰ [AUTO-SYNC] Timer fired at:', new Date().toLocaleTimeString());
-        console.log('⏰ [AUTO-SYNC] Checking for sync...');
+        console.log('⏰ [AUTO-SYNC] Safety timer fired - uploading local changes');
 
         // Get fresh unsynced count
         const currentUnsyncedCount = await getCurrentUnsyncedCount();
-        console.log(`📊 [AUTO-SYNC] Current unsynced count: ${currentUnsyncedCount}`);
-        console.log(`📊 [AUTO-SYNC] Sync service running: ${syncService.isCurrentlyRunning()}`);
-        console.log(`📊 [AUTO-SYNC] Online status: ${isOnline}`);
-        console.log(`📊 [AUTO-SYNC] Store ID: ${storeId}`);
-
-        // Always sync if not already running - need to check for both uploads AND downloads
-        // Even with 0 unsynced records locally, there might be remote changes to download
-        if (!syncService.isCurrentlyRunning()) {
-          console.log('✅ [AUTO-SYNC] Triggering auto-sync now...');
-          console.log(`📥 [AUTO-SYNC] Will upload ${currentUnsyncedCount} local changes and check for remote changes`);
-          const syncStartTime = Date.now();
+        
+        // Only sync if there are still unsynced records
+        if (currentUnsyncedCount > 0 && !syncService.isCurrentlyRunning()) {
+          console.log(`📤 [AUTO-SYNC] Uploading ${currentUnsyncedCount} local changes`);
           const result = await performSync(true);
-          const syncDuration = Date.now() - syncStartTime;
-          console.log('✅ [AUTO-SYNC] Sync completed in', syncDuration, 'ms');
-          console.log('✅ [AUTO-SYNC] Sync result:', {
+          console.log('✅ [AUTO-SYNC] Upload completed:', {
             success: result.success,
-            uploaded: result.synced.uploaded,
-            downloaded: result.synced.downloaded,
-            conflicts: result.conflicts,
-            errors: result.errors
+            uploaded: result.synced.uploaded
           });
-          console.log('⏰ [AUTO-SYNC] ========================================');
         } else {
-          console.log('⏭️  [AUTO-SYNC] Skipping sync - sync already running');
-          console.log('⏰ [AUTO-SYNC] ========================================');
+          console.log('⏭️  [AUTO-SYNC] No upload needed (already synced or sync running)');
         }
       }, syncDelay);
     } else {
-      console.log('⏭️  [AUTO-SYNC] Not setting timer:', {
-        isOnline,
-        hasStoreId: !!storeId,
-        hasCurrentBranchId: !!currentBranchId,
-        isSyncing
-      });
+      // No timer needed - either offline, no store/branch, or no unsynced changes
+      if (unsyncedCount === 0) {
+        console.log('✅ [AUTO-SYNC] All changes synced, no timer needed');
+      }
     }
   }, [isOnline, storeId, currentBranchId, isSyncing, unsyncedCount]);
 
@@ -1394,11 +1427,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.log(`🎯 [EventStream] Starting event stream for branch ${currentBranchId}`);
       
       // Set up callback to refresh data when events are processed
-      eventStreamService.setOnEventsProcessed(async (result) => {
-        console.log(`🔄 [EventStream] Events processed (${result.processed} events), refreshing data...`);
+      // IMPORTANT: Set callback BEFORE starting event stream to ensure it's available
+      const callback = async (result: any) => {
+        console.log(`🔄 [EventStream] Callback invoked: ${result.processed} events processed`);
         if (result.processed > 0) {
           // Refresh data to reflect changes in IndexedDB
           try {
+            console.log(`🔄 [EventStream] Calling refreshData() to update UI...`);
             await refreshData();
             
             // Also refresh cash drawer status (important for real-time balance updates)
@@ -1414,14 +1449,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             
             console.log(`✅ [EventStream] Data and cash drawer status refreshed`);
           } catch (error) {
-            console.error('[EventStream] Error refreshing data after events:', error);
+            console.error('[EventStream] ❌ Error refreshing data after events:', error);
+            if (error instanceof Error) {
+              console.error('[EventStream] Error stack:', error.stack);
+            }
           }
+        } else {
+          console.log(`🔄 [EventStream] Callback invoked but no events processed (processed=${result.processed})`);
         }
-      });
+      };
+      
+      console.log(`🎯 [EventStream] Setting callback before starting event stream`);
+      eventStreamService.setOnEventsProcessed(callback);
       
       // Start event stream service
       eventStreamService.start(currentBranchId, storeId).catch((error) => {
-        console.error('[EventStream] Failed to start event stream:', error);
+        console.error('[EventStream] ❌ Failed to start event stream:', error);
       });
 
       return () => {
@@ -1430,8 +1473,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Clear callback on cleanup
         eventStreamService.setOnEventsProcessed(undefined);
       };
+    } else {
+      // If conditions not met, clear callback
+      console.log(`🛑 [EventStream] Conditions not met, clearing callback:`, {
+        hasStoreId: !!storeId,
+        hasBranchId: !!currentBranchId,
+        isOnline
+      });
+      eventStreamService.setOnEventsProcessed(undefined);
     }
-  }, [storeId, currentBranchId, isOnline, refreshData]);
+  }, [storeId, currentBranchId, isOnline, refreshData, refreshCashDrawerStatus]);
 
  
   const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
@@ -1452,7 +1503,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       const syncStartTime = Date.now();
-      const result = await syncService.sync(storeId);
+      const result = await syncService.sync(storeId, currentBranchId);
       const syncDuration = Date.now() - syncStartTime;
       
       setLastSync(new Date());
@@ -1500,10 +1551,27 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
 
     // Set new timeout for 1 second
-    const timeout = setTimeout(() => {
-      if (isOnline && !isSyncing && unsyncedCount > 0) {
-        debug('🔄 Debounced auto-sync triggered');
-        performSync(true); // Mark as automatic sync
+    const timeout = setTimeout(async () => {
+      // Update unsynced count first to ensure we have the latest count
+      await updateUnsyncedCount();
+      
+      // Re-check conditions after updating count
+      if (isOnline && !isSyncing) {
+        // Get fresh unsynced count directly from database (not from state)
+        // State might be stale, so query directly
+        try {
+          const { total: freshCount } = await crudHelperService.getUnsyncedCount();
+          if (freshCount > 0) {
+            debug('🔄 Debounced auto-sync triggered', { unsyncedCount: freshCount });
+            performSync(true); // Mark as automatic sync
+          } else {
+            debug('🔄 Debounced sync skipped: no unsynced records');
+          }
+        } catch (error) {
+          console.warn('Failed to get unsynced count, triggering sync anyway:', error);
+          // If we can't get the count, trigger sync anyway to be safe
+          performSync(true);
+        }
       }
       setDebouncedSyncTimeout(null);
     }, 1000);
@@ -2356,6 +2424,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     
     await crudHelperService.addEntity('products', storeId!, dataWithId);
     
+    // NEW: Emit event after successful creation (event emission happens in sync)
+    // Event will be emitted when syncService uploads the record
+    
     // Store undo data
     pushUndo({
       type: 'add_product',
@@ -2364,6 +2435,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     });
     
     resetAutoSyncTimer();
+    
+    // NEW: Emit event for real-time sync to other devices
+    await emitProductEvent(
+      productId,
+      buildEventOptions(storeId!, currentBranchId, userProfile?.id, 'create')
+    );
   };
 
   const addSupplier = async (supplierData: Omit<Tables['suppliers']['Insert'], 'store_id'>): Promise<void> => {
@@ -2409,6 +2486,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Refresh entities data
     await refreshData();
     resetAutoSyncTimer();
+    
+    // NEW: Emit event for real-time sync to other devices
+    await emitEntityEvent(
+      supplierId,
+      buildEventOptions(storeId!, currentBranchId, userProfile?.id, 'create', {
+        entity_type: 'supplier'
+      })
+    );
   };
 
   const addCustomer = async (customerData: Omit<Tables['customers']['Insert'], 'store_id'>): Promise<void> => {
@@ -2453,6 +2538,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Refresh entities data
     await refreshData();
     resetAutoSyncTimer();
+    
+    // NEW: Emit event for real-time sync to other devices
+    await emitEntityEvent(
+      customerId,
+      buildEventOptions(storeId!, currentBranchId, userProfile?.id, 'create', {
+        entity_type: 'customer'
+      })
+    );
   };
 
   const updateCustomer = async (id: string, updates: Tables['customers']['Update']): Promise<void> => {
@@ -2506,6 +2599,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Refresh entities data
     await refreshData();
     resetAutoSyncTimer();
+    
+    // NEW: Emit event for real-time sync to other devices
+    await emitEntityEvent(
+      id,
+      buildEventOptions(storeId!, currentBranchId, userProfile?.id, 'update', {
+        entity_type: 'customer',
+        fields_changed: Object.keys(updates)
+      })
+    );
   };
 
   const updateSupplier = async (id: string, updates: Tables['suppliers']['Update']): Promise<void> => {
@@ -2558,6 +2660,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Refresh entities data
     await refreshData();
     resetAutoSyncTimer();
+    
+    // NEW: Emit event for real-time sync to other devices
+    await emitEntityEvent(
+      id,
+      buildEventOptions(storeId!, currentBranchId, userProfile?.id, 'update', {
+        entity_type: 'supplier',
+        fields_changed: Object.keys(updates)
+      })
+    );
   };
 
   const updateProduct = async (id: string, updates: Tables['products']['Update']): Promise<void> => {
@@ -2582,6 +2693,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     });
     
     resetAutoSyncTimer();
+    
+    // NEW: Emit event for real-time sync to other devices
+    await emitProductEvent(
+      id,
+      buildEventOptions(storeId!, currentBranchId, userProfile?.id, 'update', {
+        fields_changed: Object.keys(updates)
+      })
+    );
   };
 
   const deleteProduct = async (id: string): Promise<void> => {
@@ -2604,6 +2723,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     });
     
     resetAutoSyncTimer();
+    
+    // NEW: Emit event for real-time sync to other devices
+    await emitProductEvent(
+      id,
+      buildEventOptions(storeId!, currentBranchId, userProfile?.id, 'delete')
+    );
   };
 
   const addEmployee = async (employeeData: Omit<Tables['users']['Insert'], 'store_id'>): Promise<void> => {
@@ -2622,6 +2747,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     });
     
     resetAutoSyncTimer();
+    
+    // NEW: Emit event for real-time sync to other devices
+    await emitUserEvent(
+      employeeId,
+      buildEventOptions(storeId!, currentBranchId, userProfile?.id, 'create')
+    );
   };
 
   const updateEmployee = async (id: string, updates: Tables['users']['Update']): Promise<void> => {
@@ -2646,6 +2777,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     });
     
     resetAutoSyncTimer();
+    
+    // NEW: Emit event for real-time sync to other devices
+    await emitUserEvent(
+      id,
+      buildEventOptions(storeId!, currentBranchId, userProfile?.id, 'update', {
+        fields_changed: Object.keys(updates)
+      })
+    );
   };
 
   const deleteEmployee = async (id: string): Promise<void> => {
@@ -4089,6 +4228,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.warn('⚠️ Data refresh failed (non-critical):', refreshError);
       }
 
+      // Note: Sync is now automatically triggered by Dexie hooks when _synced: false is detected
+      // No need to manually call debouncedSync() - the generic solution handles it
+
       return { success: true };
 
     } catch (error) {
@@ -4269,6 +4411,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       } catch (refreshError) {
         console.warn('⚠️ Data refresh failed (non-critical):', refreshError);
       }
+
+      // Note: Sync is now automatically triggered by Dexie hooks when _synced: false is detected
+      // No need to manually call debouncedSync() - the generic solution handles it
 
       return { success: true };
 
@@ -5368,22 +5513,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Update local state immediately
       setDefaultCommissionRate(rate);
 
-      // Update IndexedDB
-      await db.stores
-        .where('id')
-        .equals(storeId)
-        .modify({
-          preferred_commission_rate: rate,
-          _synced: false,
-          updated_at: new Date().toISOString()
-        });
+      // Update IndexedDB using .update() instead of .modify() to ensure hooks fire
+      const store = await db.stores.get(storeId);
+      if (!store) {
+        throw new Error('Store not found');
+      }
+
+      await db.stores.update(storeId, {
+        preferred_commission_rate: rate,
+        _synced: false,
+        updated_at: new Date().toISOString()
+      });
 
       console.log('✅ Commission rate updated locally:', rate);
 
       // Update unsynced count immediately
-      // await updateUnsyncedCount();
+      await updateUnsyncedCount();
 
       // Trigger immediate sync for settings changes
+      // Note: Sync trigger should also fire from hooks, but we call it explicitly as backup
+      resetAutoSyncTimer();
       if (isOnline && !isSyncing) {
         console.log('🔄 Triggering immediate sync for commission rate change');
         performSync(true);
@@ -5407,15 +5556,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Update local state immediately
       setCurrency(newCurrency);
 
-      // Update IndexedDB
-      await db.stores
-        .where('id')
-        .equals(storeId)
-        .modify({
-          preferred_currency: newCurrency,
-          _synced: false,
-          updated_at: new Date().toISOString()
-        });
+      // Update IndexedDB using .update() instead of .modify() to ensure hooks fire
+      await db.stores.update(storeId, {
+        preferred_currency: newCurrency,
+        _synced: false,
+        updated_at: new Date().toISOString()
+      });
 
       console.log('✅ Currency updated locally:', newCurrency);
 
@@ -5423,6 +5569,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await updateUnsyncedCount();
 
       // Trigger immediate sync for settings changes
+      // Note: Sync trigger should also fire from hooks, but we call it explicitly as backup
+      resetAutoSyncTimer();
       if (isOnline && !isSyncing) {
         console.log('🔄 Triggering immediate sync for currency change');
         performSync(true);
@@ -5446,15 +5594,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Update local state immediately
       setExchangeRate(rate);
 
-      // Update IndexedDB
-      await db.stores
-        .where('id')
-        .equals(storeId)
-        .modify({
-          exchange_rate: rate,
-          _synced: false,
-          updated_at: new Date().toISOString()
-        });
+      // Update IndexedDB using .update() instead of .modify() to ensure hooks fire
+      await db.stores.update(storeId, {
+        exchange_rate: rate,
+        _synced: false,
+        updated_at: new Date().toISOString()
+      });
 
       console.log('✅ Exchange rate updated locally:', rate);
 
@@ -5462,6 +5607,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await updateUnsyncedCount();
 
       // Trigger immediate sync for settings changes
+      // Note: Sync trigger should also fire from hooks, but we call it explicitly as backup
+      resetAutoSyncTimer();
       if (isOnline && !isSyncing) {
         console.log('🔄 Triggering immediate sync for exchange rate change');
         performSync(true);
@@ -5485,15 +5632,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Update local state immediately
       setLanguage(newLanguage);
 
-      // Update IndexedDB
-      await db.stores
-        .where('id')
-        .equals(storeId)
-        .modify({
-          preferred_language: newLanguage,
-          _synced: false,
-          updated_at: new Date().toISOString()
-        });
+      // Update IndexedDB using .update() instead of .modify() to ensure hooks fire
+      await db.stores.update(storeId, {
+        preferred_language: newLanguage,
+        _synced: false,
+        updated_at: new Date().toISOString()
+      });
 
       console.log('✅ Language updated locally:', newLanguage);
 

@@ -246,6 +246,18 @@ export class TransactionService {
       );
       // ⭐⭐⭐ END ATOMIC TRANSACTION ⭐⭐⭐
 
+      // Trigger sync after transaction completes
+      // This ensures hooks that might not fire during transactions still trigger sync
+      try {
+        console.log('🔄 [TransactionService] Triggering sync after transaction completes');
+        const { syncTriggerService } = await import('./syncTriggerService');
+        syncTriggerService.triggerSync();
+        console.log('🔄 [TransactionService] Sync trigger called successfully');
+      } catch (syncError) {
+        // Non-critical - sync will happen via other mechanisms if this fails
+        console.warn('⚠️ [TransactionService] Failed to trigger sync after transaction:', syncError);
+      }
+
       // 8. CREATE AUDIT LOG (outside transaction - non-critical)
       let auditLogId;
       if (params.createAuditLog !== false) {
@@ -1048,7 +1060,6 @@ export class TransactionService {
         }
 
         newBalance = previousBalance + balanceChange;
-        console.log(9343,transaction.category);
         const updateData: any = {
           updated_at: timestamp,
           _synced: false

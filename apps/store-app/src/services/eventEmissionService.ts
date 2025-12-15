@@ -230,6 +230,306 @@ export class EventEmissionService {
       metadata,
     });
   }
+
+  // ========================================================================
+  // CONFIGURATION TABLE EVENTS (For Fully Event-Driven Sync)
+  // ========================================================================
+
+  /**
+   * Emit product_updated event
+   * Called when a product is created or updated
+   */
+  async emitProductUpdated(
+    storeId: string,
+    branchId: string,
+    productId: string,
+    userId?: string,
+    metadata?: { operation?: 'create' | 'update' | 'delete'; fields_changed?: string[] }
+  ): Promise<void> {
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'product_updated',
+      entity_type: 'product',
+      entity_id: productId,
+      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
+      user_id: userId,
+      metadata,
+    });
+  }
+
+  /**
+   * Emit store_updated event
+   * Called when store settings are updated
+   */
+  async emitStoreUpdated(
+    storeId: string,
+    branchId: string,
+    userId?: string,
+    metadata?: { fields_changed?: string[] }
+  ): Promise<void> {
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'store_updated',
+      entity_type: 'store',
+      entity_id: storeId,
+      operation: 'update',
+      user_id: userId,
+      metadata,
+    });
+  }
+
+  /**
+   * Emit branch_updated event
+   * Called when branch info is updated
+   */
+  async emitBranchUpdated(
+    storeId: string,
+    branchId: string,
+    userId?: string,
+    metadata?: { fields_changed?: string[] }
+  ): Promise<void> {
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'branch_updated',
+      entity_type: 'branch',
+      entity_id: branchId,
+      operation: 'update',
+      user_id: userId,
+      metadata,
+    });
+  }
+
+  /**
+   * Emit user_updated event
+   * Called when user/employee info is updated
+   */
+  async emitUserUpdated(
+    storeId: string,
+    branchId: string,
+    targetUserId: string,
+    userId?: string,
+    metadata?: { operation?: 'create' | 'update' | 'delete'; fields_changed?: string[] }
+  ): Promise<void> {
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'user_updated',
+      entity_type: 'user',
+      entity_id: targetUserId,
+      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
+      user_id: userId,
+      metadata,
+    });
+  }
+
+  /**
+   * Emit chart_of_account_updated event
+   * Called when chart of accounts is modified
+   */
+  async emitChartOfAccountUpdated(
+    storeId: string,
+    branchId: string,
+    accountId: string,
+    userId?: string,
+    metadata?: { operation?: 'create' | 'update' | 'delete' }
+  ): Promise<void> {
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'chart_of_account_updated',
+      entity_type: 'chart_of_account',
+      entity_id: accountId,
+      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
+      user_id: userId,
+      metadata,
+    });
+  }
+
+  /**
+   * Emit role_operation_limit_updated event
+   * Called when RBAC operation limits are updated
+   */
+  async emitRoleOperationLimitUpdated(
+    storeId: string,
+    branchId: string,
+    limitId: string,
+    userId?: string,
+    metadata?: { operation?: 'create' | 'update' | 'delete' }
+  ): Promise<void> {
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'role_operation_limit_updated',
+      entity_type: 'role_operation_limit',
+      entity_id: limitId,
+      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
+      user_id: userId,
+      metadata,
+    });
+  }
+
+  /**
+   * Emit user_module_access_updated event
+   * Called when user module access permissions are updated
+   */
+  async emitUserModuleAccessUpdated(
+    storeId: string,
+    branchId: string,
+    accessId: string,
+    userId?: string,
+    metadata?: { operation?: 'create' | 'update' | 'delete'; target_user_id?: string }
+  ): Promise<void> {
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'user_module_access_updated',
+      entity_type: 'user_module_access',
+      entity_id: accessId,
+      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
+      user_id: userId,
+      metadata,
+    });
+  }
+
+  /**
+   * Emit reminder_updated event
+   * Called when a reminder is created or updated
+   */
+  async emitReminderUpdated(
+    storeId: string,
+    branchId: string,
+    reminderId: string,
+    userId?: string,
+    metadata?: { operation?: 'create' | 'update' | 'delete' }
+  ): Promise<void> {
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'reminder_updated',
+      entity_type: 'reminder',
+      entity_id: reminderId,
+      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
+      user_id: userId,
+      metadata,
+    });
+  }
+
+  // ========================================================================
+  // BULK OPERATIONS (Optimized for batch updates)
+  // ========================================================================
+
+  /**
+   * Emit products_bulk_updated event
+   * Called when multiple products are updated at once (import, bulk price update, etc.)
+   * 
+   * This prevents event storms by emitting ONE event for multiple product changes
+   */
+  async emitProductsBulkUpdated(
+    storeId: string,
+    branchId: string,
+    productIds: string[],
+    userId?: string,
+    metadata?: { 
+      operation?: 'create' | 'update' | 'delete';
+      operation_type?: 'import' | 'price_update' | 'category_change' | 'bulk_edit';
+      count?: number;
+    }
+  ): Promise<void> {
+    if (productIds.length === 0) {
+      console.warn('emitProductsBulkUpdated called with empty productIds array');
+      return;
+    }
+
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'products_bulk_updated',
+      entity_type: 'product',
+      entity_id: productIds[0], // Reference first product as anchor
+      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
+      user_id: userId,
+      metadata: {
+        ...metadata,
+        affected_product_ids: productIds,
+        count: productIds.length,
+      },
+    });
+  }
+
+  /**
+   * Emit entities_bulk_updated event
+   * Called when multiple entities (customers/suppliers) are updated at once
+   */
+  async emitEntitiesBulkUpdated(
+    storeId: string,
+    branchId: string,
+    entityIds: string[],
+    userId?: string,
+    metadata?: { 
+      operation?: 'create' | 'update' | 'delete';
+      operation_type?: 'import' | 'bulk_edit';
+      count?: number;
+    }
+  ): Promise<void> {
+    if (entityIds.length === 0) {
+      console.warn('emitEntitiesBulkUpdated called with empty entityIds array');
+      return;
+    }
+
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'entities_bulk_updated',
+      entity_type: 'entity',
+      entity_id: entityIds[0],
+      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
+      user_id: userId,
+      metadata: {
+        ...metadata,
+        affected_entity_ids: entityIds,
+        count: entityIds.length,
+      },
+    });
+  }
+
+  /**
+   * Emit users_bulk_updated event
+   * Called when multiple users are updated at once
+   */
+  async emitUsersBulkUpdated(
+    storeId: string,
+    branchId: string,
+    userIds: string[],
+    userId?: string,
+    metadata?: { 
+      operation?: 'create' | 'update' | 'delete';
+      operation_type?: 'import' | 'bulk_edit';
+      count?: number;
+    }
+  ): Promise<void> {
+    if (userIds.length === 0) {
+      console.warn('emitUsersBulkUpdated called with empty userIds array');
+      return;
+    }
+
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'users_bulk_updated',
+      entity_type: 'user',
+      entity_id: userIds[0],
+      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
+      user_id: userId,
+      metadata: {
+        ...metadata,
+        affected_user_ids: userIds,
+        count: userIds.length,
+      },
+    });
+  }
 }
 
 // Export singleton instance

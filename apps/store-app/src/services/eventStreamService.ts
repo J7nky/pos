@@ -51,18 +51,20 @@ export class EventStreamService {
   private isProcessing: Map<string, boolean> = new Map();
   private eventQueue: Map<string, BranchEvent[]> = new Map();
   private catchUpInterval: Map<string, NodeJS.Timeout> = new Map();
-  private onEventsProcessedCallback?: (result: EventProcessingResult) => void;
+  private reconnectTimeouts: Map<string, NodeJS.Timeout> = new Map();
+  private onEventsProcessedCallback?: (result: EventProcessingResult) => void | Promise<void>;
   
   // Configuration
   private readonly BATCH_SIZE = 100;
-  private readonly CATCH_UP_INTERVAL_MS = 60000; // 1 minute safety net
+  private readonly CATCH_UP_INTERVAL_MS = 60000; // 1 minute safety net (reduced from 5 min for faster catch-up)
   private readonly MAX_RETRIES = 3;
   private readonly RETRY_DELAY_MS = 2000;
 
   /**
    * Set callback to be notified when events are processed
    */
-  setOnEventsProcessed(callback: ((result: EventProcessingResult) => void) | undefined): void {
+  setOnEventsProcessed(callback: ((result: EventProcessingResult) => void | Promise<void>) | undefined): void {
+    console.log(`[EventStream] Setting callback:`, callback ? 'callback provided' : 'callback cleared');
     this.onEventsProcessedCallback = callback;
   }
 
@@ -92,6 +94,13 @@ export class EventStreamService {
    * Stop event stream for a branch
    */
   async stop(branchId: string): Promise<void> {
+    // Clear reconnect timeout
+    const reconnectTimeout = this.reconnectTimeouts.get(branchId);
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      this.reconnectTimeouts.delete(branchId);
+    }
+
     // Unsubscribe from Realtime
     const channel = this.channels.get(branchId);
     if (channel) {
@@ -118,6 +127,27 @@ export class EventStreamService {
    * Realtime is used as a wake-up signal, not data source
    */
   private async subscribeToRealtime(branchId: string, storeId: string): Promise<void> {
+    // Clear any existing reconnect timeout
+    const existingTimeout = this.reconnectTimeouts.get(branchId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this.reconnectTimeouts.delete(branchId);
+    }
+
+    // Remove existing channel if it exists (to avoid duplicates)
+    const existingChannel = this.channels.get(branchId);
+    if (existingChannel) {
+      console.log(`[EventStream] Removing existing channel for branch ${branchId} before reconnecting`);
+      try {
+        await supabase.removeChannel(existingChannel);
+      } catch (error) {
+        console.warn(`[EventStream] Error removing existing channel:`, error);
+      }
+      this.channels.delete(branchId);
+    }
+
+    console.log(`[EventStream] Setting up Realtime subscription for branch ${branchId}`);
+    
     const channel = supabase
       .channel(`branch_events:${branchId}`)
       .on(
@@ -139,14 +169,62 @@ export class EventStreamService {
         }
       )
       .subscribe((status) => {
+        console.log(`[EventStream] Realtime subscription status for branch ${branchId}: ${status}`);
         if (status === 'SUBSCRIBED') {
-          console.log(`[EventStream] Realtime subscribed for branch ${branchId}`);
+          console.log(`✅ [EventStream] Realtime subscribed successfully for branch ${branchId}`);
+          // Clear any reconnect timeout since we're successfully connected
+          const timeout = this.reconnectTimeouts.get(branchId);
+          if (timeout) {
+            clearTimeout(timeout);
+            this.reconnectTimeouts.delete(branchId);
+          }
         } else if (status === 'CHANNEL_ERROR') {
-          console.error(`[EventStream] Realtime error for branch ${branchId}`);
+          console.error(`❌ [EventStream] Realtime error for branch ${branchId} - attempting to reconnect...`);
+          this.scheduleReconnect(branchId, storeId, 2000); // Retry after 2 seconds
+        } else if (status === 'TIMED_OUT') {
+          console.warn(`⏱️ [EventStream] Realtime subscription timed out for branch ${branchId} - attempting to reconnect...`);
+          this.scheduleReconnect(branchId, storeId, 3000); // Retry after 3 seconds
+        } else if (status === 'CLOSED') {
+          console.warn(`🔒 [EventStream] Realtime subscription closed for branch ${branchId} - attempting to reconnect...`);
+          // Only reconnect if we're still supposed to be connected (channel exists in map)
+          if (this.channels.has(branchId)) {
+            this.scheduleReconnect(branchId, storeId, 2000); // Retry after 2 seconds
+          } else {
+            console.log(`[EventStream] Channel was intentionally stopped, not reconnecting`);
+          }
+        } else {
+          console.log(`ℹ️ [EventStream] Realtime subscription status changed to: ${status} for branch ${branchId}`);
         }
       });
 
     this.channels.set(branchId, channel);
+    console.log(`[EventStream] Realtime channel created for branch ${branchId}, waiting for subscription...`);
+  }
+
+  /**
+   * Schedule a reconnection attempt for a branch
+   */
+  private scheduleReconnect(branchId: string, storeId: string, delayMs: number): void {
+    // Don't schedule multiple reconnects
+    if (this.reconnectTimeouts.has(branchId)) {
+      console.log(`[EventStream] Reconnect already scheduled for branch ${branchId}, skipping`);
+      return;
+    }
+
+    console.log(`[EventStream] Scheduling reconnect for branch ${branchId} in ${delayMs}ms`);
+    const timeout = setTimeout(async () => {
+      this.reconnectTimeouts.delete(branchId);
+      console.log(`[EventStream] Attempting to reconnect for branch ${branchId}...`);
+      try {
+        await this.subscribeToRealtime(branchId, storeId);
+      } catch (error) {
+        console.error(`[EventStream] Reconnection failed for branch ${branchId}:`, error);
+        // Retry with exponential backoff (double the delay)
+        this.scheduleReconnect(branchId, storeId, Math.min(delayMs * 2, 30000)); // Max 30 seconds
+      }
+    }, delayMs);
+
+    this.reconnectTimeouts.set(branchId, timeout);
   }
 
   /**
@@ -199,18 +277,23 @@ export class EventStreamService {
       }
 
       // 5. Notify callback if events were processed
+      console.log(`[EventStream] Checking callback: processed=${result.processed}, hasCallback=${!!this.onEventsProcessedCallback}`);
       if (result.processed > 0 && this.onEventsProcessedCallback) {
-        console.log(`[EventStream] Notifying callback: ${result.processed} events processed`);
+        console.log(`[EventStream] ✅ Notifying callback: ${result.processed} events processed`);
         try {
-          this.onEventsProcessedCallback(result);
-          console.log(`[EventStream] Callback executed successfully`);
+          await this.onEventsProcessedCallback(result);
+          console.log(`[EventStream] ✅ Callback executed successfully`);
         } catch (callbackError) {
-          console.error(`[EventStream] Error in callback:`, callbackError);
+          console.error(`[EventStream] ❌ Error in callback:`, callbackError);
+          if (callbackError instanceof Error) {
+            console.error(`[EventStream] Callback error stack:`, callbackError.stack);
+          }
         }
       } else {
-        console.log(`[EventStream] Not calling callback:`, {
+        console.log(`[EventStream] ⚠️ Not calling callback:`, {
           processed: result.processed,
-          hasCallback: !!this.onEventsProcessedCallback
+          hasCallback: !!this.onEventsProcessedCallback,
+          reason: result.processed === 0 ? 'no events processed' : 'callback not set'
         });
       }
 
@@ -313,11 +396,19 @@ export class EventStreamService {
   /**
    * Process a single event
    * Fetches the affected record and updates IndexedDB
+   * Handles both single-record events and bulk events
    */
   private async processEvent(event: BranchEvent, storeId: string): Promise<void> {
     console.log(
       `[EventStream] Processing event: ${event.event_type} ${event.operation} on ${event.entity_type}/${event.entity_id}`
     );
+
+    // Handle bulk events (products_bulk_updated, entities_bulk_updated, etc.)
+    if (this.isBulkEvent(event.event_type)) {
+      console.log(`[EventStream] Processing bulk event: ${event.event_type}`);
+      await this.processBulkEvent(event, storeId);
+      return;
+    }
 
     // Handle reverse operations (deletions)
     if (event.operation === 'reverse') {
@@ -347,6 +438,117 @@ export class EventStreamService {
   }
 
   /**
+   * Check if event type is a bulk event
+   */
+  private isBulkEvent(eventType: string): boolean {
+    const bulkEventTypes = [
+      'products_bulk_updated',
+      'entities_bulk_updated',
+      'users_bulk_updated',
+    ];
+    return bulkEventTypes.includes(eventType);
+  }
+
+  /**
+   * Process bulk events efficiently
+   * Instead of fetching records one by one, fetch all affected records in a single query
+   */
+  private async processBulkEvent(event: BranchEvent, storeId: string): Promise<void> {
+    const metadata = event.metadata;
+    if (!metadata) {
+      console.warn(`[EventStream] Bulk event ${event.id} has no metadata, skipping`);
+      return;
+    }
+
+    const tableName = this.mapEntityTypeToTable(event.entity_type);
+    if (!tableName) {
+      throw new Error(`Unknown entity type for bulk event: ${event.entity_type}`);
+    }
+
+    let affectedIds: string[] = [];
+
+    // Extract affected IDs based on event type
+    if (event.event_type === 'products_bulk_updated' && metadata.affected_product_ids) {
+      affectedIds = metadata.affected_product_ids;
+    } else if (event.event_type === 'entities_bulk_updated' && metadata.affected_entity_ids) {
+      affectedIds = metadata.affected_entity_ids;
+    } else if (event.event_type === 'users_bulk_updated' && metadata.affected_user_ids) {
+      affectedIds = metadata.affected_user_ids;
+    } else {
+      console.warn(`[EventStream] Bulk event ${event.id} missing affected IDs in metadata`);
+      return;
+    }
+
+    if (affectedIds.length === 0) {
+      console.warn(`[EventStream] Bulk event ${event.id} has empty affected IDs list`);
+      return;
+    }
+
+    console.log(`[EventStream] Processing bulk event with ${affectedIds.length} affected records`);
+
+    // Handle bulk deletions
+    if (event.operation === 'reverse') {
+      console.log(`[EventStream] Bulk deletion of ${affectedIds.length} ${tableName} records`);
+      const table = (db as any)[tableName];
+      if (table) {
+        for (const id of affectedIds) {
+          await table.delete(id);
+          console.log(`[EventStream] Deleted ${tableName}/${id} from IndexedDB`);
+        }
+      }
+      return;
+    }
+
+    // Fetch all affected records in a single query
+    try {
+      let query = supabase.from(tableName).select('*').in('id', affectedIds);
+
+      // Apply store filter based on table type
+      if (tableName === 'products') {
+        query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
+      } else if (tableName !== 'stores' && tableName !== 'transactions') {
+        query = query.eq('store_id', storeId);
+      }
+
+      const { data: records, error } = await query;
+
+      if (error) {
+        throw new Error(`Failed to fetch bulk ${tableName}: ${error.message}`);
+      }
+
+      if (!records || records.length === 0) {
+        console.warn(`[EventStream] Bulk query returned no records for ${tableName}`);
+        return;
+      }
+
+      console.log(`[EventStream] Fetched ${records.length} records for bulk update`);
+
+      // Update all records in IndexedDB
+      const table = (db as any)[tableName];
+      if (!table) {
+        throw new Error(`Table ${tableName} not found in IndexedDB`);
+      }
+
+      const normalizedRecords = records.map((record) => {
+        const normalized = this.normalizeRecord(record, tableName);
+        return {
+          ...normalized,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString(),
+        };
+      });
+
+      // Bulk put (upsert) all records at once
+      await table.bulkPut(normalizedRecords);
+
+      console.log(`[EventStream] Bulk updated ${normalizedRecords.length} ${tableName} records in IndexedDB`);
+    } catch (error) {
+      console.error(`[EventStream] Error processing bulk event:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Fetch the affected record from Supabase
    * Only fetches the specific record, not the whole table
    */
@@ -371,7 +573,9 @@ export class EventStreamService {
         query = query.eq('store_id', storeId);
       }
     } else if (tableName === 'stores') {
-      query = query.eq('id', storeId);
+      // For stores, entityId is the store ID - no additional filter needed
+      // The query already filters by id=entityId above
+      console.log(`[EventStream] Fetching store ${entityId} (entityId matches store ID)`);
     }
 
     const { data, error } = await query;
@@ -445,11 +649,19 @@ export class EventStreamService {
       inventory_item: 'inventory_items',
       inventory_bill: 'inventory_bills',
       entity: 'entities',
+      customer: 'entities', // Customer is an entity_type = 'customer'
+      supplier: 'entities', // Supplier is an entity_type = 'supplier'
       cash_drawer_session: 'cash_drawer_sessions',
       cash_drawer_account: 'cash_drawer_accounts',
       product: 'products',
       reminder: 'reminders',
       missed_product: 'missed_products',
+      store: 'stores',
+      branch: 'branches',
+      user: 'users',
+      chart_of_account: 'chart_of_accounts',
+      role_operation_limit: 'role_operation_limits',
+      user_module_access: 'user_module_access',
     };
 
     return mapping[entityType] || null;
@@ -532,6 +744,22 @@ export class EventStreamService {
    */
   async getCurrentState(branchId: string): Promise<SyncState | null> {
     return this.getSyncState(branchId);
+  }
+
+  /**
+   * Manually trigger catch-up for a branch (for debugging/manual sync)
+   * Useful when Realtime subscription might have missed events
+   */
+  async manualCatchUp(branchId: string, storeId: string): Promise<EventProcessingResult> {
+    console.log(`[EventStream] Manual catch-up triggered for branch ${branchId}`);
+    return this.catchUp(branchId, storeId);
+  }
+
+  /**
+   * Check if event stream is active for a branch
+   */
+  isActive(branchId: string): boolean {
+    return this.channels.has(branchId);
   }
 }
 

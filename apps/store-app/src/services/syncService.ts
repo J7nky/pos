@@ -14,7 +14,7 @@ const SYNC_CONFIG = {
   batchSize: 100,
   maxRetries: 2,
   retryDelay: 2000,
-  syncInterval: 300000, // 5 minutes (was 30 seconds)
+  // syncInterval: REMOVED - no periodic sync in fully event-driven mode
   maxRecordsPerSync: 1000,
   incrementalSyncThreshold: 50,
   validationCacheExpiry: 900000,
@@ -23,7 +23,6 @@ const SYNC_CONFIG = {
   maxConcurrentBatches: 3, // Limit concurrent batch operations
   connectionTimeout: 10000, // Connection timeout in ms
   queryTimeout: 30000, // Query timeout for individual queries (30s)
-  idleSyncInterval: 300000, // Sync interval when idle (5 minutes, matches syncInterval)
   // Deletion detection - optimized
   enableDeletionDetection: true, // Enable detection of remote deletions
   deletionDetectionInterval: 300000, // Run full deletion check every 5 minutes
@@ -47,29 +46,18 @@ const TABLES_WITH_CREATED_AT_ONLY = [
   'chart_of_accounts'
 ] as const;
 
-// Tables that rarely change - can skip change detection more often
-// Note: cash_drawer_accounts is now event-driven, removed from this list
-const RARELY_CHANGING_TABLES = [
-  'stores',
-  'branches',
-  'chart_of_accounts',
-  'role_operation_limits',
-  'user_module_access'
-] as const;
-
-// Tables that are event-driven only - should NOT be polled by periodic sync
-// These tables are handled by EventStreamService via branch_event_log
-const EVENT_DRIVEN_TABLES = [
-  'bills',
-  'bill_line_items',
-  'bill_audit_logs',
-  'transactions',
-  'journal_entries',
-  'cash_drawer_sessions',
-  'cash_drawer_accounts',
-  'inventory_bills',
-  'inventory_items',
-] as const;
+// REMOVED: RARELY_CHANGING_TABLES - No longer needed in fully event-driven mode
+// REMOVED: EVENT_DRIVEN_TABLES - ALL tables are now event-driven
+// 
+// In fully event-driven mode:
+// - All changes emit events to branch_event_log
+// - EventStreamService handles real-time sync via events
+// - syncService.sync() is only used for:
+//   1. Manual "Force Sync" triggered by user
+//   2. Initial full resync when local DB is empty
+//   3. Upload of local unsynced changes
+//
+// NO periodic polling happens anymore!
 
 // Table sync order (respects foreign key dependencies)
 const SYNC_TABLES = [
@@ -373,7 +361,7 @@ export class SyncService {
     }
   }
 
-  async sync(storeId: string): Promise<SyncResult> {
+  async sync(storeId: string, branchId?: string): Promise<SyncResult> {
     if (this.isRunning) {
       throw new Error('Sync already in progress');
     }
@@ -417,7 +405,7 @@ export class SyncService {
 
       // Upload then download
       const uploadStart = performance.now();
-      const uploadResult = await this.uploadLocalChanges(storeId);
+      const uploadResult = await this.uploadLocalChanges(storeId, branchId);
       const uploadTime = performance.now() - uploadStart;
       console.log(`⏱️  Upload time: ${uploadTime.toFixed(2)}ms (${uploadResult.uploaded} records)`);
       result.synced.uploaded = uploadResult.uploaded;
@@ -468,7 +456,7 @@ export class SyncService {
     return result;
   }
 
-  private async uploadLocalChanges(storeId: string) {
+  private async uploadLocalChanges(storeId: string, branchId?: string) {
     const result = { uploaded: 0, errors: [] as string[] };
 
     // Get detailed count for debugging
@@ -498,6 +486,14 @@ export class SyncService {
 
         if (activeRecords.length === 0 && deletedRecords.length === 0) {
           continue;
+        }
+
+        // Log when stores table has unsynced records
+        if (tableName === 'stores' && activeRecords.length > 0) {
+          console.log(`📤 [Sync] Found ${activeRecords.length} unsynced store record(s) to upload`);
+          activeRecords.forEach((r: any) => {
+            console.log(`   - Store ${r.id}: preferred_commission_rate=${r.preferred_commission_rate}, exchange_rate=${r.exchange_rate}, preferred_currency=${r.preferred_currency}`);
+          });
         }
 
         // Debug logging for discrepancy analysis
@@ -768,10 +764,12 @@ export class SyncService {
               }
             }
           } else {
+            // Mark all records as synced
             for (const record of batch as any[]) {
               await db.markAsSynced(tableName, record.id);
             }
             result.uploaded += batch.length;
+            console.log(`✅ [Sync] Successfully uploaded ${batch.length} ${tableName} records to Supabase`);
             
             // 🎯 EMIT EVENTS: After successful upload to Supabase
             // This ensures the record exists when other devices receive the event
@@ -904,6 +902,203 @@ export class SyncService {
                   console.log(`🎯 [Event] Emitted inventory_received event for bill ${record.id}`);
                 } catch (eventError) {
                   console.error('[Event] Failed to emit inventory_received event:', eventError);
+                }
+              }
+            } else if (tableName === 'entities') {
+              // Emit events for entity updates (customer/supplier balance changes)
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '', // Use current branch for store-level events
+                    event_type: record.entity_type === 'customer' ? 'customer_updated' : 'supplier_updated',
+                    entity_type: 'entity', // Database constraint requires 'entity', not 'customer' or 'supplier'
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      name: record.name,
+                      entity_type: record.entity_type, // Store actual type (customer/supplier) in metadata
+                      usd_balance: record.usd_balance || 0,
+                      lb_balance: record.lb_balance || 0
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted ${record.entity_type}_updated event for ${record.id}`);
+                } catch (eventError) {
+                  console.error(`[Event] Failed to emit ${record.entity_type}_updated event:`, eventError);
+                }
+              }
+            } else if (tableName === 'stores') {
+              // Emit events for store settings updates
+              for (const record of batch as any[]) {
+                try {
+                  // Validate branch_id - must be a valid UUID for store-level events
+                  if (!branchId || branchId === '') {
+                    console.warn(`⚠️ [Event] Cannot emit store_updated event: branchId is missing or empty. Store: ${record.id}`);
+                    console.warn('   Store-level events require a branch_id. Skipping event emission.');
+                    continue;
+                  }
+
+                  console.log(`🎯 [Event] Emitting store_updated event for store ${record.id}, branch ${branchId}`);
+                  await eventEmissionService.emitEvent({
+                    store_id: record.id,
+                    branch_id: branchId, // Use current branch for store-level events
+                    event_type: 'store_updated',
+                    entity_type: 'store',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      name: record.name,
+                      exchange_rate: record.exchange_rate,
+                      preferred_currency: record.preferred_currency,
+                      preferred_language: record.preferred_language,
+                      preferred_commission_rate: record.preferred_commission_rate
+                    }
+                  });
+                  console.log(`✅ [Event] Successfully emitted store_updated event for store ${record.id}`);
+                } catch (eventError) {
+                  console.error(`❌ [Event] Failed to emit store_updated event for store ${record.id}:`, eventError);
+                  // Log the error details for debugging
+                  if (eventError instanceof Error) {
+                    console.error('   Error message:', eventError.message);
+                    console.error('   Error stack:', eventError.stack);
+                  }
+                }
+              }
+            } else if (tableName === 'branches') {
+              // Emit events for branch updates
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: record.id,
+                    event_type: 'branch_updated',
+                    entity_type: 'branch',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      name: record.name,
+                      location: record.location
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted branch_updated event for branch ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit branch_updated event:', eventError);
+                }
+              }
+            } else if (tableName === 'users') {
+              // Emit events for user updates
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '',
+                    event_type: 'user_updated',
+                    entity_type: 'user',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || record.id,
+                    metadata: {
+                      name: record.name,
+                      role: record.role
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted user_updated event for user ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit user_updated event:', eventError);
+                }
+              }
+            } else if (tableName === 'products') {
+              // Emit events for product updates
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '',
+                    event_type: 'product_updated',
+                    entity_type: 'product',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      name: record.name,
+                      barcode: record.barcode,
+                      category: record.category
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted product_updated event for product ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit product_updated event:', eventError);
+                }
+              }
+            } else if (tableName === 'chart_of_accounts') {
+              // Emit events for chart of account updates
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '',
+                    event_type: 'chart_of_account_updated',
+                    entity_type: 'chart_of_account',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      account_code: record.account_code,
+                      account_name: record.account_name
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted chart_of_account_updated event for ${record.account_code}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit chart_of_account_updated event:', eventError);
+                }
+              }
+            } else if (tableName === 'role_operation_limits') {
+              // Emit events for role operation limit updates
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '',
+                    event_type: 'role_operation_limit_updated',
+                    entity_type: 'role_operation_limit',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      role: record.role,
+                      operation_type: record.operation_type,
+                      limit_value: record.limit_value
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted role_operation_limit_updated event for ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit role_operation_limit_updated event:', eventError);
+                }
+              }
+            } else if (tableName === 'user_module_access') {
+              // Emit events for user module access updates
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '',
+                    event_type: 'user_module_access_updated',
+                    entity_type: 'user_module_access',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      user_id: record.user_id,
+                      module_name: record.module_name,
+                      has_access: record.has_access
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted user_module_access_updated event for ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit user_module_access_updated event:', eventError);
                 }
               }
             }
@@ -1178,11 +1373,12 @@ export class SyncService {
     for (const tableName of SYNC_TABLES) {
       const tableStart = performance.now();
       try {
-        // Skip event-driven tables - they are handled by EventStreamService
-        if (EVENT_DRIVEN_TABLES.includes(tableName as any)) {
-          console.log(`⏭️  Skipping ${tableName} - handled by event-driven sync`);
-          continue;
-        }
+        // NOTE: In fully event-driven mode, ALL tables are handled by EventStreamService
+        // This sync() method is only used for:
+        // 1. Initial full resync (when DB is empty)
+        // 2. Manual "Force Sync" triggered by user
+        // 3. Uploading local unsynced changes
+        // Real-time updates happen via EventStreamService, not periodic sync
 
         if (!await this.validateDependencies(tableName, storeId)) {
           console.log(`⏳ Skipping download for ${tableName} - dependencies not met`);
@@ -1206,15 +1402,9 @@ export class SyncService {
         const localRecordCount = await table.filter((record: any) => !record._deleted).count();
         const shouldDoFullSync = isFirstSync || localRecordCount === 0;
 
-        // NEW: Change detection - skip sync if no changes detected
-        // For rarely-changing tables, skip change detection on frequent syncs (every 15s)
-        // Only check them every 60 seconds to reduce requests
-        const isRarelyChanging = RARELY_CHANGING_TABLES.includes(tableName as any);
-        const shouldSkipChangeDetection = isRarelyChanging && 
-          this.lastSyncAttempt && 
-          Date.now() - this.lastSyncAttempt.getTime() < 60000; // Skip if last sync was < 60s ago
-        
-        if (!shouldDoFullSync && !shouldSkipChangeDetection) {
+        // Change detection - skip sync if no changes detected
+        // In fully event-driven mode, this is only used for initial/manual sync
+        if (!shouldDoFullSync) {
           const changeDetection = await universalChangeDetectionService.detectChanges(
             tableName,
             storeId,
@@ -1492,10 +1682,9 @@ export class SyncService {
     for (const tableName of SYNC_TABLES) {
       const tableStart = performance.now();
       try {
-        // Skip event-driven tables - deletions are handled via events (reverse operation)
-        if (EVENT_DRIVEN_TABLES.includes(tableName as any)) {
-          continue;
-        }
+        // NOTE: Deletion detection runs for ALL tables as a safety mechanism
+        // Even though deletions are handled via events (reverse operation),
+        // this catches any deletions that happened directly in Supabase
 
         const table = (db as any)[tableName];
         
@@ -1535,6 +1724,7 @@ export class SyncService {
         let hasMore = true;
         let offset = 0;
         let totalFetched = 0;
+        let queryTimedOut = false;
         
         while (hasMore) {
           let query = supabase
@@ -1568,6 +1758,7 @@ export class SyncService {
           } catch (timeoutError) {
             result.errors.push(`Query timeout for ${tableName} at offset ${offset}`);
             console.error(`⏱️ Query timeout for ${tableName} at offset ${offset}`);
+            queryTimedOut = true;
             break;
           }
           
@@ -1575,6 +1766,7 @@ export class SyncService {
           
           if (error) {
             result.errors.push(`Failed to fetch remote IDs for ${tableName}: ${error.message}`);
+            queryTimedOut = true;
             break;
           }
           
@@ -1593,6 +1785,15 @@ export class SyncService {
             console.warn(`⚠️ ${tableName}: Reached pagination limit (50k records)`);
             break;
           }
+        }
+        
+        // CRITICAL FIX: Skip deletion detection if query timed out or failed
+        // Otherwise we'll incorrectly mark records as deleted when they're just not fetched yet
+        if (queryTimedOut) {
+          console.warn(`⚠️ Skipping deletion detection for ${tableName} - query timed out or failed. Will retry next sync.`);
+          const tableTime = performance.now() - tableStart;
+          console.log(`  ⏱️  ${tableName} deletion check: ${tableTime.toFixed(2)}ms (skipped due to timeout)`);
+          continue; // Skip to next table
         }
         
         console.log(`📊 ${tableName}: Fetched ${totalFetched} remote IDs, comparing with ${localCount} local records`);

@@ -1816,6 +1816,35 @@ class POSDatabase extends Dexie {
     this.bill_audit_logs.hook('creating', this.addCreateFields);
     this.bills.hook('updating', this.addUpdateFields);
 
+    // ========================================================================
+    // AUTOMATIC SYNC TRIGGERS - Generic solution for all tables
+    // ========================================================================
+    // These hooks automatically trigger sync when _synced: false is detected
+    // This ensures ALL database write operations trigger sync, regardless of
+    // whether they go through crudHelperService or direct DB calls
+    // ========================================================================
+    
+    // Get all table names that should trigger sync
+    const syncableTables = [
+      'stores', 'branches', 'products', 'users', 'entities',
+      'inventory_items', 'inventory_bills', 'transactions', 'journal_entries',
+      'bills', 'bill_line_items', 'bill_audit_logs',
+      'cash_drawer_accounts', 'cash_drawer_sessions',
+      'missed_products', 'reminders', 'chart_of_accounts',
+      'role_operation_limits', 'user_module_access', 'balance_snapshots'
+    ];
+
+    // Register sync trigger hooks for all tables
+    for (const tableName of syncableTables) {
+      const table = (this as any)[tableName];
+      if (table) {
+        // Hook for create operations
+        table.hook('creating', this.triggerSyncOnUnsynced);
+        // Hook for update operations
+        table.hook('updating', this.triggerSyncOnUpdate);
+      }
+    }
+
     // Migrations for schema updates (silent - no console logs needed)
     this.version(9).upgrade(trans => {
       // Bill management tables initialization
@@ -2436,6 +2465,46 @@ class POSDatabase extends Dexie {
   private addUpdateFields = (modifications: any, primKey: any, obj: any, trans: any) => {
     modifications.updated_at = new Date().toISOString();
     if (modifications._synced === undefined) modifications._synced = false;
+  };
+
+  /**
+   * Hook to automatically trigger sync when _synced: false is detected
+   * This ensures all database write operations trigger sync, regardless of how they're called
+   * Safe to call from Dexie hooks - defers execution until after transaction completes
+   */
+  private triggerSyncOnUnsynced = (primKey: any, obj: any, trans: any) => {
+    // Only trigger if record is marked as unsynced
+    if (obj._synced === false) {
+      console.log(`🔄 [DB Hook] Creating record with _synced: false - ${trans?.table?.name || 'unknown'}/${primKey}`);
+      // Defer execution to avoid blocking the transaction
+      // Import dynamically to avoid circular dependencies
+      setTimeout(() => {
+        import('../services/syncTriggerService').then(({ syncTriggerService }) => {
+          syncTriggerService.triggerSync();
+        }).catch(err => {
+          // Log error for debugging
+          console.warn('⚠️ [DB Hook] Sync trigger service not available:', err);
+        });
+      }, 0);
+    }
+  };
+
+  /**
+   * Hook for update operations - triggers sync when _synced: false is set
+   */
+  private triggerSyncOnUpdate = (modifications: any, primKey: any, obj: any, trans: any) => {
+    // Only trigger if _synced is being set to false
+    if (modifications._synced === false || (modifications._synced === undefined && obj._synced === false)) {
+      console.log(`🔄 [DB Hook] Updating record with _synced: false - ${trans?.table?.name || 'unknown'}/${primKey}`);
+      // Defer execution to avoid blocking the transaction
+      setTimeout(() => {
+        import('../services/syncTriggerService').then(({ syncTriggerService }) => {
+          syncTriggerService.triggerSync();
+        }).catch(err => {
+          console.warn('⚠️ [DB Hook] Sync trigger service not available:', err);
+        });
+      }, 0);
+    }
   };
 
   // ⚠️ DEPRECATED: Hook for automatic cash drawer updates - NO LONGER USED

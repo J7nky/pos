@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
@@ -49,6 +49,30 @@ export default function Settings() {
   const [tempExchangeRate, setTempExchangeRate] = useState(exchangeRate?.toString() || '89500');
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Sync local state with context values when they change (important for real-time updates from other devices)
+  useEffect(() => {
+    const newValue = defaultCommissionRate?.toString() || '10';
+    console.log(`[Settings] Syncing tempCommissionRate from context: ${defaultCommissionRate} -> ${newValue}`);
+    setTempCommissionRate(newValue);
+  }, [defaultCommissionRate]);
+
+  useEffect(() => {
+    console.log(`[Settings] Syncing tempCurrency from context: ${currency}`);
+    setTempCurrency(currency);
+  }, [currency]);
+
+  useEffect(() => {
+    const newValue = exchangeRate?.toString() || '89500';
+    console.log(`[Settings] Syncing tempExchangeRate from context: ${exchangeRate} -> ${newValue}`);
+    setTempExchangeRate(newValue);
+  }, [exchangeRate]);
+
+  useEffect(() => {
+    const newValue = lowStockThreshold?.toString() || '10';
+    console.log(`[Settings] Syncing tempThreshold from context: ${lowStockThreshold} -> ${newValue}`);
+    setTempThreshold(newValue);
+  }, [lowStockThreshold]);
 
   // Language change is now handled by the I18nProvider through OfflineDataContext
   // No need for custom handling here
