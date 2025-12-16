@@ -5,6 +5,7 @@ import { BalanceCalculator } from '../utils/balanceCalculator';
 import { QueryHelpers, DateFilters } from '../utils/queryHelpers';
 import { CacheManager, CacheKeys } from '../utils/cacheManager';
 import { PerformanceMonitor } from '../utils/performanceMonitor';
+import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 
 export interface RunningBalance {
   USD: number;
@@ -447,88 +448,109 @@ export class AccountBalanceService {
       let reversalResult;
       
       // Determine which service method to use based on the original transaction
+      // Use proper categories instead of negative amounts for reversals
+      const context = {
+        userId: createdBy,
+        module: 'account_balance_service',
+        source: 'api',
+        storeId: originalTransaction.store_id,
+        branchId: originalTransaction.branch_id || originalTransaction.store_id
+      };
+
       if (originalTransaction.customer_id) {
-        // For customer transactions, reverse the payment direction
+        // For customer transactions, use CUSTOMER_REFUND for reversals
         if (originalTransaction.type === 'income') {
-          // Original was income (customer paid us), reversal is expense (we refund customer)
-          // This increases customer balance (they owe us less or we owe them)
-          reversalResult = await transactionService.createCustomerPayment(
-            originalTransaction.customer_id,
-            -reversalAmount, // Negative to reverse the payment
-            reversalCurrency,
-            reversalDescription,
-            {
-              userId: createdBy,
-              module: 'account_balance_service',
-              source: 'api',
-              storeId: originalTransaction.store_id
-            }
-          );
+          // Original was income (customer paid us), reversal is refund (we refund customer)
+          // Use CUSTOMER_REFUND category which is an expense type
+          reversalResult = await transactionService.createTransaction({
+            category: TRANSACTION_CATEGORIES.CUSTOMER_REFUND,
+            amount: reversalAmount, // Positive amount, category handles the reversal
+            currency: reversalCurrency,
+            description: reversalDescription,
+            context,
+            customerId: originalTransaction.customer_id,
+            reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
+          });
         } else {
-          // Original was expense (we paid customer), reversal is income (customer pays us back)
+          // Original was expense (we paid customer/refund), reversal is payment (customer pays us back)
           reversalResult = await transactionService.createCustomerPayment(
             originalTransaction.customer_id,
             reversalAmount,
             reversalCurrency,
             reversalDescription,
+            context,
             {
-              userId: createdBy,
-              module: 'account_balance_service',
-              source: 'api',
-              storeId: originalTransaction.store_id
+              reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
             }
           );
         }
       } else if (originalTransaction.supplier_id) {
-        // For supplier transactions, reverse the payment direction
+        // For supplier transactions, use SUPPLIER_REFUND for reversals
         if (originalTransaction.type === 'expense') {
-          // Original was expense (we paid supplier), reversal is income (supplier refunds us)
-          reversalResult = await transactionService.createSupplierPayment(
-            originalTransaction.supplier_id,
-            -reversalAmount, // Negative to reverse the payment
-            reversalCurrency,
-            reversalDescription,
-            {
-              userId: createdBy,
-              module: 'account_balance_service',
-              source: 'api',
-              storeId: originalTransaction.store_id
-            }
-          );
+          // Original was expense (we paid supplier), reversal is refund (supplier refunds us)
+          // Use SUPPLIER_REFUND category which is an income type
+          reversalResult = await transactionService.createTransaction({
+            category: TRANSACTION_CATEGORIES.SUPPLIER_REFUND,
+            amount: reversalAmount, // Positive amount, category handles the reversal
+            currency: reversalCurrency,
+            description: reversalDescription,
+            context,
+            supplierId: originalTransaction.supplier_id,
+            reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
+          });
         } else {
-          // Original was income (supplier paid us), reversal is expense (we pay supplier back)
+          // Original was income (supplier paid us/refund), reversal is payment (we pay supplier back)
           reversalResult = await transactionService.createSupplierPayment(
             originalTransaction.supplier_id,
             reversalAmount,
             reversalCurrency,
             reversalDescription,
+            context,
             {
-              userId: createdBy,
-              module: 'account_balance_service',
-              source: 'api',
-              storeId: originalTransaction.store_id
+              reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
             }
           );
         }
+      } else if (originalTransaction.employee_id) {
+        // For employee transactions, use opposite category
+        // If original was EMPLOYEE_PAYMENT (expense), reversal is EMPLOYEE_PAYMENT_RECEIVED (income)
+        // If original was EMPLOYEE_PAYMENT_RECEIVED (income), reversal is EMPLOYEE_PAYMENT (expense)
+        const reversalCategory = originalTransaction.category === TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT
+          ? TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT_RECEIVED
+          : TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT;
+        
+        reversalResult = await transactionService.createTransaction({
+          category: reversalCategory,
+          amount: reversalAmount,
+          currency: reversalCurrency,
+          description: reversalDescription,
+          context,
+          employeeId: originalTransaction.employee_id,
+          reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
+        });
       } else {
-        // General expense reversal (no customer or supplier)
+        // General transaction reversal - reverse the type
+        const reversalType = originalTransaction.type === 'income' ? 'expense' : 'income';
         reversalResult = await transactionService.createTransaction({
           category: originalTransaction.category as any,
           amount: reversalAmount,
           currency: reversalCurrency,
           description: reversalDescription,
-          context: {
-            userId: createdBy,
-            module: 'account_balance_service',
-            source: 'api',
-            storeId: originalTransaction.store_id
-          }
+          context,
+          reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
         });
+      }
+      
+      // Check if reversal transaction was created successfully
+      if (!reversalResult.success) {
+        console.error('Reversal transaction creation failed:', reversalResult.error);
+        throw new Error(`Failed to create reversal transaction: ${reversalResult.error || 'Unknown error'}`);
       }
       
       // Get the created reversal transaction
       if (!reversalResult.transactionId) {
-        throw new Error('Failed to create reversal transaction');
+        console.error('Reversal result:', reversalResult);
+        throw new Error('Failed to create reversal transaction: No transaction ID returned');
       }
       
       const reversalTransaction = await db.transactions.get(reversalResult.transactionId);

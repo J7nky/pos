@@ -6,13 +6,15 @@ import {
   FileText,
   Wallet,
   FileText as Document,
+  DollarSign,
 } from "lucide-react";
 type AccountingTab =
   | "dashboard"
   | "nonpriced"
   | "bills-management"
   | "received-bills"
-  | "cash-drawer";
+  | "cash-drawer"
+  | "payments";
 
 type ActionTabsBarProps = {
   activeTab: AccountingTab;
@@ -30,6 +32,7 @@ const ActionTabsBar: React.FC<ActionTabsBarProps> = ({
     { id: "nonpriced", label: "Non Priced Items", icon: AlertCircle },
     { id: "bills-management", label: "Bills Management", icon: Document },
     { id: "received-bills", label: "Received Bills", icon: FileText },
+    { id: "payments", label: "Recent Payments", icon: DollarSign },
     { id: "cash-drawer", label: "Cash Drawer", icon: Wallet },
   ];
 

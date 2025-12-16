@@ -19,6 +19,7 @@ import ReceivedBills from '../components/accountingPage/tabs/ReceivedBills';
 import SoldBills from '../components/accountingPage/tabs/SoldBills';
 import DashboardOverview from '../components/accountingPage/tabs/DashboardOverview';
 import NonPricedItems from '../components/accountingPage/tabs/NonPricedItems';
+import RecentPayments from '../components/accountingPage/tabs/RecentPayments';
 import { PaymentsModal } from '../components/accountingPage/modals/PaymentsModal';
 import EditSaleModal from '../components/accountingPage/modals/EditSaleModal';
 import DeleteSaleModal from '../components/accountingPage/modals/DeleteSaleModal';
@@ -93,7 +94,7 @@ export default function Accounting() {
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('accounting_recent_suppliers', []);
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
 
-  const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer'>('accounting_active_tab', 'dashboard');
+  const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer' | 'payments'>('accounting_active_tab', 'dashboard');
   const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
   const [showForm, setShowForm] = useState<"receive" | "pay" | "expense" | null>(null);
   const [dashboardPeriod] = useLocalStorage<'today' | 'week' | 'month' | 'quarter' | 'year'>('accounting_dashboard_period', 'today');
@@ -1058,7 +1059,12 @@ export default function Accounting() {
         />
       )}
 
-    
+      {activeTab === 'payments' && (
+        <RecentPayments
+          formatCurrency={formatCurrency}
+          formatCurrencyWithSymbol={formatCurrencyWithSymbol}
+        />
+      )}
 
       {/* Forms Modal */}
       {showForm && (
