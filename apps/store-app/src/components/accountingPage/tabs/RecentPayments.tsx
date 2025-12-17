@@ -43,6 +43,9 @@ interface PaymentRow {
   reference: string | null;
   createdByName: string;
   createdById: string;
+  isReversal?: boolean;
+  reversalOfTransactionId?: string | null;
+  reversalTransactions?: PaymentRow[]; // Child reversals for this transaction
 }
 
 const ITEMS_PER_PAGE = 20;
@@ -65,6 +68,7 @@ export default function RecentPayments({
     end: ''
   });
   const [currentPage, setCurrentPage] = useState(1);
+  const [showReversals, setShowReversals] = useState(false);
   const [userNameCache, setUserNameCache] = useState<Record<string, string>>({});
   const [editingPayment, setEditingPayment] = useState<PaymentRow | null>(null);
   const [deletingPayment, setDeletingPayment] = useState<PaymentRow | null>(null);
@@ -128,6 +132,7 @@ export default function RecentPayments({
       endDate: dateRange.end || undefined,
       currency: currencyFilter !== 'all' ? (currencyFilter as 'USD' | 'LBP') : undefined
     });
+    console.log(paymentTransactions,753353);
 
     // Also include employee payments
     const employeePayments = transactions.filter(t => 
@@ -196,12 +201,52 @@ export default function RecentPayments({
         status,
         reference: transaction.reference,
         createdByName,
-        createdById: transaction.created_by || ''
+        createdById: transaction.created_by || '',
+        isReversal: transaction.is_reversal || false,
+        reversalOfTransactionId: transaction.reversal_of_transaction_id || null,
+        reversalTransactions: []
       };
     });
 
+    // Group reversals under their original transactions FIRST (before filtering)
+    const groupedRows: PaymentRow[] = [];
+    const reversalMap = new Map<string, PaymentRow[]>();
+    
+    // First, collect all reversals grouped by their original transaction ID
+    rows.forEach(row => {
+      if (row.isReversal && row.reversalOfTransactionId) {
+        if (!reversalMap.has(row.reversalOfTransactionId)) {
+          reversalMap.set(row.reversalOfTransactionId, []);
+        }
+        reversalMap.get(row.reversalOfTransactionId)!.push(row);
+      }
+    });
+
+    // Then, build the final list with reversals nested under originals
+    rows.forEach(row => {
+      if (!row.isReversal) {
+        // This is an original transaction - check if it has reversals
+        const reversals = reversalMap.get(row.id) || [];
+        if (reversals.length > 0) {
+          groupedRows.push({
+            ...row,
+            reversalTransactions: showReversals ? reversals : [] // Only include reversals if showReversals is true
+          });
+        } else {
+          groupedRows.push(row);
+        }
+      } else if (!row.reversalOfTransactionId) {
+        // Standalone reversal (shouldn't happen, but handle it)
+        // Only show if showReversals is true
+        if (showReversals) {
+          groupedRows.push(row);
+        }
+      }
+      // Skip reversals that have a parent - they'll be added as children if showReversals is true
+    });
+
     // Apply filters
-    let filtered = rows;
+    let filtered = groupedRows;
 
     // Search filter
     if (searchTerm) {
@@ -231,7 +276,7 @@ export default function RecentPayments({
     });
 
     return filtered;
-  }, [transactions, entities, userNameCache, searchTerm, typeFilter, statusFilter, currencyFilter, dateRange, paymentService]);
+  }, [transactions, entities, employees, userNameCache, searchTerm, typeFilter, statusFilter, currencyFilter, dateRange, showReversals, paymentService]);
 
   // Pagination
   const totalPages = Math.ceil(paymentRows.length / ITEMS_PER_PAGE);
@@ -243,7 +288,7 @@ export default function RecentPayments({
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, typeFilter, statusFilter, currencyFilter, dateRange]);
+  }, [searchTerm, typeFilter, statusFilter, currencyFilter, dateRange, showReversals]);
 
   const clearFilters = () => {
     setSearchTerm('');
@@ -251,11 +296,12 @@ export default function RecentPayments({
     setStatusFilter('all');
     setCurrencyFilter('all');
     setDateRange({ start: '', end: '' });
+    setShowReversals(false);
     setCurrentPage(1);
   };
 
   const hasActiveFilters = searchTerm || typeFilter !== 'all' || statusFilter !== 'all' || 
-                          currencyFilter !== 'all' || dateRange.start || dateRange.end;
+                          currencyFilter !== 'all' || dateRange.start || dateRange.end || showReversals;
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type, visible: true });
@@ -331,7 +377,7 @@ export default function RecentPayments({
       // This preserves history: "Mistakes are corrected, not erased. History is preserved, not rewritten"
       const reversalReason = `Correction: ${originalDescription}`;
       
-      console.log('🔄 Creating reversal transaction for payment correction...');
+      console.log('🔄 Creating reversal transaction for payment correction...');0
       const reversalTransaction = await accountBalanceService.createReversalTransaction(
         editingPayment.id,
         reversalReason,
@@ -485,7 +531,6 @@ export default function RecentPayments({
       showToast(error.message || t('accounting.failedToDeletePayment') || 'Failed to delete payment', 'error');
     }
   };
-
   return (
     <div className="space-y-6">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={() => setToast(t => ({ ...t, visible: false }))} />
@@ -569,7 +614,7 @@ export default function RecentPayments({
           </div>
         </div>
 
-        {/* Date Range */}
+        {/* Date Range and Toggle */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -593,11 +638,22 @@ export default function RecentPayments({
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
-          <div className="flex items-end">
+          <div className="flex items-end gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showReversals}
+                onChange={(e) => setShowReversals(e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-700">
+                {t('accounting.showCorrectedReversedPayments') || 'Show corrected & reversed payments'}
+              </span>
+            </label>
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
-                className="w-full px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 flex items-center justify-center gap-2"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 flex items-center justify-center gap-2"
               >
                 <X className="w-4 h-4" />
                 {t('common.clearFilters') || 'Clear Filters'}
@@ -653,77 +709,119 @@ export default function RecentPayments({
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {paginatedRows.map((row) => (
-                    <tr key={row.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {new Date(row.date).toLocaleDateString()} {new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          row.type === 'Customer Payment' 
-                            ? 'bg-green-100 text-green-800'
-                            : row.type === 'Supplier Payment'
-                            ? 'bg-blue-100 text-blue-800'
-                            : row.type === 'Employee Payment'
-                            ? 'bg-purple-100 text-purple-800'
-                            : 'bg-orange-100 text-orange-800'
-                        }`}>
-                          {row.type}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <User className="w-4 h-4 text-gray-400 mr-2" />
-                          <span className="text-sm text-gray-900">{row.entityName}</span>
-                          <span className="ml-2 text-xs text-gray-500 capitalize">({row.entityType})</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`text-sm font-semibold ${
-                          row.type === 'Customer Payment' ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {formatCurrencyWithSymbol(row.amount, row.currency)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          row.status === 'completed'
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}>
-                          {row.status === 'completed' 
-                            ? (t('accounting.completed') || 'Completed')
-                            : (t('accounting.reversed') || 'Reversed')}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {row.reference || '-'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {row.createdByName}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex items-center gap-2">
-                          {row.status === 'completed' && (
-                            <>
-                              <button
-                                onClick={() => handleEditPayment(row)}
-                                className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
-                                title={t('accounting.editPayment') || 'Edit Payment'}
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDeletePayment(row)}
-                                className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50"
-                                title={t('accounting.deletePayment') || 'Delete Payment'}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                    <React.Fragment key={row.id}>
+                      {/* Main transaction row */}
+                      <tr className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {new Date(row.date).toLocaleDateString()} {new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            row.type === 'Customer Payment' 
+                              ? 'bg-green-100 text-green-800'
+                              : row.type === 'Supplier Payment'
+                              ? 'bg-blue-100 text-blue-800'
+                              : row.type === 'Employee Payment'
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'bg-orange-100 text-orange-800'
+                          }`}>
+                            {row.type}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <User className="w-4 h-4 text-gray-400 mr-2" />
+                            <span className="text-sm text-gray-900">{row.entityName}</span>
+                            <span className="ml-2 text-xs text-gray-500 capitalize">({row.entityType})</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`text-sm font-semibold ${
+                            row.type === 'Customer Payment' ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {formatCurrencyWithSymbol(row.amount, row.currency)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            row.status === 'completed'
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {row.status === 'completed' 
+                              ? (t('accounting.completed') || 'Completed')
+                              : (t('accounting.reversed') || 'Reversed')}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.reference || '-'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.createdByName}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex items-center gap-2">
+                            {row.status === 'completed' && !row.isReversal && (
+                              <>
+                                <button
+                                  onClick={() => handleEditPayment(row)}
+                                  className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
+                                  title={t('accounting.editPayment') || 'Edit Payment'}
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeletePayment(row)}
+                                  className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50"
+                                  title={t('accounting.deletePayment') || 'Delete Payment'}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {/* Reversal transactions nested under original */}
+                      {row.reversalTransactions && row.reversalTransactions.length > 0 && row.reversalTransactions.map((reversal) => (
+                        <tr key={reversal.id} className="hover:bg-gray-50 bg-gray-50 border-l-4 border-orange-400">
+                          <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600 pl-12">
+                            {new Date(reversal.date).toLocaleDateString()} {new Date(reversal.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="px-6 py-3 whitespace-nowrap">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                              {reversal.type} (Reversal)
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <User className="w-4 h-4 text-gray-400 mr-2" />
+                              <span className="text-sm text-gray-600">{reversal.entityName}</span>
+                              <span className="ml-2 text-xs text-gray-500 capitalize">({reversal.entityType})</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-3 whitespace-nowrap">
+                            <span className="text-sm font-semibold text-orange-600">
+                              {formatCurrencyWithSymbol(reversal.amount, reversal.currency)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 whitespace-nowrap">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                              {t('accounting.reversal') || 'Reversal'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500">
+                            {reversal.reference || '-'}
+                          </td>
+                          <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
+                            {reversal.createdByName}
+                          </td>
+                          <td className="px-6 py-3 whitespace-nowrap text-sm font-medium">
+                            {/* Reversals typically don't have actions */}
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -736,6 +834,8 @@ export default function RecentPayments({
                   currentPage={currentPage}
                   totalPages={totalPages}
                   onPageChange={setCurrentPage}
+                  itemsPerPage={ITEMS_PER_PAGE}
+                  totalItems={paymentRows.length}
                 />
               </div>
             )}

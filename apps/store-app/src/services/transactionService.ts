@@ -57,6 +57,8 @@ export interface CreateTransactionParams {
   supplierId?: string | null;
   employeeId?: string | null;
   metadata?: Record<string, any>;
+  is_reversal?: boolean;
+  reversal_of_transaction_id?: string | null;
   
   // Behavior flags
   updateBalances?: boolean;
@@ -198,6 +200,8 @@ export class TransactionService {
         created_by: params.context.userId,
         _synced: params._synced ?? false,
         _deleted: false,
+        is_reversal: params.is_reversal ?? false,
+        reversal_of_transaction_id: params.reversal_of_transaction_id ?? null,
         metadata: {
           ...params.metadata,
           correlationId,

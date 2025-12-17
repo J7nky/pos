@@ -1707,6 +1707,68 @@ class POSDatabase extends Dexie {
       // No data migration needed - new table, starts empty
     });
 
+    // Version 45: Add is_reversal and reversal_of_transaction_id fields to transactions
+    this.version(45).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      branches: 'id, store_id, name, is_active, updated_at, _synced, _deleted',
+      
+      // Core tables
+      products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
+      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, [store_id+branch_id], _synced, _deleted',
+      // Add reversal_of_transaction_id index (is_reversal is boolean, cannot be indexed in Dexie)
+      transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, reversal_of_transaction_id, [store_id+branch_id], _synced, _deleted',
+      inventory_bills: 'id, store_id, branch_id, supplier_id, received_at, created_by, currency, [store_id+branch_id], _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, branch_id, customer_id, bill_number, payment_method, payment_status, bill_date, status, created_by, created_at, [store_id+branch_id], _synced, _deleted',
+      bill_line_items: 'id, store_id, branch_id, bill_id, inventory_item_id, product_id, created_at, [store_id+branch_id], [store_id+bill_id], _synced, _deleted',
+      bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, [store_id+branch_id], [store_id+bill_id], _synced, _deleted',
+      
+      // Cash drawer
+      cash_drawer_sessions: 'id, store_id, branch_id, opened_by, opened_at, closed_at, status, [store_id+branch_id], [store_id+branch_id+status], _synced, _deleted',
+      cash_drawer_accounts: 'id, store_id, branch_id, currency, created_at, updated_at, [store_id+branch_id], [store_id+branch_id+currency], _synced, _deleted',
+
+      // Public access tokens
+      public_access_tokens: 'id, customer_id, token, expires_at, created_at, _synced, _deleted',
+      
+      // Notification preferences
+      notification_preferences: 'id, store_id, branch_id, updated_at, _synced, _deleted',
+      
+      // Reminder system
+      reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
+      
+      // Employee attendance
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
+      
+      // Accounting foundation tables
+      journal_entries: 'id, store_id, branch_id, transaction_id, entity_id, account_code, currency, transaction_date, created_at, [store_id+branch_id], [store_id+account_code], [entity_id+currency+account_code], [entity_id+currency], [transaction_id], _synced, _deleted',
+      balance_snapshots: 'id, store_id, branch_id, entity_id, snapshot_date, created_at, [store_id+branch_id], _synced, _deleted',
+      entities: 'id, store_id, branch_id, entity_type, entity_code, name, is_system_entity, updated_at, [store_id+branch_id], [store_id+entity_type], [store_id+entity_code], [store_id+is_system_entity], _synced, _deleted',
+      chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
+      
+      // RBAC tables
+      role_operation_limits: 'id, [store_id+role], [store_id+role+operation_type], [store_id+user_id+operation_type], user_id, updated_at, _synced, _deleted',
+      user_module_access: 'id, [user_id+store_id], [user_id+store_id+module], user_id, store_id, updated_at, _synced, _deleted',
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      sync_state: 'branch_id, last_seen_event_version, updated_at',
+      
+      // Subscription management tables
+      subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
+    }).upgrade(async (trans) => {
+      console.log('🔧 Running migration v45: Add is_reversal and reversal_of_transaction_id to transactions');
+      console.log('   ✅ Added is_reversal and reversal_of_transaction_id fields to transactions table');
+      console.log('   📊 Schema updated - no existing data to migrate');
+      // No data migration needed - new fields will be set when creating new reversal transactions
+    });
+
     // Migration for version 5 - update existing records to match new schema
     this.version(5).upgrade(trans => {
       console.log('🔄 Running migration v5: Updating existing records to match new schema');

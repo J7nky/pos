@@ -634,6 +634,8 @@ export interface Database {
           created_at: string;
           supplier_id: string | null;
           customer_id: string | null;
+          is_reversal: boolean;
+          reversal_of_transaction_id?: string | null;
         };
         Insert: {
           id: string;
@@ -648,6 +650,8 @@ export interface Database {
           created_at?: string;
           supplier_id?: string | null;
           customer_id?: string | null;
+          is_reversal?: boolean;
+          reversal_of_transaction_id?: string | null;
         };
         Update: {
           id: string;
@@ -656,6 +660,8 @@ export interface Database {
           reference?: string | null;
           supplier_id?: string | null;
           customer_id?: string | null;
+          is_reversal?: boolean;
+          reversal_of_transaction_id?: string | null;
         };
       };
       missed_products: {

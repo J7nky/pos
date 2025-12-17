@@ -1010,9 +1010,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await refreshDataAndUpdateCount();
     }
 
-    // Run migrations for existing transactions after data loads
-    await migrateExistingTransactions();
-    await migrateTransactionIds();
+
 
     // ✅ Ensure cash drawer accounts are synced from Supabase before they're accessed
     // Only do this if we didn't just do a full resync (which already handles this above)
@@ -1103,52 +1101,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Migration: Fix transaction IDs with old format to proper UUIDs
-  const migrateTransactionIds = async () => {
-    if (!storeId) return;
+ 
 
-    try {
-      const { TransactionIdMigration } = await import('../utils/transactionIdMigration');
-      
-      // Check if migration is needed
-      const hasOldFormat = await TransactionIdMigration.hasOldFormatTransactions(storeId);
-      if (!hasOldFormat) {
-        return; // No migration needed
-      }
-
-      console.log('🔄 [MIGRATION] Starting transaction ID migration...');
-      const result = await TransactionIdMigration.migrateTransactionIds(storeId);
-      
-      if (result.success) {
-        console.log(`✅ [MIGRATION] Successfully migrated ${result.migratedCount} transaction IDs`);
-        // Refresh data to reflect changes
-        await refreshDataAndUpdateCount();
-      } else {
-        console.error('❌ [MIGRATION] Transaction ID migration failed:', result.errors);
-      }
-    } catch (error) {
-      console.error('❌ [MIGRATION] Transaction ID migration error:', error);
-    }
-  };
-
-  // Migration: Fix existing transactions with large LBP amounts
-  const migrateExistingTransactions = async () => {
-    if (!storeId) return;
-
-    // Check if migration has already been run
-    const migrationKey = `transaction_migration_${storeId}`;
-    const alreadyMigrated = localStorage.getItem(migrationKey);
-    if (alreadyMigrated) return;
-
-    try {
-      // Mark migration as complete - we now handle precision issues during sync
-      // This is system state, so localStorage is appropriate
-      localStorage.setItem(migrationKey, new Date().toISOString());
-      debug('✅ Transaction migration completed - precision issues now handled during sync');
-    } catch (error) {
-      console.error('❌ Transaction migration failed:', error);
-    }
-  };
+ 
 
   // Auto-sync when connection is restored
   useEffect(() => {
@@ -3503,7 +3458,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         created_at: new Date().toISOString(),
         _synced: false,
         amount: transactionData.amount,
-        reference: transactionData.reference ?? null
+        reference: transactionData.reference ?? null,
+        is_reversal: (transactionData as any).is_reversal ?? false,
+        reversal_of_transaction_id: (transactionData as any).reversal_of_transaction_id ?? null
       };
       await db.transactions.add(transaction);
     } else {

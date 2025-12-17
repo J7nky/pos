@@ -243,11 +243,34 @@ export class EventStreamService {
     try {
       // 1. Get last seen version from IndexedDB
       const syncState = await this.getSyncState(branchId);
-      const lastVersion = syncState?.last_seen_event_version || 0;
+      let lastVersion = syncState?.last_seen_event_version || 0;
+
+      // 2. OPTIMIZATION: If no sync state exists but database has data,
+      //    initialize with current max version to avoid replaying all events
+      if (!syncState && lastVersion === 0) {
+        console.log(`[EventStream] No sync state found for branch ${branchId}, checking if database has data...`);
+        
+        // Check if database has any data (pick a table that's likely to have records)
+        const hasData = await db.products.limit(1).count() > 0 || 
+                        await db.bills.limit(1).count() > 0 ||
+                        await db.transactions.limit(1).count() > 0;
+
+        if (hasData) {
+          console.log(`[EventStream] Database has data but no sync state - initializing to current max version to avoid replaying all events`);
+          await this.initializeSyncState(branchId);
+          
+          // Fetch the newly initialized sync state
+          const newSyncState = await this.getSyncState(branchId);
+          lastVersion = newSyncState?.last_seen_event_version || 0;
+          console.log(`[EventStream] Initialized sync state to version ${lastVersion} for branch ${branchId}`);
+        } else {
+          console.log(`[EventStream] Database is empty - will start from version 0 (expected on first sync)`);
+        }
+      }
 
       console.log(`[EventStream] Catching up from version ${lastVersion} for branch ${branchId}`);
 
-      // 2. Pull events since last version
+      // 3. Pull events since last version
       const events = await this.pullEvents(branchId, lastVersion);
 
       if (events.length === 0) {
@@ -255,9 +278,9 @@ export class EventStreamService {
         return { processed: 0, errors: [], last_version: lastVersion };
       }
 
-      console.log(`[EventStream] Found ${events.length} new events for branch ${branchId}`);
+      console.log(`[EventStream] Found ${events.length} new events for branch ${branchId} (versions ${events[0]?.version} to ${events[events.length - 1]?.version})`);
 
-      // 3. Process events sequentially
+      // 4. Process events sequentially
       console.log(`[EventStream] About to call processEvents with ${events.length} events`);
       const result = await this.processEvents(branchId, storeId, events);
       console.log(`[EventStream] processEvents returned:`, {
@@ -267,7 +290,7 @@ export class EventStreamService {
         lastVersion_before: lastVersion
       });
 
-      // 4. Update last seen version
+      // 5. Update last seen version
       if (result.last_version > lastVersion) {
         console.log(`[EventStream] Updating sync state from version ${lastVersion} to ${result.last_version}`);
         await this.updateSyncState(branchId, result.last_version);
@@ -737,6 +760,45 @@ export class EventStreamService {
     }, this.CATCH_UP_INTERVAL_MS);
 
     this.catchUpInterval.set(branchId, interval);
+  }
+
+  /**
+   * Initialize sync state with current max version from branch_event_log
+   * Should be called after fullResync() to avoid replaying all historical events
+   */
+  async initializeSyncState(branchId: string): Promise<void> {
+    try {
+      console.log(`[EventStream] Initializing sync state for branch ${branchId}...`);
+      
+      // Fetch the current max version from branch_event_log
+      const { data, error } = await supabase
+        .from('branch_event_log')
+        .select('version')
+        .eq('branch_id', branchId)
+        .order('version', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) {
+        // If no events exist yet, that's fine - start from version 0
+        if (error.code === 'PGRST116') {
+          console.log(`[EventStream] No events found for branch ${branchId}, starting from version 0`);
+          await this.updateSyncState(branchId, 0);
+          return;
+        }
+        throw error;
+      }
+
+      const maxVersion = data?.version || 0;
+      console.log(`[EventStream] Found max version ${maxVersion} for branch ${branchId}`);
+
+      // Update sync state with current max version
+      await this.updateSyncState(branchId, maxVersion);
+      console.log(`[EventStream] ✅ Sync state initialized to version ${maxVersion} for branch ${branchId}`);
+    } catch (error) {
+      console.error(`[EventStream] Failed to initialize sync state for branch ${branchId}:`, error);
+      // Don't throw - let the service start anyway, it will just replay events
+    }
   }
 
   /**

@@ -469,10 +469,13 @@ export class AccountBalanceService {
             description: reversalDescription,
             context,
             customerId: originalTransaction.customer_id,
-            reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
+            reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`,
+            is_reversal: true,
+            reversal_of_transaction_id: originalTransactionId
           });
         } else {
           // Original was expense (we paid customer/refund), reversal is payment (customer pays us back)
+          // Note: createCustomerPayment doesn't support is_reversal directly, so we'll update it after
           reversalResult = await transactionService.createCustomerPayment(
             originalTransaction.customer_id,
             reversalAmount,
@@ -483,6 +486,14 @@ export class AccountBalanceService {
               reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
             }
           );
+          // Update with reversal fields after creation
+          if (reversalResult.success && reversalResult.transactionId) {
+            await db.transactions.update(reversalResult.transactionId, {
+              is_reversal: true,
+              reversal_of_transaction_id: originalTransactionId,
+              _synced: false
+            });
+          }
         }
       } else if (originalTransaction.supplier_id) {
         // For supplier transactions, use SUPPLIER_REFUND for reversals
@@ -496,7 +507,9 @@ export class AccountBalanceService {
             description: reversalDescription,
             context,
             supplierId: originalTransaction.supplier_id,
-            reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
+            reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`,
+            is_reversal: true,
+            reversal_of_transaction_id: originalTransactionId
           });
         } else {
           // Original was income (supplier paid us/refund), reversal is payment (we pay supplier back)
@@ -510,6 +523,14 @@ export class AccountBalanceService {
               reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
             }
           );
+          // Update with reversal fields after creation
+          if (reversalResult.success && reversalResult.transactionId) {
+            await db.transactions.update(reversalResult.transactionId, {
+              is_reversal: true,
+              reversal_of_transaction_id: originalTransactionId,
+              _synced: false
+            });
+          }
         }
       } else if (originalTransaction.employee_id) {
         // For employee transactions, use opposite category
@@ -526,7 +547,9 @@ export class AccountBalanceService {
           description: reversalDescription,
           context,
           employeeId: originalTransaction.employee_id,
-          reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
+          reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`,
+          is_reversal: true,
+          reversal_of_transaction_id: originalTransactionId
         });
       } else {
         // General transaction reversal - reverse the type
@@ -537,7 +560,9 @@ export class AccountBalanceService {
           currency: reversalCurrency,
           description: reversalDescription,
           context,
-          reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`
+          reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`,
+          is_reversal: true,
+          reversal_of_transaction_id: originalTransactionId
         });
       }
       
@@ -553,10 +578,27 @@ export class AccountBalanceService {
         throw new Error('Failed to create reversal transaction: No transaction ID returned');
       }
       
-      const reversalTransaction = await db.transactions.get(reversalResult.transactionId);
+      let reversalTransaction = await db.transactions.get(reversalResult.transactionId);
       
       if (!reversalTransaction) {
         throw new Error('Failed to retrieve created reversal transaction');
+      }
+
+      // For transactions created via createCustomerPayment/createSupplierPayment, 
+      // we already updated them inline. For others, the fields were set during creation.
+      // Verify the fields are set correctly
+      if (!reversalTransaction.is_reversal || reversalTransaction.reversal_of_transaction_id !== originalTransactionId) {
+        // Fallback: update if not already set (shouldn't happen, but safety check)
+        await db.transactions.update(reversalResult.transactionId, {
+          is_reversal: true,
+          reversal_of_transaction_id: originalTransactionId,
+          _synced: false
+        });
+        // Get the updated transaction
+        reversalTransaction = await db.transactions.get(reversalResult.transactionId);
+        if (!reversalTransaction) {
+          throw new Error('Failed to retrieve updated reversal transaction');
+        }
       }
 
       // Update affected account balance

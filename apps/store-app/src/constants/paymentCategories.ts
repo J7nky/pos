@@ -7,11 +7,12 @@ export const PAYMENT_CATEGORIES = {
   // Customer-related payments
   CUSTOMER_PAYMENT: 'Customer Payment',
   CUSTOMER_CREDIT_SALE: 'Customer Credit Sale',
-  
+  CUSTOMER_REFUND: 'Customer Refund',
   // Supplier-related payments
   SUPPLIER_PAYMENT: 'Supplier Payment',
   SUPPLIER_COMMISSION: 'Supplier Commission',
-  
+  SUPPLIER_REFUND: 'Supplier Refund',
+  SUPPLIER_CREDIT_SALE: 'Supplier Credit Sale',
   // Cash drawer payments
   CASH_PAYMENT: 'Cash Payment',
   CASH_SALE: 'Cash Sale',
@@ -57,13 +58,16 @@ export const isPaymentCategory = (category: string): boolean => {
  */
 export const isCustomerPayment = (transaction: { type: string; category: string; customer_id?: string | null }): boolean => {
   return (
-    transaction.type === PAYMENT_TYPES.INCOME &&
+   (transaction.type === PAYMENT_TYPES.INCOME || transaction.type === PAYMENT_TYPES.EXPENSE) &&
     (transaction.category === PAYMENT_CATEGORIES.CUSTOMER_PAYMENT ||
+     transaction.category === PAYMENT_CATEGORIES.CUSTOMER_REFUND ||
      transaction.category === PAYMENT_CATEGORIES.CUSTOMER_CREDIT_SALE ||
      transaction.category === PAYMENT_CATEGORIES.PAYMENT_RECEIVED) &&
     !!transaction.customer_id
-  );
+  );  
+  
 };
+
 
 /**
  * Check if a transaction is a supplier payment
@@ -72,7 +76,9 @@ export const isSupplierPayment = (transaction: { type: string; category: string;
   return (
     transaction.type === PAYMENT_TYPES.EXPENSE &&
     (transaction.category === PAYMENT_CATEGORIES.SUPPLIER_PAYMENT ||
+     transaction.category === PAYMENT_CATEGORIES.SUPPLIER_CREDIT_SALE ||
      transaction.category === PAYMENT_CATEGORIES.SUPPLIER_COMMISSION ||
+     transaction.category === PAYMENT_CATEGORIES.SUPPLIER_REFUND ||
      transaction.category === PAYMENT_CATEGORIES.PAYMENT_SENT) &&
     !!transaction.supplier_id
   );

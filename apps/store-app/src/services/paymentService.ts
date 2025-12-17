@@ -51,6 +51,7 @@ export class PaymentService {
     transactions: Transaction[], 
     filter: PaymentFilter = {}
   ): PaymentTransaction[] {
+
     let filteredTransactions = transactions.filter(isPaymentTransaction);
 
     // Apply entity type filter

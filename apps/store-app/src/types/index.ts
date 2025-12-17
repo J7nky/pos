@@ -429,6 +429,8 @@ export interface Transaction {
   _synced: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
+  is_reversal?: boolean;
+  reversal_of_transaction_id?: string | null;
 }
 
 export interface CashDrawer {
