@@ -111,13 +111,13 @@ export function AccountStatementPrintContent({
                           </>
                         )}
                         <td className="print-table-col-debit print-number print-currency">
-                          {transaction.type !== 'payment' ? formatCurrency(transaction.amount || 0, transaction.currency, false) : '0'}
+                          {transaction.type !== 'payment' ? formatCurrency(transaction.amount || 0, transaction.currency || 'LBP', false) : '0'}
                         </td>
                         <td className="print-table-col-credit print-number print-currency">
-                          {transaction.type === 'payment' ? formatCurrency(transaction.amount || 0, transaction.currency, false) : '0'}
+                          {transaction.type === 'payment' ? formatCurrency(transaction.amount || 0, transaction.currency || 'LBP', false) : '0'}
                         </td>
                         <td className="print-table-col-balance print-number print-currency">
-                          {formatCurrency(transaction.balanceAfter, transaction.currency, true)}
+                          {formatCurrency(transaction.balanceAfter, transaction.currency || 'LBP', true)}
                         </td>
                       </tr>
                     ))}

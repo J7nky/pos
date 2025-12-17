@@ -17,11 +17,16 @@ export interface CurrencyFormatOptions {
  * @returns Formatted currency string
  */
 export function formatCurrency(
-  amount: number,
+  amount: number | undefined | null,
   currency: 'USD' | 'LBP',
   includeSymbol: boolean = true,
   locale: string = 'en-US'
 ): string {
+  // Handle undefined/null amounts
+  if (amount === undefined || amount === null || isNaN(amount)) {
+    amount = 0;
+  }
+  
   if (currency === 'USD') {
     const formatted = amount.toFixed(2);
     return includeSymbol ? `$${formatted}` : formatted;

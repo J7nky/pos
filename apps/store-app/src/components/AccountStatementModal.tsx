@@ -110,50 +110,18 @@ export default function AccountStatementModal({
 
       let newStatement: AccountStatement | null = null;
 
-      // Compute locally (always) - now uses optimized database queries
+      // Generate statement using journal entries (single source of truth)
       if (entityType === 'customer') {
         newStatement = await accountStatementService.generateCustomerStatement(
-          entity as Customer,
+          entity.id,
           storeId,
-          sales,
-          transactions,
-          products,
-          inventory,
           dateRange,
-          viewMode,
-          bills
+          viewMode
         );
       } else {
-        // Normalize LocalSaleItem[] to unified SaleItem[] for supplier statements
-        // const normalizedSales: BillLineItem[] = (sales as any[]).map((s: any) => ({
-        //   id: s.id,
-        //   storeId: s.store_id,
-        //   inventoryItemId: s.inventory_item_id,
-        //   billId: s.bill_id,
-        //   productId: s.product_id,
-        //   supplierId: s.supplier_id,
-        //   customerId: s.customer_id || undefined,
-        //   quantity: s.quantity || 0,
-        //   weight: s.weight ?? undefined,
-        //   unitPrice: s.unit_price || 0,
-        //   totalPrice: (s.quantity || 0) * (s.unit_price || 0),
-        //   receivedValue: s.received_value || 0,
-        //   paymentMethod: s.payment_method,
-        //   notes: s.notes || undefined,
-        //   createdAt: s.created_at,
-        //   createdBy: s.created_by,
-        //   synced: s._synced ?? true,
-        //   deleted: s._deleted ?? false,
-        // }));
-
-        newStatement = accountStatementService.generateSupplierStatement(
-          entity as Supplier,
+        newStatement = await accountStatementService.generateSupplierStatement(
+          entity.id,
           storeId,
-          sales,
-          inventory,
-          transactions,
-          products,
-          inventoryBills as any,
           dateRange,
           viewMode
         );
@@ -603,7 +571,7 @@ export default function AccountStatementModal({
                               <td className="px-6 py-4 whitespace-nowrap">
                                 {transaction.type === 'payment' ? (
                                   <span className="text-sm font-bold text-green-600">
-                                    {formatCurrency(transaction.amount || 0, transaction.currency)}
+                                    {formatCurrency(transaction.amount || 0, transaction.currency || 'LBP')}
                                   </span>
                                 ) : (
                                   <span className="text-sm text-gray-400">-</span>
@@ -613,7 +581,7 @@ export default function AccountStatementModal({
                               <td className="px-6 py-4 whitespace-nowrap">
                                 {transaction.type !== 'payment' ? (
                                   <span className="text-sm font-bold text-red-600">
-                                    {formatCurrency(transaction.amount || 0, transaction.currency)}
+                                    {formatCurrency(transaction.amount || 0, transaction.currency || 'LBP')}
                                   </span>
                                 ) : (
                                   <span className="text-sm text-gray-400">-</span>
@@ -621,7 +589,7 @@ export default function AccountStatementModal({
                               </td>
                               {/* balance USD/LBP */}
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {formatCurrency(transaction.balanceAfter, transaction.currency)}
+                                {formatCurrency(transaction.balanceAfter, transaction.currency || 'LBP')}
                               </td>
                               {/* reference */}
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

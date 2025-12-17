@@ -143,18 +143,18 @@ export default function PublicCustomerStatement() {
         console.warn('⚠️ Bills function failed, using empty array:', billsError);
       }
 
-      // Generate statement using AccountStatementService
+      // Generate statement using AccountStatementService (now uses journal entries)
       console.log('📊 Generating statement...');
       const accountStatementService = AccountStatementService.getInstance();
+      
+      // Get storeId from customer or use a default (you may need to adjust this)
+      const storeId = customer.store_id || '';
+      
       const generatedStatement = await accountStatementService.generateCustomerStatement(
-        customer,
-        salesData || [],
-        transactionsData || [],
-        (productsData || []) as Product[],
-        inventoryData || [],
+        customer.id,
+        storeId,
         dateRange,
-        viewMode,
-        billsData || []
+        viewMode
       );
 
       setStatement(generatedStatement);

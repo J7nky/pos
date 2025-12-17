@@ -6,6 +6,7 @@ import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { PaymentService, PaymentTransaction } from '../../../services/paymentService';
 import { transactionService } from '../../../services/transactionService';
 import { accountBalanceService } from '../../../services/accountBalanceService';
+import { transactionValidationService } from '../../../services/transactionValidationService';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import { db } from '../../../lib/db';
 import { 
@@ -29,7 +30,7 @@ interface RecentPaymentsProps {
 }
 
 type PaymentType = 'Customer Payment' | 'Supplier Payment' | 'Employee Payment' | 'Refund';
-type PaymentStatus = 'completed' | 'reversed';
+type PaymentStatus = 'completed' | 'reversed' | 'canceled';
 
 interface PaymentRow {
   id: string;
@@ -37,6 +38,7 @@ interface PaymentRow {
   type: PaymentType;
   entityName: string;
   entityType: 'customer' | 'supplier' | 'employee';
+  entityId?: string; // Entity ID for balance calculations
   amount: number;
   currency: 'USD' | 'LBP';
   status: PaymentStatus;
@@ -46,9 +48,31 @@ interface PaymentRow {
   isReversal?: boolean;
   reversalOfTransactionId?: string | null;
   reversalTransactions?: PaymentRow[]; // Child reversals for this transaction
+  originalAmount?: number; // Original amount for corrected payments
+  originalCurrency?: 'USD' | 'LBP'; // Original currency for corrected payments
+  isCorrected?: boolean; // Whether this is a corrected payment
+}
+
+interface DeletionDetails {
+  balanceImpact?: { before: number; after: number; currency: string };
+  isSynced?: boolean;
+  hasReversals?: boolean;
+  cashDrawerImpact?: boolean;
+  warnings?: string[];
 }
 
 const ITEMS_PER_PAGE = 20;
+
+// Helper function to get translation key for payment type
+const getPaymentTypeTranslationKey = (type: PaymentType): string => {
+  const typeMap: Record<PaymentType, string> = {
+    'Customer Payment': 'customerPayment',
+    'Supplier Payment': 'supplierPayment',
+    'Employee Payment': 'employeePayment',
+    'Refund': 'refund'
+  };
+  return `payments.${typeMap[type]}`;
+};
 
 export default function RecentPayments({
   formatCurrency,
@@ -72,6 +96,8 @@ export default function RecentPayments({
   const [userNameCache, setUserNameCache] = useState<Record<string, string>>({});
   const [editingPayment, setEditingPayment] = useState<PaymentRow | null>(null);
   const [deletingPayment, setDeletingPayment] = useState<PaymentRow | null>(null);
+  const [deletionDetails, setDeletionDetails] = useState<DeletionDetails | null>(null);
+  const [loadingDeletionDetails, setLoadingDeletionDetails] = useState(false);
   const [editForm, setEditForm] = useState({
     amount: '',
     currency: 'USD' as 'USD' | 'LBP',
@@ -144,7 +170,32 @@ export default function RecentPayments({
     );
 
     // Combine all payment transactions
-    const allPaymentTransactions = [...paymentTransactions, ...employeePayments];
+    let allPaymentTransactions = [...paymentTransactions, ...employeePayments];
+
+    // Build a map of corrected transaction IDs to their original amounts and currencies
+    // This helps us identify which transactions are corrections and what their original amounts were
+    const correctedTransactionMap = new Map<string, { amount: number; currency: 'USD' | 'LBP' }>();
+    transactions.forEach(t => {
+      if (t.metadata?.corrected === true && t.metadata?.correctedTransactionId) {
+        // This is the original transaction that was corrected
+        // Store the original amount and currency for the corrected transaction
+        const correctedTransactionId = t.metadata.correctedTransactionId as string;
+        correctedTransactionMap.set(correctedTransactionId, {
+          amount: t.amount,
+          currency: t.currency as 'USD' | 'LBP'
+        });
+      }
+    });
+
+    // Filter out original transactions that were corrected (metadata.corrected === true)
+    // These should not appear in the list
+    allPaymentTransactions = allPaymentTransactions.filter(t => {
+      // Hide original transactions that were corrected
+      if (t.metadata?.corrected === true) {
+        return false;
+      }
+      return true;
+    });
 
     // Map to rows with entity and user names
     const rows: PaymentRow[] = allPaymentTransactions.map((transaction: any) => {
@@ -182,13 +233,23 @@ export default function RecentPayments({
         entityName = entity?.name || 'Unknown';
       }
 
-      // Determine status
-      const status: PaymentStatus = transaction._deleted ? 'reversed' : 'completed';
+      // Determine status: canceled (metadata.deleted) > reversed (_deleted) > completed
+      const status: PaymentStatus = (transaction.metadata as any)?.deleted === true
+        ? 'canceled'
+        : transaction._deleted
+          ? 'reversed'
+          : 'completed';
 
       // Get created by name
       const createdByName = transaction.created_by 
         ? (userNameCache[transaction.created_by] || 'Unknown')
         : 'System';
+
+      // Check if this is a corrected transaction
+      const isCorrected = correctedTransactionMap.has(transaction.id);
+      const originalData = isCorrected ? correctedTransactionMap.get(transaction.id) : undefined;
+      const originalAmount = originalData?.amount;
+      const originalCurrency = originalData?.currency;
 
       return {
         id: transaction.id,
@@ -196,6 +257,7 @@ export default function RecentPayments({
         type,
         entityName,
         entityType,
+        entityId: entityId || undefined,
         amount: transaction.amount,
         currency: transaction.currency || 'USD',
         status,
@@ -204,17 +266,24 @@ export default function RecentPayments({
         createdById: transaction.created_by || '',
         isReversal: transaction.is_reversal || false,
         reversalOfTransactionId: transaction.reversal_of_transaction_id || null,
-        reversalTransactions: []
+        reversalTransactions: [],
+        originalAmount,
+        originalCurrency,
+        isCorrected: isCorrected || false
       };
     });
 
-    // Group reversals under their original transactions FIRST (before filtering)
+    // Separate non-reversal and reversal transactions
+    const nonReversalRows = rows.filter(row => !row.isReversal);
+    const reversalRows = rows.filter(row => row.isReversal);
+
+    // Group reversals under their original transactions (for non-corrected originals)
     const groupedRows: PaymentRow[] = [];
     const reversalMap = new Map<string, PaymentRow[]>();
     
-    // First, collect all reversals grouped by their original transaction ID
-    rows.forEach(row => {
-      if (row.isReversal && row.reversalOfTransactionId) {
+    // Collect reversals grouped by their original transaction ID
+    reversalRows.forEach(row => {
+      if (row.reversalOfTransactionId) {
         if (!reversalMap.has(row.reversalOfTransactionId)) {
           reversalMap.set(row.reversalOfTransactionId, []);
         }
@@ -222,28 +291,35 @@ export default function RecentPayments({
       }
     });
 
-    // Then, build the final list with reversals nested under originals
-    rows.forEach(row => {
-      if (!row.isReversal) {
-        // This is an original transaction - check if it has reversals
-        const reversals = reversalMap.get(row.id) || [];
-        if (reversals.length > 0) {
-          groupedRows.push({
-            ...row,
-            reversalTransactions: showReversals ? reversals : [] // Only include reversals if showReversals is true
-          });
-        } else {
-          groupedRows.push(row);
-        }
-      } else if (!row.reversalOfTransactionId) {
-        // Standalone reversal (shouldn't happen, but handle it)
-        // Only show if showReversals is true
-        if (showReversals) {
-          groupedRows.push(row);
-        }
+    // Build the final list with reversals nested under their originals (if originals exist)
+    nonReversalRows.forEach(row => {
+      const reversals = reversalMap.get(row.id) || [];
+      if (reversals.length > 0 && showReversals) {
+        // Original transaction with reversals - include reversals as children
+        groupedRows.push({
+          ...row,
+          reversalTransactions: reversals
+        });
+      } else {
+        // Original transaction without reversals, or showReversals is false
+        groupedRows.push(row);
       }
-      // Skip reversals that have a parent - they'll be added as children if showReversals is true
     });
+
+    // Add standalone reversal transactions (reversals whose originals were filtered out)
+    // These are reversals that point to transactions with metadata.corrected === true
+    if (showReversals) {
+      reversalRows.forEach(row => {
+        // Check if this reversal is already included as a child
+        const alreadyIncluded = groupedRows.some(gr => 
+          gr.reversalTransactions?.some(rt => rt.id === row.id)
+        );
+        if (!alreadyIncluded) {
+          // This is a standalone reversal (its original was filtered out)
+          groupedRows.push(row);
+        }
+      });
+    }
 
     // Apply filters
     let filtered = groupedRows;
@@ -335,7 +411,7 @@ export default function RecentPayments({
 
     const amount = parseFloat(editForm.amount);
     if (isNaN(amount) || amount <= 0) {
-      showToast(t('accounting.pleaseEnterValidAmount') || 'Please enter a valid amount', 'error');
+      showToast(t('payments.pleaseEnterValidAmount') || 'Please enter a valid amount', 'error');
       return;
     }
 
@@ -352,7 +428,7 @@ export default function RecentPayments({
       // Get the original transaction
       const originalTransaction = transactions.find(t => t.id === editingPayment.id);
       if (!originalTransaction) {
-        showToast(t('accounting.transactionNotFound') || 'Transaction not found', 'error');
+        showToast(t('payments.transactionNotFound') || 'Transaction not found', 'error');
         return;
       }
 
@@ -368,7 +444,7 @@ export default function RecentPayments({
       const referenceChanged = (originalTransaction.reference || '') !== (editForm.reference || '');
 
       if (!amountChanged && !currencyChanged && !descriptionChanged && !referenceChanged) {
-        showToast(t('accounting.noChangesDetected') || 'No changes detected', 'error');
+        showToast(t('payments.noChangesDetected') || 'No changes detected', 'error');
         setEditingPayment(null);
         return;
       }
@@ -385,7 +461,7 @@ export default function RecentPayments({
       );
 
       if (!reversalTransaction) {
-        showToast(t('accounting.failedToCreateReversal') || 'Failed to create reversal transaction', 'error');
+        showToast(t('payments.failedToCreateReversal') || 'Failed to create reversal transaction', 'error');
         return;
       }
 
@@ -475,7 +551,7 @@ export default function RecentPayments({
 
         console.log('✅ Payment correction completed successfully');
         showToast(
-          t('accounting.paymentCorrectedSuccessfully') || 
+          t('payments.paymentCorrectedSuccessfully') || 
           'Payment corrected successfully. Original transaction preserved, reversal and correction created.',
           'success'
         );
@@ -484,7 +560,7 @@ export default function RecentPayments({
       } else {
         showToast(
           correctedResult.error || 
-          t('accounting.failedToCorrectPayment') || 
+          t('payments.failedToCorrectPayment') || 
           'Failed to correct payment',
           'error'
         );
@@ -493,15 +569,148 @@ export default function RecentPayments({
       console.error('❌ Error correcting payment:', error);
       showToast(
         error.message || 
-        t('accounting.failedToCorrectPayment') || 
+        t('payments.failedToCorrectPayment') || 
         'Failed to correct payment',
         'error'
       );
     }
   };
 
-  const handleDeletePayment = (payment: PaymentRow) => {
+  // Helper function to calculate balance impact
+  const getBalanceImpact = async (payment: PaymentRow): Promise<{ before: number; after: number; currency: string } | null> => {
+    // Only calculate for customer/supplier payments with valid entity ID
+    if (!payment.entityId || 
+        !payment.entityType || 
+        (payment.entityType !== 'customer' && payment.entityType !== 'supplier')) {
+      return null; // Employee payments don't affect entity balances
+    }
+
+    try {
+      // Validate entityId is a non-empty string
+      if (typeof payment.entityId !== 'string' || payment.entityId.trim() === '') {
+        console.warn('Invalid entityId for balance calculation:', payment.entityId);
+        return null;
+      }
+
+      const balanceResult = await accountBalanceService.getAccountBalance(
+        payment.entityType,
+        payment.entityId,
+        false, // Don't verify, use cached
+        undefined // No date range
+      );
+
+      const currentBalance = payment.currency === 'USD' 
+        ? balanceResult.currentBalance.USD 
+        : balanceResult.currentBalance.LBP;
+
+      // Calculate impact: deletion reverses the transaction
+      // Customer payment: when received, it DECREASES customer balance (they owe us less)
+      //   Deletion reverses this: balance INCREASES (they owe us more again)
+      // Supplier payment: when sent, it DECREASES supplier balance (we owe them less)
+      //   Deletion reverses this: balance INCREASES (we owe them more again)
+      // Refund: reverses the original transaction effect
+      let impactAmount = 0;
+      if (payment.type === 'Customer Payment') {
+        // Customer payment deletion: reverses the decrease, so balance increases
+        impactAmount = payment.amount;
+      } else if (payment.type === 'Supplier Payment') {
+        // Supplier payment deletion: reverses the decrease, so balance increases
+        impactAmount = payment.amount;
+      } else if (payment.type === 'Refund') {
+        // Refund deletion: reverses the refund effect
+        // Customer refund deletion: reverses refund (they owe us more again)
+        // Supplier refund deletion: reverses refund (we owe them more again)
+        impactAmount = payment.amount;
+      }
+
+      return {
+        before: currentBalance,
+        after: currentBalance + impactAmount,
+        currency: payment.currency
+      };
+    } catch (error) {
+      console.error('Error calculating balance impact:', error);
+      return null;
+    }
+  };
+
+  // Helper function to check if transaction has related reversals
+  const checkForReversals = async (transactionId: string): Promise<boolean> => {
+    try {
+      // Use filter instead of where to avoid index requirements
+      // Check both _deleted and metadata.deleted
+      const reversals = await db.transactions
+        .filter(t => 
+          t.reversal_of_transaction_id === transactionId && 
+          !t._deleted && 
+          (t.metadata as any)?.deleted !== true
+        )
+        .count();
+      return reversals > 0;
+    } catch (error) {
+      console.error('Error checking for reversals:', error);
+      return false;
+    }
+  };
+
+  // Helper function to check if transaction affects cash drawer
+  const checkCashDrawerImpact = async (payment: PaymentRow): Promise<boolean> => {
+    try {
+      const transaction = await db.transactions.get(payment.id);
+      if (!transaction) return false;
+      
+      // Check if this is a cash transaction category
+      const cashCategories = [
+        TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED,
+        TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT
+      ];
+      
+      return cashCategories.includes(transaction.category as any);
+    } catch (error) {
+      console.error('Error checking cash drawer impact:', error);
+      return false;
+    }
+  };
+
+  const handleDeletePayment = async (payment: PaymentRow) => {
     setDeletingPayment(payment);
+    setLoadingDeletionDetails(true);
+    setDeletionDetails(null);
+
+    try {
+      // Fetch deletion details in parallel
+      const [balanceImpact, hasReversals, transaction, cashDrawerImpact] = await Promise.all([
+        getBalanceImpact(payment),
+        checkForReversals(payment.id),
+        db.transactions.get(payment.id),
+        checkCashDrawerImpact(payment)
+      ]);
+
+      // Get validation warnings (non-blocking)
+      const validationResult = await transactionValidationService.validateTransactionDeletion(
+        payment.id,
+        {
+          enforceImmutability: false,
+          allowDeletes: true
+        }
+      );
+
+      const details: DeletionDetails = {
+        balanceImpact: balanceImpact || undefined,
+        isSynced: transaction?._synced || false,
+        hasReversals,
+        cashDrawerImpact,
+        warnings: validationResult.warnings.length > 0 ? validationResult.warnings : undefined
+      };
+
+      setDeletionDetails(details);
+    } catch (error) {
+      console.error('Error fetching deletion details:', error);
+      // Still allow deletion even if details fetch fails
+      setDeletionDetails({});
+    } finally {
+      setLoadingDeletionDetails(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -520,15 +729,16 @@ export default function RecentPayments({
       const result = await transactionService.deleteTransaction(deletingPayment.id, context);
 
       if (result.success) {
-        showToast(t('accounting.paymentDeletedSuccessfully') || 'Payment deleted successfully', 'success');
+        showToast(t('payments.paymentDeletedSuccessfully') || 'Payment deleted successfully', 'success');
         setDeletingPayment(null);
+        setDeletionDetails(null);
         await raw.refreshData();
       } else {
-        showToast(result.error || t('accounting.failedToDeletePayment') || 'Failed to delete payment', 'error');
+        showToast(result.error || t('payments.failedToDeletePayment') || 'Failed to delete payment', 'error');
       }
     } catch (error: any) {
       console.error('Error deleting payment:', error);
-      showToast(error.message || t('accounting.failedToDeletePayment') || 'Failed to delete payment', 'error');
+      showToast(error.message || t('payments.failedToDeletePayment') || 'Failed to delete payment', 'error');
     }
   };
   return (
@@ -538,10 +748,10 @@ export default function RecentPayments({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">
-            {t('accounting.recentPayments') || 'Recent Payments'}
+            {t('payments.recentPayments') || 'Recent Payments'}
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            {t('accounting.paymentTransactions') || 'Payment Transactions'} ({paymentRows.length})
+            {t('payments.paymentTransactions') || 'Payment Transactions'} ({paymentRows.length})
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -550,7 +760,7 @@ export default function RecentPayments({
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2"
           >
             <RefreshCw className="w-4 h-4" />
-            {t('common.refresh') || 'Refresh'}
+            {t('dashboard.refresh') || 'Refresh'}
           </button>
         </div>
       </div>
@@ -564,7 +774,7 @@ export default function RecentPayments({
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
                 type="text"
-                placeholder={t('common.search') || 'Search...'}
+                placeholder={t('dashboard.search') || 'Search...'}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -579,11 +789,11 @@ export default function RecentPayments({
               onChange={(e) => setTypeFilter(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="all">{t('common.allTypes') || 'All Types'}</option>
-              <option value="Customer Payment">{t('accounting.customerPayment') || 'Customer Payment'}</option>
-              <option value="Supplier Payment">{t('accounting.supplierPayment') || 'Supplier Payment'}</option>
-              <option value="Employee Payment">{t('accounting.employeePayment') || 'Employee Payment'}</option>
-              <option value="Refund">{t('accounting.refund') || 'Refund'}</option>
+              <option value="all">{t('dashboard.allTypes') || 'All Types'}</option>
+              <option value="Customer Payment">{t('payments.customerPayment')}</option>
+              <option value="Supplier Payment">{t('payments.supplierPayment')}</option>
+              <option value="Employee Payment">{t('payments.employeePayment')}</option>
+              <option value="Refund">{t('payments.refund') }</option>
             </select>
           </div>
 
@@ -594,9 +804,10 @@ export default function RecentPayments({
               onChange={(e) => setStatusFilter(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="all">{t('common.allStatuses') || 'All Statuses'}</option>
-              <option value="completed">{t('accounting.completed') || 'Completed'}</option>
-              <option value="reversed">{t('accounting.reversed') || 'Reversed'}</option>
+              <option value="all">{t('dashboard.allStatuses') || 'All Statuses'}</option>
+              <option value="completed">{t('payments.completed') || 'Completed'}</option>
+              <option value="reversed">{t('payments.reversed') || 'Reversed'}</option>
+              <option value="canceled">{t('payments.canceled') || 'Canceled'}</option>
             </select>
           </div>
 
@@ -607,9 +818,9 @@ export default function RecentPayments({
               onChange={(e) => setCurrencyFilter(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="all">{t('common.allCurrencies') || 'All Currencies'}</option>
-              <option value="USD">USD</option>
-              <option value="LBP">LBP</option>
+              <option value="all">{t('dashboard.allCurrencies') || 'All Currencies'}</option>
+              <option value="USD">{t('common.currency.USD') || 'USD'}</option>
+              <option value="LBP">{t('common.currency.LBP') || 'LBP'}</option>
             </select>
           </div>
         </div>
@@ -618,7 +829,7 @@ export default function RecentPayments({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              {t('common.startDate') || 'Start Date'}
+              {t('dashboard.startDate') || 'Start Date'}
             </label>
             <input
               type="date"
@@ -629,7 +840,7 @@ export default function RecentPayments({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              {t('common.endDate') || 'End Date'}
+              {t('dashboard.endDate') || 'End Date'}
             </label>
             <input
               type="date"
@@ -647,7 +858,7 @@ export default function RecentPayments({
                 className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
               />
               <span className="text-sm font-medium text-gray-700">
-                {t('accounting.showCorrectedReversedPayments') || 'Show corrected & reversed payments'}
+                {t('payments.showCorrectedReversedPayments') || 'Show corrected & reversed payments'}
               </span>
             </label>
             {hasActiveFilters && (
@@ -656,7 +867,7 @@ export default function RecentPayments({
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 flex items-center justify-center gap-2"
               >
                 <X className="w-4 h-4" />
-                {t('common.clearFilters') || 'Clear Filters'}
+                {t('dashboard.clearFilters') || 'Clear Filters'}
               </button>
             )}
           </div>
@@ -669,10 +880,10 @@ export default function RecentPayments({
           <div className="text-center py-12">
             <DollarSign className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <p className="text-lg font-medium text-gray-500">
-              {t('accounting.noPaymentsFound') || 'No Payments Found'}
+              {t('payments.noPaymentsFound') || 'No Payments Found'}
             </p>
             <p className="text-sm text-gray-400 mt-2">
-              {t('accounting.noPaymentsMessage') || 'No payment transactions match your current filters.'}
+              {t('payments.noPaymentsMessage') || 'No payment transactions match your current filters.'}
             </p>
           </div>
         ) : (
@@ -682,28 +893,28 @@ export default function RecentPayments({
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {t('accounting.dateTime') || 'Date'}
+                      {t('payments.dateTime')}  
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {t('accounting.type') || 'Type'}
+                      {t('dashboard.type')}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {t('accounting.entity') || 'Entity'}
+                      {t('payments.entity')}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {t('accounting.amount') || 'Amount'}
+                      {t('payments.amount')}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {t('accounting.status') || 'Status'}
+                      {t('payments.status')}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {t('accounting.reference') || 'Reference'}
+                      {t('payments.reference')}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {t('accounting.createdBy') || 'Created By'}
+                      {t('dashboard.createdBy')}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {t('accounting.actions') || 'Actions'}
+                      {t('payments.actions')}
                     </th>
                   </tr>
                 </thead>
@@ -725,7 +936,7 @@ export default function RecentPayments({
                               ? 'bg-purple-100 text-purple-800'
                               : 'bg-orange-100 text-orange-800'
                           }`}>
-                            {row.type}
+                            {t(getPaymentTypeTranslationKey(row.type)) || row.type}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -736,21 +947,32 @@ export default function RecentPayments({
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`text-sm font-semibold ${
-                            row.type === 'Customer Payment' ? 'text-green-600' : 'text-red-600'
-                          }`}>
-                            {formatCurrencyWithSymbol(row.amount, row.currency)}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className={`text-sm font-semibold ${
+                              row.type === 'Customer Payment' ? 'text-green-600' : 'text-red-600'
+                            }`}>
+                              {formatCurrencyWithSymbol(row.amount, row.currency)}
+                            </span>
+                            {row.isCorrected && row.originalAmount !== undefined && showReversals && (
+                              <span className="text-xs text-gray-500 italic" title="Original amount (no effect on calculations)">
+                                {t('receivedBills.original')}: {formatCurrencyWithSymbol(row.originalAmount, row.originalCurrency || row.currency)}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                             row.status === 'completed'
                               ? 'bg-green-100 text-green-800'
+                              : row.status === 'canceled'
+                              ? 'bg-gray-100 text-gray-800'
                               : 'bg-red-100 text-red-800'
                           }`}>
                             {row.status === 'completed' 
-                              ? (t('accounting.completed') || 'Completed')
-                              : (t('accounting.reversed') || 'Reversed')}
+                              ? (t('payments.completed') || 'Completed')
+                              : row.status === 'canceled'
+                              ? (t('payments.canceled') || 'Canceled')
+                              : (t('payments.reversed') || 'Reversed')}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -766,18 +988,23 @@ export default function RecentPayments({
                                 <button
                                   onClick={() => handleEditPayment(row)}
                                   className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
-                                  title={t('accounting.editPayment') || 'Edit Payment'}
+                                  title={t('payments.editPayment') || 'Edit Payment'}
                                 >
                                   <Edit className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => handleDeletePayment(row)}
                                   className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50"
-                                  title={t('accounting.deletePayment') || 'Delete Payment'}
+                                  title={t('payments.deletePayment') || 'Delete Payment'}
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </>
+                            )}
+                            {row.status === 'canceled' && (
+                              <span className="text-xs text-gray-500 italic">
+                                {t('payments.paymentCanceled') || 'Payment Canceled'}
+                              </span>
                             )}
                           </div>
                         </td>
@@ -790,7 +1017,7 @@ export default function RecentPayments({
                           </td>
                           <td className="px-6 py-3 whitespace-nowrap">
                             <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                              {reversal.type} (Reversal)
+                              {t(getPaymentTypeTranslationKey(reversal.type)) || reversal.type} ({t('payments.reversal') || 'Reversal'})
                             </span>
                           </td>
                           <td className="px-6 py-3 whitespace-nowrap">
@@ -806,9 +1033,16 @@ export default function RecentPayments({
                             </span>
                           </td>
                           <td className="px-6 py-3 whitespace-nowrap">
-                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                              {t('accounting.reversal') || 'Reversal'}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                                {t('payments.reversal') || 'Reversal'}
+                              </span>
+                              {reversal.status === 'reversed' && (
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
+                                  {t('payments.canceled') || 'Canceled'}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500">
                             {reversal.reference || '-'}
@@ -849,13 +1083,13 @@ export default function RecentPayments({
           <div className="bg-white rounded-lg max-w-md w-full">
             <div className="p-6 border-b">
               <h2 className="text-xl font-semibold text-gray-900">
-                {t('accounting.editPayment') || 'Edit Payment'}
+                {t('payments.editPayment') || 'Edit Payment'}
               </h2>
             </div>
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('accounting.amount') || 'Amount'} *
+                  {t('payments.amount') || 'Amount'} *
                 </label>
                 <input
                   type="number"
@@ -868,7 +1102,7 @@ export default function RecentPayments({
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('common.currency') || 'Currency'} *
+                  {t('dashboard.currency') || 'Currency'} *
                 </label>
                 <select
                   value={editForm.currency}
@@ -881,7 +1115,7 @@ export default function RecentPayments({
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('accounting.description') || 'Description'}
+                  {t('payments.description') || 'Description'}
                 </label>
                 <textarea
                   value={editForm.description}
@@ -892,7 +1126,7 @@ export default function RecentPayments({
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('accounting.reference') || 'Reference'}
+                  {t('payments.reference') || 'Reference'}
                 </label>
                 <input
                   type="text"
@@ -907,13 +1141,13 @@ export default function RecentPayments({
                 onClick={() => setEditingPayment(null)}
                 className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
-                {t('common.cancel') || 'Cancel'}
+                {t('dashboard.cancel') || 'Cancel'}
               </button>
               <button
                 onClick={handleSaveEdit}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
-                {t('common.save') || 'Save'}
+                {t('dashboard.save') || 'Save'}
               </button>
             </div>
           </div>
@@ -923,40 +1157,142 @@ export default function RecentPayments({
       {/* Delete Confirmation Modal */}
       {deletingPayment && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-md w-full">
+          <div className="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
               <h2 className="text-xl font-semibold text-gray-900">
-                {t('accounting.deletePaymentTitle') || 'Delete Payment'}
+                {t('payments.deletePaymentTitle') || 'Delete Payment'}
               </h2>
             </div>
             <div className="p-6">
-              <p className="text-gray-700 mb-4">
-                {t('accounting.deletePaymentMessage') || 'Are you sure you want to delete this payment? This action cannot be undone and will affect related balances.'}
-              </p>
-              <div className="bg-gray-50 p-4 rounded-lg mb-4">
-                <p className="text-sm text-gray-600">
-                  <strong>{t('accounting.entity') || 'Entity'}:</strong> {deletingPayment.entityName}
-                </p>
-                <p className="text-sm text-gray-600">
-                  <strong>{t('accounting.amount') || 'Amount'}:</strong> {formatCurrencyWithSymbol(deletingPayment.amount, deletingPayment.currency)}
-                </p>
-                <p className="text-sm text-gray-600">
-                  <strong>{t('accounting.reference') || 'Reference'}:</strong> {deletingPayment.reference || '-'}
-                </p>
-              </div>
+              {loadingDeletionDetails ? (
+                <div className="flex items-center justify-center py-8">
+                  <RefreshCw className="w-6 h-6 text-gray-400 animate-spin" />
+                  <span className="ml-2 text-gray-600">
+                    {t('payments.loadingDeletionDetails') || 'Loading deletion details...'}
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <p className="text-gray-700 mb-4">
+                    {t('payments.deletePaymentMessage') || 'Are you sure you want to delete this payment? This action cannot be undone and will affect related balances.'}
+                  </p>
+
+                  {/* Payment Information */}
+                  <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                    <p className="text-sm text-gray-600 mb-2">
+                      <strong>{t('payments.entity') || 'Entity'}:</strong> {deletingPayment.entityName}
+                    </p>
+                    <p className="text-sm text-gray-600 mb-2">
+                      <strong>{t('payments.amount') || 'Amount'}:</strong> {formatCurrencyWithSymbol(deletingPayment.amount, deletingPayment.currency)}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      <strong>{t('payments.reference') || 'Reference'}:</strong> {deletingPayment.reference || '-'}
+                    </p>
+                  </div>
+
+                  {/* Sync Status */}
+                  {deletionDetails?.isSynced !== undefined && (
+                    <div className={`p-3 rounded-lg mb-4 ${
+                      deletionDetails.isSynced 
+                        ? 'bg-yellow-50 border border-yellow-200' 
+                        : 'bg-blue-50 border border-blue-200'
+                    }`}>
+                      <p className="text-sm font-medium flex items-center">
+                        {deletionDetails.isSynced ? (
+                          <>
+                            <span className="text-yellow-800">
+                              {t('payments.deletionSyncStatusSynced') || '⚠️ This payment has been synced to the server'}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-blue-800">
+                              {t('payments.deletionSyncStatusUnsynced') || 'ℹ️ This payment has not been synced yet'}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Balance Impact */}
+                  {deletionDetails?.balanceImpact && (
+                    <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-4">
+                      <h3 className="text-sm font-semibold text-blue-900 mb-2">
+                        {t('payments.deletionBalanceImpact') || 'Balance Impact'}
+                      </h3>
+                      <div className="space-y-1 text-sm">
+                        <p className="text-blue-800">
+                          <strong>{t('payments.currentBalance') || 'Current Balance'}:</strong>{' '}
+                          {formatCurrencyWithSymbol(deletionDetails.balanceImpact.before, deletionDetails.balanceImpact.currency)}
+                        </p>
+                        <p className="text-blue-800">
+                          <strong>{t('payments.balanceAfterDeletion') || 'Balance After Deletion'}:</strong>{' '}
+                          {formatCurrencyWithSymbol(deletionDetails.balanceImpact.after, deletionDetails.balanceImpact.currency)}
+                        </p>
+                        <p className="text-blue-700 font-medium mt-2">
+                          {t('payments.balanceChange') || 'Change'}:{' '}
+                          {deletionDetails.balanceImpact.after - deletionDetails.balanceImpact.before >= 0 ? '+' : ''}
+                          {formatCurrencyWithSymbol(
+                            deletionDetails.balanceImpact.after - deletionDetails.balanceImpact.before,
+                            deletionDetails.balanceImpact.currency
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cash Drawer Impact */}
+                  {deletionDetails?.cashDrawerImpact && (
+                    <div className="bg-purple-50 border border-purple-200 p-3 rounded-lg mb-4">
+                      <p className="text-sm text-purple-800">
+                        {t('payments.deletionCashDrawerImpact') || '💵 This deletion will also affect the cash drawer balance'}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Related Reversals Warning */}
+                  {deletionDetails?.hasReversals && (
+                    <div className="bg-orange-50 border border-orange-200 p-3 rounded-lg mb-4">
+                      <p className="text-sm text-orange-800">
+                        {t('payments.deletionHasReversals') || '⚠️ This payment has related reversal transactions'}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Validation Warnings */}
+                  {deletionDetails?.warnings && deletionDetails.warnings.length > 0 && (
+                    <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-4">
+                      <h3 className="text-sm font-semibold text-yellow-900 mb-2">
+                        {t('payments.deletionWarning') || 'Warnings'}
+                      </h3>
+                      <ul className="list-disc list-inside space-y-1 text-sm text-yellow-800">
+                        {deletionDetails.warnings.map((warning, index) => (
+                          <li key={index}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
             <div className="p-6 border-t flex justify-end gap-3">
               <button
-                onClick={() => setDeletingPayment(null)}
+                onClick={() => {
+                  setDeletingPayment(null);
+                  setDeletionDetails(null);
+                }}
                 className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                disabled={loadingDeletionDetails}
               >
-                {t('common.cancel') || 'Cancel'}
+                {t('dashboard.cancel') || 'Cancel'}
               </button>
               <button
                 onClick={handleConfirmDelete}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={loadingDeletionDetails}
               >
-                {t('accounting.deletePaymentButton') || 'Delete Payment'}
+                {t('payments.deletePaymentButton') || 'Delete Payment'}
               </button>
             </div>
           </div>

@@ -650,7 +650,8 @@ export class TransactionService {
         };
       }
 
-      if (transaction._deleted) {
+      // Check if already deleted (either via _deleted flag or metadata.deleted)
+      if (transaction._deleted || (transaction.metadata as any)?.deleted === true) {
         return {
           success: false,
           error: 'Transaction already deleted',
@@ -666,8 +667,11 @@ export class TransactionService {
       const affectedRecords: string[] = [transactionId];
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
+      // Include all object stores that updateCashDrawerAtomic needs:
+      // - cash_drawer_accounts (for updating balance)
+      // - journal_entries (for reading cash journal entries)
       await db.transaction('rw', 
-        [db.transactions, db.entities, db.cash_drawer_sessions], 
+        [db.transactions, db.entities, db.cash_drawer_sessions, db.cash_drawer_accounts, db.journal_entries], 
         async () => {
           // Get current balance before deletion
           balanceBefore = await this.getEntityBalance(
@@ -678,32 +682,124 @@ export class TransactionService {
           );
 
           // Reverse the transaction's balance impact
-          const reversalTransaction: Transaction = {
-            ...transaction,
-            type: transaction.type === 'income' ? 'expense' : 'income', // Reverse type
-            amount: transaction.amount, // Keep original amount
-            category: transaction.category as TransactionCategory,
-            description: typeof transaction.description === 'string' ? transaction.description : JSON.stringify(transaction.description)
-          };
+          // Calculate the reversal balance change based on category (same logic as updateEntityBalancesAtomic)
+          const entityId = transaction.customer_id || transaction.supplier_id || (transaction as any).employee_id;
+          let reversalBalanceChange = 0;
           
-          const balanceResult = await this.updateEntityBalancesAtomic(reversalTransaction, 0);
-          balanceAfter = balanceResult.newBalance;
-          affectedRecords.push(...balanceResult.affectedRecords);
+          if (entityId) {
+            const entity = await db.entities.get(entityId);
+            if (entity) {
+              // Calculate what the original transaction did, then negate it
+              if (entity.entity_type === 'customer') {
+                // Customer balance logic:
+                // - Payments DECREASE AR (they owe us less) = negative balance change
+                // - Reversal: INCREASE AR (they owe us more again) = positive balance change
+                if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE) {
+                  reversalBalanceChange = -transaction.amount; // Reverse: decrease AR
+                } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT || 
+                           transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED) {
+                  reversalBalanceChange = transaction.amount; // Reverse: increase AR (opposite of -amount)
+                } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND) {
+                  reversalBalanceChange = -transaction.amount; // Reverse: decrease AR
+                } else {
+                  // Fallback: reverse the type-based logic
+                  reversalBalanceChange = transaction.type === 'income' ? transaction.amount : -transaction.amount;
+                }
+              } else if (entity.entity_type === 'supplier') {
+                // Supplier balance logic:
+                // - Payments DECREASE AP (we owe them less) = negative balance change
+                // - Reversal: INCREASE AP (we owe them more again) = positive balance change
+                if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE) {
+                  reversalBalanceChange = -transaction.amount; // Reverse: decrease AP
+                } else if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT) {
+                  reversalBalanceChange = transaction.amount; // Reverse: increase AP (opposite of -amount)
+                } else if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND) {
+                  reversalBalanceChange = -transaction.amount; // Reverse: decrease AP
+                } else {
+                  // Fallback: reverse the type-based logic
+                  reversalBalanceChange = transaction.type === 'expense' ? transaction.amount : -transaction.amount;
+                }
+              } else if (entity.entity_type === 'employee') {
+                // For employee: reverse the original change
+                reversalBalanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
+              }
+              
+              // Apply the reversal
+              const isUSD = transaction.currency === 'USD';
+              const currentBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
+              balanceAfter = currentBalance + reversalBalanceChange;
+              
+              const updateData: any = {
+                updated_at: timestamp,
+                _synced: false
+              };
+              
+              if (isUSD) {
+                updateData.usd_balance = balanceAfter;
+              } else {
+                updateData.lb_balance = balanceAfter;
+              }
+              
+              await db.entities.update(entityId, updateData);
+              affectedRecords.push(entityId);
+            }
+          }
 
           // Reverse cash drawer impact if applicable
           if (this.isCashDrawerCategory(transaction.category as TransactionCategory)) {
-            const reversalForCash: Transaction = {
-              ...transaction,
-              type: transaction.type === 'income' ? 'expense' : 'income', // Reverse for cash drawer too
-              category: transaction.category as TransactionCategory,
-              description: typeof transaction.description === 'string' ? transaction.description : JSON.stringify(transaction.description)
-            };
-            await this.updateCashDrawerAtomic(reversalForCash, context.storeId, context.branchId);
+            // Calculate the original cash drawer impact and negate it
+            const account = await db.getCashDrawerAccount(context.storeId, context.branchId);
+            
+            if (account) {
+              const previousCashBalance = Number((account as any)?.current_balance || 0);
+              
+              // Get journal entries for the original transaction to calculate what it did
+              const cashJournalEntries = await db.journal_entries
+                .where('transaction_id')
+                .equals(transactionId)
+                .and(entry => entry.account_code === '1100' && entry.is_posted === true)
+                .toArray();
+              
+              // Calculate original balance change: sum of (debit - credit) for cash account entries
+              let originalBalanceChange = 0;
+              for (const entry of cashJournalEntries) {
+                const entryAmount = (entry.debit || 0) - (entry.credit || 0);
+                
+                // Convert to LBP if entry is in USD (cash drawer always stores in LBP)
+                if (entry.currency === 'USD') {
+                  const amountInLBP = currencyService.convertCurrency(entryAmount, 'USD', 'LBP');
+                  originalBalanceChange += amountInLBP;
+                } else {
+                  // Entry is already in LBP
+                  originalBalanceChange += entryAmount;
+                }
+              }
+              
+              // Reverse the balance change (negate it)
+              const reversalBalanceChange = -originalBalanceChange;
+              const newCashBalance = previousCashBalance + reversalBalanceChange;
+              
+              // Update cash drawer account balance
+              await db.cash_drawer_accounts.update(account.id as string, {
+                current_balance: newCashBalance as any,
+                updated_at: timestamp,
+                _synced: false
+              } as any);
+              
+              console.log(`💰 Cash drawer balance reversed: ${previousCashBalance.toLocaleString()} LBP → ${newCashBalance.toLocaleString()} LBP (reversal: ${reversalBalanceChange > 0 ? '+' : ''}${reversalBalanceChange.toLocaleString()} LBP)`);
+            }
           }
 
-          // Soft delete the transaction
+          // Mark transaction as canceled using metadata (preserves history)
+          const existingMetadata = transaction.metadata || {};
           await db.transactions.update(transactionId, {
-            _deleted: true,
+            metadata: {
+              ...existingMetadata,
+              deleted: true,
+              deletedAt: timestamp,
+              deletedBy: context.userId,
+              deletionReason: 'Payment canceled by user'
+            },
             updated_at: timestamp,
             _synced: false
           });
@@ -787,9 +883,11 @@ export class TransactionService {
         .equals(storeId)
         .toArray();
 
-      // Filter deleted
+      // Filter deleted (both _deleted flag and metadata.deleted)
       if (!options.includeDeleted) {
-        transactions = transactions.filter(t => !t._deleted);
+        transactions = transactions.filter(t => 
+          !t._deleted && (t.metadata as any)?.deleted !== true
+        );
       }
 
       // Filter by date range
