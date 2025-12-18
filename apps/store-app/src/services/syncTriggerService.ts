@@ -17,7 +17,7 @@ import { crudHelperService } from './crudHelperService';
 class SyncTriggerService {
   private syncTriggered = false;
   private syncTimeout: NodeJS.Timeout | null = null;
-  private readonly DEBOUNCE_MS = 1000; // 1 second debounce
+  private readonly DEBOUNCE_MS = 30000; // 30 seconds debounce
 
   /**
    * Trigger sync (debounced)

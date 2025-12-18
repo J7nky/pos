@@ -4,6 +4,7 @@ import { useCustomerForm } from '../contexts/CustomerFormContext';
 
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
+import { normalizeNameForComparison } from '../utils/nameNormalization';
 import { Plus, Search, Edit, CheckCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText, Banknote, UserCheck } from 'lucide-react';
 import { Customer, Supplier } from '../types';
 import Toast from '../components/common/Toast';
@@ -120,6 +121,7 @@ export default function Customers() {
     usd_max_balance: undefined,
   });
   const [customerFormError, setCustomerFormError] = useState<string | null>(null);
+  const [nameValidationError, setNameValidationError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
     message: '',
     type: 'success',
@@ -325,6 +327,7 @@ export default function Customers() {
       lb_max_balance: undefined,
       usd_max_balance: undefined,
     });
+    setNameValidationError(null);
     setShowCustomerForm(true);
   };
 
@@ -339,6 +342,7 @@ export default function Customers() {
       lb_max_balance: customer.lb_max_balance,
       usd_max_balance: customer.usd_max_balance,
     });
+    setNameValidationError(null);
     setShowCustomerForm(true);
   };
 
@@ -348,6 +352,23 @@ export default function Customers() {
       ...prev,
       [name]: type === 'number' ? parseFloat(value) : value,
     }));
+    
+    // Real-time validation for name field
+    if (name === 'name' && value.trim()) {
+      const normalizedInput = normalizeNameForComparison(value);
+      const duplicate = customers.find(c => {
+        const normalizedExisting = normalizeNameForComparison(c.name);
+        return normalizedInput === normalizedExisting && (!editingCustomer || c.id !== editingCustomer.id);
+      });
+      
+      if (duplicate) {
+        setNameValidationError(t('customers.duplicateNameError') || 'A customer with this name already exists.');
+      } else {
+        setNameValidationError(null);
+      }
+    } else if (name === 'name' && !value.trim()) {
+      setNameValidationError(null);
+    }
   };
 
   const handleCustomerCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -364,10 +385,17 @@ export default function Customers() {
       showToast(t('customers.nameRequired'), 'error');
       return;
     }
-    const exists = customers.some(c => c.name.trim().toLowerCase() === customerForm.name!.trim().toLowerCase() && c.phone.trim() === customerForm.phone!.trim() && (!editingCustomer || c.id !== editingCustomer.id));
+    // Check for duplicate customer name (with Arabic normalization)
+    const normalizedInput = normalizeNameForComparison(customerForm.name!);
+    const exists = customers.some(c => {
+      const normalizedExisting = normalizeNameForComparison(c.name);
+      return normalizedInput === normalizedExisting && (!editingCustomer || c.id !== editingCustomer.id);
+    });
     if (exists) {
-      setCustomerFormError('This customer already exists.');
-      showToast('This customer already exists.', 'error');
+      const errorMsg = t('customers.duplicateNameError') || 'A customer with this name already exists.';
+      setCustomerFormError(errorMsg);
+      setNameValidationError(errorMsg);
+      showToast(errorMsg, 'error');
       return;
     }
     setCustomerFormError(null);
@@ -522,7 +550,7 @@ export default function Customers() {
               }`}
             >
               <UserCheck className="w-5 h-5 inline mr-2" />
-              Employee Payments
+                {t('customers.employeePayments')}
             </button>
           </nav>
         </div>
@@ -792,9 +820,16 @@ export default function Customers() {
                     name="name"
                     value={customerForm.name}
                     onChange={handleCustomerFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    className={`mt-1 block w-full border rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 ${
+                      nameValidationError 
+                        ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
+                        : 'border-gray-300 focus:border-blue-500'
+                    }`}
                     required
                   />
+                  {nameValidationError && (
+                    <p className="mt-1 text-sm text-red-600">{nameValidationError}</p>
+                  )}
                 </div>
                 <div>
                   <label htmlFor="phone" className="block text-sm font-medium text-gray-700">{t('customers.phoneLabel')}</label>
@@ -1150,18 +1185,18 @@ export default function Customers() {
                     }))}
                     value={paymentForm.supplierId}
                     onChange={(value) => setPaymentForm(prev => ({ ...prev, supplierId: value as string }))}
-                    placeholder="Select Supplier *"
-                    searchPlaceholder="Search suppliers..."
+                    placeholder={t('customers.selectSupplier')}
+                    searchPlaceholder={t('customers.searchSuppliers')}
                     categories={['Commission', 'Cash']}
                     showAddOption={true}
-                    addOptionText="Add New Supplier"
+                    addOptionText={t('customers.addNewSupplier')}
                     onAddNew={() => setShowSupplierForm(true)}
                     className="w-full"
                   />
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentAmount')} *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1250,14 +1285,14 @@ export default function Customers() {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentCurrency')} *</label>
                   <select
                     value={paymentForm.currency}
                     onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
                   >
-                    <option value="USD">USD ($)</option>
-                    <option value="LBP">LBP (ل.ل)</option>
+                    <option value="USD">{t('customers.usd')}</option>
+                    <option value="LBP">{t('customers.lbp')}</option>
                   </select>
                 </div>
               </div>

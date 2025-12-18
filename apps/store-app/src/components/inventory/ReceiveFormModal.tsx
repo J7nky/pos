@@ -48,7 +48,6 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   existingBatchItems = [],
 }) => {
   const [loading, setLoading] = useState(false);
-  const firstInputRef = useRef<HTMLInputElement>(null);
   const [bulkProducts, setBulkProducts] = useState<string[]>([]);
   const [bulkItems, setBulkItems] = useState<Record<string, { 
     product_id?: string; 
@@ -65,7 +64,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [originalFormValues, setOriginalFormValues] = useState<any>(null);
   const modalInstanceRef = useRef<number>(0);
-  const [showAsTag, setShowAsTag] = useState(false);
+  const [showAsTag, setShowAsTag] = useState(true);
   const [notesSuggestions, setNotesSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -719,13 +718,12 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         }))}
                         value={form.supplier_id}
                         onChange={(value: any) => setForm({ ...form, supplier_id: value })}
-                        placeholder="Select Supplier *"
-                        searchPlaceholder="Search suppliers..."
-                        categories={['Commission', 'Credit']}
+                        placeholder={t('customers.selectSupplier')}
+                        searchPlaceholder={t('customers.searchSuppliers')}
                         recentSelections={recentSuppliers}
                         onRecentUpdate={setRecentSuppliers}
                         showAddOption={true}
-                        addOptionText="Add New Supplier"
+                        addOptionText={t('customers.addNewSupplier')}
                         onAddNew={() => setShowSupplierModal(true)}
                         className={`w-full ${errors.supplier_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
                         portal={true}
@@ -779,7 +777,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         value={form.commission_rate}
                         onChange={(e) => setForm({ ...form, commission_rate: e.target.value.toString() })}
                         className={`w-full border ${errors.commission_rate ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                        placeholder={`Default: ${defaultCommissionRate}%`}
+                        placeholder={`${t('inventory.default')}: ${defaultCommissionRate}%`}
                       />
                       {errors.commission_rate && <p className="text-xs text-red-600 mt-1">{errors.commission_rate}</p>}
                     </div>
@@ -926,7 +924,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                           className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         <span className="text-sm text-gray-700 dark:text-slate-300">
-                          Show as tag in POS page
+                          {t('inventory.showAsTagInPOSPage')}
                         </span>
                       </label>
                     )}
@@ -987,23 +985,35 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                               <div ref={selectRef}>
                                 <div className="flex items-center gap-2">
                                   <SearchableSelect
-                                    options={products.map((product: any) => ({
-                                      id: product.id,
-                                      label: getProductName(product),
-                                      value: product.id,
-                                      category: product.category
-                                    }))}
+                                    options={products.map((product: any) => {
+                                      // Map product categories to translated category labels for filtering
+                                      // Product categories are: 'Fruits', 'Vegetables', 'Herbs', 'Herbs/Leafy', 'Nuts', 'Others'
+                                      let categoryLabel = product.category;
+                                      if (product.category === 'Fruits') {
+                                        categoryLabel = t('inventory.categoryFruits');
+                                      } else if (product.category === 'Vegetables') {
+                                        categoryLabel = t('inventory.categoryVegetables');
+                                      } else if (product.category === 'Herbs' || product.category === 'Herbs/Leafy') {
+                                        categoryLabel = t('inventory.categoryHerbs');
+                                      }
+                                      return {
+                                        id: product.id,
+                                        label: getProductName(product),
+                                        value: product.id,
+                                        category: categoryLabel
+                                      };
+                                    })}
                                     value={item.product_id || ''}
                                     onChange={(value: any) => {
                                       const selectedId = value as string;
                                       setBulkItems(prev => ({
                                         ...prev,
-                                        [productId]: { ...prev[productId], product_id: selectedId, unit: 'kg' }
+                                        [productId]: { ...prev[productId], product_id: selectedId, unit: 'box' }
                                       }));
                                     }}
                                     placeholder={t('inventory.selectProduct')}
                                     searchPlaceholder={t('inventory.searchProducts')}
-                                    categories={['Fruits', 'Vegetables']}
+                                    categories={[t('inventory.categoryFruits'), t('inventory.categoryVegetables'), t('inventory.categoryHerbs')]}
                                     showAddOption={true}
                                     addOptionText={t('inventory.addNewProduct')}  
                                     className="w-full min-w-[200px]"

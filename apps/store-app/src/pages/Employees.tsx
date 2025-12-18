@@ -7,6 +7,8 @@ import { EmployeeService } from '../services/employeeService';
 import Toast from '../components/common/Toast';
 import { ModuleAccessManager } from '../components/rbac/ModuleAccessManager';
 import { OperationLimitsManager } from '../components/rbac/OperationLimitsManager';
+import { useI18n } from '../i18n';
+import { normalizeNameForComparison } from '../utils/nameNormalization';
 
 export default function Employees() {
   const { userProfile } = useSupabaseAuth();
@@ -20,7 +22,7 @@ export default function Employees() {
     type: 'success',
     visible: false,
   });
-
+  const { t } = useI18n();
   const [formData, setFormData] = useState<Partial<Employee>>({
     name: '',
     email: '',
@@ -38,6 +40,7 @@ export default function Employees() {
   const [showWorkingDaysModal, setShowWorkingDaysModal] = useState(false);
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [nameValidationError, setNameValidationError] = useState<string | null>(null);
   const [roleCounts, setRoleCounts] = useState({ cashier: 0, manager: 0 });
   const [activeTab, setActiveTab] = useState<'info' | 'modules' | 'limits'>('info');
 
@@ -46,7 +49,7 @@ export default function Employees() {
 console.log(userProfile,123123123);
   useEffect(() => {
     if (!isAdmin) {
-      setToast({ message: 'Access denied. Admin role required.', type: 'error', visible: true });
+      setToast({ message: t('employees.accessDenied'), type: 'error', visible: true });
       return;
     }
     loadEmployees();
@@ -65,7 +68,7 @@ console.log(userProfile,123123123);
     } catch (error) {
       console.error('❌ Error loading employees:', error);
       setToast({ 
-        message: error instanceof Error ? error.message : 'Failed to load employees', 
+        message: error instanceof Error ? error.message : t('employees.employeeListFailed'), 
         type: 'error', 
         visible: true 
       });
@@ -78,30 +81,30 @@ console.log(userProfile,123123123);
     const errors: Record<string, string> = {};
 
     if (!formData.name?.trim()) {
-      errors.name = 'Name is required';
+      errors.name = t('employees.nameRequired');
     }
     if (!formData.email?.trim()) {
-      errors.email = 'Email is required';
+      errors.email = t('employees.emailRequired');
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      errors.email = 'Invalid email format';
+      errors.email = t('employees.invalidEmailFormat');
     }
     if (!editingEmployee && (!password || password.length < 6)) {
-      errors.password = 'Password must be at least 6 characters';
+      errors.password = t('employees.passwordRequired');
     }
     if (!formData.role) {
-      errors.role = 'Role is required';
+      errors.role = t('employees.roleRequired');
     }
     if (formData.phone && !/^[\d\s\-\+\(\)]+$/.test(formData.phone)) {
-      errors.phone = 'Invalid phone number format';
+      errors.phone = t('employees.invalidPhoneNumberFormat');
     }
     if (salaryValue && isNaN(parseFloat(salaryValue))) {
-      errors.monthly_salary = 'Salary must be a valid number';
+      errors.monthly_salary = t('employees.salaryMustBeValidNumber');
     }
     if (formData.working_hours_start && !/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(formData.working_hours_start)) {
-      errors.working_hours_start = 'Invalid time format (use HH:mm)';
+      errors.working_hours_start = t('employees.invalidTimeFormat');
     }
     if (formData.working_hours_end && !/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(formData.working_hours_end)) {
-      errors.working_hours_end = 'Invalid time format (use HH:mm)';
+      errors.working_hours_end = t('employees.invalidTimeFormat');
     }
 
     setFormErrors(errors);
@@ -156,6 +159,21 @@ console.log(userProfile,123123123);
           }
         }
         
+        // Check name uniqueness if name is being changed (with Arabic normalization)
+        const normalizedInput = normalizeNameForComparison(employeeData.name || '');
+        const normalizedExisting = normalizeNameForComparison(editingEmployee.name);
+        if (employeeData.name && normalizedInput !== normalizedExisting) {
+          const existingByName = employees.find(emp => {
+            const normalizedEmpName = normalizeNameForComparison(emp.name);
+            return normalizedInput === normalizedEmpName && emp.id !== editingEmployee.id;
+          });
+          if (existingByName) {
+            const errorMsg = t('employees.duplicateNameError') || 'An employee with this name already exists';
+            setNameValidationError(errorMsg);
+            throw new Error(errorMsg);
+          }
+        }
+        
         // Check email uniqueness if email is being changed
         if (employeeData.email && employeeData.email !== editingEmployee.email) {
           const existingByEmail = employees.find(emp => emp.email === employeeData.email && emp.id !== editingEmployee.id);
@@ -165,13 +183,25 @@ console.log(userProfile,123123123);
         }
         
         await updateEmployee(editingEmployee.id, employeeData);
-        setToast({ message: 'Employee updated successfully', type: 'success', visible: true });
+        setToast({ message: t('employees.employeeUpdatedSuccessfully'), type: 'success', visible: true });
       } else {
         // Validate role limits for new employee
         const existingEmployees = employees.filter(emp => emp.role === employeeData.role);
         const maxAllowed = (employeeData.role as 'cashier' | 'manager') === 'cashier' ? 2 : 1;
         if (existingEmployees.length >= maxAllowed) {
           throw new Error(`Cannot add more ${employeeData.role}s. Maximum allowed: ${maxAllowed}`);
+        }
+        
+        // Check name uniqueness (with Arabic normalization)
+        const normalizedInput = normalizeNameForComparison(employeeData.name || '');
+        const existingByName = employees.find(emp => {
+          const normalizedEmpName = normalizeNameForComparison(emp.name);
+          return normalizedInput === normalizedEmpName;
+        });
+        if (existingByName) {
+          const errorMsg = t('employees.duplicateNameError') || 'An employee with this name already exists';
+          setNameValidationError(errorMsg);
+          throw new Error(errorMsg);
         }
         
         // Check email uniqueness
@@ -182,7 +212,7 @@ console.log(userProfile,123123123);
         
         // Create employee with auth user using the service
         await EmployeeService.createEmployeeWithAuth(storeId, employeeData as any, password);
-        setToast({ message: 'Employee created successfully with login credentials', type: 'success', visible: true });
+        setToast({ message: t('employees.employeeCreatedSuccessfullyWithLoginCredentials'), type: 'success', visible: true });
       }
       
       resetForm();
@@ -190,7 +220,7 @@ console.log(userProfile,123123123);
     } catch (error) {
       console.error('❌ Error saving employee:', error);
       setToast({ 
-        message: error instanceof Error ? error.message : 'Failed to save employee', 
+        message: error instanceof Error ? error.message : t('employees.employeeCreatedFailed'), 
         type: 'error', 
         visible: true 
       });
@@ -215,6 +245,7 @@ console.log(userProfile,123123123);
       working_hours_end: employee.working_hours_end || '',
       working_days: employee.working_days || '',
     });
+    setNameValidationError(null);
     
     // Set currency and value based on existing balance
     if (employee.lbp_balance !== null && employee.lbp_balance !== undefined) {
@@ -238,22 +269,22 @@ console.log(userProfile,123123123);
     // Prevent admin from deleting themselves
     if (employeeToDelete && employeeToDelete.email === userProfile?.email) {
       setToast({ 
-        message: 'You cannot delete your own account', 
+        message: t('employees.cannotDeleteYourOwnAccount'), 
         type: 'error', 
         visible: true 
       });
       return;
     }
 
-    if (!confirm('Are you sure you want to delete this employee?')) return;
+    if (!confirm(t('employees.areYouSureYouWantToDeleteThisEmployee'))) return;
 
     try {
       await deleteEmployee(employeeId);
-      setToast({ message: 'Employee deleted successfully', type: 'success', visible: true });
+      setToast({ message: t('employees.employeeDeletedSuccessfully'), type: 'success', visible: true });
       // No need to reload, context will auto-update
     } catch (error) {
       setToast({ 
-        message: error instanceof Error ? error.message : 'Failed to delete employee', 
+        message: error instanceof Error ? error.message : t('employees.employeeDeletedFailed'), 
         type: 'error', 
         visible: true 
       });
@@ -278,6 +309,7 @@ console.log(userProfile,123123123);
     setEditingEmployee(null);
     setShowForm(false);
     setFormErrors({});
+    setNameValidationError(null);
   };
 
   const filteredEmployees = employees.filter(emp => {
@@ -301,7 +333,7 @@ console.log(userProfile,123123123);
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">Access denied. This page is only available to administrators.</p>
+          <p className="text-red-800">{t('employees.accessDenied')}</p>
         </div>
       </div>
     );
@@ -316,9 +348,9 @@ console.log(userProfile,123123123);
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center">
             <UsersIcon className="w-7 h-7 mr-2" />
-            Employee Management
+            {t('employees.title')}
           </h1>
-          <p className="text-gray-600 mt-1">Manage employees, roles, and working hours</p>
+          <p className="text-gray-600 mt-1">{t('employees.description')}</p>
         </div>
         <button
           onClick={() => {
@@ -328,7 +360,7 @@ console.log(userProfile,123123123);
           className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center"
         >
           <Plus className="w-5 h-5 mr-2" />
-          Add Employee
+          {t('employees.addEmployee')}
         </button>
       </div>
 
@@ -336,24 +368,24 @@ console.log(userProfile,123123123);
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className={`p-4 rounded-lg border ${cashierAvailability.available ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
           <div className="flex justify-between items-center">
-            <span className="font-medium text-gray-700">Cashiers</span>
+            <span className="font-medium text-gray-700">{t('employees.cashiers')}</span>
             <span className={`px-2 py-1 rounded text-sm ${cashierAvailability.available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
               {cashierAvailability.current} / {cashierAvailability.max}
             </span>
           </div>
           {!cashierAvailability.available && (
-            <p className="text-sm text-red-600 mt-1">Maximum cashiers reached</p>
+            <p className="text-sm text-red-600 mt-1">{t('employees.maximumCashiersReached')}</p>
           )}
         </div>
         <div className={`p-4 rounded-lg border ${managerAvailability.available ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
           <div className="flex justify-between items-center">
-            <span className="font-medium text-gray-700">Managers</span>
+            <span className="font-medium text-gray-700">{t('employees.managers')}</span>
             <span className={`px-2 py-1 rounded text-sm ${managerAvailability.available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
               {managerAvailability.current} / {managerAvailability.max}
             </span>
           </div>
           {!managerAvailability.available && (
-            <p className="text-sm text-red-600 mt-1">Maximum managers reached</p>
+            <p className="text-sm text-red-600 mt-1">{t('employees.maximumManagersReached')}</p>
           )}
         </div>
       </div>
@@ -364,7 +396,7 @@ console.log(userProfile,123123123);
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input
             type="text"
-            placeholder="Search employees by name, email, role, or phone..."
+            placeholder={t('employees.employeeSearch')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -377,7 +409,7 @@ console.log(userProfile,123123123);
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">
-              {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
+              {editingEmployee ? t('employees.editEmployee') : t('employees.addNewEmployee')}
             </h2>
 
             {/* Tabs - Only show for editing existing employee */}
@@ -393,7 +425,7 @@ console.log(userProfile,123123123);
                   }`}
                 >
                   <User className="w-4 h-4 inline mr-2" />
-                  Employee Info
+                  {t('employees.employeeInfo')}
                 </button>
                 <button
                   type="button"
@@ -405,7 +437,7 @@ console.log(userProfile,123123123);
                   }`}
                 >
                   <Shield className="w-4 h-4 inline mr-2" />
-                  Module Access
+                  {t('employees.employeeModuleAccess')}
                 </button>
                 <button
                   type="button"
@@ -417,7 +449,7 @@ console.log(userProfile,123123123);
                   }`}
                 >
                   <Lock className="w-4 h-4 inline mr-2" />
-                  Operation Limits
+                  {t('employees.employeeOperationLimits')}
                 </button>
               </div>
             )}
@@ -428,7 +460,7 @@ console.log(userProfile,123123123);
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Name <span className="text-red-500">*</span>
+                    {t('employees.name')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -442,7 +474,7 @@ console.log(userProfile,123123123);
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email <span className="text-red-500">*</span>
+                    {t('employees.email')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="email"
@@ -453,13 +485,13 @@ console.log(userProfile,123123123);
                     disabled={!!editingEmployee}
                   />
                   {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
-                  {editingEmployee && <p className="text-xs text-gray-500 mt-1">Email cannot be changed</p>}
+                    {editingEmployee && <p className="text-xs text-gray-500 mt-1">{t('employees.emailCannotBeChanged')}</p>}
                 </div>
 
                 {!editingEmployee && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Password <span className="text-red-500">*</span>
+                      {t('employees.password')} <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="password"
@@ -468,16 +500,16 @@ console.log(userProfile,123123123);
                       className={`w-full px-3 py-2 border rounded-lg ${formErrors.password ? 'border-red-500' : 'border-gray-300'}`}
                       required
                       minLength={6}
-                      placeholder="Minimum 6 characters"
+                      placeholder={t('employees.minimum6Characters')}
                     />
                     {formErrors.password && <p className="text-red-500 text-xs mt-1">{formErrors.password}</p>}
-                    <p className="text-xs text-gray-500 mt-1">Employee will use this password to log in</p>
+                    <p className="text-xs text-gray-500 mt-1">{t('employees.employeeWillUseThisPasswordToLogIn')}</p>
                   </div>
                 )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Role <span className="text-red-500">*</span>
+                    {t('employees.role')} <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={formData.role || 'cashier'}
@@ -493,15 +525,15 @@ console.log(userProfile,123123123);
                     className={`w-full px-3 py-2 border rounded-lg ${formErrors.role ? 'border-red-500' : 'border-gray-300'}`}
                     required
                   >
-                    <option value="cashier">Cashier {!cashierAvailability.available && !editingEmployee && `(Max: ${cashierAvailability.max})`}</option>
-                    <option value="manager">Manager {!managerAvailability.available && !editingEmployee && `(Max: ${managerAvailability.max})`}</option>
+                    <option value="cashier">{t('employees.cashier')} {!cashierAvailability.available && !editingEmployee && `(Max: ${cashierAvailability.max})`}</option>
+                    <option value="manager">{t('employees.manager')} {!managerAvailability.available && !editingEmployee && `(Max: ${managerAvailability.max})`}</option>
                   </select>
                   {formErrors.role && <p className="text-red-500 text-xs mt-1">{formErrors.role}</p>}
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Phone
+                    {t('employees.phone')}
                   </label>
                   <input
                     type="tel"
@@ -514,7 +546,7 @@ console.log(userProfile,123123123);
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Monthly Salary
+                    {t('employees.monthlySalary')}
                   </label>
                   <input
                     type="text"
@@ -561,7 +593,7 @@ console.log(userProfile,123123123);
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Working Days
+                    {t('employees.workingDays')}
                   </label>
                   <div className="relative">
                     <input
@@ -569,14 +601,14 @@ console.log(userProfile,123123123);
                       readOnly
                       value={formData.working_days ? formData.working_days.split(',').filter(d => d.trim()).join(', ') : ''}
                       onClick={() => setShowWorkingDaysModal(true)}
-                      placeholder="Click to select working days"
+                      placeholder={t('employees.clickToSelectWorkingDays')}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                     <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
                   </div>
                   {formData.working_days && (
                     <p className="text-xs text-gray-500 mt-1">
-                      {formData.working_days.split(',').filter(d => d.trim()).length} day(s) selected
+                      {formData.working_days.split(',').filter(d => d.trim()).length} {t('employees.daysSelected')}
                     </p>
                   )}
                 </div>
@@ -593,11 +625,11 @@ console.log(userProfile,123123123);
                   >
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
                       <div className="p-6 border-b">
-                        <h3 className="text-lg font-semibold text-gray-900">Select Working Days</h3>
+                        <h3 className="text-lg font-semibold text-gray-900">{t('employees.selectWorkingDays')}</h3>
                       </div>
                       <div className="p-6">
                         <div className=" gap-3">
-                          {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => {
+                          {[t('employees.monday'), t('employees.tuesday'), t('employees.wednesday'), t('employees.thursday'), t('employees.friday'), t('employees.saturday'), t('employees.sunday')].map((day) => {
                             const currentDays = formData.working_days ? formData.working_days.split(',').map(d => d.trim()) : [];
                             const isChecked = currentDays.includes(day);
                             return (
@@ -630,7 +662,7 @@ console.log(userProfile,123123123);
                           onClick={() => setShowWorkingDaysModal(false)}
                           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                         >
-                          Done
+                          {t('employees.done')}
                         </button>
                       </div>
                     </div>
@@ -639,7 +671,7 @@ console.log(userProfile,123123123);
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Working Hours Start
+                    {t('employees.workingHoursStart')}
                   </label>
                   <input
                     type="time"
@@ -652,7 +684,7 @@ console.log(userProfile,123123123);
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Working Hours End
+                    {t('employees.workingHoursEnd')}
                   </label>
                   <input
                     type="time"
@@ -666,7 +698,7 @@ console.log(userProfile,123123123);
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address
+                  {t('employees.address')}
                 </label>
                 <textarea
                     value={formData.address || ''}
@@ -682,13 +714,13 @@ console.log(userProfile,123123123);
                   onClick={resetForm}
                   className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                 >
-                  Cancel
+                  {t('employees.cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
-                  {editingEmployee ? 'Update' : 'Create'}
+                  {editingEmployee ? t('employees.update') : t('employees.create')}
                 </button>
               </div>
             </form>
@@ -703,7 +735,7 @@ console.log(userProfile,123123123);
                   storeId={storeId || ''}
                   onUpdate={() => {
                     // Optionally reload employees or show success message
-                    setToast({ message: 'Module access updated successfully', type: 'success', visible: true });
+                    setToast({ message: t('employees.moduleAccessUpdatedSuccessfully'), type: 'success', visible: true });
                   }}
                 />
                 
@@ -718,7 +750,7 @@ console.log(userProfile,123123123);
                     }}
                     className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
                   >
-                    Close
+                    {t('employees.close')}
                   </button>
                 </div>
               </div>
@@ -732,7 +764,7 @@ console.log(userProfile,123123123);
                   userRole={editingEmployee.role}
                   storeId={storeId || ''}
                   onUpdate={() => {
-                    setToast({ message: 'Operation limits updated successfully', type: 'success', visible: true });
+                    setToast({ message: t('employees.operationLimitsUpdatedSuccessfully'), type: 'success', visible: true });
                   }}
                 />
 
@@ -747,7 +779,7 @@ console.log(userProfile,123123123);
                     }}
                     className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
                   >
-                    Close
+                    {t('employees.close')}
                   </button>
                 </div>
               </div>
@@ -760,18 +792,18 @@ console.log(userProfile,123123123);
       {loading ? (
         <div className="text-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading employees...</p>
+          <p className="mt-4 text-gray-600">{t('employees.loadingEmployees')}</p>
         </div>
       ) : filteredEmployees.length === 0 ? (
         <div className="text-center py-12 bg-gray-50 rounded-lg">
           <UsersIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-600">No employees found</p>
+          <p className="text-gray-600">{t('employees.noEmployeesFound')}</p>
           {searchTerm && (
             <button
               onClick={() => setSearchTerm('')}
               className="text-blue-600 hover:underline mt-2"
             >
-              Clear search
+              {t('employees.clearSearch')}
             </button>
           )}
         </div>
@@ -780,12 +812,12 @@ console.log(userProfile,123123123);
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Salary</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Working Hours</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('employees.name')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('employees.role')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('employees.contact')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('employees.salary')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('employees.workingHours')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('employees.actions')}</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -839,7 +871,7 @@ console.log(userProfile,123123123);
                         {employee.usd_balance.toLocaleString()} USD
                       </div>
                     ) : (
-                      <span className="text-sm text-gray-400">Not set</span>
+                      <span className="text-sm text-gray-400">{t('employees.notSet')}</span>
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -849,7 +881,7 @@ console.log(userProfile,123123123);
                         {employee.working_hours_start} - {employee.working_hours_end}
                       </div>
                     ) : (
-                      <span className="text-sm text-gray-400">Not set</span>
+                      <span className="text-sm text-gray-400">{t('employees.notSet')}</span>
                     )}
                     {employee.working_days && (
                       <div className="text-xs text-gray-500 mt-1">{employee.working_days}</div>
@@ -871,7 +903,7 @@ console.log(userProfile,123123123);
                             ? 'text-gray-400 cursor-not-allowed'
                             : 'text-red-600 hover:text-red-900'
                         }`}
-                        title={employee.email === userProfile?.email ? "You cannot delete your own account" : "Delete employee"}
+                        title={employee.email === userProfile?.email ? t('employees.youCannotDeleteYourOwnAccount') : t('employees.deleteEmployee')}
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>

@@ -46,28 +46,104 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load user profile function
+  // Load user profile function with timeout handling and error recovery
   const loadUserProfile = async (userId: string) => {
     try {
-      // Try to get profile from Supabase first
-      const profile = await SupabaseService.getUserProfile(userId);
+      // Try to get profile from Supabase first with a timeout
+      const profilePromise = SupabaseService.getUserProfile(userId);
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Profile load timeout')), 5000)
+      );
+      
+      const profile = await Promise.race([profilePromise, timeoutPromise]) as any;
+      
       if (profile) {
-        setUserProfile(profile as any);
+        setUserProfile(profile);
+        return profile;
       } else {
         // Fallback to cached profile
         const cachedProfile = SupabaseService.getCachedUserProfile(userId);
         setUserProfile(cachedProfile);
+        return cachedProfile;
       }
     } catch (error) {
       console.error('Error loading user profile:', error);
+      
+      // If there's an error, try to clear potentially corrupted cache
+      try {
+        const profileKey = `user_profile_${userId}`;
+        const cached = localStorage.getItem(profileKey);
+        if (cached) {
+          // Test if the cached data is valid JSON
+          try {
+            JSON.parse(cached);
+          } catch (parseError) {
+            // Corrupted data, remove it
+            console.warn('Removing corrupted profile cache:', profileKey);
+            localStorage.removeItem(profileKey);
+          }
+        }
+      } catch (clearError) {
+        console.warn('Failed to clear cached profile:', clearError);
+      }
+      
       // Try cached profile as fallback
       const cachedProfile = SupabaseService.getCachedUserProfile(userId);
       setUserProfile(cachedProfile);
+      return cachedProfile;
     }
   };
 
   // Initialize authentication
   useEffect(() => {
+    // Clean up potentially corrupted localStorage data on startup
+    const cleanupCorruptedData = () => {
+      try {
+        // Check for and remove corrupted profile data
+        const profileKeys = Object.keys(localStorage).filter(key => 
+          key.startsWith('user_profile_')
+        );
+        
+        for (const key of profileKeys) {
+          try {
+            const data = localStorage.getItem(key);
+            if (data) {
+              // Test if it's valid JSON
+              JSON.parse(data);
+            }
+          } catch (e) {
+            // Corrupted data, remove it
+            console.warn('Removing corrupted profile data:', key);
+            localStorage.removeItem(key);
+          }
+        }
+        
+        // Check for suspiciously large Supabase auth keys (potential corruption)
+        const supabaseKeys = Object.keys(localStorage).filter(key =>
+          (key.includes('supabase.auth') || key.startsWith('sb-')) && 
+          key.length > 50 // Only check longer keys
+        );
+        
+        for (const key of supabaseKeys) {
+          try {
+            const data = localStorage.getItem(key);
+            if (data && data.length > 50000) { // Suspiciously large (>50KB)
+              console.warn('Removing suspiciously large Supabase key:', key);
+              localStorage.removeItem(key);
+            }
+          } catch (e) {
+            // If we can't read it, it might be corrupted
+            console.warn('Removing potentially corrupted Supabase key:', key);
+            localStorage.removeItem(key);
+          }
+        }
+      } catch (error) {
+        console.error('Error during storage cleanup:', error);
+      }
+    };
+    
+    cleanupCorruptedData();
+    
     // Check if we have valid Supabase credentials
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;

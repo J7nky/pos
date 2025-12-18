@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react';
 import { Building2, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { BranchAccessValidationService } from '../services/branchAccessValidationService';
 import { db } from '../lib/db';
 import { Branch } from '../types';
@@ -19,6 +20,7 @@ interface BranchSelectionScreenProps {
 
 export default function BranchSelectionScreen({ onBranchSelected }: BranchSelectionScreenProps) {
   const { userProfile } = useSupabaseAuth();
+  const { branchSyncStatus } = useOfflineData();
   
   const [branches, setBranches] = useState<Branch[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,6 +34,7 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
   useEffect(() => {
     let isMounted = true;
     let retryTimeout: NodeJS.Timeout;
+    let syncWaitTimeout: NodeJS.Timeout;
 
     const loadBranches = async (attemptNumber: number = 0) => {
       if (!isMounted) return;
@@ -49,6 +52,30 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
         return;
       }
 
+      // Wait for branch sync to complete if it's in progress
+      if (branchSyncStatus.isSyncing) {
+        setLoadingMessage('Syncing branch data from server...');
+        // Poll for sync completion
+        const checkSyncComplete = () => {
+          if (!branchSyncStatus.isSyncing) {
+            // Sync completed, proceed with loading branches
+            loadBranches(attemptNumber);
+          } else {
+            // Still syncing, check again in 200ms
+            syncWaitTimeout = setTimeout(checkSyncComplete, 200);
+          }
+        };
+        syncWaitTimeout = setTimeout(checkSyncComplete, 200);
+        return;
+      }
+
+      // If sync failed, show error
+      if (branchSyncStatus.error && !branchSyncStatus.isComplete) {
+        setError(`Failed to sync branches: ${branchSyncStatus.error}`);
+        setIsLoading(false);
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
       
@@ -56,24 +83,34 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
       if (attemptNumber === 0) {
         setLoadingMessage('Loading branches...');
       } else if (attemptNumber === 1) {
-        setLoadingMessage('Syncing branch data from server...');
-      } else if (attemptNumber === 2) {
         setLoadingMessage('Still loading, please wait...');
       } else {
         setLoadingMessage('Almost there...');
       }
       
       try {
+        // Ensure database is open before querying
+        await db.ensureOpen();
+        
+        // If sync just completed, wait a bit longer to ensure transaction is fully committed
+        if (branchSyncStatus.isComplete && attemptNumber === 0) {
+          // Wait longer after sync completion to ensure IndexedDB transaction is visible
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        
         // Get all branches for the store
+        // Pass role and branch_id directly to avoid database lookup (user might not be synced yet)
         const accessibleBranches = await BranchAccessValidationService.getAccessibleBranches(
           userProfile.id,
-          userProfile.store_id
+          userProfile.store_id,
+          userProfile.role,
+          userProfile.branch_id
         );
         
-        if (accessibleBranches.length === 0 && attemptNumber < 5) {
-          // Branches not loaded yet - retry with exponential backoff
-          const retryDelay = Math.min(1000 * Math.pow(1.5, attemptNumber), 5000);
-          console.log(`No branches found, retrying in ${retryDelay}ms (attempt ${attemptNumber + 1}/5)...`);
+        if (accessibleBranches.length === 0 && attemptNumber < 3) {
+          // Branches not loaded yet - retry with exponential backoff (reduced from 5 to 3 attempts)
+          const retryDelay = Math.min(500 * Math.pow(1.5, attemptNumber), 2000);
+          console.log(`No branches found, retrying in ${retryDelay}ms (attempt ${attemptNumber + 1}/3)...`);
           setRetryCount(attemptNumber + 1);
           
           retryTimeout = setTimeout(() => {
@@ -101,9 +138,9 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
 
         const validBranches = branchDetails.filter(b => b !== undefined) as Branch[];
         
-        if (validBranches.length === 0 && attemptNumber < 5) {
+        if (validBranches.length === 0 && attemptNumber < 3) {
           // Branch details not available yet - retry
-          const retryDelay = Math.min(1000 * Math.pow(1.5, attemptNumber), 5000);
+          const retryDelay = Math.min(500 * Math.pow(1.5, attemptNumber), 2000);
           console.log(`Branch details not loaded, retrying in ${retryDelay}ms...`);
           setRetryCount(attemptNumber + 1);
           
@@ -143,8 +180,11 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
       if (retryTimeout) {
         clearTimeout(retryTimeout);
       }
+      if (syncWaitTimeout) {
+        clearTimeout(syncWaitTimeout);
+      }
     };
-  }, [userProfile]);
+  }, [userProfile, branchSyncStatus]);
 
   const handleBranchSelect = (branchId: string) => {
     setSelectedBranchId(branchId);
@@ -157,11 +197,15 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
       setIsLoading(true);
       
       // Validate branch access
+      // Pass role, branch_id, and name directly to avoid database lookup
       if (userProfile?.id && userProfile?.store_id) {
         await BranchAccessValidationService.validateBranchAccess(
           userProfile.id,
           userProfile.store_id,
-          selectedBranchId
+          selectedBranchId,
+          userProfile.role,
+          userProfile.branch_id,
+          userProfile.name
         );
       }
       

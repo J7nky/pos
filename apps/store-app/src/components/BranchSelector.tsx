@@ -53,9 +53,12 @@ export default function BranchSelector({
       setError(null);
       
       try {
+        // Pass role and branch_id directly to avoid database lookup
         const branches = await BranchAccessValidationService.getAccessibleBranches(
           userProfile.id,
-          storeId
+          storeId,
+          userProfile.role,
+          userProfile.branch_id
         );
         
         setAccessibleBranches(branches);
@@ -102,10 +105,14 @@ export default function BranchSelector({
 
     try {
       // Validate access
+      // Pass role, branch_id, and name directly to avoid database lookup
       await BranchAccessValidationService.validateBranchAccess(
         userProfile.id,
         storeId,
-        branchId
+        branchId,
+        userProfile.role,
+        userProfile.branch_id,
+        userProfile.name
       );
       
       // Update branch

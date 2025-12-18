@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { Supplier } from '../../types';
+import { useI18n } from '../../i18n';
+import { normalizeNameForComparison } from '../../utils/nameNormalization';
+
 
 interface SupplierFormModalProps {
   open: boolean;
@@ -17,6 +20,7 @@ export default function SupplierFormModal({
   editingSupplier = null,
   existingSuppliers = []
 }: SupplierFormModalProps) {
+  const { t } = useI18n();
   const [supplierForm, setSupplierForm] = useState<Partial<Supplier>>({
     name: '',
     phone: '',
@@ -26,6 +30,7 @@ export default function SupplierFormModal({
     advance_usd_balance: 0,
   });
   const [supplierFormError, setSupplierFormError] = useState<string | null>(null);
+  const [nameValidationError, setNameValidationError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
 
@@ -66,6 +71,7 @@ export default function SupplierFormModal({
         });
       }
       setSupplierFormError(null);
+      setNameValidationError(null);
     }
   }, [open, editingSupplier]);
 
@@ -85,15 +91,17 @@ export default function SupplierFormModal({
       return;
     }
 
-    // Check for duplicate suppliers
-    const exists = existingSuppliers.some(s => 
-      s.name.trim().toLowerCase() === supplierForm.name!.trim().toLowerCase() && 
-      s.phone.trim() === supplierForm.phone!.trim() && 
-      (!editingSupplier || s.id !== editingSupplier.id)
-    );
+    // Check for duplicate supplier name (with Arabic normalization)
+    const normalizedInput = normalizeNameForComparison(supplierForm.name!);
+    const exists = existingSuppliers.some(s => {
+      const normalizedExisting = normalizeNameForComparison(s.name);
+      return normalizedInput === normalizedExisting && (!editingSupplier || s.id !== editingSupplier.id);
+    });
     
     if (exists) {
-      setSupplierFormError('This supplier already exists.');
+      const errorMsg = t('customers.duplicateSupplierNameError') || 'A supplier with this name already exists.';
+      setSupplierFormError(errorMsg);
+      setNameValidationError(errorMsg);
       return;
     }
 
@@ -120,14 +128,14 @@ export default function SupplierFormModal({
   };
 
   if (!open) return null;
-
+  
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-gray-900">
-              {editingSupplier ? 'Edit Supplier' : 'Add New Supplier'}
+              {editingSupplier ? t('customers.editSupplier') : t('customers.addSupplier')}
             </h2>
             <button
               onClick={onClose}
@@ -148,20 +156,27 @@ export default function SupplierFormModal({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="supplier-name" className="block text-sm font-medium text-gray-700">Name *</label>
+              <label htmlFor="supplier-name" className="block text-sm font-medium text-gray-700">{t('customers.nameLabel')}</label>
               <input
                 type="text"
                 id="supplier-name"
                 name="name"
                 value={supplierForm.name}
                 onChange={handleSupplierFormChange}
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className={`mt-1 block w-full border rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 ${
+                  nameValidationError 
+                    ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
+                    : 'border-gray-300 focus:border-blue-500'
+                }`}
                 required
               />
+              {nameValidationError && (
+                <p className="mt-1 text-sm text-red-600">{nameValidationError}</p>
+              )}
             </div>
             
             <div>
-              <label htmlFor="supplier-phone" className="block text-sm font-medium text-gray-700">Phone *</label>
+              <label htmlFor="supplier-phone" className="block text-sm font-medium text-gray-700">{t('customers.phoneLabel')}</label>
               <input
                 type="text"
                 id="supplier-phone"
@@ -174,7 +189,7 @@ export default function SupplierFormModal({
             </div>
             
             <div>
-              <label htmlFor="supplier-email" className="block text-sm font-medium text-gray-700">Email</label>
+              <label htmlFor="supplier-email" className="block text-sm font-medium text-gray-700">{t('customers.emailLabel')}</label>
               <input
                 type="email"
                 id="supplier-email"
@@ -186,7 +201,7 @@ export default function SupplierFormModal({
             </div>
             
             <div>
-              <label htmlFor="supplier-address" className="block text-sm font-medium text-gray-700">Address</label>
+              <label htmlFor="supplier-address" className="block text-sm font-medium text-gray-700">{t('customers.addressLabel')}</label>
               <input
                 type="text"
                 id="supplier-address"
@@ -200,11 +215,11 @@ export default function SupplierFormModal({
 
           {/* Advance Payment Section - Optional for new suppliers */}
           <div className="border-t border-gray-200 pt-4 mt-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Initial Advance Payment (Optional)</h3>
-            <p className="text-xs text-gray-500 mb-3">You can also manage advances later from the Supplier Advances tab in Accounting.</p>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">{t('customers.initialAdvancePaymentOptional')}</h3>
+            <p className="text-xs text-gray-500 mb-3">{t('customers.youCanAlsoManageAdvancesLaterFromTheSupplierAdvancesTabInAccounting')}</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label htmlFor="advance-usd" className="block text-sm font-medium text-gray-700">Advance (USD)</label>
+                <label htmlFor="advance-usd" className="block text-sm font-medium text-gray-700">{t('customers.advanceUSD')}</label>
                 <input
                   type="number"
                   id="advance-usd"
@@ -219,7 +234,7 @@ export default function SupplierFormModal({
               </div>
               
               <div>
-                <label htmlFor="advance-lbp" className="block text-sm font-medium text-gray-700">Advance (LBP)</label>
+                <label htmlFor="advance-lbp" className="block text-sm font-medium text-gray-700">{t('customers.advanceLBP')}</label>
                 <input
                   type="number"
                   id="advance-lbp"
@@ -245,14 +260,14 @@ export default function SupplierFormModal({
               onClick={onClose}
               className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
             >
-              Cancel
+              {t('customers.cancel')}
             </button>
             <button
               type="submit"
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={loading}
             >
-              {loading ? 'Saving...' : (editingSupplier ? 'Save Changes' : 'Add Supplier')}
+              {loading ? t('customers.saving') : (editingSupplier ? t('customers.saveChanges') : t('customers.addSupplier'))}
             </button>
           </div>
         </form>

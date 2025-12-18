@@ -7,6 +7,8 @@ import { Clock, DollarSign, User, LogIn, LogOut, Calendar, TrendingUp } from 'lu
 import { useCurrency } from '../../../hooks/useCurrency';
 import { Pagination } from '../../../components/common/Pagination';
 import SearchableSelect from '../../../components/common/SearchableSelect';
+import { useI18n } from '../../../i18n';
+import { rtlTableHeaderClasses, rtlTableCellClasses, rtlFlexClasses, rtlSpacingClasses } from '../../../utils/rtl';
 
 interface EmployeePaymentsProps {
   employees: Employee[];
@@ -115,13 +117,13 @@ export default function EmployeePayments({
   const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEmployee || !userProfile?.store_id || !userProfile?.id) {
-      showToast('Please select an employee', 'error');
+      showToast(t('customers.pleaseSelectAnEmployee'), 'error');
       return;
     }
 
     const numAmount = parseFloat(paymentForm.amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      showToast('Please enter a valid amount', 'error');
+      showToast(t('customers.pleaseEnterAValidAmount'), 'error');
       return;
     }
 
@@ -129,20 +131,20 @@ export default function EmployeePayments({
       employeeId: selectedEmployee,
       amount: paymentForm.amount,
       currency: paymentForm.currency,
-      description: paymentForm.description || 'Employee payment',
+      description: paymentForm.description || t('customers.employeePayment'),
       reference: `EMP-${Date.now()}`,
       storeId: userProfile.store_id,
       createdBy: userProfile.id
     });
 
     if (result.success) {
-      showToast('Payment processed successfully!', 'success');
+      showToast(t('customers.paymentProcessedSuccessfully'), 'success');
       setShowPaymentForm(false);
       setPaymentForm({ amount: '', currency: 'USD', description: '' });
       setSelectedEmployee(null);
       await refreshData();
     } else {
-      showToast(result.error || 'Failed to process payment', 'error');
+      showToast(result.error || t('customers.failedToProcessPayment'), 'error');
     }
   };
 
@@ -160,27 +162,27 @@ export default function EmployeePayments({
     if (isManager) return true; // Manager can pay employees
     return employeeId === userProfile?.id; // Cashier can only pay themselves
   };
-
+const { t } = useI18n();
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow-sm p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Employee Payments & Attendance</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">{t('customers.employeePaymentsAndAttendance')}</h2>
         
         {loading ? (
           <div className="text-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-2 text-gray-600">Loading...</p>
+            <p className="mt-2 text-gray-600">{t('customers.loading')}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full divide-y divide-gray-200 ">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Today Hours</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th className={rtlTableHeaderClasses}>{t('customers.employee')}</th>
+                  <th className={rtlTableHeaderClasses}>{t('customers.balance')}</th>
+                  <th className={rtlTableHeaderClasses}>{t('customers.status')}</th>
+                  <th className={rtlTableHeaderClasses}>{t('customers.todayHours')}</th>
+                  <th className={rtlTableHeaderClasses}>{t('customers.actions')}</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -194,43 +196,43 @@ export default function EmployeePayments({
 
                   return (
                     <tr key={employee.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
+                      <td className={`${rtlTableCellClasses} whitespace-nowrap`}>
+                        <div className={rtlFlexClasses}>
                           <div className="flex-shrink-0 h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
                             <User className="w-6 h-6 text-blue-600" />
                           </div>
-                          <div className="ml-4">
+                          <div className={rtlSpacingClasses.marginLeft}>
                             <div className="text-sm font-medium text-gray-900">{employee.name}</div>
                             <div className="text-sm text-gray-500">{employee.email}</div>
                             <div className="text-xs text-gray-400">{employee.role}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className={`${rtlTableCellClasses} whitespace-nowrap`}>
                         <div className="text-sm text-gray-900">
                           {formatCurrencyWithSymbol(employeeBalance, balanceCurrency)}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className={`${rtlTableCellClasses} whitespace-nowrap`}>
                         {currentStatus ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            <LogIn className="w-3 h-3 mr-1" />
-                            Checked In
+                            <LogIn className={`w-3 h-3 ${rtlSpacingClasses.marginRight}`} />
+                            {t('customers.checkedIn')}
                           </span>
                         ) : (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                            <LogOut className="w-3 h-3 mr-1" />
-                            Checked Out
+                            <LogOut className={`w-3 h-3 ${rtlSpacingClasses.marginRight}`} />
+                            {t('customers.checkedOut')}
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className={`${rtlTableCellClasses} whitespace-nowrap`}>
                         <div className="text-sm text-gray-900">
                           {todayHours > 0 ? `${todayHours.toFixed(2)} hrs` : '-'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex space-x-2">
+                      <td className={`${rtlTableCellClasses} whitespace-nowrap text-sm font-medium`}>
+                        <div className={`flex ${rtlSpacingClasses.spaceX}`}>
                           {canPayEmployee(employee.id) && (
                             <button
                               onClick={() => {
@@ -238,7 +240,7 @@ export default function EmployeePayments({
                                 setShowPaymentForm(true);
                               }}
                               className="text-green-600 hover:text-green-900"
-                              title="Pay Employee"
+                              title={t('customers.payEmployee')}
                             >
                               <DollarSign className="w-5 h-5" />
                             </button>
@@ -248,7 +250,7 @@ export default function EmployeePayments({
                               setSelectedEmployee(employee.id);
                             }}
                             className="text-blue-600 hover:text-blue-900"
-                            title="View Attendance"
+                            title={t('customers.viewAttendance')}
                           >
                             <Calendar className="w-5 h-5" />
                           </button>
@@ -278,21 +280,21 @@ export default function EmployeePayments({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">Pay Employee</h2>
+              <h2 className="text-xl font-semibold text-gray-900">{t('employees.payEmployee')}</h2>
             </div>
             <form onSubmit={handlePaymentSubmit} className="p-6 space-y-6">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
                 <div className="flex items-center">
                   <DollarSign className="w-5 h-5 text-blue-600 mr-2" />
                   <span className="text-blue-800 font-medium">
-                    Record a payment to {employees.find(e => e.id === selectedEmployee)?.name}
+                    {t('employees.recordAPaymentTo')} {employees.find(e => e.id === selectedEmployee)?.name}
                   </span>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('dashboard.amount')} *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -305,26 +307,26 @@ export default function EmployeePayments({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('dashboard.currency')} *</label>
                   <select
                     value={paymentForm.currency}
                     onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option value="USD">USD ($)</option>
-                    <option value="LBP">LBP (ل.ل)</option>
+                    <option value="USD">{t('customers.usd')} ($)</option>
+                    <option value="LBP">{t('customers.lbp')} (ل.ل)</option>
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description (optional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('payments.description')} </label>
                 <input
                   type="text"
                   value={paymentForm.description}
                   onChange={(e) => setPaymentForm(prev => ({ ...prev, description: e.target.value }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g., Monthly salary, Bonus, etc."
+                  placeholder={t('payments.description')}
                 />
               </div>
 
@@ -338,13 +340,13 @@ export default function EmployeePayments({
                   }}
                   className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  Cancel
+                  {t('customers.cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
                 >
-                  Process Payment
+                  {t('employees.recordAPayment')}
                 </button>
               </div>
             </form>
@@ -359,7 +361,7 @@ export default function EmployeePayments({
             <div className="p-6 border-b">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900">
-                  Attendance History - {employees.find(e => e.id === selectedEmployee)?.name}
+                  {t('customers.attendanceHistory')} - {employees.find(e => e.id === selectedEmployee)?.name}
                 </h2>
                 <button
                   onClick={() => setSelectedEmployee(null)}
@@ -374,10 +376,10 @@ export default function EmployeePayments({
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Check In</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Check Out</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hours</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Notes</th>
+                      <th className={rtlTableHeaderClasses}>{t('customers.checkIn')}</th>
+                      <th className={rtlTableHeaderClasses}>{t('customers.checkOut')}</th>
+                      <th className={rtlTableHeaderClasses}>{t('customers.hours')}</th>
+                      <th className={rtlTableHeaderClasses}>{t('customers.notes')}</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -385,16 +387,16 @@ export default function EmployeePayments({
                       const hours = EmployeeAttendanceService.calculateHoursWorked(att);
                       return (
                         <tr key={att.id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className={`${rtlTableCellClasses} whitespace-nowrap text-sm text-gray-900`}>
                             {new Date(att.check_in_at).toLocaleString()}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className={`${rtlTableCellClasses} whitespace-nowrap text-sm text-gray-900`}>
                             {att.check_out_at ? new Date(att.check_out_at).toLocaleString() : '-'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className={`${rtlTableCellClasses} whitespace-nowrap text-sm text-gray-900`}>
                             {hours !== null ? `${hours.toFixed(2)} hrs` : '-'}
                           </td>
-                          <td className="px-6 py-4 text-sm text-gray-900">
+                          <td className={`${rtlTableCellClasses} text-sm text-gray-900`}>
                             {att.notes || '-'}
                           </td>
                         </tr>

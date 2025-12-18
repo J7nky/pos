@@ -31,9 +31,11 @@ export function useRolePermissions() {
       }
 
       try {
+        // Pass role directly to avoid database lookup (user might not be synced yet)
         const access = await RolePermissionService.getUserModuleAccess(
           userProfile.id,
-          userProfile.store_id
+          userProfile.store_id,
+          userProfile.role
         );
         setModuleAccess(access);
       } catch (error) {

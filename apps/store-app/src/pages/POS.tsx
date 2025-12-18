@@ -1142,7 +1142,7 @@ ${dashSeparator}`;
                   onAddNew={() => {
                     // Signal Customers page to open its add-customer form, then navigate there
                     requestAddCustomerFromPOS();
-                    navigate('/customers');
+                    navigate('/accounts');
                   }}
                   className={`w-full ${customerError ? 'border border-red-500' : ''}`}
                   tabIndex={10000}

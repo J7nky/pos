@@ -56,7 +56,8 @@ const fr = {
     currencySettings: 'Paramètres de devise', displayCurrency: 'Devise d’affichage', currentCurrency: 'Devise actuelle : {{value}}',
     systemInfo: 'Informations système', appVersion: 'Version de l’application', dataStorage: 'Stockage des données', lastSync: 'Dernière synchro', deviceType: 'Type d’appareil', webApp: 'Application Web',
     security: 'Sécurité', sessionManagement: 'Gestion de session', sessionNote: 'Votre session restera active jusqu’à déconnexion manuelle', changePassword: 'Changer le mot de passe',
-    language: 'Langue', language_ar: 'Arabe', language_en: 'Anglais', language_fr: 'Français'
+    language: 'Langue', language_ar: 'Arabe', language_en: 'Anglais', language_fr: 'Français',
+    branchInfo: 'Informations de la succursale'
   },
   home: {
     products: 'produits',

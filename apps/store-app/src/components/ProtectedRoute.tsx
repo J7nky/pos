@@ -71,7 +71,7 @@ export function ProtectedRoute({
     }
     
     // Redirect to dashboard with error message
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/" replace />;
   }
 
   // Access granted - render children

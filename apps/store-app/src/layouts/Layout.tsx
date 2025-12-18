@@ -58,9 +58,11 @@ export default function Layout() {
     const loadModuleAccess = async () => {
       if (!userProfile) return;
 
+      // Pass role directly to avoid database lookup (user might not be synced yet)
       const access = await RolePermissionService.getUserModuleAccess(
         userProfile.id,
-        userProfile.store_id
+        userProfile.store_id,
+        userProfile.role
       );
       setModuleAccess(access);
     };
@@ -73,17 +75,17 @@ export default function Layout() {
     { id: 'home', label: t('nav.home'), icon: LayoutDashboard, path: '/', module: null },
     { id: 'inventory', label: t('nav.inventory'), icon: Package, path: '/inventory', module: 'inventory' as ModuleName },
     { id: 'pos', label: t('nav.pos'), icon: ShoppingCart, path: '/pos', module: 'pos' as ModuleName },
-    { id: 'customers', label: t('nav.customers'), icon: Users, path: '/customers', module: null },
+    { id: 'accounts', label: t('nav.accounts'), icon: Users, path: '/accounts', module: null },
     { id: 'accounting', label: t('nav.accounting'), icon: Calculator, path: '/accounting', module: 'accounting' as ModuleName },
     { id: 'reports', label: t('nav.reports'), icon: FileText, path: '/reports', module: 'reports' as ModuleName },
     { id: 'unsynced', label: t('nav.unsynced'), icon: CloudOff, path: '/unsynced', module: null },
     { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings', module: 'settings' as ModuleName },
-    { id: 'employees', label: 'Employees', icon: UserCog, path: '/employees', module: 'users' as ModuleName }
+    { id: 'employees', label: t('nav.employees'), icon: UserCog, path: '/employees', module: 'users' as ModuleName }
   ];
 
   // Filter menu items based on module access
   const menuItems = allMenuItems.filter(item => {
-    // Always show items without module requirement (home, customers, unsynced)
+    // Always show items without module requirement (home, accounts, unsynced)
     if (!item.module) return true;
     
     // Check module access for protected items
@@ -102,10 +104,11 @@ export default function Layout() {
           'Alt+H': 'Home',
           'Alt+I': 'Inventory',
           'Alt+P': 'Point of Sale',
-          'Alt+C': 'Customers',
+          'Alt+C': 'Accounts',
           'Alt+A': 'Accounting',
           'Alt+R': 'Reports',
-          'Alt+S': 'Settings'
+          'Alt+S': 'Settings',
+          'Alt+E': 'Employees'
         }
       }
     ];

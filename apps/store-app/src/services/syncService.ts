@@ -2507,31 +2507,73 @@ export class SyncService {
       if (error) {
         result.errors.push(`Download failed: ${error.message}`);
       } else if (remoteRecords) {
-        for (const record of remoteRecords as any[]) {
-          const normalizedRecord = { ...record };
-          
-          // Normalize is_deleted for branches: convert to _deleted for IndexedDB
-          if (tableName === 'branches' && normalizedRecord.is_deleted !== undefined) {
-            normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
-            // Remove Supabase-specific fields that aren't in IndexedDB schema
-            delete normalizedRecord.is_deleted;
-            delete normalizedRecord.deleted_at;
-            delete normalizedRecord.deleted_by;
-          }
-          
-          // Normalize is_deleted for stores: convert to _deleted for IndexedDB
-          if (tableName === 'stores' && normalizedRecord.is_deleted !== undefined) {
-            normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
-            delete normalizedRecord.is_deleted;
-            delete normalizedRecord.deleted_at;
-            delete normalizedRecord.deleted_by;
-          }
-          
-          await (db as any)[tableName].put({
-            ...normalizedRecord,
-            _synced: true,
-            _lastSyncedAt: new Date().toISOString()
+        // For branches and stores, wrap writes in a transaction to ensure atomicity
+        // This guarantees data is immediately queryable after sync completes
+        const needsTransaction = tableName === 'branches' || tableName === 'stores';
+        
+        if (needsTransaction) {
+          const table = (db as any)[tableName];
+          await db.transaction('rw', [table], async () => {
+            for (const record of remoteRecords as any[]) {
+              const normalizedRecord = { ...record };
+              
+              // Normalize is_deleted for branches: convert to _deleted for IndexedDB
+              if (tableName === 'branches' && normalizedRecord.is_deleted !== undefined) {
+                normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
+                // Remove Supabase-specific fields that aren't in IndexedDB schema
+                delete normalizedRecord.is_deleted;
+                delete normalizedRecord.deleted_at;
+                delete normalizedRecord.deleted_by;
+              }
+              
+              // Normalize is_deleted for stores: convert to _deleted for IndexedDB
+              if (tableName === 'stores' && normalizedRecord.is_deleted !== undefined) {
+                normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
+                delete normalizedRecord.is_deleted;
+                delete normalizedRecord.deleted_at;
+                delete normalizedRecord.deleted_by;
+              }
+              
+              // Ensure _deleted is always set (default to false)
+              if (normalizedRecord._deleted === undefined) {
+                normalizedRecord._deleted = false;
+              }
+              
+              await table.put({
+                ...normalizedRecord,
+                _synced: true,
+                _lastSyncedAt: new Date().toISOString()
+              });
+            }
           });
+        } else {
+          // For other tables, use individual puts (existing behavior)
+          for (const record of remoteRecords as any[]) {
+            const normalizedRecord = { ...record };
+            
+            // Normalize is_deleted for branches: convert to _deleted for IndexedDB
+            if (tableName === 'branches' && normalizedRecord.is_deleted !== undefined) {
+              normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
+              // Remove Supabase-specific fields that aren't in IndexedDB schema
+              delete normalizedRecord.is_deleted;
+              delete normalizedRecord.deleted_at;
+              delete normalizedRecord.deleted_by;
+            }
+            
+            // Normalize is_deleted for stores: convert to _deleted for IndexedDB
+            if (tableName === 'stores' && normalizedRecord.is_deleted !== undefined) {
+              normalizedRecord._deleted = normalizedRecord.is_deleted === true || normalizedRecord.is_deleted === 1;
+              delete normalizedRecord.is_deleted;
+              delete normalizedRecord.deleted_at;
+              delete normalizedRecord.deleted_by;
+            }
+            
+            await (db as any)[tableName].put({
+              ...normalizedRecord,
+              _synced: true,
+              _lastSyncedAt: new Date().toISOString()
+            });
+          }
         }
         result.synced.downloaded = remoteRecords.length;
       }
@@ -2577,6 +2619,49 @@ export class SyncService {
       
       if (result.success) {
         console.log(`✅ Stores and branches synced: ${result.synced.downloaded} records downloaded`);
+        
+        // Verify branches are actually queryable after sync
+        // This ensures IndexedDB transaction has committed and data is visible
+        // Use multiple verification attempts with increasing delays
+        try {
+          // Ensure database is open before querying
+          await db.ensureOpen();
+          
+          // Wait a bit for transaction to fully commit
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
+          let branchCount = 0;
+          let verificationAttempts = 0;
+          const maxVerificationAttempts = 5;
+          
+          while (verificationAttempts < maxVerificationAttempts) {
+            branchCount = await db.branches
+              .where('store_id')
+              .equals(storeId)
+              .filter(b => !(b._deleted === true))
+              .count();
+            
+            if (branchCount > 0) {
+              console.log(`✅ Verified ${branchCount} branches are queryable after ${verificationAttempts + 1} attempt(s)`);
+              break;
+            }
+            
+            verificationAttempts++;
+            if (verificationAttempts < maxVerificationAttempts) {
+              // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms
+              const delay = 100 * Math.pow(2, verificationAttempts - 1);
+              console.log(`⏳ Branches not yet queryable, retrying verification in ${delay}ms (attempt ${verificationAttempts + 1}/${maxVerificationAttempts})...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
+          }
+          
+          if (branchCount === 0 && branchesResult.synced.downloaded > 0) {
+            console.warn('⚠️ Branches synced but not queryable after verification attempts - data may be available shortly');
+          }
+        } catch (verifyError) {
+          console.warn('⚠️ Failed to verify branches after sync:', verifyError);
+          // Don't fail the sync if verification fails, but log the warning
+        }
       } else {
         console.error(`❌ Stores and branches sync had errors:`, result.errors);
       }

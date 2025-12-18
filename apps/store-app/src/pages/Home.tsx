@@ -336,7 +336,7 @@ export default function Home() {
       icon: UserPlus,
       color: 'bg-purple-500',
       hoverColor: 'hover:bg-purple-600',
-      action: () => {navigate('/customers')},
+      action: () => {navigate('/accounts')},
       stats: `${customers.filter(c => c.isActive).length} ${t('common.active')}`
     },
     {

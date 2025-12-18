@@ -24,6 +24,8 @@ export default function Settings() {
   
   // Check if user is admin or manager
   const isAdminOrManager = userProfile?.role === 'admin' || userProfile?.role === 'manager';
+  // Check if user is admin (only admin can edit branch info)
+  const isAdmin = userProfile?.role === 'admin';
   
   // Use offline context for all settings (offline-first approach)
   const offlineData = useOfflineData();  
@@ -206,6 +208,15 @@ export default function Settings() {
               />
             </div>
           </div>
+        </div>
+
+        {/* Branch Information */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <div className="flex items-center mb-4">
+            <Building className="w-6 h-6 text-gray-600 mr-3" />
+            <h2 className="text-xl font-semibold text-gray-900">{t('settings.branchInfo')}</h2>
+          </div>
+          <BranchInfoSection />
         </div>
 
         {/* Inventory Alerts */}
@@ -724,6 +735,162 @@ function ReceiptSettings() {
           >
             <Save className="w-4 h-4 mr-2" />
             Save Receipt Settings
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Branch Info Section Component
+function BranchInfoSection() {
+  const { userProfile } = useSupabaseAuth();
+  const offlineData = useOfflineData();
+  
+  // Check if user is admin (only admin can edit)
+  const isAdmin = userProfile?.role === 'admin';
+  // Check if user can view (admin, manager, or cashier)
+  const canView = userProfile?.role === 'admin' || userProfile?.role === 'manager' || userProfile?.role === 'cashier';
+  
+  // Get current branch from context
+  const currentBranchId = offlineData?.currentBranchId;
+  const branches = offlineData?.branches || [];
+  const currentBranch = currentBranchId ? branches.find(b => b.id === currentBranchId) : null;
+  
+  const [tempBranch, setTempBranch] = useState({
+    name: currentBranch?.name || '',
+    address: currentBranch?.address || '',
+    phone: currentBranch?.phone || ''
+  });
+  const [showSaveMessage, setShowSaveMessage] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  
+  // Update temp state when branch changes
+  useEffect(() => {
+    if (currentBranch) {
+      setTempBranch({
+        name: currentBranch.name || '',
+        address: currentBranch.address || '',
+        phone: currentBranch.phone || ''
+      });
+    }
+  }, [currentBranch]);
+  
+  const handleSave = async () => {
+    if (!currentBranchId || !isAdmin) return;
+    
+    try {
+      if (offlineData?.updateBranch) {
+        await offlineData.updateBranch(currentBranchId, {
+          name: tempBranch.name,
+          address: tempBranch.address || null,
+          phone: tempBranch.phone || null
+        });
+        setShowSaveMessage(true);
+        setSaveError(null);
+        setTimeout(() => setShowSaveMessage(false), 2000);
+      }
+    } catch (error) {
+      console.error('Error saving branch info:', error);
+      setSaveError('Failed to save branch information');
+      setTimeout(() => setSaveError(null), 3000);
+    }
+  };
+  
+  const handleInputChange = (field: string, value: string) => {
+    setTempBranch((prev) => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+  
+  if (!canView) {
+    return null;
+  }
+  
+  if (!currentBranch) {
+    return (
+      <div className="p-4 border border-gray-200 rounded-lg">
+        <p className="text-gray-600">No branch information available.</p>
+      </div>
+    );
+  }
+  
+  const hasChanges = 
+    tempBranch.name !== (currentBranch.name || '') ||
+    tempBranch.address !== (currentBranch.address || '') ||
+    tempBranch.phone !== (currentBranch.phone || '');
+  
+  return (
+    <div className="space-y-4">
+      {/* Save Message */}
+      {showSaveMessage && (
+        <div className="flex items-center px-4 py-2 bg-green-100 text-green-800 rounded-lg">
+          <CheckCircle className="w-5 h-5 mr-2" />
+          Branch information saved successfully!
+        </div>
+      )}
+      {saveError && (
+        <div className="flex items-center px-4 py-2 bg-red-100 text-red-800 rounded-lg">
+          <AlertTriangle className="w-5 h-5 mr-2" />
+          {saveError}
+        </div>
+      )}
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Branch Name
+          </label>
+          <input
+            type="text"
+            value={tempBranch.name}
+            onChange={(e) => handleInputChange('name', e.target.value)}
+            disabled={!isAdmin}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
+            placeholder="Branch Name"
+          />
+        </div>
+        
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Phone
+          </label>
+          <input
+            type="text"
+            value={tempBranch.phone}
+            onChange={(e) => handleInputChange('phone', e.target.value)}
+            disabled={!isAdmin}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
+            placeholder="Phone Number"
+          />
+        </div>
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Address
+        </label>
+        <input
+          type="text"
+          value={tempBranch.address}
+          onChange={(e) => handleInputChange('address', e.target.value)}
+          disabled={!isAdmin}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
+          placeholder="Branch Address"
+        />
+      </div>
+      
+      {/* Save Button - Only for Admin */}
+      {isAdmin && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleSave}
+            disabled={!hasChanges}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+          >
+            <Save className="w-4 h-4 mr-2" />
+            Save Branch Information
           </button>
         </div>
       )}

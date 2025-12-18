@@ -48,6 +48,12 @@ interface OfflineDataContextType {
   // Branch context (automatic - no manual selection for manager/cashier, manual for admin)
   currentBranchId: string | null;
   setCurrentBranchId: (branchId: string | null) => void;
+  // Branch sync status - tracks when branches are being synced for admin users
+  branchSyncStatus: {
+    isSyncing: boolean;
+    isComplete: boolean;
+    error: string | null;
+  };
   // Data - matching exact structure
   products: Tables['products']['Row'][];
   branches: Branch[]; // Store branches for multi-branch support
@@ -117,6 +123,7 @@ interface OfflineDataContextType {
   updateSupplier: (id: string, updates: Tables['suppliers']['Update']) => Promise<void>;
   updateProduct: (id: string, updates: Tables['products']['Update']) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
+  updateBranch: (id: string, updates: { name?: string; address?: string | null; phone?: string | null }) => Promise<void>;
   addEmployee: (employee: Omit<Tables['users']['Insert'], 'store_id'>) => Promise<void>;
   updateEmployee: (id: string, updates: Tables['users']['Update']) => Promise<void>;
   deleteEmployee: (id: string) => Promise<void>;
@@ -344,6 +351,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Tables['transactions']['Row'][]>([]);
   const [expenseCategories] = useState<any[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  
+  // Branch sync status - tracks when branches are being synced for admin users
+  const [branchSyncStatus, setBranchSyncStatus] = useState<{
+    isSyncing: boolean;
+    isComplete: boolean;
+    error: string | null;
+  }>({
+    isSyncing: false,
+    isComplete: false,
+    error: null
+  });
 
   // Raw internal data
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
@@ -550,25 +568,92 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const existingBranches = await db.branches
         .where('store_id')
         .equals(storeId)
-        .filter(b => !b._deleted)
+        .filter(b => !(b._deleted === true))
         .count();
       
       if (existingBranches > 0) {
         console.log(`✅ Branches already synced (${existingBranches} branches found)`);
+        setBranchSyncStatus({
+          isSyncing: false,
+          isComplete: true,
+          error: null
+        });
         return;
       }
       
       // Branches not available - sync them immediately
       console.log('🔄 Admin user detected - syncing branches immediately for branch selection...');
+      setBranchSyncStatus({
+        isSyncing: true,
+        isComplete: false,
+        error: null
+      });
+      
       try {
         const syncResult = await syncService.syncStoresAndBranches(storeId);
         if (syncResult.success) {
           console.log(`✅ Branches synced successfully: ${syncResult.synced.downloaded} branches downloaded`);
+          
+          // Wait a bit more to ensure IndexedDB transaction is fully committed and visible
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Verify branches are actually queryable before marking sync as complete
+          try {
+            await db.ensureOpen();
+            const branchCount = await db.branches
+              .where('store_id')
+              .equals(storeId)
+              .filter(b => !(b._deleted === true))
+              .count();
+            
+            if (branchCount > 0 || syncResult.synced.downloaded === 0) {
+              // Branches are queryable or no branches to sync
+              setBranchSyncStatus({
+                isSyncing: false,
+                isComplete: true,
+                error: null
+              });
+            } else {
+              // Branches synced but not yet queryable - wait a bit more
+              console.log('⏳ Waiting for branches to become queryable...');
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              const retryCount = await db.branches
+                .where('store_id')
+                .equals(storeId)
+                .filter(b => !(b._deleted === true))
+                .count();
+              
+              setBranchSyncStatus({
+                isSyncing: false,
+                isComplete: retryCount > 0,
+                error: retryCount === 0 ? 'Branches synced but not yet queryable' : null
+              });
+            }
+          } catch (verifyError) {
+            console.warn('⚠️ Failed to verify branches after sync:', verifyError);
+            // Still mark as complete since sync succeeded
+            setBranchSyncStatus({
+              isSyncing: false,
+              isComplete: true,
+              error: null
+            });
+          }
         } else {
           console.error('❌ Failed to sync branches:', syncResult.errors);
+          setBranchSyncStatus({
+            isSyncing: false,
+            isComplete: false,
+            error: syncResult.errors.join(', ')
+          });
         }
       } catch (error) {
         console.error('❌ Error syncing branches for admin:', error);
+        setBranchSyncStatus({
+          isSyncing: false,
+          isComplete: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
       }
     };
     
@@ -1505,7 +1590,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       clearTimeout(debouncedSyncTimeout);
     }
 
-    // Set new timeout for 1 second
+    // Set new timeout for 30 seconds
     const timeout = setTimeout(async () => {
       // Update unsynced count first to ensure we have the latest count
       await updateUnsyncedCount();
@@ -1529,7 +1614,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       }
       setDebouncedSyncTimeout(null);
-    }, 1000);
+    }, 30000);
 
     setDebouncedSyncTimeout(timeout);
   }, [isOnline, isSyncing, debouncedSyncTimeout, unsyncedCount, performSync]);
@@ -2656,6 +2741,48 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         fields_changed: Object.keys(updates)
       })
     );
+  };
+
+  const updateBranch = async (id: string, updates: { name?: string; address?: string | null; phone?: string | null }): Promise<void> => {
+    // Get original branch data
+    const originalBranch = await db.branches.get(id);
+    if (!originalBranch) throw new Error('Branch not found');
+    
+    // Prepare update payload
+    const updatePayload: any = {
+      ...updates,
+      updated_at: new Date().toISOString(),
+      _synced: false
+    };
+    
+    // Update branch in IndexedDB
+    await db.branches.update(id, updatePayload);
+    
+    // Store undo data with original values
+    const undoChanges: any = {};
+    for (const key of Object.keys(updates)) {
+      undoChanges[key] = (originalBranch as any)[key];
+    }
+    
+    pushUndo({
+      type: 'update_branch',
+      affected: [{ table: 'branches', id }],
+      steps: [{ op: 'update', table: 'branches', id, changes: undoChanges }]
+    });
+    
+    resetAutoSyncTimer();
+    
+    // Emit event for real-time sync to other devices
+    // Use the branch ID being updated as the branchId for the event
+    await emitBranchEvent(
+      buildEventOptions(storeId!, id, userProfile?.id, 'update', {
+        fields_changed: Object.keys(updates)
+      })
+    );
+    
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
   };
 
   const deleteProduct = async (id: string): Promise<void> => {
@@ -5748,6 +5875,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         storeId: null,
         currentBranchId: null,
         setCurrentBranchId: () => {},
+        branchSyncStatus: {
+          isSyncing: false,
+          isComplete: false,
+          error: null
+        },
         products: [],
         branches: [],
         suppliers: [],
@@ -5803,6 +5935,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateCustomer: async () => { },
         updateSupplier: async () => { },
         updateProduct: async () => { },
+        updateBranch: async () => { },
         deleteProduct: async () => { },
         addEmployee: async () => { },
         updateEmployee: async () => { },
@@ -5884,6 +6017,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       storeId,
       currentBranchId,
       setCurrentBranchId,
+      branchSyncStatus,
       products,
       branches,
       suppliers,
@@ -5933,6 +6067,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateCustomer,
       updateSupplier,
       updateProduct,
+      updateBranch,
       deleteProduct,
       addEmployee,
       updateEmployee,

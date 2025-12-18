@@ -159,22 +159,31 @@ export class RolePermissionService {
    * 
    * @param userId - User ID
    * @param storeId - Store ID
+   * @param userRole - Optional user role (if provided, skips database lookup)
    * @returns Record of module access status
    */
   static async getUserModuleAccess(
     userId: string,
-    storeId: string
+    storeId: string,
+    userRole?: 'admin' | 'manager' | 'cashier'
   ): Promise<Record<ModuleName, boolean>> {
-    const user = await db.users.get(userId);
-    if (!user) {
-      return {
-        pos: false,
-        inventory: false,
-        accounting: false,
-        reports: false,
-        settings: false,
-        users: false
-      };
+    let role = userRole;
+    
+    if (!role) {
+      // Fallback to database lookup if role not provided
+      const user = await db.users.get(userId);
+      if (!user) {
+        // If user not found and no role provided, return all false
+        return {
+          pos: false,
+          inventory: false,
+          accounting: false,
+          reports: false,
+          settings: false,
+          users: false
+        };
+      }
+      role = user.role;
     }
 
     // Get all user-specific module access records
@@ -193,7 +202,7 @@ export class RolePermissionService {
         access[module] = userRecord.can_access;
       } else {
         // Fall back to role default
-        access[module] = this.roleHasModuleAccess(user.role, module);
+        access[module] = this.roleHasModuleAccess(role, module);
       }
     }
 

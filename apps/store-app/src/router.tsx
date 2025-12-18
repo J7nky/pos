@@ -72,7 +72,7 @@ export const router = createRouter([
             errorElement: <ErrorPage />,
           },
           {
-            path: "customers",
+            path: "accounts",
             element: <Customers />,
             errorElement: <ErrorPage />,
           },
