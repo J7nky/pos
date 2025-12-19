@@ -84,7 +84,8 @@ const SYNC_TABLES = [
   'reminders',
   // RBAC tables (Role-Based Access Control) - sync for cross-device permissions
   'role_operation_limits', // Operation limits (discount, void, return amounts)
-  'user_module_access' // Per-user module access (POS, Inventory, Accounting, etc.)
+  'role_permissions', // Default permissions per role (operations + module access)
+  'user_permissions' // User-specific permission overrides (operations + module access)
 ] as const;
 
 type SyncTable = typeof SYNC_TABLES[number];
@@ -113,7 +114,8 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'missed_products': ['cash_drawer_sessions', 'inventory_items'],
   'reminders': ['users'], // Reminders reference users (created_by, completed_by)
   'role_operation_limits': ['stores', 'users'], // RBAC: Operation limits reference stores and users
-  'user_module_access': ['stores', 'users'] // RBAC: Module access references stores and users
+  'role_permissions': ['stores'], // RBAC: Role permissions reference stores
+  'user_permissions': ['stores', 'users'] // RBAC: User permissions reference stores and users
 };
 
 export interface SyncResult {
@@ -1078,27 +1080,50 @@ export class SyncService {
                   console.error('[Event] Failed to emit role_operation_limit_updated event:', eventError);
                 }
               }
-            } else if (tableName === 'user_module_access') {
-              // Emit events for user module access updates
+            } else if (tableName === 'role_permissions') {
+              // Emit events for role permission updates
               for (const record of batch as any[]) {
                 try {
                   await eventEmissionService.emitEvent({
                     store_id: record.store_id,
                     branch_id: branchId || '',
-                    event_type: 'user_module_access_updated',
-                    entity_type: 'user_module_access',
+                    event_type: 'role_permission_updated',
+                    entity_type: 'role_permissions',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      role: record.role,
+                      operation: record.operation,
+                      allowed: record.allowed
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted role_permission_updated event for ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit role_permission_updated event:', eventError);
+                }
+              }
+            } else if (tableName === 'user_permissions') {
+              // Emit events for user permission updates
+              for (const record of batch as any[]) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '',
+                    event_type: 'user_permission_updated',
+                    entity_type: 'user_permissions',
                     entity_id: record.id,
                     operation: 'update',
                     user_id: record.updated_by || null,
                     metadata: {
                       user_id: record.user_id,
-                      module_name: record.module_name,
-                      has_access: record.has_access
+                      operation: record.operation,
+                      allowed: record.allowed
                     }
                   });
-                  console.log(`🎯 [Event] Emitted user_module_access_updated event for ${record.id}`);
+                  console.log(`🎯 [Event] Emitted user_permission_updated event for ${record.id}`);
                 } catch (eventError) {
-                  console.error('[Event] Failed to emit user_module_access_updated event:', eventError);
+                  console.error('[Event] Failed to emit user_permission_updated event:', eventError);
                 }
               }
             }

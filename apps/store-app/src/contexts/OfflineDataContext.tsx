@@ -660,6 +660,58 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     syncBranchesForAdmin();
   }, [storeId, userProfile, isOnline, currentBranchId]);
 
+  // CRITICAL: Sync branches for cashier/manager users before branch initialization
+  // This ensures their assigned branch is available in IndexedDB when initializeBranch runs
+  useEffect(() => {
+    const syncBranchesForCashierManager = async () => {
+      // Only sync for cashier/manager users with assigned branch
+      if (!storeId || !userProfile || !isOnline) {
+        return;
+      }
+      
+      // Only for cashier/manager users with assigned branch_id
+      if ((userProfile.role !== 'cashier' && userProfile.role !== 'manager') || !userProfile.branch_id || currentBranchId) {
+        return;
+      }
+      
+      // Check if the assigned branch exists locally
+      const assignedBranch = await db.branches.get(userProfile.branch_id);
+      
+      if (assignedBranch && !assignedBranch._deleted && assignedBranch.store_id === storeId) {
+        // Branch already exists and is valid
+        console.log(`✅ Assigned branch already synced: ${userProfile.branch_id}`);
+        return;
+      }
+      
+      // Branch not available - sync branches immediately
+      console.log(`🔄 ${userProfile.role} user detected - syncing branches to ensure assigned branch is available...`);
+      
+      try {
+        const syncResult = await syncService.syncStoresAndBranches(storeId);
+        if (syncResult.success) {
+          console.log(`✅ Branches synced successfully for ${userProfile.role}: ${syncResult.synced.downloaded} branches downloaded`);
+          
+          // Wait a bit to ensure IndexedDB transaction is fully committed
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Verify the assigned branch is now available
+          const branchAfterSync = await db.branches.get(userProfile.branch_id);
+          if (branchAfterSync && !branchAfterSync._deleted && branchAfterSync.store_id === storeId) {
+            console.log(`✅ Assigned branch is now available after sync: ${userProfile.branch_id}`);
+          } else {
+            console.warn(`⚠️ Assigned branch still not found after sync: ${userProfile.branch_id}`);
+          }
+        } else {
+          console.error(`❌ Failed to sync branches for ${userProfile.role}:`, syncResult.errors);
+        }
+      } catch (error) {
+        console.error(`❌ Error syncing branches for ${userProfile.role}:`, error);
+      }
+    };
+    
+    syncBranchesForCashierManager();
+  }, [storeId, userProfile, isOnline, currentBranchId]);
+
   // Initialize branch - automatically determine branch based on user role
   useEffect(() => {
     const initializeBranch = async () => {
@@ -700,13 +752,33 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         
         // Manager/Cashier - Use their assigned branch_id
         if ((userProfile.role === 'manager' || userProfile.role === 'cashier') && userProfile.branch_id) {
-          // Validate their assigned branch
-          const branch = await db.branches.get(userProfile.branch_id);
+          // Validate their assigned branch - with retry logic if branch is not synced yet
+          let branch = await db.branches.get(userProfile.branch_id);
+          
+          // If branch not found, wait a bit for sync to complete and retry
+          if (!branch && isOnline) {
+            console.log(`⏳ ${userProfile.role}: Assigned branch not found in IndexedDB, waiting for sync...`);
+            // Wait for sync to complete (max 3 seconds)
+            for (let attempt = 0; attempt < 6; attempt++) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+              branch = await db.branches.get(userProfile.branch_id);
+              if (branch) {
+                console.log(`✅ ${userProfile.role}: Branch found after ${attempt + 1} attempt(s)`);
+                break;
+              }
+            }
+          }
+          
           if (branch && !branch._deleted && branch.store_id === storeId) {
             setCurrentBranchId(userProfile.branch_id);
             console.log(`✅ ${userProfile.role}: Auto-assigned to branch:`, userProfile.branch_id);
-          } else {
-            console.error(`❌ ${userProfile.role}: Assigned branch is invalid or deleted`);
+          } else if (!branch) {
+            // Branch still not found after retries - might need manual sync
+            console.error(`❌ ${userProfile.role}: Assigned branch not found in IndexedDB: ${userProfile.branch_id}. Please ensure you're online and try refreshing.`);
+          } else if (branch._deleted) {
+            console.error(`❌ ${userProfile.role}: Assigned branch has been deleted: ${userProfile.branch_id}`);
+          } else if (branch.store_id !== storeId) {
+            console.error(`❌ ${userProfile.role}: Assigned branch belongs to different store: ${userProfile.branch_id}`);
           }
           return;
         }

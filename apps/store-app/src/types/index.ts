@@ -44,6 +44,44 @@ export type OperationType =
   | 'max_void_amount_usd'
   | 'max_void_amount_lbp';
 
+// Operation names for permissions (includes operations and module access)
+export type OperationName =
+  // Module access operations
+  | 'access_pos'
+  | 'access_inventory'
+  | 'access_accounting'
+  | 'access_reports'
+  | 'access_settings'
+  | 'access_users'
+  // POS operations
+  | 'create_sale'
+  | 'edit_sale'
+  | 'delete_sale'
+  | 'void_sale'
+  | 'refund_sale'
+  | 'apply_discount'
+  | 'override_price'
+  | 'access_cash_drawer'
+  // Inventory operations
+  | 'create_product'
+  | 'edit_product'
+  | 'delete_product'
+  | 'receive_inventory'
+  | 'adjust_inventory'
+  | 'view_products'
+  // Accounting operations
+  | 'create_transaction'
+  | 'edit_transaction'
+  | 'delete_transaction'
+  | 'view_reports'
+  // User management operations
+  | 'create_user'
+  | 'edit_user'
+  | 'delete_user'
+  | 'view_users'
+  | 'manage_users';
+
+// Operation limits (for numeric restrictions like max discount, max void amount)
 export interface RoleOperationLimit {
   id: string;
   store_id: string;
@@ -58,6 +96,47 @@ export interface RoleOperationLimit {
   _deleted?: boolean;
 }
 
+// Role permissions (GLOBAL default permissions per role - applies to ALL stores)
+export interface RolePermission {
+  id: string;
+  role: 'admin' | 'manager' | 'cashier' | 'super_admin';
+  operation: OperationName;
+  allowed: boolean;
+  created_at: string;
+  updated_at: string;
+  _synced?: boolean;
+  _deleted?: boolean;
+}
+
+// User permissions (user-specific permission overrides)
+export interface UserPermission {
+  id: string;
+  user_id: string;
+  store_id: string;
+  operation: OperationName;
+  allowed: boolean;
+  created_at: string;
+  updated_at: string;
+  _synced?: boolean;
+  _deleted?: boolean;
+}
+
+// Permission cache structure (for in-memory caching)
+export interface PermissionCache {
+  userId: string;
+  storeId: string;
+  modules: Record<ModuleName, boolean>;
+  operations: Record<OperationName, boolean>;
+  limits: Record<OperationType, {
+    limit_value: number;
+    limit_currency?: 'USD' | 'LBP';
+    source: 'role_default' | 'user_override';
+  }>;
+  branches: string[]; // Accessible branch IDs
+  expiresAt: number; // Timestamp
+}
+
+// @deprecated - Use UserPermission instead. Module access is now treated as operations (access_pos, access_inventory, etc.)
 export interface UserModuleAccess {
   id: string;
   user_id: string;

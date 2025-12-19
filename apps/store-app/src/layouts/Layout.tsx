@@ -7,7 +7,7 @@ import { NotificationCenter } from '../components/NotificationCenter';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useI18n } from '../i18n';
-import { RolePermissionService } from '../services/rolePermissionService';
+import { AccessControlService } from '../services/accessControlService';
 import { useState, useEffect } from 'react';
 import { ModuleName } from '../types';
 import {
@@ -59,7 +59,7 @@ export default function Layout() {
       if (!userProfile) return;
 
       // Pass role directly to avoid database lookup (user might not be synced yet)
-      const access = await RolePermissionService.getUserModuleAccess(
+      const access = await AccessControlService.getUserModuleAccess(
         userProfile.id,
         userProfile.store_id,
         userProfile.role

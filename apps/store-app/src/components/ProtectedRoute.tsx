@@ -11,7 +11,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { RolePermissionService } from '../services/rolePermissionService';
+import { AccessControlService } from '../services/accessControlService';
 import { ModuleName } from '../types';
 
 interface ProtectedRouteProps {
@@ -38,7 +38,7 @@ export function ProtectedRoute({
       }
 
       try {
-        await RolePermissionService.checkModuleAccess(
+        await AccessControlService.checkModuleAccess(
           userProfile.id,
           userProfile.store_id,
           module

@@ -8,6 +8,7 @@ import {
   DollarSign, 
   BarChart3, 
   Settings,
+  Shield,
   LogOut
 } from 'lucide-react';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
@@ -27,6 +28,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Subscriptions', href: '/subscriptions', icon: CreditCard },
     { name: 'Payments', href: '/payments', icon: DollarSign },
     { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+    { name: 'Role Permissions', href: '/role-permissions', icon: Shield },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 

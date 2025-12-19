@@ -1,6 +1,9 @@
 /**
  * Role Permission Service
  * 
+ * @deprecated This service is deprecated. Use AccessControlService instead.
+ * This service will be removed in a future version.
+ * 
  * Validates permissions based on user role (admin/manager/cashier).
  * Checks operation limits from database for configurable restrictions.
  * Checks module access from database for per-user module permissions.

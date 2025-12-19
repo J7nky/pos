@@ -1,6 +1,9 @@
 /**
  * Branch Access Validation Service
  * 
+ * @deprecated This service is deprecated. Use AccessControlService instead.
+ * This service will be removed in a future version.
+ * 
  * Validates user access to branches based on role:
  * - Admin: Can access all branches (branch_id: null)
  * - Manager/Cashier: Can only access their assigned branch (branch_id: "branch-id")
