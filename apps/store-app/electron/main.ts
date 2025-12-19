@@ -4,7 +4,15 @@ const { exec } = require("child_process");
 const { ThermalPrinter, PrinterTypes } = require("node-thermal-printer");
 const fs = require("fs");
 // iconv-lite removed - not used after removing test functions
-const { createCanvas } = require("canvas");
+// Canvas is lazy-loaded to avoid startup errors if native module isn't built
+let createCanvas: any = null;
+try {
+  const canvas = require("canvas");
+  createCanvas = canvas.createCanvas;
+} catch (error) {
+  console.warn("⚠️ Canvas module not available. Arabic text rendering will use fallback method.");
+  console.warn("   To enable canvas, install Python and rebuild: npx electron-rebuild -f -w canvas");
+}
 const { autoUpdater } = require("electron-updater");
 
 // Enable hot reloading in development
@@ -265,6 +273,18 @@ function renderTextToBitmap(text: string, options: any = {}): Buffer {
     bold = true,
     padding = 10
   } = options;
+  
+  // Check if canvas is available
+  if (!createCanvas) {
+    console.warn("⚠️ Canvas not available, using fallback text rendering");
+    // Fallback: Create a simple bitmap representation
+    // This is a basic fallback - for proper Arabic rendering, canvas needs to be built
+    const bytesPerLine = Math.ceil(width / 8);
+    const height = Math.ceil(fontSize * 1.5 + padding * 2);
+    const bitmapData = Buffer.alloc(bytesPerLine * height);
+    // Return empty bitmap (will print as blank line)
+    return bitmapData;
+  }
   
   // Create canvas
   const canvas = createCanvas(width, 100); // Height will be adjusted
