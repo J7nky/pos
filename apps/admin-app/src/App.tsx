@@ -9,6 +9,7 @@ import { StoreDetail } from './components/stores';
 import Subscriptions from './pages/Subscriptions';
 import Payments from './pages/Payments';
 import Analytics from './pages/Analytics';
+import RolePermissions from './pages/RolePermissions';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 
@@ -34,6 +35,7 @@ function AppRoutes() {
         <Route path="/subscriptions" element={<Subscriptions />} />
         <Route path="/payments" element={<Payments />} />
         <Route path="/analytics" element={<Analytics />} />
+        <Route path="/role-permissions" element={<RolePermissions />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />

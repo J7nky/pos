@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react';
 import { Building2, ChevronDown, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { BranchAccessValidationService } from '../services/branchAccessValidationService';
+import { AccessControlService } from '../services/accessControlService';
 import { setBranchPreference } from '../lib/branchHelpers';
 import Toast from './common/Toast';
 
@@ -54,7 +54,7 @@ export default function BranchSelector({
       
       try {
         // Pass role and branch_id directly to avoid database lookup
-        const branches = await BranchAccessValidationService.getAccessibleBranches(
+        const branches = await AccessControlService.getAccessibleBranches(
           userProfile.id,
           storeId,
           userProfile.role,
@@ -106,7 +106,7 @@ export default function BranchSelector({
     try {
       // Validate access
       // Pass role, branch_id, and name directly to avoid database lookup
-      await BranchAccessValidationService.validateBranchAccess(
+      await AccessControlService.validateBranchAccess(
         userProfile.id,
         storeId,
         branchId,
@@ -135,7 +135,14 @@ export default function BranchSelector({
     }
   };
 
-  const canSwitchBranches = userProfile?.role === 'admin';
+  const canSwitchBranches = userProfile ? AccessControlService.canSwitchBranches({
+    id: userProfile.id,
+    role: userProfile.role,
+    store_id: userProfile.store_id,
+    branch_id: userProfile.branch_id,
+    email: userProfile.email,
+    name: userProfile.name
+  } as any) : false;
   const currentBranch = accessibleBranches.find(b => b.id === currentBranchId);
 
   // Loading state

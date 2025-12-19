@@ -325,8 +325,14 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       if (cachedProfile?.store_id) {
         try {
           const { EmployeeAttendanceService } = await import('../services/employeeAttendanceService');
-          await EmployeeAttendanceService.checkIn(data.user.id, cachedProfile.store_id);
-          console.log('✅ Employee check-in recorded');
+          // Check if already checked in before attempting check-in
+          const currentStatus = await EmployeeAttendanceService.getCurrentStatus(data.user.id);
+          if (!currentStatus) {
+            await EmployeeAttendanceService.checkIn(data.user.id, cachedProfile.store_id);
+            console.log('✅ Employee check-in recorded');
+          } else {
+            console.log('ℹ️ Employee already checked in, skipping check-in');
+          }
         } catch (attendanceError) {
           // Don't fail login if attendance check-in fails
           console.warn('Failed to record employee check-in:', attendanceError);
@@ -397,8 +403,14 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       if (userProfile?.id && userProfile?.store_id) {
         try {
           const { EmployeeAttendanceService } = await import('../services/employeeAttendanceService');
-          await EmployeeAttendanceService.checkOut(userProfile.id);
-          console.log('✅ Employee check-out recorded');
+          // Check if there's an active check-in before attempting check-out
+          const currentStatus = await EmployeeAttendanceService.getCurrentStatus(userProfile.id);
+          if (currentStatus) {
+            await EmployeeAttendanceService.checkOut(userProfile.id);
+            console.log('✅ Employee check-out recorded');
+          } else {
+            console.log('ℹ️ No active check-in found, skipping check-out');
+          }
         } catch (attendanceError) {
           // Don't fail logout if attendance check-out fails
           console.warn('Failed to record employee check-out:', attendanceError);
