@@ -3152,7 +3152,7 @@ class POSDatabase extends Dexie {
       ...lineItem
     } as BillLineItem;
 
-    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs], async () => {
+    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs, this.products], async () => {
       await this.bill_line_items.add(newLineItem);
 
       // Resolve product name for audit log
@@ -3197,7 +3197,7 @@ class POSDatabase extends Dexie {
 
     const now = new Date().toISOString();
 
-    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs], async () => {
+    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs, this.products], async () => {
       // Update the line item
       await this.bill_line_items.update(lineItemId, {
         ...updates,
@@ -3272,7 +3272,7 @@ class POSDatabase extends Dexie {
 
     const now = new Date().toISOString();
 
-    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs], async () => {
+    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs, this.products], async () => {
       // Soft delete the line item
       await this.bill_line_items.update(lineItemId, {
         _deleted: true,

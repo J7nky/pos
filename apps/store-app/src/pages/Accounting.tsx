@@ -4,6 +4,7 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { useCurrency } from '../hooks/useCurrency';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useProductMultilingual } from '../hooks/useMultilingual';
 import { 
   generatePaymentReference, 
   generateExpenseReference,
@@ -29,6 +30,7 @@ import { CurrentCashDrawerStatus } from '../components/CurrentCashDrawerStatus';
 
 export default function Accounting() {
   const { t } = useI18n();
+  const { getProductName } = useProductMultilingual();
   let raw;
   try {
     raw = useOfflineData();
@@ -656,7 +658,7 @@ export default function Accounting() {
         item.quantity || '',
         item.weight || '',
         item.unit_price || '',
-        item.unit_price && (item.weight || item.quantity) ? (item.unit_price * (item.weight || item.quantity)).toFixed(2) : '',
+        item.totalValue ? item.totalValue.toFixed(2) : '',
         item.date ? new Date(item.date).toLocaleDateString() : '',
         (item.status || '').replace(/,/g, ';')
       ].join(','))
@@ -672,18 +674,44 @@ export default function Accounting() {
   };
 
   // Enhanced nonPricedItems for display: filter, sort, and resolve customer name
-  // Create batch map for supplier lookup
+  // Create efficient lookup maps for O(1) access
   const batchMap = new Map(inventoryBills.map(b => [b.id, b]));
+  const inventoryItemMap = new Map(inventory.map(item => [item.id, item]));
+  const supplierMap = new Map(suppliers.map(s => [s.id, s]));
+  const productMap = new Map(products.map(p => [p.id, p]));
+  const billMap = new Map(bills.map(b => [b.id, b]));
+  const customerMap = new Map(customers.map(c => [c.id, c]));
   
   const filteredNonPricedItems = nonPricedItems
     .map(item => {
-      const product = products.find(p => p.id === item.product_id);
+      // Get product using efficient map lookup
+      const product = productMap.get(item.product_id);
+      
       // Get customer_id from parent bill (normalized schema)
-      const bill = bills.find(b => b.id === item.bill_id);
-      const customer = customers.find(c => c.id === bill?.customer_id);
-      // supplier_id needs to be retrieved from inventory_items or products
-      // For now, using undefined as supplier tracking needs refactoring
-      const supplier = undefined; // TODO: Get supplier from inventory_items via inventory_item_id
+      const bill = billMap.get(item.bill_id);
+      const customer = bill?.customer_id ? customerMap.get(bill.customer_id) : null;
+      
+      // Supplier lookup: inventory_item_id → inventory → batch_id → inventory_bills → supplier_id
+      let supplier = null;
+      if (item.inventory_item_id) {
+        const inventoryItem = inventoryItemMap.get(item.inventory_item_id);
+        if (inventoryItem?.batch_id) {
+          const batch = batchMap.get(inventoryItem.batch_id);
+          if (batch?.supplier_id) {
+            supplier = supplierMap.get(batch.supplier_id);
+            if (!supplier) {
+              console.warn(`[Accounting] Supplier not found for supplier_id: ${batch.supplier_id} (from batch: ${inventoryItem.batch_id})`);
+            }
+          } else {
+            console.warn(`[Accounting] Batch not found or missing supplier_id: ${inventoryItem.batch_id}`);
+          }
+        } else if (inventoryItem) {
+          console.warn(`[Accounting] Inventory item missing batch_id: ${item.inventory_item_id}`);
+        } else {
+          console.warn(`[Accounting] Inventory item not found: ${item.inventory_item_id}`);
+        }
+      }
+      // Fallback: If no inventory_item_id, supplier remains null (will show "Unknown Supplier")
 
       // Get staged changes for this item
       const stagedChanges = stagedNonPricedChanges[item.id] || {};
@@ -691,14 +719,29 @@ export default function Accounting() {
       const currentQuantity = stagedChanges.quantity !== undefined ? stagedChanges.quantity : item.quantity;
       const currentWeight = stagedChanges.weight !== undefined ? stagedChanges.weight : item.weight;
 
+      // Calculate total value: prioritize weight if it exists (even if 0), otherwise use quantity
+      // This matches the logic used in SoldBills.tsx for calculating line_total
+      // If weight is not null/undefined, it's a weight-based item, so use weight
+      // Otherwise, it's a quantity-based item, so use quantity
+      const totalValue = currentUnitPrice && currentUnitPrice > 0
+        ? (currentWeight == null || currentWeight == undefined || currentWeight == 0
+          ? currentUnitPrice * currentQuantity
+          : currentUnitPrice * currentWeight)
+        : 0;
+      
+      // Status: ready if has price and (quantity or weight), incomplete otherwise
+      const status = currentUnitPrice > 0 && (currentQuantity > 0 || currentWeight > 0) 
+        ? 'ready' 
+        : 'incomplete';
+
       return {
         ...item,
         customerName: customer?.name || 'Walk-in Customer',
-        productName: product?.name || 'Unknown Product',
+        productName: getProductName(product) || 'Unknown Product',
         supplierName: supplier?.name || 'Unknown Supplier',
         date: item.created_at || '',
-        totalValue: currentUnitPrice && (currentWeight || currentQuantity) ? currentUnitPrice * (currentWeight || currentQuantity) : 0,
-        status: currentUnitPrice > 0 && (currentQuantity > 0 || currentWeight > 0) ? 'ready' : 'incomplete'
+        totalValue,
+        status
       };
     })
     .filter(item => {
@@ -1005,6 +1048,8 @@ export default function Accounting() {
               getCurrentValue={getCurrentValue}
               showToast={showToast}
               showBulkActions={showBulkActions}
+              formatCurrencyWithSymbol={formatCurrencyWithSymbol}
+              currency={currency}
             />
         </div>
       )}

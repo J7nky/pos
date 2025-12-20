@@ -6,6 +6,7 @@ import {
   AlertCircle,
   CheckCircle,
   Trash2,
+  Save,
 } from "lucide-react";
 import MoneyInput from "../../common/MoneyInput";
 import { useI18n } from "../../../i18n";
@@ -56,6 +57,8 @@ interface NonPricedItemsProps {
   handleMarkPriced: (item: NonPricedItem) => void;
   handleDeleteNonPriced: (item: NonPricedItem) => void;
   showToast: (message: string, type: "success" | "error") => void;
+  formatCurrencyWithSymbol: (amount: number, currency: 'USD' | 'LBP') => string;
+  currency: 'USD' | 'LBP';
 }
 
 export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
@@ -87,6 +90,8 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
   handleMarkPriced,
   handleDeleteNonPriced,
   showToast,
+  formatCurrencyWithSymbol,
+  currency,
 }) => {
   const { t } = useI18n();
   return (
@@ -391,7 +396,7 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
                         />
                       </td>
                       <td className="px-4 py-3 font-semibold text-gray-900">
-                        ${item.totalValue.toFixed(2)}
+                        {formatCurrencyWithSymbol(item.totalValue, currency)}
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-sm">
                         {item.created_at
@@ -399,26 +404,41 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
                           : "-"}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex space-x-2 rtl:space-x-reverse">
-                         
+                        <div className="flex items-center space-x-2 rtl:space-x-reverse">
+                          {hasStagedChanges ? (
+                            <button
+                              onClick={() => handleMarkPriced(item)}
+                              disabled={item.status !== "ready"}
+                              className={`flex items-center space-x-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors rtl:space-x-reverse ${
+                                item.status === "ready"
+                                  ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
+                                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                              }`}
+                              title={t('nonPriced.markAsPriced')}
+                            >
+                              <Save className="w-4 h-4" />
+                              <span>{t('nonPriced.saveChanges')}</span>
+                            </button>
+                          ) : (
                           <button
                             onClick={() => handleMarkPriced(item)}
                             disabled={item.status !== "ready"}
-                            className={`${
+                              className={`px-2.5 py-1.5 rounded-md transition-colors ${
                               item.status === "ready"
-                                ? "text-green-600 hover:text-green-800"
-                                : "text-gray-400 cursor-not-allowed"
+                                  ? "bg-green-600 text-white hover:bg-green-700"
+                                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
                             }`}
                             title={t('nonPriced.markAsPriced')}
                           >
-                            <CheckCircle className="w-4 h-4" />
+                              <CheckCircle className="w-5 h-5" />
                           </button>
+                          )}
                           <button
                             onClick={() => handleDeleteNonPriced(item)}
-                            className="text-red-600 hover:text-red-800"
+                            className="px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors"
                             title={t('nonPriced.deleteItem')}
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-5 h-5" />
                           </button>
                         </div>
                       </td>

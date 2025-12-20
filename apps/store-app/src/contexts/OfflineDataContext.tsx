@@ -1997,7 +1997,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // ✅ OPTIMIZED: Handle credit sale transaction WITHOUT nested transaction
       // Use pre-fetched entity to avoid nested db.transaction()
-      if (customerBalanceUpdate && preFetchedEntity) {
+      // IMPORTANT: Skip creating journal entries/transactions when amountDue = 0 (non-priced items)
+      if (customerBalanceUpdate && customerBalanceUpdate.amountDue > 0 && preFetchedEntity) {
         const entity = preFetchedEntity;
         const entityType = entity.entity_type as 'customer' | 'supplier';
         const transactionId = createId();
@@ -2013,7 +2014,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
             : TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
           amount: customerBalanceUpdate.amountDue,
-          currency: 'LBP',
+          currency: currency as 'USD' | 'LBP', // Use store's currency
           description: `Credit sale - Bill ${bill.bill_number} (${entityType})`,
           reference: bill.bill_number,
           customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
@@ -2054,7 +2055,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           entity_type: entityType,
           debit: customerBalanceUpdate.amountDue,  // ✅ Only debit field set
           credit: 0,  // ✅ Credit is zero (satisfies constraint)
-          currency: 'LBP' as const,
+          currency: currency as 'USD' | 'LBP', // Use store's currency
           description: `Credit sale - Bill ${bill.bill_number}`,
           posted_date: postedDate,
           fiscal_period: fiscalPeriod,
@@ -2075,7 +2076,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           entity_type: entityType,
           debit: 0,  // ✅ Debit is zero (satisfies constraint)
           credit: customerBalanceUpdate.amountDue,  // ✅ Only credit field set
-          currency: 'LBP' as const,
+          currency: currency as 'USD' | 'LBP', // Use store's currency
           description: `Credit sale - Bill ${bill.bill_number}`,
           posted_date: postedDate,
           fiscal_period: fiscalPeriod,
@@ -2088,7 +2089,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         await db.journal_entries.bulkAdd([debitEntry, creditEntry]);
         
         // 3. Update entity balance directly
-        const isUSD = creditSaleTransaction.currency === 'USD';
+        const transactionCurrency = creditSaleTransaction.currency;
+        const isUSD = transactionCurrency === 'USD';
         const previousBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
         
         // For credit sale: increase AR (customer owes us more) or increase AP (we owe supplier more)
@@ -3641,6 +3643,152 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Update related bills if price-related fields changed
     if (priceChanged) {
       await db.updateBillsForLineItem(id);
+      
+      // Check if we need to update customer balance for credit sales
+      // This happens when pricing a non-priced item (unit_price goes from 0 to > 0)
+      const bill = await db.bills.get(originalSale.bill_id);
+      if (bill && bill.payment_method === 'credit' && bill.customer_id) {
+        // Get all line items for this bill to calculate totals
+        const allLineItems = await db.bill_line_items
+          .where('bill_id')
+          .equals(bill.id)
+          .and(item => !item._deleted)
+          .toArray();
+        
+        // Calculate old and new bill totals
+        const { calculateBillTotals } = await import('../utils/billCalculations');
+        
+        // Calculate old totals (before update) - reconstruct with original item
+        const oldLineItems = allLineItems.map(item => 
+          item.id === id ? originalSale : item
+        );
+        const oldTotals = calculateBillTotals(oldLineItems, bill. || 0);
+        
+        // Calculate new totals (after update)
+        const newTotals = calculateBillTotals(allLineItems, bill.amount_paid || 0);
+        
+        // Check if amount_due increased (item was just priced)
+        // We need to check if the original item had unit_price = 0
+        const originalItemHadZeroPrice = originalSale.unit_price === 0;
+        const oldAmountDue = oldTotals.amount_due;
+        const newAmountDue = newTotals.amount_due;
+        const amountDueIncrease = newAmountDue - oldAmountDue;
+        
+        // Only update balance if:
+        // 1. Original item had zero price (was non-priced)
+        // 2. Amount due increased (item was priced)
+        if (originalItemHadZeroPrice && amountDueIncrease > 0) {
+          // This is a non-priced item being priced - update customer balance
+          const entity = await db.entities.get(bill.customer_id);
+          if (entity && (entity.entity_type === 'customer' || entity.entity_type === 'supplier')) {
+            const entityType = entity.entity_type as 'customer' | 'supplier';
+            const now = new Date().toISOString();
+            const transactionId = createId();
+            const journalTransactionId = createId();
+            
+            // 1. Create transaction record
+            const creditSaleTransaction: Transaction = {
+              id: transactionId,
+              store_id: storeId,
+              branch_id: currentBranchId || '',
+              type: 'income',
+              category: entityType === 'customer' 
+                ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
+                : TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
+              amount: amountDueIncrease,
+              currency: currency as 'USD' | 'LBP', // Use store's currency
+              description: `Credit sale - Bill ${bill.bill_number} (${entityType}) - Item priced`,
+              reference: bill.bill_number,
+              customer_id: entityType === 'customer' ? bill.customer_id : null,
+              supplier_id: entityType === 'supplier' ? bill.customer_id : null,
+              employee_id: null,
+              created_at: now,
+              created_by: currentUserId,
+              _synced: false,
+              _deleted: false,
+              metadata: {
+                correlationId: createId(),
+                source: 'offline',
+                module: 'billing'
+              }
+            };
+            
+            await db.transactions.add(creditSaleTransaction);
+            
+            // 2. Create journal entries (double-entry bookkeeping)
+            const postedDate = now.split('T')[0];
+            const fiscalPeriod = getFiscalPeriodForDate(now).period;
+            
+            const debitAccountCode = entityType === 'customer' ? '1200' : '2100';
+            const debitAccountName = entityType === 'customer' ? 'Accounts Receivable' : 'Accounts Payable';
+            
+            const debitEntry = {
+              id: createId(),
+              store_id: storeId,
+              branch_id: currentBranchId || '',
+              transaction_id: journalTransactionId,
+              account_code: debitAccountCode,
+              account_name: debitAccountName,
+              entity_id: bill.customer_id,
+              entity_type: entityType,
+              debit: amountDueIncrease,
+              credit: 0,
+              currency: currency as 'USD' | 'LBP',
+              description: `Credit sale - Bill ${bill.bill_number} - Item priced`,
+              posted_date: postedDate,
+              fiscal_period: fiscalPeriod,
+              is_posted: true,
+              created_by: currentUserId,
+              created_at: now,
+              _synced: false
+            };
+            
+            const creditEntry = {
+              id: createId(),
+              store_id: storeId,
+              branch_id: currentBranchId || '',
+              transaction_id: journalTransactionId,
+              account_code: '4100',
+              account_name: 'Revenue',
+              entity_id: bill.customer_id,
+              entity_type: entityType,
+              debit: 0,
+              credit: amountDueIncrease,
+              currency: currency as 'USD' | 'LBP',
+              description: `Credit sale - Bill ${bill.bill_number} - Item priced`,
+              posted_date: postedDate,
+              fiscal_period: fiscalPeriod,
+              is_posted: true,
+              created_by: currentUserId,
+              created_at: now,
+              _synced: false
+            };
+            
+            await db.journal_entries.bulkAdd([debitEntry, creditEntry]);
+            
+            // 3. Update entity balance
+            const transactionCurrency = creditSaleTransaction.currency;
+            const isUSD = transactionCurrency === 'USD';
+            const previousBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
+            const newBalance = previousBalance + amountDueIncrease;
+            
+            const updateData: any = {
+              updated_at: now,
+              _synced: false
+            };
+            
+            if (isUSD) {
+              updateData.usd_balance = newBalance;
+            } else {
+              updateData.lb_balance = newBalance;
+            }
+            
+            await db.entities.update(bill.customer_id, updateData);
+            
+            console.log(`✅ Updated ${entityType} balance for ${entity.name}: ${previousBalance} → ${newBalance} (increase: ${amountDueIncrease})`);
+          }
+        }
+      }
     }
 
     // Store undo data with original values

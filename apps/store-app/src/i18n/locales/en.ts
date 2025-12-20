@@ -724,6 +724,7 @@ const en = {
     ready: 'Ready',
     incomplete: 'Incomplete',
     modified: 'Modified',
+    saveChanges: 'Save Changes',
     editDetails: 'Edit details',
     deleteItem: 'Delete item',
     showingResults: 'Showing {{start}} to {{end}} of {{total}} items',

@@ -362,8 +362,15 @@ export class SyncService {
   }
 
   async sync(storeId: string, branchId?: string): Promise<SyncResult> {
+    // If sync is already running, return early with a skipped result instead of throwing
     if (this.isRunning) {
-      throw new Error('Sync already in progress');
+      console.log('⏭️  [SYNC] Sync already in progress, skipping duplicate request');
+      return {
+        success: true,
+        errors: [],
+        synced: { uploaded: 0, downloaded: 0 },
+        conflicts: 0
+      };
     }
 
     this.isRunning = true;
