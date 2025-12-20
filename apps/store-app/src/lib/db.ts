@@ -24,7 +24,6 @@ import {
   NotificationPreferences,
   Reminder,
   EmployeeAttendance,
-  RoleOperationLimit,
   RolePermission,
   UserPermission,
   UserModuleAccess // @deprecated - kept for migration
@@ -114,7 +113,6 @@ class POSDatabase extends Dexie {
   chart_of_accounts!: Table<ChartOfAccounts, string>;
   
   // RBAC tables (Role-Based Access Control)
-  role_operation_limits!: Table<RoleOperationLimit, string>;
   role_permissions!: Table<RolePermission, string>;
   user_permissions!: Table<UserPermission, string>;
   user_module_access!: Table<UserModuleAccess, string>; // @deprecated - will be removed in v46
@@ -1404,7 +1402,7 @@ class POSDatabase extends Dexie {
       // No data migration needed - entity_code should already exist in data, just adding to index
     });
 
-    // Version 40: Add RBAC tables (role_operation_limits and user_module_access)
+    // Version 40: Add RBAC tables (user_module_access)
     this.version(40).stores({
       // Store configuration
       stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -1446,7 +1444,6 @@ class POSDatabase extends Dexie {
       chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
       
       // RBAC tables (NEW)
-      role_operation_limits: 'id, [store_id+role], [store_id+role+operation_type], [store_id+user_id+operation_type], user_id, updated_at, _synced, _deleted',
       user_module_access: 'id, [user_id+store_id], [user_id+store_id+module], user_id, store_id, updated_at, _synced, _deleted',
       
       // Sync management
@@ -1457,8 +1454,7 @@ class POSDatabase extends Dexie {
       subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
       license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
     }).upgrade(async (trans) => {
-      console.log('🔧 Running migration v40: Add RBAC tables (role_operation_limits and user_module_access)');
-      console.log('   ✅ Added role_operation_limits table for operation limits (discount, void, return)');
+      console.log('🔧 Running migration v40: Add RBAC tables (user_module_access)');
       console.log('   ✅ Added user_module_access table for per-user module permissions');
       console.log('   ✅ Both tables will sync across all devices via Supabase');
       console.log('   📢 Next: Update sync service to sync these tables');
@@ -1507,7 +1503,6 @@ class POSDatabase extends Dexie {
       chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
       
       // RBAC tables
-      role_operation_limits: 'id, [store_id+role], [store_id+role+operation_type], [store_id+user_id+operation_type], user_id, updated_at, _synced, _deleted',
       user_module_access: 'id, [user_id+store_id], [user_id+store_id+module], user_id, store_id, updated_at, _synced, _deleted',
       
       // Sync management
@@ -1568,7 +1563,6 @@ class POSDatabase extends Dexie {
       chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
       
       // RBAC tables
-      role_operation_limits: 'id, [store_id+role], [store_id+role+operation_type], [store_id+user_id+operation_type], user_id, updated_at, _synced, _deleted',
       user_module_access: 'id, [user_id+store_id], [user_id+store_id+module], user_id, store_id, updated_at, _synced, _deleted',
       
       // Sync management
@@ -1631,7 +1625,6 @@ class POSDatabase extends Dexie {
       chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
       
       // RBAC tables
-      role_operation_limits: 'id, [store_id+role], [store_id+role+operation_type], [store_id+user_id+operation_type], user_id, updated_at, _synced, _deleted',
       user_module_access: 'id, [user_id+store_id], [user_id+store_id+module], user_id, store_id, updated_at, _synced, _deleted',
       
       // Sync management
@@ -1693,7 +1686,6 @@ class POSDatabase extends Dexie {
       chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
       
       // RBAC tables
-      role_operation_limits: 'id, [store_id+role], [store_id+role+operation_type], [store_id+user_id+operation_type], user_id, updated_at, _synced, _deleted',
       user_module_access: 'id, [user_id+store_id], [user_id+store_id+module], user_id, store_id, updated_at, _synced, _deleted',
       
       // Sync management
@@ -1755,7 +1747,6 @@ class POSDatabase extends Dexie {
       chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
       
       // RBAC tables
-      role_operation_limits: 'id, [store_id+role], [store_id+role+operation_type], [store_id+user_id+operation_type], user_id, updated_at, _synced, _deleted',
       user_module_access: 'id, [user_id+store_id], [user_id+store_id+module], user_id, store_id, updated_at, _synced, _deleted',
       
       // Sync management
@@ -1816,7 +1807,6 @@ class POSDatabase extends Dexie {
       chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
       
       // RBAC tables (Unified - replaces user_module_access)
-      role_operation_limits: 'id, [store_id+role], [store_id+role+operation_type], [store_id+user_id+operation_type], user_id, updated_at, _synced, _deleted',
       role_permissions: 'id, [role+operation], role, updated_at, _synced, _deleted', // GLOBAL permissions (no store_id)
       user_permissions: 'id, [user_id+store_id], [user_id+store_id+operation], user_id, store_id, updated_at, _synced, _deleted',
       
@@ -1994,7 +1984,7 @@ class POSDatabase extends Dexie {
       'bills', 'bill_line_items', 'bill_audit_logs',
       'cash_drawer_accounts', 'cash_drawer_sessions',
       'missed_products', 'reminders', 'chart_of_accounts',
-      'role_operation_limits', 'role_permissions', 'user_permissions', 'balance_snapshots'
+      'role_permissions', 'user_permissions', 'balance_snapshots'
     ];
 
     // Register sync trigger hooks for all tables

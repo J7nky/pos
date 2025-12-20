@@ -83,7 +83,6 @@ const SYNC_TABLES = [
   'missed_products',
   'reminders',
   // RBAC tables (Role-Based Access Control) - sync for cross-device permissions
-  'role_operation_limits', // Operation limits (discount, void, return amounts)
   'role_permissions', // Default permissions per role (operations + module access)
   'user_permissions' // User-specific permission overrides (operations + module access)
 ] as const;
@@ -113,8 +112,7 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'cash_drawer_sessions': ['cash_drawer_accounts'],
   'missed_products': ['cash_drawer_sessions', 'inventory_items'],
   'reminders': ['users'], // Reminders reference users (created_by, completed_by)
-  'role_operation_limits': ['stores', 'users'], // RBAC: Operation limits reference stores and users
-  'role_permissions': ['stores'], // RBAC: Role permissions reference stores
+  'role_permissions': [], // RBAC: Role permissions are GLOBAL (no store_id, no dependencies)
   'user_permissions': ['stores', 'users'] // RBAC: User permissions reference stores and users
 };
 
@@ -1057,29 +1055,6 @@ export class SyncService {
                   console.error('[Event] Failed to emit chart_of_account_updated event:', eventError);
                 }
               }
-            } else if (tableName === 'role_operation_limits') {
-              // Emit events for role operation limit updates
-              for (const record of batch as any[]) {
-                try {
-                  await eventEmissionService.emitEvent({
-                    store_id: record.store_id,
-                    branch_id: branchId || '',
-                    event_type: 'role_operation_limit_updated',
-                    entity_type: 'role_operation_limit',
-                    entity_id: record.id,
-                    operation: 'update',
-                    user_id: record.updated_by || null,
-                    metadata: {
-                      role: record.role,
-                      operation_type: record.operation_type,
-                      limit_value: record.limit_value
-                    }
-                  });
-                  console.log(`🎯 [Event] Emitted role_operation_limit_updated event for ${record.id}`);
-                } catch (eventError) {
-                  console.error('[Event] Failed to emit role_operation_limit_updated event:', eventError);
-                }
-              }
             } else if (tableName === 'role_permissions') {
               // Emit events for role permission updates
               for (const record of batch as any[]) {
@@ -1387,6 +1362,10 @@ export class SyncService {
     // Special case: transactions - no store filter
     if (tableName === 'transactions') {
       return query; // No filter
+    }
+    // Special case: role_permissions - GLOBAL table (no store_id column)
+    if (tableName === 'role_permissions') {
+      return query; // No filter - download all global permissions
     }
     // Default: filter by store_id
     return query.eq('store_id', storeId);
@@ -1757,14 +1736,17 @@ export class SyncService {
             .select('id', { count: 'exact' });
           
           // Apply store filtering
-          if (tableName !== 'transactions' && tableName !== 'stores') {
-            if (tableName === 'products') {
-              query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
-            } else {
-              query = query.eq('store_id', storeId);
-            }
-          } else if (tableName === 'stores') {
+          if (tableName === 'stores') {
             query = query.eq('id', storeId);
+          } else if (tableName === 'transactions') {
+            // No store filter for transactions
+          } else if (tableName === 'role_permissions') {
+            // GLOBAL table - no store_id filter (check all global permissions)
+            // No filter needed
+          } else if (tableName === 'products') {
+            query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
+          } else {
+            query = query.eq('store_id', storeId);
           }
           
           // Add pagination

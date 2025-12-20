@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { AccessControlService } from '../services/accessControlService';
-import { ModuleName, OperationName, OperationType } from '../types';
+import { ModuleName, OperationName } from '../types';
 
 export function useAccessControl() {
   const { userProfile } = useSupabaseAuth();
@@ -81,57 +81,6 @@ export function useAccessControl() {
   }, [userProfile]);
 
   /**
-   * Check if operation is within limits
-   * Returns true if within limits, false if exceeds
-   */
-  const checkLimit = useCallback(async (
-    operationType: OperationType,
-    value: number,
-    currency?: 'USD' | 'LBP'
-  ): Promise<{ allowed: boolean; error?: string }> => {
-    if (!userProfile) {
-      return { allowed: false, error: 'User not authenticated' };
-    }
-
-    try {
-      await AccessControlService.checkOperationLimit(
-        userProfile.id,
-        userProfile.store_id,
-        operationType,
-        value,
-        currency
-      );
-      return { allowed: true };
-    } catch (error) {
-      return {
-        allowed: false,
-        error: error instanceof Error ? error.message : 'Operation not allowed'
-      };
-    }
-  }, [userProfile]);
-
-  /**
-   * Check and throw if not allowed (for use with try/catch)
-   */
-  const checkLimitOrThrow = useCallback(async (
-    operationType: OperationType,
-    value: number,
-    currency?: 'USD' | 'LBP'
-  ): Promise<void> => {
-    if (!userProfile) {
-      throw new Error('User not authenticated');
-    }
-
-    await AccessControlService.checkOperationLimit(
-      userProfile.id,
-      userProfile.store_id,
-      operationType,
-      value,
-      currency
-    );
-  }, [userProfile]);
-
-  /**
    * Check if user can access a branch
    */
   const canAccessBranch = useCallback(async (
@@ -184,10 +133,6 @@ export function useAccessControl() {
     
     // Operation permissions
     canPerform,
-    
-    // Operation limits
-    checkLimit,
-    checkLimitOrThrow,
     
     // Branch access
     canAccessBranch,

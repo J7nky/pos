@@ -210,6 +210,9 @@ export class DownloadOptimizationService {
           query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
         } else if (tableName === 'stores') {
           query = query.eq('id', storeId);
+        } else if (tableName === 'role_permissions') {
+          // GLOBAL table - no store_id filter (download all global permissions)
+          // No filter needed
         } else if (tableName !== 'transactions') {
           query = query.eq('store_id', storeId);
         }

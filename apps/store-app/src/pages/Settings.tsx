@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
+import BranchSelectionScreen from '../components/BranchSelectionScreen';
 import { 
   Settings as SettingsIcon,
   Bell,
@@ -17,7 +18,11 @@ import {
   DollarSign,
   Printer,
   Building,
+  RefreshCw,
+  Briefcase,
 } from 'lucide-react';
+
+type SettingsTab = 'account' | 'business' | 'inventory' | 'receipt' | 'preferences';
 
 export default function Settings() {
   const { userProfile } = useSupabaseAuth();
@@ -51,6 +56,8 @@ export default function Settings() {
   const [tempExchangeRate, setTempExchangeRate] = useState(exchangeRate?.toString() || '89500');
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showBranchSelection, setShowBranchSelection] = useState(false);
+  const [activeTab, setActiveTab] = useState<SettingsTab>('account');
 
   // Sync local state with context values when they change (important for real-time updates from other devices)
   useEffect(() => {
@@ -154,6 +161,36 @@ export default function Settings() {
     }
   };
 
+  const handleBranchSelected = (branchId: string) => {
+    console.log('🏢 Admin selected branch from settings:', branchId);
+    if (offlineData?.setCurrentBranchId && userProfile?.store_id) {
+      offlineData.setCurrentBranchId(branchId);
+      // Save preference to localStorage (matching BranchSelectionScreen behavior)
+      localStorage.setItem(`branch_preference_${userProfile.store_id}`, branchId);
+    }
+    setShowBranchSelection(false);
+  };
+
+  // Show branch selection screen if admin clicked switch branch
+  if (showBranchSelection && isAdmin) {
+    return (
+      <BranchSelectionScreen 
+        onBranchSelected={handleBranchSelected}
+      />
+    );
+  }
+
+  // Define tabs with visibility
+  const tabs: { id: SettingsTab; label: string; icon: React.ElementType; visible: boolean }[] = [
+    { id: 'account', label: 'Account & Profile', icon: User, visible: true },
+    { id: 'business', label: 'Business Settings', icon: Briefcase, visible: true },
+    { id: 'inventory', label: 'Inventory', icon: Package, visible: true },
+    { id: 'receipt', label: 'Receipt & Printing', icon: Printer, visible: isAdminOrManager },
+    { id: 'preferences', label: 'Preferences', icon: SettingsIcon, visible: true },
+  ];
+
+  const visibleTabs = tabs.filter(tab => tab.visible);
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
@@ -172,299 +209,349 @@ export default function Settings() {
         )}
       </div>
 
-      <div className="space-y-6">
-        {/* User Information */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <User className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">{t('settings.userInfo')}</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.name')}</label>
-              <input
-                type="text"
-                value={userProfile?.name || ''}
-                disabled
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.email')}</label>
-              <input
-                type="email"
-                value={userProfile?.email || ''}
-                disabled
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.role')}</label>
-              <input
-                type="text"
-                value={userProfile?.role || ''}
-                disabled
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-500 capitalize"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Branch Information */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <Building className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">{t('settings.branchInfo')}</h2>
-          </div>
-          <BranchInfoSection />
-        </div>
-
-        {/* Inventory Alerts */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <Bell className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">{t('settings.inventoryAlerts')}</h2>
-          </div>
-          
-          <div className="space-y-4">
-            {/* Low Stock Alerts Toggle */}
-            <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-              <div className="flex items-center">
-                <AlertTriangle className="w-5 h-5 text-amber-500 mr-3" />
-                <div>
-                  <h3 className="font-medium text-gray-900">{t('settings.lowStockAlerts')}</h3>
-                  <p className="text-sm text-gray-600">{t('settings.lowStockDescription')}</p>
-                </div>
-              </div>
+      {/* Tab Navigation */}
+      <div className="mb-6">
+        <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit overflow-x-auto">
+          {visibleTabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
               <button
-                onClick={() => handleToggleAlerts(!lowStockAlertsEnabled)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  lowStockAlertsEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2 rounded-md transition-colors flex items-center relative whitespace-nowrap ${
+                  activeTab === tab.id
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    lowStockAlertsEnabled ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
+                <Icon className="w-4 h-4 mr-2" />
+                {tab.label}
               </button>
-            </div>
+            );
+          })}
+        </div>
+      </div>
 
-            {/* Low Stock Threshold */}
-            {lowStockAlertsEnabled && (
-              <div className="p-4 border border-gray-200 rounded-lg">
-                <div className="flex items-center mb-3">
-                  <Package className="w-5 h-5 text-blue-500 mr-3" />
-                  <h3 className="font-medium text-gray-900">{t('settings.lowStockThreshold')}</h3>
-                </div>
-                <p className="text-sm text-gray-600 mb-3">{t('settings.lowStockDescription')}</p>
-                <div className="flex items-center space-x-3">
+      <div className="space-y-6">
+        {/* Account & Profile Tab */}
+        {activeTab === 'account' && (
+          <>
+            {/* User Information */}
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center mb-4">
+                <User className="w-6 h-6 text-gray-600 mr-3" />
+                <h2 className="text-xl font-semibold text-gray-900">{t('settings.userInfo')}</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.name')}</label>
                   <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={tempThreshold}
-                    onChange={(e) => setTempThreshold(e.target.value)}
-                    className="w-24 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                    type="text"
+                    value={userProfile?.name || ''}
+                    disabled
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-500"
                   />
-                  <span className="text-gray-600">{t('settings.units')}</span>
-                  <button
-                    onClick={handleThresholdSave}
-                    disabled={tempThreshold === (lowStockThreshold?.toString() || '10')}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
-                  >
-                    <Save className="w-4 h-4 mr-2" />
-                    {t('settings.save')}
-                  </button>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">{t('settings.currentThreshold', { value: lowStockThreshold })}</p>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.email')}</label>
+                  <input
+                    type="email"
+                    value={userProfile?.email || ''}
+                    disabled
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.role')}</label>
+                  <input
+                    type="text"
+                    value={userProfile?.role || ''}
+                    disabled
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-500 capitalize"
+                  />
+                </div>
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Commission Settings */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <Calculator className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">{t('settings.commissionSettings')}</h2>
-          </div>
-          
-          <div className="space-y-4">
-            <div className="p-4 border border-gray-200 rounded-lg">
-              <div className="flex items-center mb-3">
-                <DollarSign className="w-5 h-5 text-green-500 mr-3" />
-                <h3 className="font-medium text-gray-900">{t('settings.defaultCommissionRate')}</h3>
-              </div>
-              <div className="flex items-center space-x-3">
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.1"
-                  value={tempCommissionRate}
-                  onChange={(e) => setTempCommissionRate(e.target.value)}
-                  className="w-24 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <span className="text-gray-600">%</span>
-                <button
-                  onClick={handleCommissionRateSave}
-                  disabled={tempCommissionRate === (defaultCommissionRate?.toString() || '10')}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  {t('settings.save')}
-                </button>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">{t('settings.currentDefaultRate', { value: defaultCommissionRate })}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Currency Settings */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <DollarSign className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">{t('settings.currencySettings')}</h2>
-          </div>
-          
-          <div className="space-y-4">
-            <div className="p-4 border border-gray-200 rounded-lg">
-              <div className="flex items-center mb-3">
-                <DollarSign className="w-5 h-5 text-blue-500 mr-3" />
-                <h3 className="font-medium text-gray-900">{t('settings.displayCurrency')}</h3>
-              </div>
-              <p className="text-sm text-gray-600 mb-3">
-                {t('settings.displayCurrency')}
-              </p>
-              <div className="flex items-center space-x-3">
-                <select
-                  value={tempCurrency}
-                  onChange={(e) => setTempCurrency(e.target.value as 'USD' | 'LBP')}
-                  className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="USD">USD ($)</option>
-                  <option value="LBP">LBP (ل.ل)</option>
-                </select>
-                <button
-                  onClick={handleCurrencySave}
-                  disabled={tempCurrency === currency}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  {t('settings.save')}
-                </button>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">{t('settings.currentCurrency', { value: currency === 'USD' ? 'USD ($)' : 'LBP (ل.ل)' })}</p>
             </div>
 
-            <div className="p-4 border border-gray-200 rounded-lg">
-              <div className="flex items-center mb-3">
-                <DollarSign className="w-5 h-5 text-green-500 mr-3" />
-                <h3 className="font-medium text-gray-900">Exchange Rate (USD to LBP)</h3>
+            {/* Branch Information */}
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <Building className="w-6 h-6 text-gray-600 mr-3" />
+                  <h2 className="text-xl font-semibold text-gray-900">{t('settings.branchInfo')}</h2>
+                </div>
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowBranchSelection(true)}
+                    className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Switch Branch
+                  </button>
+                )}
               </div>
-              <p className="text-sm text-gray-600 mb-3">
-                Set the exchange rate for converting between USD and LBP (e.g., 1 USD = 89500 LBP)
-              </p>
-              <div className="flex items-center space-x-3">
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={tempExchangeRate}
-                  onChange={(e) => setTempExchangeRate(e.target.value)}
-                  className="w-32 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="89500"
-                />
-                <span className="text-gray-600">LBP per USD</span>
-                <button
-                  onClick={handleExchangeRateSave}
-                  disabled={tempExchangeRate === (exchangeRate?.toString() || '89500')}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  {t('settings.save')}
-                </button>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">Current rate: 1 USD = {exchangeRate} LBP</p>
+              <BranchInfoSection />
             </div>
-          </div>
-        </div>
 
-        {/* System Information */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <Database className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">{t('settings.systemInfo')}</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">{t('settings.appVersion')}</h3>
-              <p className="text-gray-600">ProducePOS v1.0.0</p>
-            </div>
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">{t('settings.dataStorage')}</h3>
-              <p className="text-gray-600">Local Storage (Offline-first)</p>
-            </div>
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">{t('settings.lastSync')}</h3>
-              <p className="text-gray-600">Never (Local only)</p>
-            </div>
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">{t('settings.deviceType')}</h3>
-              <div className="flex items-center text-gray-600">
-                <Smartphone className="w-4 h-4 mr-2" />
-                {t('settings.webApp')}
+            {/* Security */}
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center mb-4">
+                <Shield className="w-6 h-6 text-gray-600 mr-3" />
+                <h2 className="text-xl font-semibold text-gray-900">{t('settings.security')}</h2>
+              </div>
+              <div className="space-y-4">
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <h3 className="font-medium text-gray-900 mb-2">{t('settings.sessionManagement')}</h3>
+                  <p className="text-sm text-gray-600 mb-3">{t('settings.sessionNote')}</p>
+                  <button className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">{t('settings.changePassword')}</button>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
 
-        {/* Security */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <Shield className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">{t('settings.security')}</h2>
-          </div>
-          <div className="space-y-4">
-            <div className="p-4 border border-gray-200 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">{t('settings.sessionManagement')}</h3>
-              <p className="text-sm text-gray-600 mb-3">{t('settings.sessionNote')}</p>
-              <button className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">{t('settings.changePassword')}</button>
+        {/* Business Settings Tab */}
+        {activeTab === 'business' && (
+          <>
+            {/* Commission Settings */}
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center mb-4">
+                <Calculator className="w-6 h-6 text-gray-600 mr-3" />
+                <h2 className="text-xl font-semibold text-gray-900">{t('settings.commissionSettings')}</h2>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center mb-3">
+                    <DollarSign className="w-5 h-5 text-green-500 mr-3" />
+                    <h3 className="font-medium text-gray-900">{t('settings.defaultCommissionRate')}</h3>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={tempCommissionRate}
+                      onChange={(e) => setTempCommissionRate(e.target.value)}
+                      className="w-24 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <span className="text-gray-600">%</span>
+                    <button
+                      onClick={handleCommissionRateSave}
+                      disabled={tempCommissionRate === (defaultCommissionRate?.toString() || '10')}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      {t('settings.save')}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">{t('settings.currentDefaultRate', { value: defaultCommissionRate })}</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
+            {/* Currency Settings */}
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center mb-4">
+                <DollarSign className="w-6 h-6 text-gray-600 mr-3" />
+                <h2 className="text-xl font-semibold text-gray-900">{t('settings.currencySettings')}</h2>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center mb-3">
+                    <DollarSign className="w-5 h-5 text-blue-500 mr-3" />
+                    <h3 className="font-medium text-gray-900">{t('settings.displayCurrency')}</h3>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-3">
+                    {t('settings.displayCurrency')}
+                  </p>
+                  <div className="flex items-center space-x-3">
+                    <select
+                      value={tempCurrency}
+                      onChange={(e) => setTempCurrency(e.target.value as 'USD' | 'LBP')}
+                      className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="USD">USD ($)</option>
+                      <option value="LBP">LBP (ل.ل)</option>
+                    </select>
+                    <button
+                      onClick={handleCurrencySave}
+                      disabled={tempCurrency === currency}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      {t('settings.save')}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">{t('settings.currentCurrency', { value: currency === 'USD' ? 'USD ($)' : 'LBP (ل.ل)' })}</p>
+                </div>
 
-        {/* Receipt Settings - Admin/Manager Only */}
-        {isAdminOrManager && (
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center mb-3">
+                    <DollarSign className="w-5 h-5 text-green-500 mr-3" />
+                    <h3 className="font-medium text-gray-900">Exchange Rate (USD to LBP)</h3>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Set the exchange rate for converting between USD and LBP (e.g., 1 USD = 89500 LBP)
+                  </p>
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={tempExchangeRate}
+                      onChange={(e) => setTempExchangeRate(e.target.value)}
+                      className="w-32 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="89500"
+                    />
+                    <span className="text-gray-600">LBP per USD</span>
+                    <button
+                      onClick={handleExchangeRateSave}
+                      disabled={tempExchangeRate === (exchangeRate?.toString() || '89500')}
+                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      {t('settings.save')}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">Current rate: 1 USD = {exchangeRate} LBP</p>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Inventory Tab */}
+        {activeTab === 'inventory' && (
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex items-center mb-4">
-              <SettingsIcon className="w-6 h-6 text-gray-600 mr-3" />
+              <Bell className="w-6 h-6 text-gray-600 mr-3" />
+              <h2 className="text-xl font-semibold text-gray-900">{t('settings.inventoryAlerts')}</h2>
+            </div>
+            
+            <div className="space-y-4">
+              {/* Low Stock Alerts Toggle */}
+              <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div className="flex items-center">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 mr-3" />
+                  <div>
+                    <h3 className="font-medium text-gray-900">{t('settings.lowStockAlerts')}</h3>
+                    <p className="text-sm text-gray-600">{t('settings.lowStockDescription')}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleToggleAlerts(!lowStockAlertsEnabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    lowStockAlertsEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      lowStockAlertsEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Low Stock Threshold */}
+              {lowStockAlertsEnabled && (
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center mb-3">
+                    <Package className="w-5 h-5 text-blue-500 mr-3" />
+                    <h3 className="font-medium text-gray-900">{t('settings.lowStockThreshold')}</h3>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-3">{t('settings.lowStockDescription')}</p>
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={tempThreshold}
+                      onChange={(e) => setTempThreshold(e.target.value)}
+                      className="w-24 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <span className="text-gray-600">{t('settings.units')}</span>
+                    <button
+                      onClick={handleThresholdSave}
+                      disabled={tempThreshold === (lowStockThreshold?.toString() || '10')}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      {t('settings.save')}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">{t('settings.currentThreshold', { value: lowStockThreshold })}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Receipt & Printing Tab */}
+        {activeTab === 'receipt' && isAdminOrManager && (
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center mb-4">
+              <Printer className="w-6 h-6 text-gray-600 mr-3" />
               <h2 className="text-xl font-semibold text-gray-900">Receipt Settings</h2>
             </div>
             <ReceiptSettings />
           </div>
         )}
 
-        {/* Language */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center mb-4">
-            <SettingsIcon className="w-6 h-6 text-gray-600 mr-3" />
-            <h2 className="text-xl font-semibold text-gray-900">{t('settings.language')}</h2>
-          </div>
-          <div className="flex items-center space-x-3">
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="ar">{t('settings.language_ar')}</option>
-              <option value="en">{t('settings.language_en')}</option>
-              <option value="fr">{t('settings.language_fr')}</option>
-            </select>
-          </div>
-        </div>
+        {/* Preferences Tab */}
+        {activeTab === 'preferences' && (
+          <>
+            {/* Language */}
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center mb-4">
+                <SettingsIcon className="w-6 h-6 text-gray-600 mr-3" />
+                <h2 className="text-xl font-semibold text-gray-900">{t('settings.language')}</h2>
+              </div>
+              <div className="flex items-center space-x-3">
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="ar">{t('settings.language_ar')}</option>
+                  <option value="en">{t('settings.language_en')}</option>
+                  <option value="fr">{t('settings.language_fr')}</option>
+                </select>
+              </div>
+            </div>
+
+            {/* System Information */}
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center mb-4">
+                <Database className="w-6 h-6 text-gray-600 mr-3" />
+                <h2 className="text-xl font-semibold text-gray-900">{t('settings.systemInfo')}</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <h3 className="font-medium text-gray-900 mb-2">{t('settings.appVersion')}</h3>
+                  <p className="text-gray-600">ProducePOS v1.0.0</p>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <h3 className="font-medium text-gray-900 mb-2">{t('settings.dataStorage')}</h3>
+                  <p className="text-gray-600">Local Storage (Offline-first)</p>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <h3 className="font-medium text-gray-900 mb-2">{t('settings.lastSync')}</h3>
+                  <p className="text-gray-600">Never (Local only)</p>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <h3 className="font-medium text-gray-900 mb-2">{t('settings.deviceType')}</h3>
+                  <div className="flex items-center text-gray-600">
+                    <Smartphone className="w-4 h-4 mr-2" />
+                    {t('settings.webApp')}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
     </div>

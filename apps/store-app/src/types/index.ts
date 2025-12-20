@@ -37,13 +37,6 @@ export interface Employee {
 // RBAC (Role-Based Access Control) Types
 export type ModuleName = 'pos' | 'inventory' | 'accounting' | 'reports' | 'settings' | 'users';
 
-export type OperationType = 
-  | 'max_discount_percent'
-  | 'max_return_amount_usd'
-  | 'max_return_amount_lbp'
-  | 'max_void_amount_usd'
-  | 'max_void_amount_lbp';
-
 // Operation names for permissions (includes operations and module access)
 export type OperationName =
   // Module access operations
@@ -81,21 +74,6 @@ export type OperationName =
   | 'view_users'
   | 'manage_users';
 
-// Operation limits (for numeric restrictions like max discount, max void amount)
-export interface RoleOperationLimit {
-  id: string;
-  store_id: string;
-  role: 'admin' | 'manager' | 'cashier';
-  user_id: string | null; // NULL = role default, NOT NULL = user-specific override
-  operation_type: OperationType;
-  limit_value: number;
-  limit_currency?: 'USD' | 'LBP';
-  created_at: string;
-  updated_at: string;
-  _synced?: boolean;
-  _deleted?: boolean;
-}
-
 // Role permissions (GLOBAL default permissions per role - applies to ALL stores)
 export interface RolePermission {
   id: string;
@@ -127,11 +105,7 @@ export interface PermissionCache {
   storeId: string;
   modules: Record<ModuleName, boolean>;
   operations: Record<OperationName, boolean>;
-  limits: Record<OperationType, {
-    limit_value: number;
-    limit_currency?: 'USD' | 'LBP';
-    source: 'role_default' | 'user_override';
-  }>;
+  limits: Record<string, never>; // Empty object - operation limits removed
   branches: string[]; // Accessible branch IDs
   expiresAt: number; // Timestamp
 }

@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { RolePermissionService } from '../services/rolePermissionService';
-import { ModuleName, OperationType } from '../types';
+import { ModuleName } from '../types';
 
 export function useRolePermissions() {
   const { userProfile } = useSupabaseAuth();
@@ -71,63 +71,6 @@ export function useRolePermissions() {
   }, [userProfile]);
 
   /**
-   * Check if operation is within limits
-   * Returns true if within limits, false if exceeds
-   * @param operationType - Type of operation (e.g., 'max_discount_percent')
-   * @param value - Value to check
-   * @param currency - Currency for amount-based limits
-   */
-  const checkLimit = useCallback(async (
-    operationType: OperationType,
-    value: number,
-    currency?: 'USD' | 'LBP'
-  ): Promise<{ allowed: boolean; error?: string }> => {
-    if (!userProfile) {
-      return { allowed: false, error: 'User not authenticated' };
-    }
-
-    try {
-      await RolePermissionService.checkOperationLimit(
-        userProfile.id,
-        userProfile.store_id,
-        operationType,
-        value,
-        currency
-      );
-      return { allowed: true };
-    } catch (error) {
-      return {
-        allowed: false,
-        error: error instanceof Error ? error.message : 'Operation not allowed'
-      };
-    }
-  }, [userProfile]);
-
-  /**
-   * Check and throw if not allowed (for use with try/catch)
-   * @param operationType - Type of operation
-   * @param value - Value to check
-   * @param currency - Currency for amount-based limits
-   */
-  const checkLimitOrThrow = useCallback(async (
-    operationType: OperationType,
-    value: number,
-    currency?: 'USD' | 'LBP'
-  ): Promise<void> => {
-    if (!userProfile) {
-      throw new Error('User not authenticated');
-    }
-
-    await RolePermissionService.checkOperationLimit(
-      userProfile.id,
-      userProfile.store_id,
-      operationType,
-      value,
-      currency
-    );
-  }, [userProfile]);
-
-  /**
    * Simple role checks
    */
   const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'super_admin';
@@ -142,10 +85,6 @@ export function useRolePermissions() {
     // Operation checks
     canPerform,
     
-    // Limit checks
-    checkLimit,
-    checkLimitOrThrow,
-    
     // Role checks
     role: userProfile?.role,
     isAdmin,
@@ -157,26 +96,4 @@ export function useRolePermissions() {
   };
 }
 
-/**
- * Example usage in components:
- * 
- * function POSPage() {
- *   const { checkLimit, isAdmin } = useRolePermissions();
- * 
- *   const handleApplyDiscount = async (discountPercent: number) => {
- *     const { allowed, error } = await checkLimit('max_discount_percent', discountPercent);
- *     if (!allowed) {
- *       toast.error(error);
- *       return;
- *     }
- *     // Apply discount...
- *   };
- * 
- *   return (
- *     <div>
- *       {isAdmin && <DeleteButton />}
- *     </div>
- *   );
- * }
- */
 

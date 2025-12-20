@@ -938,41 +938,6 @@ export interface Database {
       };
       
       // RBAC Tables
-      role_operation_limits: {
-        Row: {
-          id: string;
-          store_id: string;
-          role: 'admin' | 'manager' | 'cashier';
-          user_id: string | null;
-          operation_type: string;
-          limit_value: number;
-          limit_currency: string | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          store_id: string;
-          role: 'admin' | 'manager' | 'cashier';
-          user_id?: string | null;
-          operation_type: string;
-          limit_value: number;
-          limit_currency?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          store_id?: string;
-          role?: 'admin' | 'manager' | 'cashier';
-          user_id?: string | null;
-          operation_type?: string;
-          limit_value?: number;
-          limit_currency?: string | null;
-          updated_at?: string;
-        };
-      };
-
       user_module_access: {
         Row: {
           id: string;

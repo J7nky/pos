@@ -19,7 +19,6 @@ import { permissionCache } from './permissionCache';
 import { 
   ModuleName, 
   OperationName, 
-  OperationType, 
   PermissionCache,
   Employee 
 } from '../types';
@@ -42,7 +41,35 @@ export class AccessControlService {
     // Load user
     const user = await db.users.get(userId);
     if (!user) {
-      throw new Error(`User not found: ${userId}`);
+      // User not synced yet - return minimal permissions (all false)
+      // This allows the app to continue loading while sync completes in the background
+      // Permissions will be refreshed once sync completes
+      const minimalCache: PermissionCache = {
+        userId,
+        storeId,
+        modules: {
+          pos: false,
+          inventory: false,
+          accounting: false,
+          reports: false,
+          settings: false,
+          users: false
+        },
+        operations: {} as Record<OperationName, boolean>,
+        limits: {},
+        branches: [],
+        expiresAt: Date.now() + (5 * 60 * 1000) // 5 minutes
+      };
+      
+      // Store minimal cache to prevent repeated lookups
+      permissionCache.set(userId, storeId, {
+        modules: minimalCache.modules,
+        operations: minimalCache.operations,
+        limits: minimalCache.limits,
+        branches: minimalCache.branches
+      });
+      
+      return minimalCache;
     }
 
     // Load role permissions (GLOBAL - no store_id filter)
@@ -84,43 +111,6 @@ export class AccessControlService {
       users: operations['access_users'] || false
     };
 
-    // Load operation limits
-    const userLimits = await db.role_operation_limits
-      .where('[store_id+user_id+operation_type]')
-      .between(
-        [storeId, userId, ''],
-        [storeId, userId, '\uffff']
-      )
-      .toArray();
-
-    const roleLimits = await db.role_operation_limits
-      .where('[store_id+role]')
-      .equals([storeId, user.role])
-      .filter(l => !l.user_id && !l._deleted)
-      .toArray();
-
-    const limits: Record<OperationType, any> = {} as any;
-    
-    // Apply role defaults first
-    roleLimits.forEach(limit => {
-      limits[limit.operation_type] = {
-        limit_value: limit.limit_value,
-        limit_currency: limit.limit_currency,
-        source: 'role_default' as const
-      };
-    });
-
-    // Apply user overrides
-    userLimits.forEach(limit => {
-      if (!limit._deleted) {
-        limits[limit.operation_type] = {
-          limit_value: limit.limit_value,
-          limit_currency: limit.limit_currency,
-          source: 'user_override' as const
-        };
-      }
-    });
-
     // Get accessible branches
     const branches = await this.getAccessibleBranches(userId, storeId, user.role, user.branch_id);
 
@@ -130,7 +120,7 @@ export class AccessControlService {
       storeId,
       modules,
       operations,
-      limits,
+      limits: {},
       branches: branches.map(b => b.id),
       expiresAt: Date.now() + (5 * 60 * 1000) // 5 minutes
     };
@@ -139,7 +129,7 @@ export class AccessControlService {
     permissionCache.set(userId, storeId, {
       modules,
       operations,
-      limits,
+      limits: {},
       branches: branches.map(b => b.id)
     });
 
@@ -218,10 +208,10 @@ export class AccessControlService {
       return; // ✅ Permission granted via user override
     }
 
-    // Check role default
+    // Check role default (GLOBAL - no store_id)
     const rolePermission = await db.role_permissions
-      .where('[store_id+role+operation]')
-      .equals([storeId, user.role, operation])
+      .where('[role+operation]')
+      .equals([user.role, operation])
       .first();
 
     if (rolePermission && !rolePermission._deleted) {
@@ -265,78 +255,6 @@ export class AccessControlService {
   }
 
   /**
-   * Check if operation value is within user's configured limits
-   * Priority: User-specific override > Role default > Unlimited
-   */
-  static async checkOperationLimit(
-    userId: string,
-    storeId: string,
-    operationType: OperationType,
-    value: number,
-    currency?: 'USD' | 'LBP'
-  ): Promise<void> {
-    // Check cache first
-    const cachedLimit = permissionCache.getLimit(userId, storeId, operationType);
-    if (cachedLimit) {
-      if (cachedLimit.limit_currency && currency && cachedLimit.limit_currency !== currency) {
-        return; // Different currency, not applicable
-      }
-      if (value > cachedLimit.limit_value) {
-        throw new Error(
-          `Operation limit exceeded: ${operationType}. ` +
-          `Maximum allowed${cachedLimit.source === 'user_override' ? ' for you' : ''}: ${cachedLimit.limit_value}${currency ? ' ' + currency : '%'}. ` +
-          `Attempted: ${value}${currency ? ' ' + currency : '%'}.`
-        );
-      }
-      return; // ✅ Within limit
-    }
-
-    const user = await db.users.get(userId);
-    if (!user) {
-      throw new Error(`User not found: ${userId}`);
-    }
-
-    // Priority 1: Check for user-specific override
-    const userLimits = await db.role_operation_limits
-      .where('[store_id+user_id+operation_type]')
-      .equals([storeId, userId, operationType])
-      .filter(l => !l._deleted)
-      .toArray();
-
-    let limit = userLimits[0];
-    let isUserOverride = !!limit;
-
-    // Priority 2: If no user override, check role default
-    if (!limit) {
-      const roleLimits = await db.role_operation_limits
-        .where('[store_id+role+operation_type]')
-        .equals([storeId, user.role, operationType])
-        .filter(l => !l.user_id && !l._deleted)
-        .toArray();
-
-      limit = roleLimits[0];
-    }
-
-    if (!limit) {
-      // No limit configured = unlimited (allowed)
-      return;
-    }
-
-    // Check currency match for amount-based limits
-    if (limit.limit_currency && currency && limit.limit_currency !== currency) {
-      return; // Different currency, not applicable
-    }
-
-    if (value > limit.limit_value) {
-      throw new Error(
-        `Operation limit exceeded: ${operationType}. ` +
-        `Maximum allowed${isUserOverride ? ' for you' : ` for ${user.role}`}: ${limit.limit_value}${currency ? ' ' + currency : '%'}. ` +
-        `Attempted: ${value}${currency ? ' ' + currency : '%'}.`
-      );
-    }
-  }
-
-  /**
    * Get user's module access status for all modules
    * Used for UI (showing/hiding menu items)
    */
@@ -347,28 +265,6 @@ export class AccessControlService {
   ): Promise<Record<ModuleName, boolean>> {
     const cache = await this.loadUserPermissions(userId, storeId);
     return cache.modules;
-  }
-
-  /**
-   * Get all configured operation limits for a user
-   */
-  static async getUserOperationLimits(
-    userId: string,
-    storeId: string
-  ): Promise<Array<{
-    operation_type: OperationType;
-    limit_value: number;
-    limit_currency?: 'USD' | 'LBP';
-    source: 'role_default' | 'user_override';
-  }>> {
-    const cache = await this.loadUserPermissions(userId, storeId);
-    
-    return Object.entries(cache.limits).map(([operationType, limit]) => ({
-      operation_type: operationType as OperationType,
-      limit_value: limit.limit_value,
-      limit_currency: limit.limit_currency,
-      source: limit.source
-    }));
   }
 
   // ============================================================================

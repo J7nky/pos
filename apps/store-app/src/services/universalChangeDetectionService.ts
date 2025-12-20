@@ -191,6 +191,11 @@ export class UniversalChangeDetectionService {
       return query; // No filter
     }
 
+    // Special case: role_permissions - GLOBAL table (no store_id column)
+    if (tableName === 'role_permissions') {
+      return query; // No filter - download all global permissions
+    }
+
     // Default: filter by store_id
     return query.eq('store_id', storeId);
   }

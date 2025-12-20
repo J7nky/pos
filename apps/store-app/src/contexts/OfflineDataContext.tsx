@@ -330,15 +330,94 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const storeId = userProfile?.store_id;
   const hasLoggedNoProfile = useRef(false);
   const autoSyncTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const previousStoreIdRef = useRef<string | null>(null);
+  const isClearingStorageRef = useRef(false);
 
   debug('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline, 'justCameOnline:', justCameOnline);
+
+  // Detect store change and clear storage if new store detected
+  useEffect(() => {
+    const handleStoreChange = async () => {
+      // Skip if no storeId yet or if we're already clearing storage
+      if (!storeId || isClearingStorageRef.current) {
+        return;
+      }
+
+      // Get the last accessed store ID from localStorage (persists across sessions)
+      const LAST_STORE_ID_KEY = 'last_accessed_store_id';
+      let lastStoreId: string | null = null;
+      try {
+        lastStoreId = localStorage.getItem(LAST_STORE_ID_KEY);
+      } catch (error) {
+        console.warn('⚠️ Failed to read last store ID from localStorage:', error);
+      }
+
+      // Check if store has changed (compare against both ref and localStorage)
+      const previousStoreId = previousStoreIdRef.current || lastStoreId;
+      if (previousStoreId !== null && previousStoreId !== storeId) {
+        // Store has changed! Clear all IndexedDB data
+        console.log(`🔄 Store changed from ${previousStoreId} to ${storeId}. Clearing all IndexedDB data...`);
+        isClearingStorageRef.current = true;
+
+        try {
+          // Close the database
+          await db.close();
+          
+          // Delete the entire database
+          await db.delete();
+          
+          // Update localStorage with new store ID
+          try {
+            localStorage.setItem(LAST_STORE_ID_KEY, storeId);
+          } catch (error) {
+            console.warn('⚠️ Failed to update last store ID in localStorage:', error);
+          }
+          
+          console.log('✅ IndexedDB cleared successfully. Reloading page...');
+          
+          // Reload the page to recreate the database with fresh schema
+          window.location.reload();
+        } catch (error) {
+          console.error('❌ Failed to clear IndexedDB:', error);
+          isClearingStorageRef.current = false;
+          // Try to reopen database even if clear failed
+          try {
+            await db.ensureOpen();
+          } catch (reopenError) {
+            console.error('❌ Failed to reopen database:', reopenError);
+          }
+        }
+        return;
+      }
+
+      // Update both ref and localStorage with current store ID
+      if (storeId) {
+        if (previousStoreIdRef.current !== storeId) {
+          previousStoreIdRef.current = storeId;
+        }
+        // Update localStorage if it's different
+        if (lastStoreId !== storeId) {
+          try {
+            localStorage.setItem(LAST_STORE_ID_KEY, storeId);
+          } catch (error) {
+            console.warn('⚠️ Failed to update last store ID in localStorage:', error);
+          }
+        }
+      }
+    };
+
+    handleStoreChange();
+  }, [storeId]);
 
   // Reset branch when user logs out
   useEffect(() => {
     if (!userProfile) {
-      // User logged out, reset currentBranchId
+      // User logged out, reset currentBranchId and in-memory store reference
+      // Note: We keep localStorage store ID to detect store changes on next login
       setCurrentBranchId(null);
-      console.log('🔄 User logged out, branch ID reset');
+      previousStoreIdRef.current = null;
+      isClearingStorageRef.current = false;
+      console.log('🔄 User logged out, branch ID and in-memory store reference reset');
     }
   }, [userProfile]);
 
@@ -1130,6 +1209,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             debug(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
             await refreshDataAndUpdateCount();
             
+            // Invalidate permission cache after full resync (user data and permissions may have changed)
+            if (userProfile) {
+              const { AccessControlService } = await import('../services/accessControlService');
+              AccessControlService.clearCache(userProfile.id, userProfile.store_id);
+              debug('🔄 Permission cache invalidated after full resync');
+            }
+            
             // ✅ AFTER full resync completes, ensure cash drawer accounts are available
             // This is called AFTER sync so getCashDrawerAccount() can safely access synced data
             didFullResync = true;
@@ -1632,6 +1718,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         await refreshData();
         await updateUnsyncedCount();
         await checkUndoValidity();
+        
+        // Invalidate permission cache after sync (user data and permissions may have changed)
+        if (userProfile) {
+          const { AccessControlService } = await import('../services/accessControlService');
+          AccessControlService.clearCache(userProfile.id, userProfile.store_id);
+          console.log('🔄 [SYNC] Permission cache invalidated');
+        }
+        
         console.log('✅ [SYNC] Local data refreshed');
       }
 

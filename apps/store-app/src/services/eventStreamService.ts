@@ -529,6 +529,9 @@ export class EventStreamService {
       // Apply store filter based on table type
       if (tableName === 'products') {
         query = query.or(`store_id.eq.${storeId},is_global.eq.true`);
+      } else if (tableName === 'role_permissions') {
+        // GLOBAL table - no store_id filter (download all global permissions)
+        // No filter needed
       } else if (tableName !== 'stores' && tableName !== 'transactions') {
         query = query.eq('store_id', storeId);
       }
@@ -683,7 +686,6 @@ export class EventStreamService {
       branch: 'branches',
       user: 'users',
       chart_of_account: 'chart_of_accounts',
-      role_operation_limit: 'role_operation_limits',
       user_module_access: 'user_module_access',
     };
 

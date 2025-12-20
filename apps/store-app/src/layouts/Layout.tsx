@@ -8,7 +8,7 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useI18n } from '../i18n';
 import { AccessControlService } from '../services/accessControlService';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ModuleName } from '../types';
 import {
   LayoutDashboard,
@@ -42,7 +42,8 @@ export default function Layout() {
   }
 
   const { isOnline, getSyncStatus } = useOfflineData();
-  const { unsyncedCount } = getSyncStatus();
+  const { unsyncedCount, isSyncing } = getSyncStatus();
+  const prevIsSyncingRef = useRef(isSyncing);
 
   // Dynamic module access based on user permissions (syncs across devices)
   const [moduleAccess, setModuleAccess] = useState<Record<ModuleName, boolean>>({
@@ -54,9 +55,16 @@ export default function Layout() {
     users: false
   });
 
-  useEffect(() => {
-    const loadModuleAccess = async () => {
-      if (!userProfile) return;
+  // Load module access
+  const loadModuleAccess = async (forceReload = false) => {
+    if (!userProfile) return;
+
+    try {
+      // Clear cache if forcing reload
+      if (forceReload) {
+        AccessControlService.clearCache(userProfile.id, userProfile.store_id);
+        console.log('🔄 Permission cache cleared, reloading...');
+      }
 
       // Pass role directly to avoid database lookup (user might not be synced yet)
       const access = await AccessControlService.getUserModuleAccess(
@@ -64,10 +72,163 @@ export default function Layout() {
         userProfile.store_id,
         userProfile.role
       );
+      
+      // Check if permissions are minimal (all false) - this indicates user data might not be synced yet
+      const hasAnyPermission = Object.values(access).some(v => v === true);
+      
+      if (!hasAnyPermission) {
+        // Check if user exists in IndexedDB - if yes, we should have permissions
+        const { db } = await import('../lib/db');
+        const user = await db.users.get(userProfile.id);
+        
+        if (user) {
+          // User exists but no permissions - this shouldn't happen, try reloading
+          console.log('⚠️ User exists but no permissions found, checking role permissions...');
+          const rolePerms = await db.role_permissions
+            .where('role')
+            .equals(user.role)
+            .toArray();
+          
+          if (rolePerms.length > 0) {
+            // Role permissions exist, force reload
+            console.log('🔄 Role permissions found, forcing permission reload...');
+            AccessControlService.clearCache(userProfile.id, userProfile.store_id);
+            const refreshedAccess = await AccessControlService.getUserModuleAccess(
+              userProfile.id,
+              userProfile.store_id,
+              userProfile.role
+            );
+            setModuleAccess(refreshedAccess);
+            return;
+          }
+        }
+      }
+      
       setModuleAccess(access);
-    };
+      console.log('✅ Module access loaded:', access);
+    } catch (error) {
+      console.error('Failed to load module access:', error);
+    }
+  };
 
+  // Load permissions on mount or when user changes
+  useEffect(() => {
     loadModuleAccess();
+    
+    // Also check after a delay in case sync completes quickly
+    // This handles the race condition where sync finishes before this component mounts
+    const delayedCheck = setTimeout(async () => {
+      if (!userProfile) return;
+      
+      try {
+        const { db } = await import('../lib/db');
+        const user = await db.users.get(userProfile.id);
+        
+        if (user) {
+          // User exists, check if we have proper permissions
+          const currentAccess = await AccessControlService.getUserModuleAccess(
+            userProfile.id,
+            userProfile.store_id,
+            userProfile.role
+          );
+          
+          const hasAnyPermission = Object.values(currentAccess).some(v => v === true);
+          
+          if (!hasAnyPermission) {
+            // No permissions but user exists - force reload
+            console.log('🔄 Delayed check: User exists but no permissions, reloading...');
+            await loadModuleAccess(true);
+          } else {
+            // Update with proper permissions
+            setModuleAccess(currentAccess);
+          }
+        }
+      } catch (error) {
+        console.error('Error in delayed permission check:', error);
+      }
+    }, 3000); // Check after 3 seconds
+    
+    return () => clearTimeout(delayedCheck);
+  }, [userProfile]);
+
+  // Reload permissions when sync completes (isSyncing changes from true to false)
+  useEffect(() => {
+    const wasSyncing = prevIsSyncingRef.current;
+    const isNowSyncing = isSyncing;
+
+    // If sync just completed (was syncing, now not syncing)
+    if (wasSyncing && !isNowSyncing && userProfile) {
+      console.log('🔄 Sync completed, reloading permissions...');
+      // Small delay to ensure data is fully written to IndexedDB
+      setTimeout(() => {
+        loadModuleAccess(true); // Force reload with cache clear
+      }, 1000); // Increased delay to ensure data is written
+    }
+
+    prevIsSyncingRef.current = isNowSyncing;
+  }, [isSyncing, userProfile]);
+
+  // Periodically check if permissions need to be refreshed
+  // This handles the case where permissions were loaded with minimal cache before user data synced
+  useEffect(() => {
+    if (!userProfile) return;
+
+    let checkCount = 0;
+    const maxChecks = 20; // Check for 40 seconds (20 * 2 seconds)
+    let hasReloaded = false;
+
+    const checkInterval = setInterval(async () => {
+      checkCount++;
+      
+      try {
+        const { db } = await import('../lib/db');
+        const user = await db.users.get(userProfile.id);
+        
+        // If user exists, check if we need to reload permissions
+        if (user && !hasReloaded) {
+          // Check current permissions state
+          const currentAccess = await AccessControlService.getUserModuleAccess(
+            userProfile.id,
+            userProfile.store_id,
+            userProfile.role
+          );
+          
+          const hasAnyPermission = Object.values(currentAccess).some(v => v === true);
+          
+          if (!hasAnyPermission) {
+            // Still no permissions, check if role permissions exist
+            const rolePerms = await db.role_permissions
+              .where('role')
+              .equals(user.role)
+              .toArray();
+            
+            if (rolePerms.length > 0) {
+              console.log('🔄 Role permissions exist but not loaded, forcing reload...');
+              await loadModuleAccess(true); // Force reload
+              hasReloaded = true;
+              clearInterval(checkInterval);
+            }
+          } else {
+            // Permissions are good now, update state
+            setModuleAccess(currentAccess);
+            hasReloaded = true;
+            clearInterval(checkInterval);
+          }
+        } else if (checkCount >= maxChecks) {
+          // Stop checking after max attempts
+          clearInterval(checkInterval);
+        }
+      } catch (error) {
+        console.error('Error checking user data:', error);
+        if (checkCount >= maxChecks) {
+          clearInterval(checkInterval);
+        }
+      }
+    }, 2000);
+
+    return () => {
+      clearInterval(checkInterval);
+    };
   }, [userProfile]);
 
   // All potential menu items

@@ -8,7 +8,7 @@
  * Follows offline-first pattern: IndexedDB → Cache → Fast checks
  */
 
-import { PermissionCache, ModuleName, OperationName, OperationType } from '../types';
+import { PermissionCache, ModuleName, OperationName } from '../types';
 
 class PermissionCacheService {
   private cache: Map<string, PermissionCache> = new Map();
@@ -96,22 +96,6 @@ class PermissionCacheService {
   }
 
   /**
-   * Get cached operation limit
-   * Returns null if not cached, limit config if cached
-   */
-  getLimit(
-    userId: string,
-    storeId: string,
-    operationType: OperationType
-  ): { limit_value: number; limit_currency?: 'USD' | 'LBP'; source: 'role_default' | 'user_override' } | null {
-    const cached = this.get(userId, storeId);
-    if (!cached) {
-      return null;
-    }
-    return cached.limits[operationType] || null;
-  }
-
-  /**
    * Get cached accessible branches
    * Returns null if not cached, branch IDs if cached
    */
@@ -144,20 +128,6 @@ class PermissionCacheService {
     }
   }
 
-  /**
-   * Update operation limit in cache
-   */
-  updateLimit(
-    userId: string,
-    storeId: string,
-    operationType: OperationType,
-    limit: { limit_value: number; limit_currency?: 'USD' | 'LBP'; source: 'role_default' | 'user_override' }
-  ): void {
-    const cached = this.get(userId, storeId);
-    if (cached) {
-      cached.limits[operationType] = limit;
-    }
-  }
 }
 
 // Export singleton instance

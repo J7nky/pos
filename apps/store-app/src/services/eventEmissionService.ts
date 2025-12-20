@@ -349,29 +349,6 @@ export class EventEmissionService {
   }
 
   /**
-   * Emit role_operation_limit_updated event
-   * Called when RBAC operation limits are updated
-   */
-  async emitRoleOperationLimitUpdated(
-    storeId: string,
-    branchId: string,
-    limitId: string,
-    userId?: string,
-    metadata?: { operation?: 'create' | 'update' | 'delete' }
-  ): Promise<void> {
-    await this.emitEvent({
-      store_id: storeId,
-      branch_id: branchId,
-      event_type: 'role_operation_limit_updated',
-      entity_type: 'role_operation_limit',
-      entity_id: limitId,
-      operation: metadata?.operation === 'delete' ? 'reverse' : (metadata?.operation === 'create' ? 'insert' : 'update'),
-      user_id: userId,
-      metadata,
-    });
-  }
-
-  /**
    * Emit user_module_access_updated event
    * Called when user module access permissions are updated
    */

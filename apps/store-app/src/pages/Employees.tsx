@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { Plus, Search, Edit, Trash2, Users as UsersIcon, Clock, DollarSign, Phone, MapPin, User, Calendar, Shield, Lock } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Users as UsersIcon, Clock, DollarSign, Phone, MapPin, User, Calendar, Shield } from 'lucide-react';
 import { Employee } from '../types';
 import { EmployeeService } from '../services/employeeService';
 import Toast from '../components/common/Toast';
 import { ModuleAccessManager } from '../components/rbac/ModuleAccessManager';
-import { OperationLimitsManager } from '../components/rbac/OperationLimitsManager';
 import { useI18n } from '../i18n';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
 
@@ -42,7 +41,7 @@ export default function Employees() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [nameValidationError, setNameValidationError] = useState<string | null>(null);
   const [roleCounts, setRoleCounts] = useState({ cashier: 0, manager: 0 });
-  const [activeTab, setActiveTab] = useState<'info' | 'modules' | 'limits'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'modules'>('info');
 
   // Check if user is admin
   const isAdmin = userProfile?.role === 'admin';
@@ -439,18 +438,6 @@ console.log(userProfile,123123123);
                   <Shield className="w-4 h-4 inline mr-2" />
                   {t('employees.employeeModuleAccess')}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('limits')}
-                  className={`px-4 py-2 font-medium text-sm transition-colors ${
-                    activeTab === 'limits'
-                      ? 'border-b-2 border-blue-600 text-blue-600'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <Lock className="w-4 h-4 inline mr-2" />
-                  {t('employees.employeeOperationLimits')}
-                </button>
               </div>
             )}
 
@@ -756,34 +743,6 @@ console.log(userProfile,123123123);
               </div>
             )}
 
-            {/* Tab Content: Operation Limits */}
-            {editingEmployee && activeTab === 'limits' && (
-              <div className="py-4">
-                <OperationLimitsManager
-                  userId={editingEmployee.id}
-                  userRole={editingEmployee.role}
-                  storeId={storeId || ''}
-                  onUpdate={() => {
-                    setToast({ message: t('employees.operationLimitsUpdatedSuccessfully'), type: 'success', visible: true });
-                  }}
-                />
-
-                {/* Close button for tabs */}
-                <div className="mt-6 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowForm(false);
-                      setEditingEmployee(null);
-                      setActiveTab('info');
-                    }}
-                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-                  >
-                    {t('employees.close')}
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
