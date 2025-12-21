@@ -118,6 +118,13 @@ export class AccountStatementService {
       ? await db.transactions.where('id').anyOf(transactionIds).toArray()
       : [];
 
+    // Debug: Check if all transactions were found
+    if (transactions.length !== transactionIds.length) {
+      const foundIds = new Set(transactions.map(t => t.id));
+      const missingIds = transactionIds.filter(id => !foundIds.has(id));
+      console.warn(`⚠️ Some transactions not found: ${missingIds.length} missing out of ${transactionIds.length}`, missingIds.slice(0, 5));
+    }
+
     const transactionMap = new Map(transactions.map(t => [t.id, t]));
 
     // Get bills for transactions that have references
@@ -132,6 +139,27 @@ export class AccountStatementService {
     
     const billMap = new Map(bills.map(b => [b.bill_number, b]));
 
+    // Pre-fetch all bill_line_items and products for detailed view (performance optimization)
+    const billIds = bills.map(b => b.id);
+    const allBillLineItems = viewMode === 'detailed' && billIds.length > 0
+      ? await db.bill_line_items.where('bill_id').anyOf(billIds).toArray()
+      : [];
+    
+    const billLineItemsMap = new Map<string, any[]>();
+    for (const item of allBillLineItems) {
+      if (!billLineItemsMap.has(item.bill_id)) {
+        billLineItemsMap.set(item.bill_id, []);
+      }
+      billLineItemsMap.get(item.bill_id)!.push(item);
+    }
+
+    // Pre-fetch all products for detailed view (performance optimization)
+    const productIds = [...new Set(allBillLineItems.map(item => item.product_id))];
+    const allProducts = viewMode === 'detailed' && productIds.length > 0
+      ? await db.products.where('id').anyOf(productIds).toArray()
+      : [];
+    const productMap = new Map(allProducts.map(p => [p.id, p]));
+
     // Build statement transactions
     const statementTransactions: StatementTransaction[] = [];
     let runningUSD = openingBalance.USD;
@@ -143,9 +171,40 @@ export class AccountStatementService {
       paymentsUSD: 0,
       paymentsLBP: 0
     };
+    // Sort transaction IDs by transaction created_at for accurate chronological ordering
+    // This ensures transactions are ordered by when they were actually created, not posted_date
+    const sortedTransactionIds = Array.from(entriesByTransaction.entries())
+      .sort(([transactionIdA, entriesA], [transactionIdB, entriesB]) => {
+        // Use transaction created_at as primary sort key (most accurate)
+        const transactionA = transactionMap.get(transactionIdA);
+        const transactionB = transactionMap.get(transactionIdB);
+        
+        if (transactionA && transactionB) {
+          return transactionA.created_at.localeCompare(transactionB.created_at);
+        }
+        
+        // Fallback: Get account entry and use its created_at
+        const accountEntryA = entriesA.find(e => 
+          (entityType === 'customer' && e.account_code === '1200') ||
+          (entityType === 'supplier' && e.account_code === '2100')
+        );
+        const accountEntryB = entriesB.find(e => 
+          (entityType === 'customer' && e.account_code === '1200') ||
+          (entityType === 'supplier' && e.account_code === '2100')
+        );
+        
+        if (!accountEntryA || !accountEntryB) return 0;
+        
+        // Use journal entry created_at as fallback
+        return accountEntryA.created_at.localeCompare(accountEntryB.created_at);
+      })
+      .map(([transactionId]) => transactionId);
 
-    // Process each transaction group
-    for (const [transactionId, entries] of entriesByTransaction.entries()) {
+    // Process each transaction group in chronological order
+    for (const transactionId of sortedTransactionIds) {
+      const entries = entriesByTransaction.get(transactionId);
+      if (!entries) continue;
+
       // Get the entry for the account we're querying (AR for customers, AP for suppliers)
       const accountEntry = entries.find(e => 
         (entityType === 'customer' && e.account_code === '1200') ||
@@ -153,7 +212,6 @@ export class AccountStatementService {
       );
 
       if (!accountEntry) continue;
-
       const transaction = transactionMap.get(transactionId);
       const amount = accountEntry.debit - accountEntry.credit;
       const currency = accountEntry.currency;
@@ -184,7 +242,7 @@ export class AccountStatementService {
         }
       }
 
-      // Get bill information if available
+      // Get bill information if available (using pre-fetched data)
       let bill: any = null;
       let billLineItems: any[] = [];
       if (transaction?.reference) {
@@ -194,23 +252,14 @@ export class AccountStatementService {
         bill = billMap.get(billNumber);
         
         if (bill && viewMode === 'detailed') {
-          billLineItems = await db.bill_line_items
-            .where('bill_id')
-            .equals(bill.id)
-            .toArray();
+          // Use pre-fetched bill_line_items instead of DB call
+          billLineItems = billLineItemsMap.get(bill.id) || [];
         }
       }
 
-      // Build product details for detailed view
+      // Build product details for detailed view (using pre-fetched products)
       const productDetails: StatementProductDetail[] = [];
       if (viewMode === 'detailed' && billLineItems.length > 0) {
-        const products = await db.products
-          .where('id')
-          .anyOf(billLineItems.map(item => item.product_id))
-          .toArray();
-        
-        const productMap = new Map(products.map(p => [p.id, p]));
-
         for (const item of billLineItems) {
           const product = productMap.get(item.product_id);
           productDetails.push({
@@ -240,10 +289,11 @@ export class AccountStatementService {
           totals.paymentsLBP += Math.abs(amount);
         }
       }
+      console.log(transaction,8383883)
 
       statementTransactions.push({
         id: transactionId,
-        date: accountEntry.posted_date,
+        date: transaction?.created_at || accountEntry.created_at,
         type,
         description,
         amount: Math.abs(amount),
@@ -257,9 +307,15 @@ export class AccountStatementService {
         payment_method: transaction?.category?.includes('CASH') ? 'cash' : 
                        transaction?.category?.includes('CREDIT') ? 'credit' : undefined,
         product_details: productDetails.length > 0 ? productDetails : undefined,
-        reference: transaction?.reference || `TXN-${transactionId.slice(-8)}`
+        reference: (transaction?.reference && transaction.reference.trim() !== '') 
+          ? transaction.reference 
+          : `TXN-${transactionId.slice(-8)}`
       });
     }
+
+    // DO NOT re-sort after calculating balances - this would break the running balance calculation
+    // Transactions are already in chronological order from processing
+    // The balance_after values depend on the processing order, so we must maintain it
 
     return {
       statementTransactions,
@@ -433,14 +489,8 @@ export class AccountStatementService {
       return entryDate >= startDateObj && entryDate <= endDateObj;
     });
 
-    // Sort by date and time
-    journalEntries.sort((a, b) => {
-      const dateCompare = a.posted_date.localeCompare(b.posted_date);
-      if (dateCompare !== 0) return dateCompare;
-      return a.created_at.localeCompare(b.created_at);
-    });
-
     // Map journal entries to statement transactions
+    // Note: Sorting happens inside mapJournalEntriesToStatementTransactions by transaction_id
     const { statementTransactions, ending, totals } = await this.mapJournalEntriesToStatementTransactions(
       journalEntries,
       openingBalance,
@@ -453,6 +503,8 @@ export class AccountStatementService {
       ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'customer')
       : undefined;
 
+    // Use ending balance from date range as current balance for the statement period
+    // This shows the balance as of the end date, not the current balance
     return {
       entityId: customerId,
       entityName: entity.name,
@@ -536,14 +588,8 @@ export class AccountStatementService {
       return entryDate >= startDateObj && entryDate <= endDateObj;
     });
 
-    // Sort by date and time
-    journalEntries.sort((a, b) => {
-      const dateCompare = a.posted_date.localeCompare(b.posted_date);
-      if (dateCompare !== 0) return dateCompare;
-      return a.created_at.localeCompare(b.created_at);
-    });
-
     // Map journal entries to statement transactions
+    // Note: Sorting happens inside mapJournalEntriesToStatementTransactions by transaction_id
     const { statementTransactions, ending, totals } = await this.mapJournalEntriesToStatementTransactions(
       journalEntries,
       openingBalance,
@@ -556,6 +602,8 @@ export class AccountStatementService {
       ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'supplier')
       : undefined;
 
+    // Use ending balance from date range as current balance for the statement period
+    // This shows the balance as of the end date, not the current balance
     return {
       entityId: supplierId,
       entityName: entity.name,

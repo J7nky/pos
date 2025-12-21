@@ -161,7 +161,6 @@ export class TransactionService {
       // 2. PREPARE TRANSACTION DATA (outside transaction)
       const transactionId = this.generateTransactionId();
       const correlationId = params.context.correlationId || this.generateCorrelationId();
-      const timestamp = new Date().toISOString();
       const type = getTransactionType(params.category);
       
       // Convert amount to USD for balance calculations
@@ -181,7 +180,6 @@ export class TransactionService {
         params.employeeId,
         params.currency
       );
-
       // 4. PREPARE TRANSACTION RECORD
       const transaction: Transaction = {
         id: transactionId,
@@ -196,7 +194,7 @@ export class TransactionService {
         customer_id: params.customerId || null,
         supplier_id: params.supplierId || null,
         employee_id: params.employeeId || null,
-        created_at: timestamp,
+        created_at: '', // Will be set inside transaction block
         created_by: params.context.userId,
         _synced: params._synced ?? false,
         _deleted: false,
@@ -220,7 +218,12 @@ export class TransactionService {
       await db.transaction('rw', 
         [db.transactions, db.cash_drawer_sessions, db.journal_entries, db.entities, db.chart_of_accounts, db.cash_drawer_accounts], 
         async () => {
-          // 5. CREATE TRANSACTION RECORD
+          // Create timestamp inside transaction block for accurate commit time
+          const timestamp = new Date().toISOString();
+          transaction.created_at = timestamp;
+          
+      console.log(timestamp,8383883)
+      // 5. CREATE TRANSACTION RECORD
           await db.transactions.add(transaction);
 
           // 6. CREATE JOURNAL ENTRIES (MANDATORY - ACCOUNTING RULE)

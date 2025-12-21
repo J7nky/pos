@@ -345,7 +345,7 @@ export default function PublicCustomerStatement() {
                             {transaction.type === 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
                           </td>
                           <td className="print-table-col-balance print-number print-currency">
-                            {formatCurrencyValue(transaction.balanceAfter, transaction.currency)}
+                            {formatCurrencyValue(transaction.balance_after, transaction.currency)}
                             {transaction.currency === 'LBP' ? ' ل.ل' : ''}
                           </td>
                         </tr>
@@ -493,7 +493,7 @@ export default function PublicCustomerStatement() {
                                 {transaction.type === 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
                               </td>
                               <td className="print-table-col-balance print-number print-currency">
-                                {formatCurrencyValue(transaction.balanceAfter, transaction.currency)}
+                                {formatCurrencyValue(transaction.balance_after, transaction.currency)}
                                 {transaction.currency === 'LBP' ? ' ل.ل' : ''}
                               </td>
                             </tr>
@@ -823,7 +823,7 @@ export default function PublicCustomerStatement() {
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {formatCurrency(transaction.balanceAfter, transaction.currency)}
+                            {formatCurrency(transaction.balance_after, transaction.currency)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {transaction.reference || '-'}

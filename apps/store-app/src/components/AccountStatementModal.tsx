@@ -589,7 +589,7 @@ export default function AccountStatementModal({
                               </td>
                               {/* balance USD/LBP */}
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {formatCurrency(transaction.balanceAfter, transaction.currency || 'LBP')}
+                                {formatCurrency(transaction.balance_after, transaction.currency || 'LBP')}
                               </td>
                               {/* reference */}
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

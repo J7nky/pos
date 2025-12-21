@@ -3662,7 +3662,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const oldLineItems = allLineItems.map(item => 
           item.id === id ? originalSale : item
         );
-        const oldTotals = calculateBillTotals(oldLineItems, bill. || 0);
+        const oldTotals = calculateBillTotals(oldLineItems, bill.amount_paid || 0);
         
         // Calculate new totals (after update)
         const newTotals = calculateBillTotals(allLineItems, bill.amount_paid || 0);

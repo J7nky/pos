@@ -117,7 +117,7 @@ export function AccountStatementPrintContent({
                           {transaction.type === 'payment' ? formatCurrency(transaction.amount || 0, transaction.currency || 'LBP', false) : '0'}
                         </td>
                         <td className="print-table-col-balance print-number print-currency">
-                          {formatCurrency(transaction.balanceAfter, transaction.currency || 'LBP', true)}
+                          {formatCurrency(transaction.balance_after, transaction.currency || 'LBP', true)}
                         </td>
                       </tr>
                     ))}
