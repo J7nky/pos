@@ -289,7 +289,6 @@ export class AccountStatementService {
           totals.paymentsLBP += Math.abs(amount);
         }
       }
-      console.log(transaction,8383883)
 
       statementTransactions.push({
         id: transactionId,

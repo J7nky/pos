@@ -2002,7 +2002,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const entity = preFetchedEntity;
         const entityType = entity.entity_type as 'customer' | 'supplier';
         const transactionId = createId();
-        const journalTransactionId = createId();
         
         // 1. Create transaction record directly (avoiding nested transaction)
         const creditSaleTransaction: Transaction = {
@@ -2016,7 +2015,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           amount: customerBalanceUpdate.amountDue,
           currency: currency as 'USD' | 'LBP', // Use store's currency
           description: `Credit sale - Bill ${bill.bill_number} (${entityType})`,
-          reference: bill.bill_number,
+          reference: `BILL-${bill.bill_number}`, // ✅ Ensure reference includes BILL- prefix for consistency
           customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
           supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
           employee_id: null,
@@ -2035,6 +2034,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         
         // 2. Create journal entries directly (double-entry bookkeeping)
         // ✅ IMPORTANT: Each entry must have ONLY debit OR credit, not both (database constraint)
+        // ✅ FIX: Use transactionId (not a separate journalTransactionId) so account statements can find the transaction
         const postedDate = now.split('T')[0];
         const fiscalPeriod = getFiscalPeriodForDate(now).period; // Extract the period string
         
@@ -2048,7 +2048,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           id: createId(),
           store_id: storeId,
           branch_id: currentBranchId,
-          transaction_id: journalTransactionId,
+          transaction_id: transactionId, // ✅ Use transactionId (same as transaction record)
           account_code: debitAccountCode,
           account_name: debitAccountName,
           entity_id: customerBalanceUpdate.customerId,
@@ -2069,7 +2069,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           id: createId(),
           store_id: storeId,
           branch_id: currentBranchId,
-          transaction_id: journalTransactionId,
+          transaction_id: transactionId, // ✅ Use transactionId (same as transaction record)
           account_code: '4100', // Revenue
           account_name: 'Revenue',
           entity_id: customerBalanceUpdate.customerId,
@@ -3684,7 +3684,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             const entityType = entity.entity_type as 'customer' | 'supplier';
             const now = new Date().toISOString();
             const transactionId = createId();
-            const journalTransactionId = createId();
             
             // 1. Create transaction record
             const creditSaleTransaction: Transaction = {
@@ -3698,7 +3697,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               amount: amountDueIncrease,
               currency: currency as 'USD' | 'LBP', // Use store's currency
               description: `Credit sale - Bill ${bill.bill_number} (${entityType}) - Item priced`,
-              reference: bill.bill_number,
+              reference: `BILL-${bill.bill_number}`, // ✅ Ensure reference includes BILL- prefix for consistency
               customer_id: entityType === 'customer' ? bill.customer_id : null,
               supplier_id: entityType === 'supplier' ? bill.customer_id : null,
               employee_id: null,
@@ -3716,6 +3715,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             await db.transactions.add(creditSaleTransaction);
             
             // 2. Create journal entries (double-entry bookkeeping)
+            // ✅ FIX: Use transactionId (not a separate journalTransactionId) so account statements can find the transaction
             const postedDate = now.split('T')[0];
             const fiscalPeriod = getFiscalPeriodForDate(now).period;
             
@@ -3726,7 +3726,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               id: createId(),
               store_id: storeId,
               branch_id: currentBranchId || '',
-              transaction_id: journalTransactionId,
+              transaction_id: transactionId, // ✅ Use transactionId (same as transaction record)
               account_code: debitAccountCode,
               account_name: debitAccountName,
               entity_id: bill.customer_id,
@@ -3747,7 +3747,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               id: createId(),
               store_id: storeId,
               branch_id: currentBranchId || '',
-              transaction_id: journalTransactionId,
+              transaction_id: transactionId, // ✅ Use transactionId (same as transaction record)
               account_code: '4100',
               account_name: 'Revenue',
               entity_id: bill.customer_id,
