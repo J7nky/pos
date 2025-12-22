@@ -21,12 +21,11 @@ import type { JournalEntry } from '../types';
  * @returns Balance (positive = entity owes you, negative = you owe entity)
  */
 export function calculateBalance(entries: JournalEntry[], currency: 'USD' | 'LBP'): number {
+
   return entries.reduce((sum, e) => {
-    if (currency === 'USD') {
-      return sum + (e.debit_usd - e.credit_usd);
-    } else {
+   
       return sum + (e.debit_lbp - e.credit_lbp);
-    }
+    
   }, 0);
 }
 
@@ -110,6 +109,7 @@ export async function calculateCashDrawerBalance(
   currency: 'USD' | 'LBP'
 ): Promise<number> {
   try {
+    console.log('0191019', storeId, branchId, currency);
     // Get all cash journal entries for this store and branch (both currencies in same entries)
     const entries = await db.journal_entries
       .where('[store_id+account_code]')

@@ -1,9 +1,27 @@
+import { AccountStatement } from '../services/accountStatementService';
+import { Customer, Supplier } from './index';
+
+export interface AccountStatementPrintPayload {
+  statement: AccountStatement;
+  entity: {
+    name: string;
+    type: 'customer' | 'supplier';
+  };
+  viewMode: 'summary' | 'detailed';
+  language: 'en' | 'ar' | 'fr';
+  dateRange: {
+    start: string;
+    end: string;
+  };
+}
+
 declare global {
   interface Window {
     electronAPI: {
       // Printer API
       getPrinters: () => Promise<any>;
       printDocument: (options: any) => Promise<any>;
+      printStatement: (payload: AccountStatementPrintPayload) => Promise<{ success: boolean; message?: string; error?: string }>;
       testPrinter: (printerName: string) => Promise<any>;
       getPrinterStatus: (printerName: string) => Promise<any>;
       // Test functions removed - not needed in production

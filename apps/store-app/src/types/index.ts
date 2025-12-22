@@ -549,6 +549,9 @@ export interface StatementProductDetail {
   commission_rate?: number;
   commission_amount?: number;
   notes?: string;
+  debit_amount?: number;
+  credit_amount?: number;
+  currency?: 'USD' | 'LBP';
 }
 
 // Additional interfaces for db.ts (Dexie-specific) - matches database schema exactly
@@ -590,7 +593,8 @@ export interface CashDrawerAccount {
   name: string;
   currency: string;
   is_active: boolean;
-  current_balance: number | null;
+  /** @deprecated Removed from database - balance is computed from journal entries */
+  current_balance?: number | null;
   created_at: string;
   updated_at: string;
   _synced: boolean;

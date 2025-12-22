@@ -250,10 +250,11 @@ export class CashDrawerUpdateService {
                 return 0;
               }
 
-              // ✅ PURE GETTER: Return cached balance only
-              // Balance is updated when posting journal entries, not during reads
-              const balance = Number((account as any)?.current_balance || 0);
-              return balance;
+              // ✅ COMPUTED BALANCE: Calculate from journal entries (single source of truth)
+              // Journal entries are the only source of truth for cash drawer balance
+              const { calculateCashDrawerBalance } = await import('../utils/balanceCalculation');
+              const currency = (account as any)?.currency || 'USD';
+              return await calculateCashDrawerBalance(storeId, branchId, currency);
             } catch (error) {
               console.error('Error getting cash drawer balance:', error);
               return 0;
@@ -269,7 +270,7 @@ export class CashDrawerUpdateService {
    * Reconcile cash drawer balance from journal entries - EXPLICIT RECONCILIATION
    * 
    * ✅ Calculates TRUE balance from journal entries (account_code = 1100)
-   * ✅ Updates cash_drawer_accounts.current_balance to match
+   * ✅ Returns reconciliation result for auditability (balance is computed, not stored)
    * ✅ Logs the reconciliation for auditability
    * ✅ Should be called explicitly: end-of-day, session close, admin reconcile, sync repair
    * 
@@ -305,32 +306,27 @@ export class CashDrawerUpdateService {
             };
           }
 
-          const oldBalance = Number((account as any)?.current_balance || 0);
-
           // ✅ Calculate TRUE balance from journal entries (account_code = 1100)
           // This is the SINGLE SOURCE OF TRUTH
           const { calculateCashDrawerBalance } = await import('../utils/balanceCalculation');
-          const trueBalance = await calculateCashDrawerBalance(storeId, branchId, 'USD'); // TODO: Support LBP
+          const currency = (account as any)?.currency || 'USD';
+          const trueBalance = await calculateCashDrawerBalance(storeId, branchId, currency);
           
+          // Get old balance from field for comparison (informational only)
+          const oldBalance = Number((account as any)?.current_balance || 0);
           const discrepancy = trueBalance - oldBalance;
 
-          // Update stored balance to match journal entries
+          // Log reconciliation for auditability (informational only - balance is computed from journals)
           if (Math.abs(discrepancy) > 0.01) {
-            await db.cash_drawer_accounts.update(account.id as string, {
-              current_balance: trueBalance as any,
-              updated_at: new Date().toISOString(),
-              _synced: false
-            });
-
-            // Log reconciliation for auditability
-            console.log(`💰 Cash drawer balance reconciled:`, {
+            console.log(`💰 Cash drawer balance reconciliation:`, {
               storeId,
               branchId,
               oldBalance,
               newBalance: trueBalance,
               discrepancy,
               reason,
-              timestamp: new Date().toISOString()
+              timestamp: new Date().toISOString(),
+              note: 'Balance is computed from journal entries - no field update needed'
             });
           }
 

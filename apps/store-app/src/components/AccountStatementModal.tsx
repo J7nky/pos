@@ -24,6 +24,7 @@ import { setupPrintWithPageSelection } from '../utils/printUtils';
 import { paginateTransactions, getTotalPages } from '../utils/printPagination';
 import { AccountStatementPrintContent } from './AccountStatementPrintContent';
 import { formatCurrency as formatCurrencyUtil } from '../utils/currencyFormatter';
+import type { AccountStatementPrintPayload } from '../types/electron';
 
 interface AccountStatementModalProps {
   isOpen: boolean;
@@ -54,7 +55,7 @@ export default function AccountStatementModal({
   bills,
   isSyncing = false
 }: AccountStatementModalProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
@@ -116,14 +117,16 @@ export default function AccountStatementModal({
           entity.id,
           storeId,
           dateRange,
-          viewMode
+          viewMode,
+          language as 'en' | 'ar' | 'fr'
         );
       } else {
         newStatement = await accountStatementService.generateSupplierStatement(
           entity.id,
           storeId,
           dateRange,
-          viewMode
+          viewMode,
+          language as 'en' | 'ar' | 'fr'
         );
       }
 
@@ -173,8 +176,45 @@ export default function AccountStatementModal({
     setShowPrintPreview(true);
   };
 
-  const handlePrint = (selectedPages?: number[]) => {
-    setupPrintWithPageSelection(selectedPages, totalPages);
+  const handlePrint = async (selectedPages?: number[]) => {
+    if (!statement) return;
+
+    // Check if Electron API is available
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.printStatement) {
+      try {
+        // Prepare payload for Electron printing
+        const payload: AccountStatementPrintPayload = {
+          statement,
+          entity: {
+            name: entity.name,
+            type: entityType
+          },
+          viewMode,
+          language: language as 'en' | 'ar' | 'fr',
+          dateRange: {
+            start: statement.dateRange.start,
+            end: statement.dateRange.end
+          }
+        };
+
+        // Call Electron print API
+        const result = await (window as any).electronAPI.printStatement(payload);
+        
+        if (result.success) {
+          showToast('Statement sent to printer', 'success');
+        } else {
+          showToast(result.message || 'Failed to print statement', 'error');
+        }
+      } catch (error) {
+        console.error('Error printing statement via Electron:', error);
+        showToast('Failed to print statement', 'error');
+        // Fallback to CSS printing
+        setupPrintWithPageSelection(selectedPages, totalPages);
+      }
+    } else {
+      // Web fallback: use CSS printing
+      setupPrintWithPageSelection(selectedPages, totalPages);
+    }
   };
 
   const handleClosePreview = () => {
@@ -526,77 +566,177 @@ export default function AccountStatementModal({
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
 
-                          {statement.transactions.map((transaction) => (
-                            <tr key={transaction.id} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {new Date(transaction.date).toLocaleDateString()}
-                              </td>
-                           
-                              <td className="px-6 py-4">
-                                <div className="text-sm font-medium text-gray-900">
-                                  {transaction.description}
-                                </div>
-                                {transaction.paymentMethod && (
-                                  <div className="text-xs text-gray-500 mt-1 flex items-center">
-                                    <CreditCard className="w-3 h-3 me-1" />
-                                    {transaction.paymentMethod}
-                                  </div>
+                          {statement.transactions.map((transaction, transactionIndex) => {
+                            const hasLineItems = viewMode === 'detailed' && transaction.product_details && transaction.product_details.length > 0;
+                            
+                            // Calculate balance before this transaction
+                            const balanceBefore = transactionIndex === 0 
+                              ? (transaction.currency === 'USD' ? statement.financialSummary.openingBalance.USD : statement.financialSummary.openingBalance.LBP)
+                              : (statement.transactions[transactionIndex - 1].balance_after);
+                            
+                            return (
+                              <>
+                                {/* Main transaction row - only show if no line items */}
+                                {!hasLineItems && (
+                                  <tr key={transaction.id} className="hover:bg-gray-50 transition-colors">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                      {new Date(transaction.date).toLocaleDateString()}
+                                    </td>
+                                 
+                                    <td className="px-6 py-4">
+                                      <div className="text-sm font-medium text-gray-900">
+                                        {transaction.description}
+                                      </div>
+                                      {transaction.paymentMethod && (
+                                        <div className="text-xs text-gray-500 mt-1 flex items-center">
+                                          <CreditCard className="w-3 h-3 me-1" />
+                                          {transaction.paymentMethod}
+                                        </div>
+                                      )}
+                                    </td>
+                                      {viewMode === 'detailed' && (
+                                        <td className="px-6 py-4">
+                                          <div className="text-sm font-medium text-gray-900">
+                                          {transaction.quantity?`${transaction.quantity}`:'-'}
+                                        </div>
+                                      
+                                        </td>
+                                      )}
+                                      {viewMode === 'detailed' && (
+                                        <td className="px-6 py-4">
+                                          <div className="text-sm font-medium text-gray-900">
+                                          {transaction.weight?`${transaction.weight}kg`:'-'}
+                                        </div>
+                                      
+                                        </td>
+                                      )}
+                                      {viewMode === 'detailed' && (
+                                        <td className="px-6 py-4">
+                                          <div className="text-sm font-medium text-gray-900">
+                                          {transaction.price?`LBP${transaction.price}`:'-'}
+                                        </div>
+                                      
+                                        </td>
+                                      )}
+                                    {/* credit */}
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      {transaction.type === 'payment' ? (
+                                        <span className="text-sm font-bold text-green-600">
+                                          {formatCurrency(transaction.amount || 0, transaction.currency || 'LBP')}
+                                        </span>
+                                      ) : (
+                                        <span className="text-sm text-gray-400">-</span>
+                                      )}
+                                    </td>
+                                    {/* debit */}
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      {transaction.type !== 'payment' ? (
+                                        <span className="text-sm font-bold text-red-600">
+                                          {formatCurrency(transaction.amount || 0, transaction.currency || 'LBP')}
+                                        </span>
+                                      ) : (
+                                        <span className="text-sm text-gray-400">-</span>
+                                      )}
+                                    </td>
+                                    {/* balance USD/LBP */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                      {formatCurrency(transaction.balance_after, transaction.currency || 'LBP')}
+                                    </td>
+                                    {/* reference */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                      {transaction.reference || '-'}
+                                    </td>
+                                  </tr>
                                 )}
-                              </td>
-                                {viewMode === 'detailed' && (
-                                  <td className="px-6 py-4">
-                                    <div className="text-sm font-medium text-gray-900">
-                                    {transaction.quantity?`${transaction.quantity}`:'-'}
-                                  </div>
                                 
-                                  </td>
-                                )}
-                                {viewMode === 'detailed' && (
-                                  <td className="px-6 py-4">
-                                    <div className="text-sm font-medium text-gray-900">
-                                    {transaction.weight?`${transaction.weight}kg`:'-'}
-                                  </div>
-                                
-                                  </td>
-                                )}
-                                {viewMode === 'detailed' && (
-                                  <td className="px-6 py-4">
-                                    <div className="text-sm font-medium text-gray-900">
-                                    {transaction.price?`LBP${transaction.price}`:'-'}
-                                  </div>
-                                
-                                  </td>
-                                )}
-                              {/* credit */}
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                {transaction.type === 'payment' ? (
-                                  <span className="text-sm font-bold text-green-600">
-                                    {formatCurrency(transaction.amount || 0, transaction.currency || 'LBP')}
-                                  </span>
-                                ) : (
-                                  <span className="text-sm text-gray-400">-</span>
-                                )}
-                              </td>
-                              {/* debit */}
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                {transaction.type !== 'payment' ? (
-                                  <span className="text-sm font-bold text-red-600">
-                                    {formatCurrency(transaction.amount || 0, transaction.currency || 'LBP')}
-                                  </span>
-                                ) : (
-                                  <span className="text-sm text-gray-400">-</span>
-                                )}
-                              </td>
-                              {/* balance USD/LBP */}
-                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {formatCurrency(transaction.balance_after, transaction.currency || 'LBP')}
-                              </td>
-                              {/* reference */}
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                {transaction.reference || '-'}
-                              </td>
-                            </tr>
-                          ))}
+                                {/* Bill line items as separate rows in detailed view */}
+                                {hasLineItems && transaction.product_details!.map((item, idx) => {
+                                  const itemCurrency = item.currency || transaction.currency || 'LBP';
+                                  const isFirstItem = idx === 0;
+                                  
+                                  // Calculate incremental balance for each line item
+                                  // Balance = previous balance + debit - credit
+                                  let itemBalance = balanceBefore;
+                                  
+                                  // Add all previous line items in this transaction
+                                  for (let i = 0; i < idx; i++) {
+                                    const prevItem = transaction.product_details![i];
+                                    const prevDebit = prevItem.debit_amount || 0;
+                                    const prevCredit = prevItem.credit_amount || 0;
+                                    itemBalance += prevDebit - prevCredit;
+                                  }
+                                  
+                                  // Add current line item
+                                  const currentDebit = item.debit_amount || 0;
+                                  const currentCredit = item.credit_amount || 0;
+                                  itemBalance += currentDebit - currentCredit;
+                                  
+                                  return (
+                                    <tr key={`${transaction.id}-item-${idx}`} className="bg-gray-50 hover:bg-gray-100 transition-colors">
+                                      <td className="px-6 py-3 text-sm text-gray-500">
+                                        {isFirstItem ? new Date(transaction.date).toLocaleDateString() : ''}
+                                      </td>
+                                      <td className="px-6 py-3 text-sm text-gray-900">
+                                        <div className="font-medium">{item.product_name}</div>
+                                        {item.notes && (
+                                          <div className="text-xs text-gray-500 mt-1 italic">{item.notes}</div>
+                                        )}
+                                        {isFirstItem && transaction.paymentMethod && (
+                                          <div className="text-xs text-gray-500 mt-1 flex items-center">
+                                            <CreditCard className="w-3 h-3 me-1" />
+                                            {transaction.paymentMethod}
+                                          </div>
+                                        )}
+                                      </td>
+                                      {viewMode === 'detailed' && (
+                                        <td className="px-6 py-3 text-sm text-gray-700">
+                                          {item.quantity} {item.unit}
+                                        </td>
+                                      )}
+                                      {viewMode === 'detailed' && (
+                                        <td className="px-6 py-3 text-sm text-gray-700">
+                                          {item.weight ? `${item.weight}kg` : '-'}
+                                        </td>
+                                      )}
+                                      {viewMode === 'detailed' && (
+                                        <td className="px-6 py-3 text-sm text-gray-700">
+                                          {formatCurrency(item.unit_price, itemCurrency, false)}
+                                        </td>
+                                      )}
+                                      {/* credit */}
+                                      <td className="px-6 py-3 whitespace-nowrap">
+                                        {item.credit_amount && item.credit_amount > 0 ? (
+                                          <span className="text-sm font-bold text-green-600">
+                                            {formatCurrency(item.credit_amount, itemCurrency, false)}
+                                          </span>
+                                        ) : (
+                                          <span className="text-sm text-gray-400">-</span>
+                                        )}
+                                      </td>
+                                      {/* debit */}
+                                      <td className="px-6 py-3 whitespace-nowrap">
+                                        {item.debit_amount && item.debit_amount > 0 ? (
+                                          <span className="text-sm font-bold text-red-600">
+                                            {formatCurrency(item.debit_amount, itemCurrency, false)}
+                                          </span>
+                                        ) : (
+                                          <span className="text-sm text-gray-400">-</span>
+                                        )}
+                                      </td>
+                                      {/* balance USD/LBP */}
+                                      <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                                        {formatCurrency(itemBalance, itemCurrency)}
+                                      </td>
+                                      {/* reference */}
+                                      <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500">
+                                        {transaction.reference || '-'}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

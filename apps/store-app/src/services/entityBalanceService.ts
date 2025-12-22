@@ -83,6 +83,9 @@ export class EntityBalanceService {
           source: 'snapshot'
         };
       } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/139cf66a-4f99-49d5-ae8c-eb6f67aef2cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'entityBalanceService.ts:86',message:'Snapshot lookup error in getEntityBalances',data:{errorName:(error as any)?.name,errorMessage:(error as any)?.message,entityId,accountCode},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
         console.warn('Snapshot lookup failed, falling back to direct calculation:', error);
         // Fall through to direct calculation
       }

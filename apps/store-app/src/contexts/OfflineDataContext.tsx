@@ -37,6 +37,7 @@ import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 import { ensureDefaultBranch } from '../lib/branchHelpers';
 import { BranchAccessValidationService } from '../services/branchAccessValidationService';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
+import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -4364,13 +4365,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // Get current cash drawer balance for a store
   const getCurrentCashDrawerBalance = async (storeId: string): Promise<number> => {
     try {
+      if (!currentBranchId) {
+        return 0;
+      }
+      
       const currentAccount = await db.cash_drawer_accounts
         .where('store_id')
         .equals(storeId)
         .and(account => account.is_active)
         .first();
 
-      return currentAccount?.current_balance || 0;
+      if (!currentAccount) {
+        return 0;
+      }
+
+      // Calculate balance from journal entries (single source of truth)
+      const currency = (currentAccount as any)?.currency || 'USD';
+      return await calculateCashDrawerBalance(storeId, currentBranchId, currency);
     } catch (error) {
       console.error('Error getting cash drawer balance:', error);
       return 0;
@@ -4738,22 +4749,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             throw new Error('No cash drawer account found. Please create one before processing payments.');
           }
 
-          // Calculate balance change (employee payment is always an expense - money going out)
-          const previousCashBalance = Number(cashDrawerAccount.current_balance ?? 0) || 0;
-          const balanceChange = -amountInLBP; // Negative because we're paying out
-          const newCashBalance = previousCashBalance + balanceChange;
-
-          // Validate cash drawer balance
-          if (newCashBalance < 0) {
-            throw new Error(`Insufficient cash drawer balance. Required: ${Math.round(amountInLBP).toLocaleString()} LBP, Available: ${Math.round(previousCashBalance).toLocaleString()} LBP`);
+          // Validate cash drawer balance by computing it from journal entries
+          const currentBalance = await calculateCashDrawerBalance(storeId, currentBranchId!, 'LBP');
+          if (currentBalance < amountInLBP) {
+            throw new Error(`Insufficient cash drawer balance. Required: ${Math.round(amountInLBP).toLocaleString()} LBP, Available: ${Math.round(currentBalance).toLocaleString()} LBP`);
           }
 
-          // Update cash drawer balance atomically
-          await db.cash_drawer_accounts.update(cashDrawerAccount.id, {
-            current_balance: newCashBalance,
-            updated_at: new Date().toISOString(),
-            _synced: false
-          });
+          // Note: Balance is computed from journal entries, no need to update current_balance field
 
           // Create transaction record atomically
           const transactionRecord = {
@@ -5705,7 +5707,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         throw new Error('Failed to retrieve cash drawer account after opening session');
       }
 
-      const previousBalance = account.current_balance || 0;
+      // Calculate balance from journal entries for undo data
+      const currency = (account as any)?.currency || 'USD';
+      const previousBalance = await calculateCashDrawerBalance(storeId, currentBranchId, currency);
 
       // Update local state with proper status
       setCashDrawer({
@@ -5733,7 +5737,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         ],
         steps: [
           { op: 'delete', table: 'cash_drawer_sessions', id: result.sessionId! },
-          { op: 'update', table: 'cash_drawer_accounts', id: account.id, changes: { current_balance: previousBalance, _synced: false } }
+          // Note: current_balance is computed from journal entries, no need to restore it in undo
+          { op: 'update', table: 'cash_drawer_accounts', id: account.id, changes: { _synced: false } }
         ]
       });
 
@@ -5763,7 +5768,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const account = await db.getCashDrawerAccount(storeId, currentBranchId!);
       if (!account) return;
 
-      const previousBalance = account.current_balance || 0;
+      // Calculate balance from journal entries for undo data
+      const currency = (account as any)?.currency || 'USD';
+      const previousBalance = await calculateCashDrawerBalance(storeId, currentBranchId!, currency);
 
       await db.closeCashDrawerSession(cashDrawer.id, actualAmount, closedBy, notes);
 
@@ -5789,7 +5796,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               _synced: false
             }
           },
-          { op: 'update', table: 'cash_drawer_accounts', id: account.id, changes: { current_balance: previousBalance, _synced: false } }
+          // Note: current_balance is computed from journal entries, no need to restore it in undo
+          { op: 'update', table: 'cash_drawer_accounts', id: account.id, changes: { _synced: false } }
         ]
       });
 

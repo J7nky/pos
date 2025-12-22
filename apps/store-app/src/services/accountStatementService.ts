@@ -2,6 +2,7 @@ import { db } from '../lib/db';
 import { Customer, Supplier, Transaction, BillLineItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
+import { parseMultilingualString, getTranslatedString, type SupportedLanguage } from '../utils/multilingual';
 // Note: snapshotService import removed - snapshots not implemented yet, using direct journal entry calculation
 
 export interface AccountStatement {
@@ -92,7 +93,8 @@ export class AccountStatementService {
     journalEntries: any[],
     openingBalance: { USD: number; LBP: number },
     viewMode: 'summary' | 'detailed',
-    entityType: 'customer' | 'supplier'
+    entityType: 'customer' | 'supplier',
+    language: SupportedLanguage = 'en'
   ): Promise<{
     statementTransactions: StatementTransaction[];
     ending: { USD: number; LBP: number };
@@ -229,11 +231,44 @@ export class AccountStatementService {
       runningLBP += amountLBP;
 
       // Determine transaction type and description
+      // PRIMARY: Determine type from journal entry debit/credit values
+      // This is more reliable than transaction categories
       let type: 'sale' | 'payment' | 'income' | 'expense' = 'payment';
       let description = accountEntry.description || 'Transaction';
       
-      if (transaction) {
-        // Determine type from transaction category
+      // Check debit/credit values to determine transaction type
+      const hasDebitUSD = Math.abs(accountEntry.debit_usd) > 0.01;
+      const hasDebitLBP = Math.abs(accountEntry.debit_lbp) > 0.01;
+      const hasCreditUSD = Math.abs(accountEntry.credit_usd) > 0.01;
+      const hasCreditLBP = Math.abs(accountEntry.credit_lbp) > 0.01;
+      const hasDebit = hasDebitUSD || hasDebitLBP;
+      const hasCredit = hasCreditUSD || hasCreditLBP;
+      
+      if (entityType === 'customer') {
+        // For customers (AR account 1200):
+        // - Credit to AR = payment received (reduces receivable)
+        // - Debit to AR = sale/charge (increases receivable)
+        if (hasCredit && !hasDebit) {
+          type = 'payment';
+        } else if (hasDebit && !hasCredit) {
+          type = 'sale';
+        }
+        // If both debit and credit exist, fall through to transaction category check
+      } else if (entityType === 'supplier') {
+        // For suppliers (AP account 2100):
+        // - Credit to AP = receiving/purchase (increases payable)
+        // - Debit to AP = payment made (reduces payable)
+        if (hasCredit && !hasDebit) {
+          type = 'income'; // Receiving/purchase
+        } else if (hasDebit && !hasCredit) {
+          type = 'payment'; // Payment made to supplier
+        }
+        // If both debit and credit exist, fall through to transaction category check
+      }
+      
+      // FALLBACK: Use transaction category if type couldn't be determined from debit/credit
+      if (transaction && (hasDebit && hasCredit)) {
+        // Both debit and credit exist, use transaction category
         if (transaction.category?.includes('CREDIT_SALE') || transaction.category?.includes('SALE')) {
           type = entityType === 'customer' ? 'sale' : 'expense';
           description = transaction.description || description;
@@ -245,6 +280,9 @@ export class AccountStatementService {
         } else if (transaction.type === 'expense') {
           type = 'expense';
         }
+      } else if (transaction) {
+        // Update description from transaction if available
+        description = transaction.description || description;
       }
 
       // Get bill information if available (using pre-fetched data)
@@ -267,15 +305,45 @@ export class AccountStatementService {
       if (viewMode === 'detailed' && billLineItems.length > 0) {
         for (const item of billLineItems) {
           const product = productMap.get(item.product_id);
+          // Parse and translate multilingual product name
+          const parsedName = parseMultilingualString(product?.name);
+          const translatedName = getTranslatedString(parsedName, language, 'en');
+          
+          // Calculate credit/debit for each line item based on transaction type
+          // Sales show as debit (increases receivable), payments show as credit (decreases receivable)
+          let debit_amount = 0;
+          let credit_amount = 0;
+          
+          if (type === 'sale' || (type === 'income' && entityType === 'customer')) {
+            // Sales: show as debit
+            debit_amount = item.line_total || 0;
+            credit_amount = 0;
+          } else if (type === 'payment') {
+            // Payments: show as credit
+            debit_amount = 0;
+            credit_amount = item.line_total || 0;
+          } else if (type === 'income' && entityType === 'supplier') {
+            // Supplier receiving: show as credit (increases payable)
+            debit_amount = 0;
+            credit_amount = item.line_total || 0;
+          } else if (type === 'expense') {
+            // Expenses: show as debit
+            debit_amount = item.line_total || 0;
+            credit_amount = 0;
+          }
+          
           productDetails.push({
             product_id: item.product_id,
-            product_name: product?.name || 'Unknown Product',
+            product_name: translatedName || 'Unknown Product',
             quantity: item.quantity || 0,
             unit: 'piece', // Could be enhanced to get from inventory
             unit_price: item.unit_price || 0,
             total_price: item.line_total || 0,
             weight: item.weight || undefined,
-            notes: item.notes || undefined
+            notes: item.notes || undefined,
+            debit_amount,
+            credit_amount,
+            currency
           } as StatementProductDetail);
         }
       }
@@ -327,7 +395,8 @@ export class AccountStatementService {
    */
   private async calculateProductSummaryFromJournalEntries(
     journalEntries: any[],
-    entityType: 'customer' | 'supplier'
+    entityType: 'customer' | 'supplier',
+    language: SupportedLanguage = 'en'
   ): Promise<{
     totalProducts: number;
     topProducts: Array<{
@@ -384,8 +453,12 @@ export class AccountStatementService {
       const product = productMap.get(item.product_id);
       if (!product) continue;
 
+      // Parse and translate multilingual product name
+      const parsedName = parseMultilingualString(product.name);
+      const translatedName = getTranslatedString(parsedName, language, 'en');
+
       const existing = productStats.get(item.product_id) || {
-        productName: product.name,
+        productName: translatedName,
         category: product.category || 'Uncategorized',
         totalQuantity: 0,
         totalValue: 0,
@@ -435,7 +508,8 @@ export class AccountStatementService {
     customerId: string,
     storeId: string,
     dateRange?: { start: string; end: string },
-    viewMode: 'summary' | 'detailed' = 'detailed'
+    viewMode: 'summary' | 'detailed' = 'detailed',
+    language: SupportedLanguage = 'en'
   ): Promise<AccountStatement> {
     const now = new Date();
     const startDate = this.startOfDayISO(dateRange?.start || new Date(now.getFullYear(), 0, 1));
@@ -489,12 +563,13 @@ export class AccountStatementService {
       journalEntries,
       openingBalance,
       viewMode,
-      'customer'
+      'customer',
+      language
     );
 
     // Calculate product summary for detailed view
     const productSummary = viewMode === 'detailed' 
-      ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'customer')
+      ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'customer', language)
       : undefined;
 
     // Use ending balance from date range as current balance for the statement period
@@ -530,7 +605,8 @@ export class AccountStatementService {
     supplierId: string,
     storeId: string,
     dateRange?: { start: string; end: string },
-    viewMode: 'summary' | 'detailed' = 'detailed'
+    viewMode: 'summary' | 'detailed' = 'detailed',
+    language: SupportedLanguage = 'en'
   ): Promise<AccountStatement> {
     const now = new Date();
     const startDate = this.startOfDayISO(dateRange?.start || new Date(now.getFullYear(), 0, 1));
@@ -584,12 +660,13 @@ export class AccountStatementService {
       journalEntries,
       openingBalance,
       viewMode,
-      'supplier'
+      'supplier',
+      language
     );
 
     // Calculate product summary for detailed view
     const productSummary = viewMode === 'detailed' 
-      ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'supplier')
+      ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'supplier', language)
       : undefined;
 
     // Use ending balance from date range as current balance for the statement period
@@ -619,8 +696,13 @@ export class AccountStatementService {
 
   /**
    * Calculate product summary statistics
+   * @deprecated This method is not used. Use calculateProductSummaryFromJournalEntries instead.
    */
-  private calculateProductSummary(sales: BillLineItem[], products: Product[]): {
+  private calculateProductSummary(
+    sales: BillLineItem[], 
+    products: Product[],
+    language: SupportedLanguage = 'en'
+  ): {
     totalProducts: number;
     topProducts: Array<{
       productName: string;
@@ -646,8 +728,12 @@ export class AccountStatementService {
       const product = products.find(p => p.id === sale.product_id);
       if (!product) return;
 
+      // Parse and translate multilingual product name
+      const parsedName = parseMultilingualString(product.name);
+      const translatedName = getTranslatedString(parsedName, language, 'en');
+
       const existing = productStats.get(sale.product_id) || {
-        productName: product.name,
+        productName: translatedName,
         category: product.category,
         totalQuantity: 0,
         totalValue: 0,

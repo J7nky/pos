@@ -242,6 +242,389 @@ ipcMain.handle('print-document', async (_event, options) => {
         };
     }
 });
+// Generate statement print HTML with embedded CSS and JS
+function generateStatementPrintHTML(payload) {
+    const css = `
+/* Professional A4 Print Styles for Account Statements */
+@page {
+  size: A4;
+  margin: 1.5cm;
+}
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 10pt;
+  line-height: 1.4;
+  color: #000;
+  background: #fff;
+  direction: rtl;
+}
+body[dir="ltr"] {
+  direction: ltr;
+}
+.statement-header {
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #333;
+}
+.statement-title {
+  font-size: 18pt;
+  font-weight: bold;
+  margin-bottom: 10px;
+  text-align: center;
+}
+.entity-name {
+  font-size: 14pt;
+  font-weight: 600;
+  margin-bottom: 5px;
+  text-align: center;
+}
+.statement-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9pt;
+  color: #666;
+  margin-top: 10px;
+}
+.financial-summary {
+  margin: 20px 0;
+  padding: 15px;
+  background: #f5f5f5;
+  border-radius: 4px;
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 0;
+  font-size: 10pt;
+}
+.summary-label {
+  font-weight: 600;
+}
+.summary-value {
+  font-weight: bold;
+}
+.summary-value.positive {
+  color: #059669;
+}
+.summary-value.negative {
+  color: #dc2626;
+}
+.transaction-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0;
+  font-size: 9pt;
+}
+.transaction-table thead {
+  background: #333;
+  color: #fff;
+}
+.transaction-table th {
+  padding: 8px 6px;
+  text-align: right;
+  font-weight: 600;
+  border: 1px solid #555;
+}
+.transaction-table[dir="ltr"] th {
+  text-align: left;
+}
+.transaction-table tbody tr {
+  border-bottom: 1px solid #ddd;
+}
+.transaction-table tbody tr:nth-child(even) {
+  background: #f9f9f9;
+}
+.transaction-table td {
+  padding: 6px;
+  border: 1px solid #ddd;
+}
+.transaction-table .number {
+  text-align: right;
+  font-family: 'Courier New', monospace;
+}
+.line-item-row {
+  background: #f5f5f5;
+}
+.line-item-row td {
+  padding: 4px 6px;
+  font-size: 8.5pt;
+}
+.credit {
+  color: #059669;
+  font-weight: bold;
+}
+.debit {
+  color: #dc2626;
+  font-weight: bold;
+}
+.statement-footer {
+  margin-top: 30px;
+  padding-top: 15px;
+  border-top: 1px solid #ddd;
+  font-size: 8pt;
+  color: #666;
+  text-align: center;
+}
+@media print {
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .transaction-table {
+    page-break-inside: auto;
+  }
+  .transaction-table tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+  .transaction-table thead {
+    display: table-header-group;
+  }
+}`;
+    const js = `
+(function() {
+  const payload = ${JSON.stringify(payload)};
+  
+  function formatCurrency(amount, currency, includeSymbol = true) {
+    if (amount === undefined || amount === null || isNaN(amount)) {
+      amount = 0;
+    }
+    if (currency === 'USD') {
+      const formatted = amount.toFixed(2);
+      return includeSymbol ? '$' + formatted : formatted;
+    } else {
+      const rounded = Math.round(amount);
+      const formatted = rounded.toLocaleString('en-US');
+      return includeSymbol ? formatted + ' ل.ل' : formatted;
+    }
+  }
+  
+  function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('ar-LB', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+  }
+  
+  function calculateLineItemBalance(balanceBefore, lineItems, currentIndex) {
+    let balance = balanceBefore;
+    for (let i = 0; i <= currentIndex; i++) {
+      const item = lineItems[i];
+      const debit = item.debit_amount || 0;
+      const credit = item.credit_amount || 0;
+      balance += debit - credit;
+    }
+    return balance;
+  }
+  
+  function renderStatement() {
+    if (!payload || !payload.statement) {
+      document.getElementById('statement-root').innerHTML = '<p>Error: No statement data available</p>';
+      return;
+    }
+    
+    const { statement, entity, viewMode, language } = payload;
+    const isRTL = language === 'ar';
+    const dir = isRTL ? 'rtl' : 'ltr';
+    
+    document.documentElement.setAttribute('dir', dir);
+    document.documentElement.setAttribute('lang', language);
+    
+    const root = document.getElementById('statement-root');
+    const primaryCurrency = statement.financialSummary.currentBalance.USD !== 0 ? 'USD' : 'LBP';
+    let balanceBefore = statement.financialSummary.openingBalance[primaryCurrency];
+    
+    let html = '<div class="statement-header">' +
+      '<div class="statement-title">' + (isRTL ? 'كشف حساب' : 'Account Statement') + '</div>' +
+      '<div class="entity-name">' + entity.name + '</div>' +
+      '<div class="statement-meta">' +
+        '<span>' + (isRTL ? 'الفترة:' : 'Period:') + ' ' + formatDate(statement.dateRange.start) + ' - ' + formatDate(statement.dateRange.end) + '</span>' +
+        '<span>' + (isRTL ? 'التاريخ:' : 'Date:') + ' ' + formatDate(statement.statementDate) + '</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="financial-summary">' +
+      '<div class="summary-row">' +
+        '<span class="summary-label">' + (isRTL ? 'الرصيد الافتتاحي:' : 'Opening Balance:') + '</span>' +
+        '<span class="summary-value">' + formatCurrency(statement.financialSummary.openingBalance[primaryCurrency], primaryCurrency) + '</span>' +
+      '</div>' +
+      '<div class="summary-row">' +
+        '<span class="summary-label">' + (isRTL ? 'الرصيد الحالي:' : 'Current Balance:') + '</span>' +
+        '<span class="summary-value ' + (statement.financialSummary.currentBalance[primaryCurrency] >= 0 ? 'positive' : 'negative') + '">' +
+          formatCurrency(statement.financialSummary.currentBalance[primaryCurrency], primaryCurrency) +
+        '</span>' +
+      '</div>' +
+      (entity.type === 'customer' ? 
+        '<div class="summary-row">' +
+          '<span class="summary-label">' + (isRTL ? 'إجمالي المبيعات:' : 'Total Sales:') + '</span>' +
+          '<span class="summary-value">' + formatCurrency(statement.financialSummary.totalSales[primaryCurrency], primaryCurrency) + '</span>' +
+        '</div>' :
+        '<div class="summary-row">' +
+          '<span class="summary-label">' + (isRTL ? 'إجمالي المشتريات:' : 'Total Purchases:') + '</span>' +
+          '<span class="summary-value">' + formatCurrency(statement.financialSummary.totalReceivings[primaryCurrency], primaryCurrency) + '</span>' +
+        '</div>'
+      ) +
+      '<div class="summary-row">' +
+        '<span class="summary-label">' + (isRTL ? 'إجمالي المدفوعات:' : 'Total Payments:') + '</span>' +
+        '<span class="summary-value">' + formatCurrency(statement.financialSummary.totalPayments[primaryCurrency], primaryCurrency) + '</span>' +
+      '</div>' +
+    '</div>' +
+    '<table class="transaction-table" dir="' + dir + '">' +
+      '<thead>' +
+        '<tr>' +
+          '<th>' + (isRTL ? 'التاريخ' : 'Date') + '</th>' +
+          '<th>' + (isRTL ? 'المرجع' : 'Reference') + '</th>' +
+          '<th>' + (isRTL ? 'البيان' : 'Description') + '</th>' +
+          (viewMode === 'detailed' ? 
+            '<th>' + (isRTL ? 'العدد' : 'Quantity') + '</th>' +
+            '<th>' + (isRTL ? 'الوزن' : 'Weight') + '</th>' +
+            '<th>' + (isRTL ? 'السعر' : 'Price') + '</th>' : ''
+          ) +
+          '<th class="number">' + (isRTL ? 'مدين' : 'Debit') + '</th>' +
+          '<th class="number">' + (isRTL ? 'دائن' : 'Credit') + '</th>' +
+          '<th class="number">' + (isRTL ? 'الرصيد' : 'Balance') + '</th>' +
+        '</tr>' +
+      '</thead>' +
+      '<tbody>';
+    
+    statement.transactions.forEach((transaction, transactionIndex) => {
+      const hasLineItems = viewMode === 'detailed' && transaction.product_details && transaction.product_details.length > 0;
+      const itemCurrency = transaction.currency || primaryCurrency;
+      
+      if (transactionIndex > 0) {
+        const prevTransaction = statement.transactions[transactionIndex - 1];
+        balanceBefore = prevTransaction.balance_after;
+      } else {
+        balanceBefore = statement.financialSummary.openingBalance[itemCurrency];
+      }
+      
+      if (!hasLineItems) {
+        const debitAmount = transaction.type !== 'payment' ? transaction.amount : 0;
+        const creditAmount = transaction.type === 'payment' ? transaction.amount : 0;
+        
+        html += '<tr>' +
+          '<td>' + formatDate(transaction.date) + '</td>' +
+          '<td>' + (transaction.reference || '-') + '</td>' +
+          '<td>' + transaction.description + '</td>' +
+          (viewMode === 'detailed' ? 
+            '<td class="number">' + (transaction.quantity || '-') + '</td>' +
+            '<td class="number">' + (transaction.weight ? transaction.weight + 'kg' : '-') + '</td>' +
+            '<td class="number">' + (transaction.price ? formatCurrency(transaction.price, itemCurrency, false) : '-') + '</td>' : ''
+          ) +
+          '<td class="number ' + (debitAmount > 0 ? 'debit' : '') + '">' + (debitAmount > 0 ? formatCurrency(debitAmount, itemCurrency, false) : '0') + '</td>' +
+          '<td class="number ' + (creditAmount > 0 ? 'credit' : '') + '">' + (creditAmount > 0 ? formatCurrency(creditAmount, itemCurrency, false) : '0') + '</td>' +
+          '<td class="number">' + formatCurrency(transaction.balance_after, itemCurrency) + '</td>' +
+        '</tr>';
+      } else {
+        transaction.product_details.forEach((item, itemIndex) => {
+          const isFirstItem = itemIndex === 0;
+          const itemBalance = calculateLineItemBalance(balanceBefore, transaction.product_details, itemIndex);
+          
+          html += '<tr class="line-item-row">' +
+            '<td>' + (isFirstItem ? formatDate(transaction.date) : '') + '</td>' +
+            '<td>' + (transaction.reference || '-') + '</td>' +
+            '<td>' +
+              '<div style="font-weight: 600;">' + item.product_name + '</div>' +
+              (item.notes ? '<div style="font-size: 8pt; color: #666; font-style: italic; margin-top: 2px;">' + item.notes + '</div>' : '') +
+            '</td>' +
+            (viewMode === 'detailed' ? 
+              '<td class="number">' + item.quantity + ' ' + item.unit + '</td>' +
+              '<td class="number">' + (item.weight ? item.weight + 'kg' : '-') + '</td>' +
+              '<td class="number">' + formatCurrency(item.unit_price, item.currency || itemCurrency, false) + '</td>' : ''
+            ) +
+            '<td class="number ' + (item.debit_amount > 0 ? 'debit' : '') + '">' + (item.debit_amount > 0 ? formatCurrency(item.debit_amount, item.currency || itemCurrency, false) : '0') + '</td>' +
+            '<td class="number ' + (item.credit_amount > 0 ? 'credit' : '') + '">' + (item.credit_amount > 0 ? formatCurrency(item.credit_amount, item.currency || itemCurrency, false) : '0') + '</td>' +
+            '<td class="number">' + formatCurrency(itemBalance, item.currency || itemCurrency) + '</td>' +
+          '</tr>';
+        });
+      }
+    });
+    
+    html += '</tbody></table>' +
+      '<div class="statement-footer">' +
+        '<div>' + (isRTL ? 'تم إنشاء هذا الكشف تلقائياً' : 'This statement was generated automatically') + '</div>' +
+      '</div>';
+    
+    root.innerHTML = html;
+  }
+  
+  // Render when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderStatement);
+  } else {
+    renderStatement();
+  }
+})();
+`;
+    return `<!DOCTYPE html>
+<html lang="${payload.language || 'ar'}" dir="${payload.language === 'ar' ? 'rtl' : 'ltr'}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account Statement</title>
+  <style>${css}</style>
+</head>
+<body>
+  <div id="statement-root"></div>
+  <script>${js}</script>
+</body>
+</html>`;
+}
+// Account Statement Printing Handler
+ipcMain.handle('print-statement', async (_event, payload) => {
+    try {
+        console.log('🖨️ Starting account statement print job');
+        // Generate HTML with embedded CSS and JS
+        const htmlContent = generateStatementPrintHTML(payload);
+        // Create hidden BrowserWindow for printing
+        const printWindow = new BrowserWindow({
+            width: 794, // A4 width @ 96dpi
+            height: 1123, // A4 height @ 96dpi
+            show: false,
+            webPreferences: {
+                contextIsolation: true,
+                nodeIntegration: false
+            }
+        });
+        // Load HTML content as data URL
+        await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+        // Wait for content to render
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Print with A4 settings
+        const printOptions = {
+            silent: false,
+            printBackground: true,
+            pageSize: 'A4',
+            margins: {
+                marginType: 'default'
+            }
+        };
+        console.log('🖨️ Printing statement with options:', printOptions);
+        await printWindow.webContents.print(printOptions);
+        // Close the print window after a short delay
+        setTimeout(() => {
+            printWindow.close();
+        }, 1000);
+        return {
+            success: true,
+            message: 'Statement print job submitted successfully'
+        };
+    }
+    catch (error) {
+        console.error('❌ Error printing statement:', error);
+        return {
+            success: false,
+            message: 'Failed to print statement',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        };
+    }
+});
 // Helper function: Render Arabic text to bitmap image
 function renderTextToBitmap(text, options = {}) {
     const { fontSize = 40, fontFamily = 'Arial, sans-serif', width = 576, // 72mm for 80mm paper (8 dots per mm)

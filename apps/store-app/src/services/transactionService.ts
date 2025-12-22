@@ -687,8 +687,6 @@ export class TransactionService {
             const account = await db.getCashDrawerAccount(context.storeId, context.branchId);
             
             if (account) {
-              const previousCashBalance = Number((account as any)?.current_balance || 0);
-              
               // Get journal entries for the original transaction to calculate what it did
               const cashJournalEntries = await db.journal_entries
                 .where('transaction_id')
@@ -713,16 +711,10 @@ export class TransactionService {
               
               // Reverse the balance change (negate it)
               const reversalBalanceChange = -originalBalanceChange;
-              const newCashBalance = previousCashBalance + reversalBalanceChange;
               
-              // Update cash drawer account balance
-              await db.cash_drawer_accounts.update(account.id as string, {
-                current_balance: newCashBalance as any,
-                updated_at: timestamp,
-                _synced: false
-              } as any);
-              
-              console.log(`💰 Cash drawer balance reversed: ${previousCashBalance.toLocaleString()} LBP → ${newCashBalance.toLocaleString()} LBP (reversal: ${reversalBalanceChange > 0 ? '+' : ''}${reversalBalanceChange.toLocaleString()} LBP)`);
+              // ✅ Balance is computed from journal entries - no need to update current_balance field
+              // The reversal journal entries will automatically reflect the correct balance
+              console.log(`💰 Cash drawer balance reversal impact: ${reversalBalanceChange > 0 ? '+' : ''}${reversalBalanceChange.toLocaleString()} LBP (balance computed from journal entries)`);
             }
           }
 
@@ -1067,8 +1059,8 @@ export class TransactionService {
    * Update cash drawer account balance atomically within IndexedDB transaction
    * This method MUST be called within a db.transaction() block
    * 
-   * ✅ Updates cash_drawer_accounts.current_balance based on journal entries (account_code = 1100)
-   * ✅ Journal entries are the single source of truth for balance changes
+   * ✅ Calculates cash drawer balance impact from journal entries (account_code = 1100)
+   * ✅ Journal entries are the single source of truth - balance is computed, not stored
    */
   private async updateCashDrawerAtomic(
     transaction: Transaction,
@@ -1117,16 +1109,10 @@ export class TransactionService {
       }
 
       const newBalance = previousBalance + balanceChange;
-      const timestamp = new Date().toISOString();
 
-      // ✅ Update cash_drawer_accounts.current_balance (not session.actual_amount)
-      await db.cash_drawer_accounts.update(account.id as string, {
-        current_balance: newBalance as any,
-        updated_at: timestamp,
-        _synced: false
-      } as any);
-
-      console.log(`💰 Cash drawer account balance updated: ${previousBalance.toLocaleString()} LBP → ${newBalance.toLocaleString()} LBP (change: ${balanceChange > 0 ? '+' : ''}${balanceChange.toLocaleString()} LBP)`);
+      // ✅ Balance is computed from journal entries - no need to update current_balance field
+      // Journal entries are the single source of truth
+      console.log(`💰 Cash drawer balance impact: ${previousBalance.toLocaleString()} → ${newBalance.toLocaleString()} (change: ${balanceChange > 0 ? '+' : ''}${balanceChange.toLocaleString()})`);
 
       return {
         previousBalance,

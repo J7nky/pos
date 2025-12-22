@@ -8,7 +8,8 @@ export interface Database {
           store_id: string;
           account_code: string;
           name: string;
-          current_balance: number;
+          /** @deprecated Removed from database - balance is computed from journal entries */
+          current_balance?: number;
           currency: 'USD' | 'LBP';
           is_active: boolean;
           created_at: string;
@@ -19,6 +20,7 @@ export interface Database {
           store_id: string;
           account_code: string;
           name: string;
+          /** @deprecated Removed from database - balance is computed from journal entries */
           current_balance?: number;
           currency?: 'USD' | 'LBP';
           is_active?: boolean;
@@ -30,6 +32,7 @@ export interface Database {
           store_id?: string;
           account_code?: string;
           name?: string;
+          /** @deprecated Removed from database - balance is computed from journal entries */
           current_balance?: number;
           currency?: 'USD' | 'LBP';
           is_active?: boolean;

@@ -278,11 +278,20 @@ export class SnapshotService {
     asOfDate: string,
     branchId?: string | null
   ): Promise<HistoricalBalance> {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/139cf66a-4f99-49d5-ae8c-eb6f67aef2cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'snapshotService.ts:283',message:'Attempting snapshot query',data:{storeId,accountCode,entityId,asOfDate,indexKey:'[store_id+account_code+entity_id+snapshot_date]'},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     // Try to find exact snapshot for the date
     let snapshot = await db.balance_snapshots
       .where('[store_id+account_code+entity_id+snapshot_date]')
       .equals([storeId, accountCode, entityId, asOfDate])
-      .first();
+      .first()
+      .catch((error) => {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/139cf66a-4f99-49d5-ae8c-eb6f67aef2cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'snapshotService.ts:285',message:'Snapshot query failed',data:{errorName:error?.name,errorMessage:error?.message,storeId,accountCode,entityId,asOfDate},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        throw error;
+      });
     
     if (snapshot) {
       return {

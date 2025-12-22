@@ -109,17 +109,8 @@ export default function Home() {
     return cashDrawer; // Already available in context
   }, [cashDrawer]);
 
-  // Helper function to calculate cash drawer balance from local transactions
-  const calculateLocalCashDrawerBalance = useCallback((currentSession: any): number => {
-    if (!currentSession) {
-      return 0;
-    }
-    // ✅ ACCOUNTING FIX: Use actual_amount from session which is updated by transactionService
-    // The session's actual_amount is kept in sync with the cash drawer account balance
-    // which is kept in sync with journal entries (via transactionService)
-    const balance = currentSession.actual_amount || currentSession.opening_amount || currentSession.currentBalance || 0;
-    return balance;
-  }, []);
+  // Note: calculateLocalCashDrawerBalance is no longer used - balance is computed from journal entries
+  // via cashDrawerUpdateService.getCurrentCashDrawerBalance()
 
   // Helper function to get cash drawer transaction history from local data
   const getLocalCashDrawerHistory = useCallback((limit: number = 50): any[] => {
@@ -143,8 +134,7 @@ export default function Home() {
     }
     
     try {
-      // ✅ ACCOUNTING FIX: Use proper cash drawer service
-      // This gets balance from cash_drawer_accounts which is kept in sync with journals
+      // ✅ Get balance computed from journal entries (single source of truth)
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
       
       // Get current session
@@ -158,7 +148,7 @@ export default function Home() {
         return;
       }
       
-      // Get balance from service (uses cash_drawer_accounts table which is synced with journals)
+      // Get balance computed from journal entries (account_code = '1100')
       const currentBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(
         raw.storeId,
         raw.currentBranchId

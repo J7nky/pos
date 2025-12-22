@@ -1,4 +1,9 @@
 /* Professional A4 Print Styles */
+/* 
+ * Note: Account statement printing now uses Electron BrowserWindow approach for clean isolation.
+ * This file contains web fallback styles and general print utilities.
+ * Account statement-specific styles are in electron/print/statement-print.css
+ */
 
 @media print {
   /* Hide non-essential elements */

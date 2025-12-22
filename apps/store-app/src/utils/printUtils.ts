@@ -1,6 +1,16 @@
 /**
  * Utility functions for print functionality
+ * 
+ * Note: Account statement printing uses Electron BrowserWindow approach when available.
+ * This file contains web fallback utilities for CSS-based printing.
  */
+
+/**
+ * Check if Electron API is available
+ */
+export function isElectronAvailable(): boolean {
+  return typeof window !== 'undefined' && !!(window as any).electronAPI;
+}
 
 /**
  * Estimate total pages based on content height

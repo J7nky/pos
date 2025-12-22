@@ -862,6 +862,8 @@ export class SyncService {
                     operation: 'update',
                     user_id: record.updated_by || null,
                     metadata: {
+                      // Note: current_balance is computed from journal entries, not stored
+                      // Including for informational purposes only
                       current_balance: record.current_balance || 0
                     }
                   });
@@ -1933,41 +1935,54 @@ export class SyncService {
   }
 
   private async resolveCashDrawerAccountConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
-    const localBalance = Number(localRecord.current_balance || 0);
-    const remoteBalance = Number(remoteRecord.current_balance || 0);
+    // Balance is computed from journal entries - no conflict resolution needed for balance field
+    // Compare other fields (name, currency, is_active, etc.) and use remote if different
+    const fieldsToCompare = ['name', 'currency', 'is_active', 'account_code'];
+    let hasConflict = false;
 
-    if (Math.abs(localBalance - remoteBalance) > 0.01) {
-      console.warn(`💰 Cash drawer balance conflict: Local: $${localBalance.toFixed(2)}, Remote: $${remoteBalance.toFixed(2)}`);
+    for (const field of fieldsToCompare) {
+      if (localRecord[field] !== remoteRecord[field]) {
+        hasConflict = true;
+        break;
+      }
+    }
 
-      // For cash drawer conflicts, recalculate balance from transactions instead of using max
-      // This ensures accuracy and prevents balance inflation
+    if (hasConflict) {
+      console.warn(`💰 Cash drawer account conflict detected in non-balance fields`);
+      // Use remote record for non-balance fields (balance is computed from journals, not synced)
       try {
-        const { cashDrawerUpdateService } = await import('./cashDrawerUpdateService');
-        const calculatedBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(localRecord.store_id,localRecord.branch_id);
-
-        console.log(`💰 Recalculated balance from transactions: $${calculatedBalance.toFixed(2)}`);
-
-        await db.cash_drawer_accounts.update(localRecord.id, {
-          current_balance: calculatedBalance,
+        // Update non-balance fields only
+        const updateData: any = {
+          name: remoteRecord.name,
+          currency: remoteRecord.currency,
+          is_active: remoteRecord.is_active,
+          account_code: remoteRecord.account_code,
           updated_at: new Date().toISOString(),
           _synced: true,
           _lastSyncedAt: new Date().toISOString()
-        });
+        };
+        // Note: current_balance is not updated - it's computed from journal entries
+
+        await db.cash_drawer_accounts.update(localRecord.id, updateData);
 
         return true;
       } catch (error) {
-        console.error('Error recalculating cash drawer balance:', error);
+        console.error('Error resolving cash drawer account conflict:', error);
 
         // Fallback to timestamp-based resolution
         const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
         const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
 
         if (remoteTimestamp >= localTimestamp) {
-          await db.cash_drawer_accounts.put({
+          // Update non-balance fields only (balance is computed from journals)
+          const updateData: any = {
             ...remoteRecord,
             _synced: true,
             _lastSyncedAt: new Date().toISOString()
-          });
+          };
+          // Remove current_balance from update - it's computed, not synced
+          delete updateData.current_balance;
+          await db.cash_drawer_accounts.put(updateData);
         } else {
           await db.cash_drawer_accounts.update(localRecord.id, {
             _synced: true,

@@ -756,10 +756,8 @@ export class DataValidationService {
         if (!cleanRecord.name) {
           cleanRecord.name = 'Main Cash Drawer';
         }
-        // Ensure current_balance is a number (default to 0)
-        if (cleanRecord.current_balance === undefined || cleanRecord.current_balance === null) {
-          cleanRecord.current_balance = 0;
-        }
+        // Note: current_balance is optional - balance is computed from journal entries
+        // No default needed as it's deprecated
         
         // Log the record being uploaded for debugging RLS issues
         console.log(`📤 Uploading cash_drawer_accounts: store_id=${cleanRecord.store_id}, branch_id=${cleanRecord.branch_id}, account_code=${cleanRecord.account_code}`);

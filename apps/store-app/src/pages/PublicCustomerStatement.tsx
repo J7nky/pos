@@ -20,6 +20,7 @@ import {
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
 import { Customer, Product } from '../types';
 import { supabase } from '../lib/supabase';
+import { useI18n } from '../i18n';
 import { PrintLayout } from '../components/common/PrintLayout';
 import { PrintPreview } from '../components/common/PrintPreview';
 import { useState as useStateReact, useRef, useEffect } from 'react';
@@ -32,6 +33,7 @@ interface PublicCustomerStatementProps {
 
 export default function PublicCustomerStatement() {
   const { token: encodedToken } = useParams<{ token: string }>();
+  const { language } = useI18n();
   
   // URL-decode the token (it was encoded to handle special characters)
   const token = encodedToken ? decodeURIComponent(encodedToken) : undefined;
@@ -156,7 +158,8 @@ export default function PublicCustomerStatement() {
         customer.id,
         storeId,
         dateRange,
-        viewMode
+        viewMode,
+        language as 'en' | 'ar' | 'fr'
       );
 
       setStatement(generatedStatement);
