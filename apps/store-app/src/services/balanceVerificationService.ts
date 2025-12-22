@@ -1,8 +1,9 @@
 /**
  * Balance Verification Service
  * 
- * Ensures that cached entity balances match the balances derived from journal entries.
- * This service enforces the accounting principle that journal entries are the source of truth.
+ * Provides balance verification and reconciliation utilities.
+ * Since balances are now calculated exclusively from journal entries (no cached fields),
+ * this service focuses on verifying journal entry integrity and calculating balances.
  * 
  * Uses the canonical calculateBalance() function as the single source of truth.
  */
@@ -14,13 +15,10 @@ export interface BalanceVerificationResult {
   entityId: string;
   entityName: string;
   entityType: 'customer' | 'supplier' | 'employee';
-  isValid: boolean;
-  cachedUsdBalance: number;
+  isValid: boolean; // Always true since balances are calculated from journals (source of truth)
   journalUsdBalance: number;
-  usdDifference: number;
-  cachedLbpBalance: number;
   journalLbpBalance: number;
-  lbpDifference: number;
+  // Note: cached balance fields removed - balances are always calculated from journal entries
 }
 
 export interface BalanceReconciliationResult {
@@ -69,7 +67,9 @@ export class BalanceVerificationService {
   }
   
   /**
-   * Verify that an entity's cached balance matches the journal-derived balance
+   * Verify entity balance by calculating from journal entries
+   * Since balances are now calculated exclusively from journal entries,
+   * this always returns valid (balances are the source of truth)
    */
   async verifyEntityBalance(entityId: string): Promise<BalanceVerificationResult> {
     // Get entity from database
@@ -78,11 +78,7 @@ export class BalanceVerificationService {
       throw new Error(`Entity not found: ${entityId}`);
     }
     
-    // Get cached balances
-    const cachedUsdBalance = entity.usd_balance || 0;
-    const cachedLbpBalance = entity.lb_balance || 0;
-    
-    // Calculate true balances from journal entries
+    // Calculate balances from journal entries (source of truth)
     const journalUsdBalance = await this.calculateBalanceFromJournals(
       entityId,
       entity.entity_type as 'customer' | 'supplier' | 'employee',
@@ -94,29 +90,21 @@ export class BalanceVerificationService {
       'LBP'
     );
     
-    // Calculate differences (tolerance: 0.01 for rounding)
-    const usdDifference = Math.abs(cachedUsdBalance - journalUsdBalance);
-    const lbpDifference = Math.abs(cachedLbpBalance - journalLbpBalance);
-    
-    const isValid = usdDifference < 0.01 && lbpDifference < 0.01;
-    
+    // Always valid since balances are calculated from journal entries (source of truth)
     return {
       entityId,
       entityName: entity.name,
       entityType: entity.entity_type as 'customer' | 'supplier' | 'employee',
-      isValid,
-      cachedUsdBalance,
+      isValid: true, // Always valid - journal entries are the source of truth
       journalUsdBalance,
-      usdDifference,
-      cachedLbpBalance,
-      journalLbpBalance,
-      lbpDifference
+      journalLbpBalance
     };
   }
   
   /**
-   * Reconcile an entity's cached balance with journal-derived balance
-   * Updates the cached balance to match the journal truth
+   * @deprecated Reconcile is no longer needed - balances are calculated from journal entries
+   * There are no cached balance fields to reconcile.
+   * This method is kept for backward compatibility but always returns success with no updates.
    */
   async reconcileEntityBalance(entityId: string): Promise<{
     success: boolean;
@@ -129,41 +117,20 @@ export class BalanceVerificationService {
     try {
       const verification = await this.verifyEntityBalance(entityId);
       
-      if (verification.isValid) {
-        console.log(`✅ Entity ${verification.entityName} balance is already correct`);
-        return {
-          success: true,
-          wasUpdated: false,
-          oldUsdBalance: verification.cachedUsdBalance,
-          newUsdBalance: verification.journalUsdBalance,
-          oldLbpBalance: verification.cachedLbpBalance,
-          newLbpBalance: verification.journalLbpBalance
-        };
-      }
-      
-      // Update entity balance to match journal truth
-      await db.entities.update(entityId, {
-        usd_balance: verification.journalUsdBalance,
-        lb_balance: verification.journalLbpBalance,
-        updated_at: new Date().toISOString(),
-        _synced: false
-      });
-      
-      console.log(`🔄 Reconciled ${verification.entityName}:`);
-      console.log(`   USD: ${verification.cachedUsdBalance} → ${verification.journalUsdBalance}`);
-      console.log(`   LBP: ${verification.cachedLbpBalance} → ${verification.journalLbpBalance}`);
+      // No reconciliation needed - balances are always calculated from journal entries
+      console.log(`✅ Entity ${verification.entityName} balance calculated from journal entries`);
       
       return {
         success: true,
-        wasUpdated: true,
-        oldUsdBalance: verification.cachedUsdBalance,
+        wasUpdated: false, // No cached fields to update
+        oldUsdBalance: verification.journalUsdBalance,
         newUsdBalance: verification.journalUsdBalance,
-        oldLbpBalance: verification.cachedLbpBalance,
+        oldLbpBalance: verification.journalLbpBalance,
         newLbpBalance: verification.journalLbpBalance
       };
       
     } catch (error) {
-      console.error(`Error reconciling entity ${entityId}:`, error);
+      console.error(`Error processing entity ${entityId}:`, error);
       return {
         success: false,
         wasUpdated: false,
@@ -200,15 +167,13 @@ export class BalanceVerificationService {
           const result = await this.verifyEntityBalance(entity.id);
           results.push(result);
           
+          // All balances are valid since they're calculated from journal entries (source of truth)
           if (result.isValid) {
             validCount++;
           } else {
+            // This should never happen, but kept for backward compatibility
             invalidCount++;
-            totalDiscrepancies += result.usdDifference + result.lbpDifference;
-            console.warn(`⚠️ Balance discrepancy for ${result.entityName}:`, {
-              usdDiff: result.usdDifference,
-              lbpDiff: result.lbpDifference
-            });
+            console.warn(`⚠️ Unexpected invalid balance for ${result.entityName}`);
           }
         } catch (error) {
           console.error(`Error verifying entity ${entity.id}:`, error);
@@ -245,8 +210,9 @@ export class BalanceVerificationService {
   }
   
   /**
-   * Reconcile all entities in the system
-   * Updates all cached balances to match journal-derived balances
+   * @deprecated Reconcile is no longer needed - balances are calculated from journal entries
+   * There are no cached balance fields to reconcile.
+   * This method is kept for backward compatibility.
    */
   async reconcileAllBalances(storeId: string): Promise<{
     totalProcessed: number;
@@ -255,48 +221,21 @@ export class BalanceVerificationService {
     errors: number;
   }> {
     try {
-      // First verify all balances
+      // Verify all balances (all will be valid since calculated from journals)
       const verification = await this.verifyAllBalances(storeId);
       
-      console.log(`🔄 Reconciling ${verification.invalidEntities} entities with discrepancies...`);
+      console.log(`✅ All ${verification.totalEntities} entities have balances calculated from journal entries`);
       
-      let totalUpdated = 0;
-      let totalSkipped = 0;
-      let errors = 0;
-      
-      // Only reconcile entities with discrepancies
-      const entitiesToReconcile = verification.results.filter(r => !r.isValid);
-      
-      for (const entity of entitiesToReconcile) {
-        try {
-          const result = await this.reconcileEntityBalance(entity.entityId);
-          if (result.success && result.wasUpdated) {
-            totalUpdated++;
-          } else {
-            totalSkipped++;
-          }
-        } catch (error) {
-          console.error(`Error reconciling entity ${entity.entityId}:`, error);
-          errors++;
-        }
-      }
-      
-      console.log('✅ Reconciliation complete:', {
-        totalProcessed: entitiesToReconcile.length,
-        totalUpdated,
-        totalSkipped,
-        errors
-      });
-      
+      // No reconciliation needed - balances are always calculated from journal entries
       return {
-        totalProcessed: entitiesToReconcile.length,
-        totalUpdated,
-        totalSkipped,
-        errors
+        totalProcessed: verification.totalEntities,
+        totalUpdated: 0, // No cached fields to update
+        totalSkipped: verification.totalEntities,
+        errors: 0
       };
       
     } catch (error) {
-      console.error('Error reconciling all balances:', error);
+      console.error('Error processing balances:', error);
       return {
         totalProcessed: 0,
         totalUpdated: 0,

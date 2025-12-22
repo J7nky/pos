@@ -56,16 +56,26 @@ export class AccountBalanceService {
         throw new Error(`${entityType} not found: ${entityId}`);
       }
 
-      // Get cached balances
+      // Calculate balance from journal entries (source of truth)
+      // No longer using cached balance fields - all balances calculated from journals
+      const { entityBalanceService } = await import('./entityBalanceService');
+      const accountCode = entityType === 'supplier' ? '2100' : '1200';
+      
+      const currentBalances = await entityBalanceService.getEntityBalances(
+        entityId,
+        accountCode as '1200' | '2100',
+        true // Use snapshot optimization
+      );
+      
       const cachedBalance: RunningBalance = {
-        USD: entity.usd_balance || 0,
-        LBP: entity.lb_balance || 0,
-        lastTransactionDate: entity.updated_at,
+        USD: currentBalances.USD,
+        LBP: currentBalances.LBP,
+        lastTransactionDate: currentBalances.lastCalculated,
         transactionCount: 0
       };
 
       if (!verifyBalance && !dateRange) {
-        // Return cached balance without verification
+        // Return calculated balance (always reconciled since it's from journals)
         return {
           currentBalance: cachedBalance,
           openingBalance: cachedBalance,

@@ -1872,6 +1872,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // Store transaction ID for undo (created inside transaction but needed for undo data)
+    let creditSaleTransactionId: string | null = null;
+
     // Use transaction to ensure atomicity for all operations including inventory, cash drawer, customer balance, and audit logs
     // ✅ OPTIMIZED: Added journal_entries and chart_of_accounts to avoid nested transaction
     await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.entities, db.transactions, db.journal_entries, db.chart_of_accounts, db.bill_audit_logs], async () => {
@@ -2002,6 +2005,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const entity = preFetchedEntity;
         const entityType = entity.entity_type as 'customer' | 'supplier';
         const transactionId = createId();
+        creditSaleTransactionId = transactionId; // Store for undo data
         
         // 1. Create transaction record directly (avoiding nested transaction)
         const creditSaleTransaction: Transaction = {
@@ -2044,18 +2048,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const debitAccountCode = entityType === 'customer' ? '1200' : '2100';
         const debitAccountName = entityType === 'customer' ? 'Accounts Receivable' : 'Accounts Payable';
         
+        // Create journal entries using new base currency schema
+        const transactionCurrency = creditSaleTransaction.currency;
+        const isUSD = transactionCurrency === 'USD';
+        
         const debitEntry = {
           id: createId(),
           store_id: storeId,
           branch_id: currentBranchId,
-          transaction_id: transactionId, // ✅ Use transactionId (same as transaction record)
+          transaction_id: transactionId,
           account_code: debitAccountCode,
           account_name: debitAccountName,
           entity_id: customerBalanceUpdate.customerId,
           entity_type: entityType,
-          debit: customerBalanceUpdate.amountDue,  // ✅ Only debit field set
-          credit: 0,  // ✅ Credit is zero (satisfies constraint)
-          currency: currency as 'USD' | 'LBP', // Use store's currency
+          debit_usd: isUSD ? customerBalanceUpdate.amountDue : 0,
+          credit_usd: 0,
+          debit_lbp: !isUSD ? customerBalanceUpdate.amountDue : 0,
+          credit_lbp: 0,
           description: `Credit sale - Bill ${bill.bill_number}`,
           posted_date: postedDate,
           fiscal_period: fiscalPeriod,
@@ -2069,14 +2078,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           id: createId(),
           store_id: storeId,
           branch_id: currentBranchId,
-          transaction_id: transactionId, // ✅ Use transactionId (same as transaction record)
+          transaction_id: transactionId,
           account_code: '4100', // Revenue
           account_name: 'Revenue',
           entity_id: customerBalanceUpdate.customerId,
           entity_type: entityType,
-          debit: 0,  // ✅ Debit is zero (satisfies constraint)
-          credit: customerBalanceUpdate.amountDue,  // ✅ Only credit field set
-          currency: currency as 'USD' | 'LBP', // Use store's currency
+          debit_usd: 0,
+          credit_usd: isUSD ? customerBalanceUpdate.amountDue : 0,
+          debit_lbp: 0,
+          credit_lbp: !isUSD ? customerBalanceUpdate.amountDue : 0,
           description: `Credit sale - Bill ${bill.bill_number}`,
           posted_date: postedDate,
           fiscal_period: fiscalPeriod,
@@ -2088,26 +2098,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         
         await db.journal_entries.bulkAdd([debitEntry, creditEntry]);
         
-        // 3. Update entity balance directly
-        const transactionCurrency = creditSaleTransaction.currency;
-        const isUSD = transactionCurrency === 'USD';
-        const previousBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
-        
-        // For credit sale: increase AR (customer owes us more) or increase AP (we owe supplier more)
-        const newBalance = previousBalance + customerBalanceUpdate.amountDue;
-        
-        const updateData: any = {
-          updated_at: now,
-          _synced: false
-        };
-        
-        if (isUSD) {
-          updateData.usd_balance = newBalance;
-        } else {
-          updateData.lb_balance = newBalance;
-        }
-        
-        await db.entities.update(customerBalanceUpdate.customerId, updateData);
+        // Balances are now calculated from journal entries - no need to update
+        // The journal entries created above will automatically reflect the correct balance
       }
     });
 
@@ -2161,9 +2153,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         { table: 'bills', id: billId },
         ...mappedLineItems.map(item => ({ table: 'bill_line_items', id: item.id })),
         ...inventoryStates.map(state => ({ table: 'inventory_items', id: state.id })),
-        ...(customerBalanceUpdate ? [
-          { table: 'customers', id: customerBalanceUpdate.customerId },
-          { table: 'transactions', id: `credit-sale-${billId}` }
+        ...(customerBalanceUpdate && creditSaleTransactionId ? [
+          { table: 'entities', id: customerBalanceUpdate.customerId },
+          { table: 'transactions', id: creditSaleTransactionId }
         ] : [])
       ],
       steps: [
@@ -2178,19 +2170,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           id: state.id,
           changes: { quantity: state.originalQuantity, _synced: false }
         })),
-        // Restore customer balance if applicable
-        ...(customerBalanceUpdate ? [{
-          op: 'update',
-          table: 'customers',
-          id: customerBalanceUpdate.customerId,
-          changes: { lb_balance: customerBalanceUpdate.originalBalance, _synced: false }
-        }] : []),
-        // Delete the credit transaction if applicable
-        ...(customerBalanceUpdate ? [{
-          op: 'delete',
-          table: 'transactions',
-          id: `credit-sale-${billId}`
-        }] : [])
+        // Delete journal entries and transaction for credit sale if applicable
+        // Note: Balances are now calculated from journal entries, so we delete the journal entries
+        // to restore the balance, rather than updating a cached balance field
+        ...(customerBalanceUpdate && creditSaleTransactionId ? [
+          {
+            op: 'delete',
+            table: 'transactions',
+            id: creditSaleTransactionId
+          },
+          {
+            op: 'delete',
+            table: 'journal_entries',
+            // Special field: transaction_id to delete all journal entries for this transaction
+            transaction_id: creditSaleTransactionId,
+            id: `journal-entries-${billId}` // Placeholder ID for undo handler
+          }
+        ] : [])
       ]
     };
 
@@ -2656,6 +2652,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     
     // Create entity instead of legacy supplier table
+    // Note: Balances are calculated from journal entries, not stored on the entity
     const entity = {
       id: supplierId,
       store_id: storeId!,
@@ -2664,8 +2661,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       entity_code: `SUPP-${supplierId.slice(0, 8).toUpperCase()}`,
       name: supplierData.name,
       phone: supplierData.phone || null,
-      lb_balance: supplierData.lb_balance || 0,
-      usd_balance: supplierData.usd_balance || 0,
       is_system_entity: false,
       is_active: true,
       customer_data: null,
@@ -2709,6 +2704,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     
     // Create entity instead of legacy customer table
+    // Note: Balances are calculated from journal entries, not stored on the entity
     const entity = {
       id: customerId,
       store_id: storeId!,
@@ -2717,8 +2713,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       entity_code: `CUST-${customerId.slice(0, 8).toUpperCase()}`,
       name: customerData.name,
       phone: customerData.phone || null,
-      lb_balance: customerData.lb_balance || 0,
-      usd_balance: customerData.usd_balance || 0,
       is_system_entity: false,
       is_active: customerData.is_active ?? true,
       customer_data: {
@@ -2764,15 +2758,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
     
     // Convert customer updates to entity updates
+    // Note: Balances are calculated from journal entries, not stored on the entity
+    // Remove balance fields from updates if they exist
     const entityUpdates: any = {
       name: updates.name,
       phone: updates.phone ?? null,
-      lb_balance: updates.lb_balance,
-      usd_balance: updates.usd_balance,
       is_active: updates.is_active,
       updated_at: new Date().toISOString(),
       _synced: false
     };
+    
+    // Remove balance fields if they were passed (they shouldn't be updated directly)
+    if ('lb_balance' in entityUpdates) delete entityUpdates.lb_balance;
+    if ('usd_balance' in entityUpdates) delete entityUpdates.usd_balance;
     
     // Update customer_data if needed
     if (updates.lb_max_balance !== undefined || (updates as any).email !== undefined || (updates as any).address !== undefined) {
@@ -2789,11 +2787,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await db.entities.update(id, entityUpdates);
     
     // Store undo data with original values
+    // Note: Balances are calculated from journal entries, not stored on the entity
     const undoChanges: any = {
       name: originalEntity.name,
       phone: originalEntity.phone,
-      lb_balance: originalEntity.lb_balance,
-      usd_balance: originalEntity.usd_balance,
       is_active: originalEntity.is_active,
       customer_data: originalEntity.customer_data
     };
@@ -2826,14 +2823,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
     
     // Convert supplier updates to entity updates
+    // Note: Balances are calculated from journal entries, not stored on the entity
+    // Remove balance fields from updates if they exist
     const entityUpdates: any = {
       name: updates.name,
       phone: updates.phone ?? null,
-      lb_balance: updates.lb_balance,
-      usd_balance: updates.usd_balance,
       updated_at: new Date().toISOString(),
       _synced: false
     };
+    
+    // Remove balance fields if they were passed (they shouldn't be updated directly)
+    if ('lb_balance' in entityUpdates) delete entityUpdates.lb_balance;
+    if ('usd_balance' in entityUpdates) delete entityUpdates.usd_balance;
     
     // Update supplier_data if needed
     if ((updates as any).type !== undefined || (updates as any).advance_lb_balance !== undefined || (updates as any).advance_usd_balance !== undefined || (updates as any).email !== undefined || (updates as any).address !== undefined) {
@@ -2851,11 +2852,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     await db.entities.update(id, entityUpdates);
     
     // Store undo data with original values
+    // Note: Balances are calculated from journal entries, not stored on the entity
     const undoChanges: any = {
       name: originalEntity.name,
       phone: originalEntity.phone,
-      lb_balance: originalEntity.lb_balance,
-      usd_balance: originalEntity.usd_balance,
       supplier_data: originalEntity.supplier_data
     };
     
@@ -5620,10 +5620,27 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await db.transaction('rw', [...db.tables, db.pending_syncs], async () => {
         for (const step of action.steps || []) {
           if (step.op === 'delete' && step.id) {
-            await (db as any)[step.table].delete(step.id);
-            // Remove from pending syncs if it exists
-            await db.pending_syncs.where('table_name').equals(step.table)
-              .filter(item => item.record_id === step.id).delete();
+            // Special handling for journal_entries - delete by transaction_id
+            if (step.table === 'journal_entries' && (step as any).transaction_id) {
+              const transactionId = (step as any).transaction_id;
+              const journalEntries = await db.journal_entries
+                .where('transaction_id')
+                .equals(transactionId)
+                .toArray();
+              
+              // Delete all journal entries for this transaction
+              for (const entry of journalEntries) {
+                await db.journal_entries.delete(entry.id);
+                // Remove from pending syncs
+                await db.pending_syncs.where('table_name').equals('journal_entries')
+                  .filter(item => item.record_id === entry.id).delete();
+              }
+            } else {
+              await (db as any)[step.table].delete(step.id);
+              // Remove from pending syncs if it exists
+              await db.pending_syncs.where('table_name').equals(step.table)
+                .filter(item => item.record_id === step.id).delete();
+            }
           } else if (step.op === 'restore' && step.record) {
             await (db as any)[step.table].add(step.record);
           } else if (step.op === 'update' && step.id && step.changes) {

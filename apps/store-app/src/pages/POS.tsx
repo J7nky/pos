@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { usePOSKeyboard } from '../hooks/usePOSKeyboard';
 import AccessibleButton from '../components/common/AccessibleButton';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useCustomerForm } from '../contexts/CustomerFormContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
+import { useEntityBalances } from '../hooks/useEntityBalances';
 import SearchableSelect from '../components/common/SearchableSelect';
 import MoneyInput from '../components/common/MoneyInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -64,7 +65,21 @@ export default function POS() {
   const completeSaleRef = React.useRef<HTMLButtonElement>(null);
 
   const products = (raw.products || []).map(p => ({...p, createdAt: p.created_at})) as Array<any>;
-  const customers = (raw.customers || []).map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) as Array<any>;
+  
+  // Get customer entities and calculate balances from journal entries
+  const customerEntities = raw.customers || [];
+  const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
+  const customerBalances = useEntityBalances(customerIds, 'customer', true);
+  const customers = customerEntities.map(c => {
+    const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+    return {
+      ...c, 
+      isActive: c.is_active, 
+      createdAt: c.created_at, 
+      lb_balance: balances.LBP,  // From journal entries
+      usd_balance: balances.USD  // From journal entries
+    };
+  }) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
   const inventoryBills = (raw.inventoryBills || []) as Array<any>;
@@ -871,12 +886,12 @@ ${dashSeparator}`;
         }
         
         if (entity) {
+          // customerBalanceUpdate is still passed for bill creation, but balance updates are now handled by journal entries
           customerBalanceUpdate = {
             customerId: entity.id,
             amountDue: amountDue,
-            originalBalance: entity.lb_balance || 0
+            originalBalance: 0  // Not used anymore - balances calculated from journal entries
           };
-          console.log(9343,customerBalanceUpdate);
         }
       }
 

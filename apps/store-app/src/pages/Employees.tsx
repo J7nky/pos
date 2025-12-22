@@ -116,7 +116,9 @@ console.log(userProfile,123123123);
     if (!validateForm() || !storeId) return;
 
     try {
-      // Prepare balance fields based on selected currency
+      // NOTE: Employee balance fields (lbp_balance/usd_balance) store monthly salary configuration,
+      // NOT running balances like customers/suppliers. Employees don't have AR/AP accounts.
+      // Employee payments are tracked via journal entries (account 5200 - Salaries Expense).
       const balanceValue = salaryValue && salaryValue.trim() !== '' ? parseFloat(salaryValue) : null;
       const balanceData = {
         lbp_balance: salaryCurrency === 'LBP' ? balanceValue : null,
@@ -819,6 +821,7 @@ console.log(userProfile,123123123);
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
+                    {/* Display monthly salary configuration (not a running balance) */}
                     {employee.lbp_balance !== null && employee.lbp_balance !== undefined ? (
                       <div className="flex items-center text-sm text-gray-900">
                         <DollarSign className="w-4 h-4  text-gray-400" />

@@ -213,15 +213,20 @@ export class AccountStatementService {
 
       if (!accountEntry) continue;
       const transaction = transactionMap.get(transactionId);
-      const amount = accountEntry.debit - accountEntry.credit;
-      const currency = accountEntry.currency;
+      
+      // Calculate amounts for both currencies
+      const amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
+      const amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
+      
+      // Determine which currency has the transaction (prefer USD if both exist)
+      const hasUSD = Math.abs(amountUSD) > 0.01;
+      const hasLBP = Math.abs(amountLBP) > 0.01;
+      const currency = hasUSD ? 'USD' : (hasLBP ? 'LBP' : 'USD'); // Default to USD
+      const amount = hasUSD ? amountUSD : amountLBP;
 
-      // Update running balance
-      if (currency === 'USD') {
-        runningUSD += amount;
-      } else {
-        runningLBP += amount;
-      }
+      // Update running balance for both currencies
+      runningUSD += amountUSD;
+      runningLBP += amountLBP;
 
       // Determine transaction type and description
       let type: 'sale' | 'payment' | 'income' | 'expense' = 'payment';
@@ -275,19 +280,13 @@ export class AccountStatementService {
         }
       }
 
-      // Calculate totals
+      // Calculate totals for both currencies
       if (type === 'sale' || (type === 'income' && entityType === 'customer')) {
-        if (currency === 'USD') {
-          totals.salesUSD += Math.abs(amount);
-        } else {
-          totals.salesLBP += Math.abs(amount);
-        }
+        totals.salesUSD += Math.abs(amountUSD);
+        totals.salesLBP += Math.abs(amountLBP);
       } else if (type === 'payment') {
-        if (currency === 'USD') {
-          totals.paymentsUSD += Math.abs(amount);
-        } else {
-          totals.paymentsLBP += Math.abs(amount);
-        }
+        totals.paymentsUSD += Math.abs(amountUSD);
+        totals.paymentsLBP += Math.abs(amountLBP);
       }
 
       statementTransactions.push({
@@ -470,12 +469,8 @@ export class AccountStatementService {
     });
     
     const openingBalance = {
-      USD: prePeriodEntries
-        .filter(e => e.currency === 'USD')
-        .reduce((sum, e) => sum + (e.debit - e.credit), 0),
-      LBP: prePeriodEntries
-        .filter(e => e.currency === 'LBP')
-        .reduce((sum, e) => sum + (e.debit - e.credit), 0)
+      USD: prePeriodEntries.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
+      LBP: prePeriodEntries.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
     };
 
     // Get journal entries for the period (account_code='1200' for Accounts Receivable)
@@ -569,12 +564,8 @@ export class AccountStatementService {
     });
     
     const openingBalance = {
-      USD: prePeriodEntries
-        .filter(e => e.currency === 'USD')
-        .reduce((sum, e) => sum + (e.debit - e.credit), 0),
-      LBP: prePeriodEntries
-        .filter(e => e.currency === 'LBP')
-        .reduce((sum, e) => sum + (e.debit - e.credit), 0)
+      USD: prePeriodEntries.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
+      LBP: prePeriodEntries.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
     };
 
     // Get journal entries for the period (account_code='2100' for Accounts Payable)

@@ -90,6 +90,7 @@ export default function PublicCustomerStatement() {
         .eq('token', token);
 
       // Transform customer data to match Customer type
+      // Note: Balances are now calculated from journal entries, not stored on the entity
       const customer: Customer = {
         id: customerRecord.id,
         name: customerRecord.name,
@@ -98,8 +99,9 @@ export default function PublicCustomerStatement() {
         address: customerRecord.address || undefined,
         isActive: customerRecord.is_active ?? true,
         createdAt: customerRecord.created_at,
-        lb_balance: customerRecord.lb_balance || 0,
-        usd_balance: customerRecord.usd_balance || 0
+        // Balances are calculated from journal entries via accountStatementService
+        lb_balance: 0, // Will be calculated from journal entries in the statement
+        usd_balance: 0 // Will be calculated from journal entries in the statement
       };
 
       setCustomer(customer);

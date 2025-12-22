@@ -15,36 +15,56 @@ import SupplierAdvances from '../components/accountingPage/tabs/SupplierAdvances
 import EmployeePayments from '../components/accountingPage/tabs/EmployeePayments';
 import { useCurrency } from '../hooks/useCurrency';
 import { Pagination } from '../components/common/Pagination';
+import { useEntityBalances } from '../hooks/useEntityBalances';
 
 export default function Customers() {
   const raw = useOfflineData();
   const { addCustomerRequestedFromPOS, clearAddCustomerRequest } = useCustomerForm();
 
   const { t } = useI18n();
-  const customers =raw.entities.filter(e => e.entity_type === 'customer').map(c => {
-    
+  
+  // Get customer entities
+  const customerEntities = raw.entities.filter(e => e.entity_type === 'customer');
+  const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
+  
+  // Get calculated balances from journal entries (source of truth)
+  const customerBalances = useEntityBalances(customerIds, 'customer', true);
+  
+  const customers = customerEntities.map(c => {
     const customerData = (c.customer_data as any) || {};
+    // Get calculated balances from journal entries
+    const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
     return {
       ...c, 
       is_active: c.is_active ?? true, 
       createdAt: c.created_at, 
-      lb_balance: c.lb_balance || 0, 
-      usd_balance: c.usd_balance || 0, 
+      lb_balance: balances.LBP,  // From journal entries
+      usd_balance: balances.USD,  // From journal entries
       email: customerData.email || '', 
       address: customerData.address || '',
       lb_max_balance: customerData.lb_max_balance ?? undefined,
       usd_max_balance: customerData.usd_max_balance ?? undefined
     };
-  }) ;
-  const suppliers = raw.entities.filter(e => e.entity_type === 'supplier').map(s => {
+  });
+  
+  // Get supplier entities
+  const supplierEntities = raw.entities.filter(e => e.entity_type === 'supplier');
+  const supplierIds = useMemo(() => supplierEntities.map(s => s.id), [supplierEntities]);
+  
+  // Get calculated balances from journal entries (source of truth)
+  const supplierBalances = useEntityBalances(supplierIds, 'supplier', true);
+  
+  const suppliers = supplierEntities.map(s => {
     const supplierData = (s.supplier_data as any) || {};
+    // Get calculated balances from journal entries
+    const balances = supplierBalances.getBalances(s.id) || { USD: 0, LBP: 0 };
     return {
       ...s, 
       createdAt: s.created_at || 'commission', 
       email: supplierData.email || '', 
       address: supplierData.address || '', 
-      lb_balance: s.lb_balance || 0, 
-      usd_balance: s.usd_balance || 0,
+      lb_balance: balances.LBP,  // From journal entries
+      usd_balance: balances.USD,  // From journal entries
       type: supplierData.type || 'standard',
       advance_lb_balance: supplierData.advance_lb_balance || 0,
       advance_usd_balance: supplierData.advance_usd_balance || 0

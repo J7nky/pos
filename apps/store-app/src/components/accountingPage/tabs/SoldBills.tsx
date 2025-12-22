@@ -888,19 +888,13 @@ export default function InventoryLogs() {
           console.log(`💰 Cash drawer delta: ${cashDrawerDelta}, Customer balance delta: ${customerBalanceDelta}`);
         }
         
-        // Update customer balance if there's a customer (not walk-in)
+        // Note: Customer balance is now calculated from journal entries, not updated directly
+        // The balance delta is handled through journal entries created by the transaction service
         if (finalCustomerId && customerBalanceDelta !== 0) {
           const customer = customers.find(c => c.id === finalCustomerId);
           if (customer) {
-            // Assuming USD for now - in production, use bill currency
-            const currentBalance = customer.usd_balance || 0;
-            const newBalance = currentBalance + customerBalanceDelta;
-            
-            console.log(`🔍 Updating customer ${customer.name} balance: ${currentBalance} → ${newBalance} (delta: ${customerBalanceDelta})`);
-            
-            await raw.updateCustomer(customer.id, {
-              usd_balance: newBalance
-            });
+            console.log(`📊 Customer balance delta: ${customerBalanceDelta} (handled via journal entries)`);
+            // Balance is automatically calculated from journal entries - no direct update needed
           }
         }
         

@@ -925,9 +925,8 @@ export class SyncService {
                     user_id: record.updated_by || null,
                     metadata: {
                       name: record.name,
-                      entity_type: record.entity_type, // Store actual type (customer/supplier) in metadata
-                      usd_balance: record.usd_balance || 0,
-                      lb_balance: record.lb_balance || 0
+                      entity_type: record.entity_type // Store actual type (customer/supplier) in metadata
+                      // Note: Balances are no longer stored on entities - calculated from journal entries
                     }
                   });
                   console.log(`🎯 [Event] Emitted ${record.entity_type}_updated event for ${record.id}`);
@@ -2000,28 +1999,13 @@ export class SyncService {
   }
 
   private async resolveBalanceConflict(tableName: string, localRecord: any, remoteRecord: any): Promise<boolean> {
-    const localUsdBalance = Number(localRecord.usd_balance || 0);
-    const remoteUsdBalance = Number(remoteRecord.usd_balance || 0);
-    const localLbpBalance = Number(localRecord.lb_balance || 0);
-    const remoteLbpBalance = Number(remoteRecord.lb_balance || 0);
-
-    if (Math.abs(localUsdBalance - remoteUsdBalance) > 0.01 || Math.abs(localLbpBalance - remoteLbpBalance) > 0.01) {
-      console.warn(`💰 Balance conflict: Local USD: $${localUsdBalance.toFixed(2)}, Remote USD: $${remoteUsdBalance.toFixed(2)}`);
-
-      const finalUsdBalance = Math.max(localUsdBalance, remoteUsdBalance);
-      const finalLbpBalance = Math.max(localLbpBalance, remoteLbpBalance);
-
-      await (db as any)[tableName].put({
-        ...remoteRecord,
-        usd_balance: finalUsdBalance,
-        lb_balance: finalLbpBalance,
-        _synced: true,
-        _lastSyncedAt: new Date().toISOString()
-      });
-
-      return true;
+    // Balances are now calculated from journal entries, not stored on entities
+    // No need to resolve balance conflicts for entities - balances are derived, not stored
+    if (tableName === 'entities') {
+      return false; // Entities don't have balance fields anymore
     }
-
+    
+    // For other tables (if any), skip balance resolution
     return false;
   }
 

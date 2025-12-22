@@ -231,15 +231,9 @@ export class TransactionService {
           // If journal entries fail, the entire transaction must be rolled back
           await this.createJournalEntriesForTransaction(transaction);
 
-          // 7. UPDATE ENTITY BALANCES (if enabled)
-          if (params.updateBalances !== false) {
-            const balanceResult = await this.updateEntityBalancesAtomic(
-              transaction,
-              amountInUSD
-            );
-            balanceAfter = balanceResult.newBalance;
-            affectedRecords.push(...balanceResult.affectedRecords);
-          }
+          // 7. BALANCES ARE NOW CALCULATED FROM JOURNAL ENTRIES
+          // No need to update entity balance fields - they are derived from journal entries
+          // Use entityBalanceService.getEntityBalance() to get current balance
 
           // 8. UPDATE CASH DRAWER (if enabled and applicable)
           if (params.updateCashDrawer !== false && this.isCashDrawerCategory(params.category)) {
@@ -555,7 +549,7 @@ export class TransactionService {
               description: typeof original.description === 'string' ? original.description : JSON.stringify(original.description)
             };
             
-            await this.updateEntityBalancesAtomic(reversalTransaction, 0);
+            // Balances are calculated from journal entries - no need to update
             
             // Apply new transaction impact
             const newType = updates.category ? getTransactionType(updates.category) : original.type;
@@ -569,9 +563,8 @@ export class TransactionService {
               description: typeof original.description === 'string' ? original.description : JSON.stringify(original.description)
             };
             
-            const balanceResult = await this.updateEntityBalancesAtomic(newTransaction, 0);
-            balanceAfter = balanceResult.newBalance;
-            affectedRecords.push(...balanceResult.affectedRecords);
+            // Balances are calculated from journal entries - no need to update
+            // Use entityBalanceService.getEntityBalance() to get current balance
           } else {
             balanceAfter = balanceBefore;
           }
@@ -684,69 +677,9 @@ export class TransactionService {
             transaction.currency
           );
 
-          // Reverse the transaction's balance impact
-          // Calculate the reversal balance change based on category (same logic as updateEntityBalancesAtomic)
-          const entityId = transaction.customer_id || transaction.supplier_id || (transaction as any).employee_id;
-          let reversalBalanceChange = 0;
-          
-          if (entityId) {
-            const entity = await db.entities.get(entityId);
-            if (entity) {
-              // Calculate what the original transaction did, then negate it
-              if (entity.entity_type === 'customer') {
-                // Customer balance logic:
-                // - Payments DECREASE AR (they owe us less) = negative balance change
-                // - Reversal: INCREASE AR (they owe us more again) = positive balance change
-                if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE) {
-                  reversalBalanceChange = -transaction.amount; // Reverse: decrease AR
-                } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT || 
-                           transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED) {
-                  reversalBalanceChange = transaction.amount; // Reverse: increase AR (opposite of -amount)
-                } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND) {
-                  reversalBalanceChange = -transaction.amount; // Reverse: decrease AR
-                } else {
-                  // Fallback: reverse the type-based logic
-                  reversalBalanceChange = transaction.type === 'income' ? transaction.amount : -transaction.amount;
-                }
-              } else if (entity.entity_type === 'supplier') {
-                // Supplier balance logic:
-                // - Payments DECREASE AP (we owe them less) = negative balance change
-                // - Reversal: INCREASE AP (we owe them more again) = positive balance change
-                if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE) {
-                  reversalBalanceChange = -transaction.amount; // Reverse: decrease AP
-                } else if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT) {
-                  reversalBalanceChange = transaction.amount; // Reverse: increase AP (opposite of -amount)
-                } else if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND) {
-                  reversalBalanceChange = -transaction.amount; // Reverse: decrease AP
-                } else {
-                  // Fallback: reverse the type-based logic
-                  reversalBalanceChange = transaction.type === 'expense' ? transaction.amount : -transaction.amount;
-                }
-              } else if (entity.entity_type === 'employee') {
-                // For employee: reverse the original change
-                reversalBalanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
-              }
-              
-              // Apply the reversal
-              const isUSD = transaction.currency === 'USD';
-              const currentBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
-              balanceAfter = currentBalance + reversalBalanceChange;
-              
-              const updateData: any = {
-                updated_at: timestamp,
-                _synced: false
-              };
-              
-              if (isUSD) {
-                updateData.usd_balance = balanceAfter;
-              } else {
-                updateData.lb_balance = balanceAfter;
-              }
-              
-              await db.entities.update(entityId, updateData);
-              affectedRecords.push(entityId);
-            }
-          }
+          // Balances are calculated from journal entries - no need to update
+          // The reversal journal entries will automatically reflect the correct balance
+          // Use entityBalanceService.getEntityBalance() to get current balance
 
           // Reverse cash drawer impact if applicable
           if (this.isCashDrawerCategory(transaction.category as TransactionCategory)) {
@@ -1074,9 +1007,9 @@ export class TransactionService {
   }
 
   /**
-   * Get current entity balance
+   * Get current entity balance from journal entries (source of truth)
    * Can be called within or outside transactions (read-only operation)
-   * Updated to use entities table instead of legacy customers/suppliers tables
+   * Updated to use journal-based calculations instead of cached balance fields
    */
   private async getEntityBalance(
     customerId?: string | null,
@@ -1090,13 +1023,31 @@ export class TransactionService {
         return 0;
       }
 
-      // Get entity from unified entities table
+      // Get entity to determine type
       const entity = await db.entities.get(entityId);
       if (!entity) {
         return 0;
       }
 
-      return currency === 'USD' ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
+      // Determine account code based on entity type
+      let accountCode: '1200' | '2100' = '1200';
+      if (entity.entity_type === 'supplier') {
+        accountCode = '2100';
+      } else if (entity.entity_type === 'customer') {
+        accountCode = '1200';
+      } else {
+        // Employees and other types don't have AR/AP balances
+        return 0;
+      }
+
+      // Calculate balance from journal entries
+      const { entityBalanceService } = await import('./entityBalanceService');
+      return await entityBalanceService.getEntityBalance(
+        entityId,
+        currency,
+        accountCode,
+        true // Use snapshot optimization
+      );
     } catch (error) {
       console.error('Error getting entity balance:', error);
       return 0;
@@ -1104,108 +1055,13 @@ export class TransactionService {
   }
 
   /**
-   * Update entity balances atomically within IndexedDB transaction
-   * This method MUST be called within a db.transaction() block
-   * Updated to use entities table instead of legacy customers/suppliers tables
+   * @deprecated Entity balances are now calculated from journal entries
+   * Use entityBalanceService.getEntityBalance() instead
+   * This method has been removed as part of the journal-based balance migration
+   * 
+   * Balances are DERIVED from journal entries, not STORED in entity fields.
+   * Journal entries are the single source of truth.
    */
-  private async updateEntityBalancesAtomic(
-    transaction: Transaction,
-    amountInUSD: number
-  ): Promise<{ newBalance: number; affectedRecords: string[] }> {
-    const affectedRecords: string[] = [];
-    let newBalance = 0;
-    const timestamp = new Date().toISOString();
-
-    // Get entity ID (customer, supplier, or employee)
-    const entityId = transaction.customer_id || transaction.supplier_id || (transaction as any).employee_id;
-    
-    if (entityId) {
-      // Get entity from unified entities table
-      const entity = await db.entities.get(entityId);
-      if (entity) {
-        const isUSD = transaction.currency === 'USD';
-        const previousBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
-        
-        // Calculate balance change based on category (not just type)
-        // This handles AR/AP transactions correctly
-        let balanceChange = 0;
-        
-        if (entity.entity_type === 'customer') {
-          // Customer balance logic:
-          // - Credit sales INCREASE AR (they owe us more) = positive balance
-          // - Payments DECREASE AR (they owe us less) = negative balance
-          if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE) {
-            balanceChange = transaction.amount; // Increase AR
-          } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT || 
-                     transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED) {
-            balanceChange = -transaction.amount; // Decrease AR
-          } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND) {
-            balanceChange = transaction.amount; // Increase AR (we owe them or they owe us more)
-          } else {
-            // Fallback: income reduces AR, expense increases AR
-            balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
-          }
-        } else if (entity.entity_type === 'supplier') {
-          // Supplier balance logic:
-          // - Credit purchases INCREASE AP (we owe them more) = positive balance
-          // - Payments DECREASE AP (we owe them less) = negative balance
-          if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE) {
-            balanceChange = transaction.amount; // Increase AP
-          } else if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT) {
-            balanceChange = -transaction.amount; // Decrease AP
-          } else if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND) {
-            balanceChange = transaction.amount; // Increase AP (we owe them more)
-          } else {
-            // Fallback: expense reduces AP, income increases AP
-            balanceChange = transaction.type === 'expense' ? -transaction.amount : transaction.amount;
-          }
-        } else if (entity.entity_type === 'employee') {
-          // For employee: payments increase what we owe, receipts decrease it
-          balanceChange = transaction.type === 'expense' ? transaction.amount : -transaction.amount;
-        }
-
-        newBalance = previousBalance + balanceChange;
-        const updateData: any = {
-          updated_at: timestamp,
-          _synced: false
-        };
-        
-        if (isUSD) {
-          updateData.usd_balance = newBalance;
-        } else {
-          updateData.lb_balance = newBalance;
-        }
-
-        // Update unified entities table
-        await db.entities.update(entityId, updateData);
-        affectedRecords.push(entityId);
-      }
-    }
-
-    return { newBalance, affectedRecords };
-  }
-
-  /**
-   * Update entity balances (legacy method - delegates to atomic version)
-   * @deprecated Use updateEntityBalancesAtomic within a transaction instead
-   * @internal This method is kept for backward compatibility only
-   */
-  private async updateEntityBalances(
-    transaction: Transaction,
-    amountInUSD: number,
-    context: TransactionContext
-  ): Promise<{ newBalance: number; affectedRecords: string[] }> {
-    console.warn('⚠️ updateEntityBalances is deprecated. Use atomic transactions instead.');
-    
-    // For backward compatibility, wrap in transaction
-    let result = { newBalance: 0, affectedRecords: [] as string[] };
-    
-    await db.transaction('rw', [db.entities], async () => {
-      result = await this.updateEntityBalancesAtomic(transaction, amountInUSD);
-    });
-    
-    return result;
-  }
 
   /**
    * Update cash drawer account balance atomically within IndexedDB transaction

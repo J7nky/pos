@@ -25,17 +25,40 @@ export class JournalService {
       transactionId,
       debitAccount,
       creditAccount,
-      amount,
-      currency,
+      amountUSD = 0,
+      amountLBP = 0,
       entityId,
       description,
       postedDate = new Date().toISOString().split('T')[0],
       createdBy = null,  // Default to null for system-generated entries
-      branchId  // Branch ID from transaction - required
+      branchId,  // Branch ID from transaction - required
+      // Legacy support
+      amount,
+      currency
     } = params;
     
     if (!branchId) {
       throw new Error('branchId is required for journal entry creation');
+    }
+    
+    // Handle legacy parameters (amount + currency) - convert to new format
+    let finalAmountUSD = amountUSD;
+    let finalAmountLBP = amountLBP;
+    
+    if (amount !== undefined && currency) {
+      // Legacy mode: single currency amount
+      if (currency === 'USD') {
+        finalAmountUSD = amount;
+        finalAmountLBP = 0;
+      } else {
+        finalAmountUSD = 0;
+        finalAmountLBP = amount;
+      }
+    }
+    
+    // Validate that at least one currency has an amount
+    if (finalAmountUSD === 0 && finalAmountLBP === 0) {
+      throw new Error('At least one currency amount (USD or LBP) must be provided');
     }
     
     // Validate accounting setup
@@ -61,17 +84,18 @@ export class JournalService {
     const fiscalPeriod = getFiscalPeriodForDate(new Date(postedDate));
     const now = new Date().toISOString();
     
-    // Create debit and credit entries
+    // Create debit and credit entries with base currency fields
     const debitEntry: JournalEntry = {
       id: createId(),
       store_id: storeId,
-      branch_id: branchId,  // ✅ Use branch_id from transaction
+      branch_id: branchId,
       transaction_id: transactionId,
       account_code: debitAccount,
       account_name: debitAccountInfo.account_name,
-      debit: amount,
-      credit: 0,
-      currency,
+      debit_usd: finalAmountUSD,
+      credit_usd: 0,
+      debit_lbp: finalAmountLBP,
+      credit_lbp: 0,
       entity_id: entityId,
       entity_type: entity.entity_type,
       posted_date: postedDate,
@@ -86,13 +110,14 @@ export class JournalService {
     const creditEntry: JournalEntry = {
       id: createId(),
       store_id: storeId,
-      branch_id: branchId,  // ✅ Use branch_id from transaction
+      branch_id: branchId,
       transaction_id: transactionId,
       account_code: creditAccount,
       account_name: creditAccountInfo.account_name,
-      debit: 0,
-      credit: amount,
-      currency,
+      debit_usd: 0,
+      credit_usd: finalAmountUSD,
+      debit_lbp: 0,
+      credit_lbp: finalAmountLBP,
       entity_id: entityId,
       entity_type: entity.entity_type,
       posted_date: postedDate,
@@ -122,7 +147,10 @@ export class JournalService {
       console.warn(`⚠️ Transaction ${transactionId} is not balanced after journal entry creation`);
     }
     
-    console.log(`✅ Journal entry created: ${transactionId} (${currency} ${amount})`);
+    const amountStr = finalAmountUSD > 0 
+      ? `USD ${finalAmountUSD}${finalAmountLBP > 0 ? ` + LBP ${finalAmountLBP}` : ''}`
+      : `LBP ${finalAmountLBP}`;
+    console.log(`✅ Journal entry created: ${transactionId} (${amountStr})`);
     return transactionId;
   }
   
@@ -358,6 +386,7 @@ export class JournalService {
   
   /**
    * Calculate account balance from journal entries
+   * Returns both USD and LBP balances from the same entries
    */
   async calculateAccountBalance(
     storeId: string,
@@ -377,11 +406,8 @@ export class JournalService {
     const balance = { USD: 0, LBP: 0 };
     
     for (const entry of entries) {
-      if (entry.currency === 'USD') {
-        balance.USD += entry.debit - entry.credit;
-      } else {
-        balance.LBP += entry.debit - entry.credit;
-      }
+      balance.USD += entry.debit_usd - entry.credit_usd;
+      balance.LBP += entry.debit_lbp - entry.credit_lbp;
     }
     
     return balance;
@@ -389,6 +415,7 @@ export class JournalService {
   
   /**
    * Verify transaction balance (debits = credits)
+   * Checks both USD and LBP balances separately
    */
   async verifyTransactionBalance(transactionId: string): Promise<boolean> {
     const entries = await this.getJournalEntriesForTransaction(transactionId);
@@ -396,8 +423,10 @@ export class JournalService {
     const totals = { USD: { debit: 0, credit: 0 }, LBP: { debit: 0, credit: 0 } };
     
     for (const entry of entries) {
-      totals[entry.currency].debit += entry.debit;
-      totals[entry.currency].credit += entry.credit;
+      totals.USD.debit += entry.debit_usd;
+      totals.USD.credit += entry.credit_usd;
+      totals.LBP.debit += entry.debit_lbp;
+      totals.LBP.credit += entry.credit_lbp;
     }
     
     return (

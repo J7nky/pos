@@ -230,17 +230,26 @@ async function dataIntegrityTest(storeId: string): Promise<void> {
     .equals(storeId)
     .toArray();
   
-  let totalDebits = 0;
-  let totalCredits = 0;
+  // Check USD balance
+  let totalDebitsUSD = 0;
+  let totalCreditsUSD = 0;
+  let totalDebitsLBP = 0;
+  let totalCreditsLBP = 0;
   
   journalEntries.forEach(entry => {
-    totalDebits += entry.debit_amount;
-    totalCredits += entry.credit_amount;
+    totalDebitsUSD += entry.debit_usd || 0;
+    totalCreditsUSD += entry.credit_usd || 0;
+    totalDebitsLBP += entry.debit_lbp || 0;
+    totalCreditsLBP += entry.credit_lbp || 0;
   });
   
-  const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
+  const usdBalanced = Math.abs(totalDebitsUSD - totalCreditsUSD) < 0.01;
+  const lbpBalanced = Math.abs(totalDebitsLBP - totalCreditsLBP) < 0.01;
+  const isBalanced = usdBalanced && lbpBalanced;
+  
   console.log(`   ⚖️ Journal entries balanced: ${isBalanced ? '✅' : '❌'}`);
-  console.log(`      Debits: $${totalDebits}, Credits: $${totalCredits}`);
+  console.log(`      USD - Debits: $${totalDebitsUSD.toFixed(2)}, Credits: $${totalCreditsUSD.toFixed(2)}`);
+  console.log(`      LBP - Debits: ${totalDebitsLBP.toFixed(2)}, Credits: ${totalCreditsLBP.toFixed(2)}`);
   
   // Check snapshot accuracy
   const snapshot = await db.balance_snapshots

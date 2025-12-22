@@ -1,7 +1,8 @@
-// Snapshot Service - Phase 4 of Accounting Foundation Migration
+// Snapshot Service - Phase 5 of Accounting Foundation Migration
 // Based on ACCOUNTING_FOUNDATION_MIGRATION_PLAN.md
 //
 // Creates and manages balance snapshots for performance optimization and historical queries
+// Uses journal-entry-based calculations with base currency schema (debit_usd, credit_usd, debit_lbp, credit_lbp)
 
 import { db } from '../lib/db';
 import { BalanceSnapshot } from '../types/accounting';
@@ -237,11 +238,8 @@ export class SnapshotService {
     const balance = { USD: 0, LBP: 0 };
     
     for (const entry of entries) {
-      if (entry.currency === 'USD') {
-        balance.USD += entry.debit - entry.credit;
-      } else {
-        balance.LBP += entry.debit - entry.credit;
-      }
+      balance.USD += entry.debit_usd - entry.credit_usd;
+      balance.LBP += entry.debit_lbp - entry.credit_lbp;
     }
     
     return balance;
@@ -323,13 +321,10 @@ export class SnapshotService {
         )
         .toArray();
       
-      // Add changes since snapshot
+      // Add changes since snapshot using new base currency schema
       for (const entry of additionalEntries) {
-        if (entry.currency === 'USD') {
-          snapshotBalance.USD += entry.debit - entry.credit;
-        } else {
-          snapshotBalance.LBP += entry.debit - entry.credit;
-        }
+        snapshotBalance.USD += entry.debit_usd - entry.credit_usd;
+        snapshotBalance.LBP += entry.debit_lbp - entry.credit_lbp;
       }
       
       return {

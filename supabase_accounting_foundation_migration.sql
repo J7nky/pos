@@ -22,9 +22,10 @@ CREATE TABLE IF NOT EXISTS public.journal_entries (
     transaction_id UUID NOT NULL, -- Groups debit + credit entries
     account_code VARCHAR(10) NOT NULL, -- '1100', '1200', etc.
     account_name VARCHAR(255) NOT NULL,
-    debit DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-    credit DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-    currency VARCHAR(3) NOT NULL CHECK (currency IN ('USD', 'LBP')),
+    debit_usd DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    credit_usd DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    debit_lbp DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    credit_lbp DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     entity_id UUID NOT NULL, -- NEVER NULL - references entities table
     entity_type VARCHAR(20) NOT NULL CHECK (entity_type IN ('customer', 'supplier', 'employee', 'cash', 'internal')),
     posted_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -36,10 +37,18 @@ CREATE TABLE IF NOT EXISTS public.journal_entries (
     
     
     -- Constraints
-    CONSTRAINT journal_entries_debit_credit_check CHECK (
-        (debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0)
+    CONSTRAINT journal_entries_usd_check CHECK (
+        (debit_usd > 0 AND credit_usd = 0) OR (credit_usd > 0 AND debit_usd = 0) OR (debit_usd = 0 AND credit_usd = 0)
     ),
-    CONSTRAINT journal_entries_amount_positive CHECK (debit >= 0 AND credit >= 0)
+    CONSTRAINT journal_entries_lbp_check CHECK (
+        (debit_lbp > 0 AND credit_lbp = 0) OR (credit_lbp > 0 AND debit_lbp = 0) OR (debit_lbp = 0 AND credit_lbp = 0)
+    ),
+    CONSTRAINT journal_entries_amount_positive CHECK (
+        debit_usd >= 0 AND credit_usd >= 0 AND debit_lbp >= 0 AND credit_lbp >= 0
+    ),
+    CONSTRAINT journal_entries_has_amount CHECK (
+        (debit_usd > 0 OR credit_usd > 0 OR debit_lbp > 0 OR credit_lbp > 0)
+    )
 );
 
 -- Indexes for journal_entries
@@ -142,6 +151,14 @@ CREATE POLICY "Users can insert balance snapshots for their store" ON public.bal
 -- =============================================================================
 -- 3. ENTITIES TABLE - Unified Customer/Supplier/Employee/Cash Abstraction
 -- =============================================================================
+--
+-- IMPORTANT: This table does NOT include usd_balance or lb_balance fields.
+-- Entity balances are calculated from journal_entries (source of truth).
+-- This follows accounting best practices: balances are DERIVED, not STORED.
+-- For performance optimization, use balance_snapshots table.
+--
+-- Migration Note: Previous versions may have had balance fields on entities.
+-- These have been removed in favor of journal-entry-based calculations.
 
 CREATE TABLE IF NOT EXISTS public.entities (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -151,8 +168,6 @@ CREATE TABLE IF NOT EXISTS public.entities (
     entity_code VARCHAR(50) NOT NULL, -- 'CUST-12345678', 'SUPP-87654321', etc.
     name VARCHAR(255) NOT NULL,
     phone VARCHAR(50),
-    lb_balance DECIMAL(15,2) NOT NULL DEFAULT 0.00, -- Cached balance
-    usd_balance DECIMAL(15,2) NOT NULL DEFAULT 0.00, -- Cached balance
     is_system_entity BOOLEAN NOT NULL DEFAULT false,
     is_active BOOLEAN NOT NULL DEFAULT true,
     customer_data JSONB, -- Type-specific data for customers
@@ -396,6 +411,11 @@ COMMENT ON COLUMN public.journal_entries.entity_id IS 'NEVER NULL - all transact
 COMMENT ON COLUMN public.entities.customer_data IS 'JSON field storing customer-specific data like credit limits';
 COMMENT ON COLUMN public.entities.supplier_data IS 'JSON field storing supplier-specific data like commission rates';
 COMMENT ON COLUMN public.chart_of_accounts.requires_entity IS 'Whether transactions to this account must specify an entity_id';
+
+-- Important: Entity balances are NOT stored in this table.
+-- Balances are calculated from journal_entries WHERE account_code IN ('1200', '2100') AND entity_id = entities.id
+-- This ensures data integrity and follows double-entry bookkeeping principles.
+-- Use balance_snapshots table for performance optimization of historical queries.
 
 -- =============================================================================
 -- MIGRATION COMPLETE

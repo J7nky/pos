@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
+import { useEntityBalances } from '../hooks/useEntityBalances';
 import { 
   DollarSign, 
   Package, 
@@ -42,7 +43,22 @@ export default function Home() {
 
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
-  const customers = Array.isArray(raw.customers) ? raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) : [];
+  
+  // Get customer entities and calculate balances from journal entries
+  const customerEntities = Array.isArray(raw.customers) ? raw.customers : [];
+  const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
+  const customerBalances = useEntityBalances(customerIds, 'customer', true);
+  
+  const customers = customerEntities.map(c => {
+    const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+    return {
+      ...c, 
+      isActive: c.is_active, 
+      createdAt: c.created_at, 
+      lb_balance: balances.LBP,  // From journal entries
+      usd_balance: balances.USD  // From journal entries
+    };
+  });
   const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({...s, createdAt: s.created_at})) : [];
   const stockLevels = Array.isArray(raw.stockLevels) ? raw.stockLevels : [];
   const cashDrawer = raw.cashDrawer;

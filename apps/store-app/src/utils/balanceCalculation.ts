@@ -5,7 +5,8 @@
  * All balance queries MUST use this logic.
  * 
  * Rule: Balances are DERIVED from journal entries, not stored values.
- * Stored values (entities.usd_balance) are CACHE for performance only.
+ * Entity balance fields (usd_balance, lb_balance) have been removed.
+ * All balances are calculated from journal entries using the base currency schema.
  */
 
 import { db } from '../lib/db';
@@ -16,12 +17,34 @@ import type { JournalEntry } from '../types';
  * This logic is NON-NEGOTIABLE per accounting principles
  * 
  * @param entries - Journal entries to calculate balance from
+ * @param currency - Currency to calculate balance for ('USD' or 'LBP')
  * @returns Balance (positive = entity owes you, negative = you owe entity)
  */
-export function calculateBalance(entries: JournalEntry[]): number {
+export function calculateBalance(entries: JournalEntry[], currency: 'USD' | 'LBP'): number {
+  return entries.reduce((sum, e) => {
+    if (currency === 'USD') {
+      return sum + (e.debit_usd - e.credit_usd);
+    } else {
+      return sum + (e.debit_lbp - e.credit_lbp);
+    }
+  }, 0);
+}
+
+/**
+ * Calculate both USD and LBP balances from the same journal entries
+ * More efficient than calling calculateBalance twice
+ * 
+ * @param entries - Journal entries to calculate balance from
+ * @returns Object with USD and LBP balances
+ */
+export function calculateBothCurrencies(entries: JournalEntry[]): { USD: number; LBP: number } {
   return entries.reduce(
-    (sum, e) => sum + (e.debit - e.credit),
-    0
+    (acc, e) => {
+      acc.USD += e.debit_usd - e.credit_usd;
+      acc.LBP += e.debit_lbp - e.credit_lbp;
+      return acc;
+    },
+    { USD: 0, LBP: 0 }
   );
 }
 
@@ -47,14 +70,14 @@ export async function calculateEntityBalance(
   accountCode: '1200' | '2100' = '1200'
 ): Promise<number> {
   try {
-    // Try to use compound index for optimal performance
+    // Get all journal entries for this entity and account (both currencies in same entries)
     const entries = await db.journal_entries
-      .where('[entity_id+currency+account_code]')
-      .equals([entityId, currency, accountCode])
+      .where('[entity_id+account_code]')
+      .equals([entityId, accountCode])
       .and(e => e.is_posted === true)
       .toArray();
 
-    return calculateBalance(entries);
+    return calculateBalance(entries, currency);
   } catch (error) {
     // Fallback: If compound index doesn't exist, filter manually
     // This happens during migration or if schema upgrade hasn't run yet
@@ -63,10 +86,10 @@ export async function calculateEntityBalance(
     const entries = await db.journal_entries
       .where('entity_id')
       .equals(entityId)
-      .and(e => e.currency === currency && e.account_code === accountCode && e.is_posted === true)
+      .and(e => e.account_code === accountCode && e.is_posted === true)
       .toArray();
 
-    return calculateBalance(entries);
+    return calculateBalance(entries, currency);
   }
 }
 
@@ -87,17 +110,17 @@ export async function calculateCashDrawerBalance(
   currency: 'USD' | 'LBP'
 ): Promise<number> {
   try {
-    // Try to use compound index for optimal performance
+    // Get all cash journal entries for this store and branch (both currencies in same entries)
     const entries = await db.journal_entries
-      .where('[store_id+currency+account_code]')
-      .equals([storeId, currency, '1100'])
+      .where('[store_id+account_code]')
+      .equals([storeId, '1100'])
       .and(e => e.is_posted === true && e.branch_id === branchId)
       .toArray();
 
-    return calculateBalance(entries);
+    return calculateBalance(entries, currency);
   } catch (error) {
     // Fallback: If compound index doesn't exist, use simpler index and filter manually
-    console.warn('Compound index [store_id+currency+account_code] not available, using fallback query');
+    console.warn('Compound index [store_id+account_code] not available, using fallback query');
     
     // Use store_id+branch_id index for exact match
     const entries = await db.journal_entries
@@ -105,12 +128,11 @@ export async function calculateCashDrawerBalance(
       .equals([storeId, branchId])
       .and(e => 
         e.account_code === '1100' &&
-        e.currency === currency && 
         e.is_posted === true
       )
       .toArray();
 
-    return calculateBalance(entries);
+    return calculateBalance(entries, currency);
   }
 }
 
@@ -159,8 +181,10 @@ export async function calculateExpectedCashInSession(
     .toArray();
 
   // Calculate inflows (debits to cash) and outflows (credits from cash)
-  const inflows = entries.reduce((sum, e) => sum + e.debit, 0);
-  const outflows = entries.reduce((sum, e) => sum + e.credit, 0);
+  // Note: This function needs currency parameter, but for now we'll use USD as default
+  // TODO: Update this function signature to accept currency parameter
+  const inflows = entries.reduce((sum, e) => sum + e.debit_usd, 0);
+  const outflows = entries.reduce((sum, e) => sum + e.credit_usd, 0);
   const expectedAmount = openingAmount + inflows - outflows;
 
   return {
@@ -172,14 +196,12 @@ export async function calculateExpectedCashInSession(
 }
 
 /**
- * Verify that cached balance matches journal-derived balance
+ * @deprecated This function is no longer needed - balances are always calculated from journal entries
+ * There are no cached balance fields to verify against.
+ * Use calculateEntityBalance() directly to get the balance.
  * 
- * This is a safety check to ensure data integrity.
- * Cached balances should ALWAYS match journal truth.
- * 
- * @param entityId - Entity to verify
- * @param currency - Currency to check
- * @returns Verification result
+ * This function is kept for backward compatibility but always returns true
+ * since there are no cached balances to verify.
  */
 export async function verifyCachedBalance(
   entityId: string,
@@ -190,15 +212,12 @@ export async function verifyCachedBalance(
   journalBalance: number;
   difference: number;
 }> {
+  // Balances are now always calculated from journal entries (source of truth)
+  // There are no cached balance fields to verify against
   const entity = await db.entities.get(entityId);
   if (!entity) {
     throw new Error(`Entity not found: ${entityId}`);
   }
-
-  // Get cached balance
-  const cachedBalance = currency === 'USD' 
-    ? (entity.usd_balance || 0)
-    : (entity.lb_balance || 0);
 
   // Get journal-derived balance (TRUTH)
   const accountCode = entity.entity_type === 'supplier' ? '2100' : '1200';
@@ -208,29 +227,24 @@ export async function verifyCachedBalance(
     accountCode as '1200' | '2100'
   );
 
-  const difference = Math.abs(cachedBalance - journalBalance);
-  const isValid = difference < 0.01; // Allow tiny rounding errors
-
+  // Always valid since there's no cached balance to compare against
   return {
-    isValid,
-    cachedBalance,
+    isValid: true,
+    cachedBalance: journalBalance, // No cached balance, use journal balance
     journalBalance,
-    difference
+    difference: 0
   };
 }
 
 /**
- * Get balance for display (uses cache for performance)
+ * Get balance for display (calculated from journal entries)
  * 
- * NOTE: This returns the CACHED balance for UI performance.
- * The cached balance should be kept in sync with journal truth
- * by the accounting service.
- * 
- * Use calculateEntityBalance() if you need the absolute truth.
+ * NOTE: This function now calculates balance from journal entries.
+ * For better performance, use entityBalanceService.getEntityBalance() with snapshot optimization.
  * 
  * @param entityId - Entity ID
  * @param currency - Currency
- * @returns Cached balance (fast)
+ * @returns Balance calculated from journal entries
  */
 export async function getDisplayBalance(
   entityId: string,
@@ -239,9 +253,13 @@ export async function getDisplayBalance(
   const entity = await db.entities.get(entityId);
   if (!entity) return 0;
 
-  return currency === 'USD' 
-    ? (entity.usd_balance || 0)
-    : (entity.lb_balance || 0);
+  // Calculate balance from journal entries (no cached balance fields)
+  const accountCode = entity.entity_type === 'supplier' ? '2100' : '1200';
+  return await calculateEntityBalance(
+    entityId,
+    currency,
+    accountCode as '1200' | '2100'
+  );
 }
 
 /**

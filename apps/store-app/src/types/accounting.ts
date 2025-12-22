@@ -4,6 +4,8 @@
 /**
  * Journal Entry - Source of Truth for all financial transactions
  * Every financial transaction creates at least two journal entries (debit + credit)
+ * 
+ * Uses base currency fields to support both USD and LBP in a single entry
  */
 export interface JournalEntry {
   id: string;
@@ -12,9 +14,10 @@ export interface JournalEntry {
   transaction_id: string;         // Groups debit + credit entries
   account_code: string;           // '1100', '1200', etc.
   account_name: string;
-  debit: number;
-  credit: number;
-  currency: 'USD' | 'LBP';
+  debit_usd: number;              // USD debit amount
+  credit_usd: number;              // USD credit amount
+  debit_lbp: number;               // LBP debit amount
+  credit_lbp: number;              // LBP credit amount
   entity_id: string;              // NEVER NULL - references entities table
   entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
   posted_date: string;
@@ -57,8 +60,6 @@ export interface Entity {
   entity_code: string;
   name: string;
   phone: string | null;
-  lb_balance: number;             // Cached balance
-  usd_balance: number;            // Cached balance
   is_system_entity: boolean;      // true for "Cash Customer", "Internal", etc.
   is_active: boolean;
   customer_data: object | null;   // Type-specific JSON data
@@ -126,18 +127,22 @@ export interface TransactionResult {
 
 /**
  * Journal entry creation parameters
+ * Supports both USD and LBP amounts in a single entry
  */
 export interface CreateJournalEntryParams {
   transactionId: string;
   debitAccount: string;
   creditAccount: string;
-  amount: number;
-  currency: 'USD' | 'LBP';
+  amountUSD?: number;              // USD amount (optional, defaults to 0)
+  amountLBP?: number;              // LBP amount (optional, defaults to 0)
   entityId: string;
   description?: string;
   postedDate?: string;
   createdBy?: string | null;  // User ID (UUID) - null for system-generated
   branchId: string;  // Branch ID - required, must match transaction.branch_id
+  // Legacy support - if currency/amount provided, will be converted
+  amount?: number;                 // Legacy: single amount
+  currency?: 'USD' | 'LBP';       // Legacy: single currency
 }
 
 /**

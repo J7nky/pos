@@ -509,16 +509,24 @@ export class AccountingFlowTester {
         transactionGroups.set(journal.transaction_id, group);
       });
 
-      // Verify each transaction has balanced entries
+      // Verify each transaction has balanced entries (for both USD and LBP)
       let allBalanced = true;
       const unbalancedTransactions: string[] = [];
 
       for (const [txnId, journals] of transactionGroups.entries()) {
-        const totalDebits = journals.reduce((sum, j) => sum + j.debit, 0);
-        const totalCredits = journals.reduce((sum, j) => sum + j.credit, 0);
+        // Check USD balance
+        const totalDebitsUSD = journals.reduce((sum, j) => sum + (j.debit_usd || 0), 0);
+        const totalCreditsUSD = journals.reduce((sum, j) => sum + (j.credit_usd || 0), 0);
+        
+        // Check LBP balance
+        const totalDebitsLBP = journals.reduce((sum, j) => sum + (j.debit_lbp || 0), 0);
+        const totalCreditsLBP = journals.reduce((sum, j) => sum + (j.credit_lbp || 0), 0);
 
         // Allow for small rounding errors (0.01)
-        if (Math.abs(totalDebits - totalCredits) > 0.01) {
+        const usdBalanced = Math.abs(totalDebitsUSD - totalCreditsUSD) < 0.01;
+        const lbpBalanced = Math.abs(totalDebitsLBP - totalCreditsLBP) < 0.01;
+        
+        if (!usdBalanced || !lbpBalanced) {
           allBalanced = false;
           unbalancedTransactions.push(txnId);
         }

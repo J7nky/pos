@@ -5,6 +5,7 @@ import { useI18n } from '../i18n';
 import { useCurrency } from '../hooks/useCurrency';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useProductMultilingual } from '../hooks/useMultilingual';
+import { useEntityBalances } from '../hooks/useEntityBalances';
 import { 
   generatePaymentReference, 
   generateExpenseReference,
@@ -56,8 +57,35 @@ export default function Accounting() {
   const getCashDrawerSessionDetails = raw.getCashDrawerSessionDetails;
   const getCurrentCashDrawerStatus = raw.getCurrentCashDrawerStatus;
   const transactions = raw.transactions?.map(t => ({...t, createdAt: t.created_at})) || [];
-  const customers = raw.customers?.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance, usd_balance: c.usd_balance})) || [];
-  const suppliers = raw.suppliers?.map(s => ({...s, createdAt: s.created_at, lb_balance: s.lb_balance, usd_balance: s.usd_balance})) || [];
+  
+  // Get customer entities and calculate balances from journal entries
+  const customerEntities = raw.customers || [];
+  const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
+  const customerBalances = useEntityBalances(customerIds, 'customer', true);
+  const customers = customerEntities.map(c => {
+    const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+    return {
+      ...c, 
+      isActive: c.is_active, 
+      createdAt: c.created_at, 
+      lb_balance: balances.LBP,  // From journal entries
+      usd_balance: balances.USD  // From journal entries
+    };
+  });
+  
+  // Get supplier entities and calculate balances from journal entries
+  const supplierEntities = raw.suppliers || [];
+  const supplierIds = useMemo(() => supplierEntities.map(s => s.id), [supplierEntities]);
+  const supplierBalances = useEntityBalances(supplierIds, 'supplier', true);
+  const suppliers = supplierEntities.map(s => {
+    const balances = supplierBalances.getBalances(s.id) || { USD: 0, LBP: 0 };
+    return {
+      ...s, 
+      createdAt: s.created_at, 
+      lb_balance: balances.LBP,  // From journal entries
+      usd_balance: balances.USD  // From journal entries
+    };
+  });
   const expenseCategories = raw.expenseCategories || [];
   const inventory = raw.inventory || [];
   const sales = raw.sales || [];
@@ -795,18 +823,8 @@ export default function Accounting() {
           created_by: userProfile?.id || ''
         });
         
-        // Update supplier balance with commission (increases what we owe them)
-        const supplier = suppliers.find(s => s.id === bill.supplier_id);
-        if (supplier) {
-          // Commission is typically in LBP
-          const currentLbBalance = supplier.lb_balance || 0;
-          const newLbBalance = currentLbBalance + fees.commission;
-          
-          await raw.updateSupplier(bill.supplier_id, {
-            lb_balance: newLbBalance
-          });
-          console.log(`💰 Updated supplier ${bill.supplierName} LBP balance: ${currentLbBalance} → ${newLbBalance} (commission: +${fees.commission})`);
-        }
+        // Balances are now calculated from journal entries - no need to update
+        // The transaction above will create journal entries which automatically update the balance
       }
 
       // Add porterage transaction (if applicable)
@@ -856,16 +874,8 @@ export default function Accounting() {
           created_by: userProfile?.id || ''
         });
         console.log('supplier', bill.supplier_id, 'fees.supplierAmount', fees.supplierAmount);
-        // Update supplier balance
-        const supplier = suppliers.find(s => s.id === bill.supplier_id);
-        if (supplier) {
-          const currentUsdBalance = supplier.usd_balance || 0;
-          const newBalance = currentUsdBalance + fees.supplierAmount;
-
-          await raw.updateSupplier(bill.supplier_id, {
-            usd_balance: newBalance
-          });
-        }
+        // Balances are now calculated from journal entries - no need to update
+        // The transaction above will create journal entries which automatically update the balance
       }
       console.log('bill', bill);
       // Persist closed flag onto the inventory batch by updating status

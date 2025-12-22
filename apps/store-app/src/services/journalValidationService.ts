@@ -63,8 +63,10 @@ export class JournalValidationService {
       const transactionIds = new Set<string>();
       
       for (const entry of entries) {
-        totals[entry.currency].debit += entry.debit;
-        totals[entry.currency].credit += entry.credit;
+        totals.USD.debit += entry.debit_usd;
+        totals.USD.credit += entry.credit_usd;
+        totals.LBP.debit += entry.debit_lbp;
+        totals.LBP.credit += entry.credit_lbp;
         transactionIds.add(entry.transaction_id);
       }
       
@@ -156,8 +158,10 @@ export class JournalValidationService {
       const totals = { USD: { debit: 0, credit: 0 }, LBP: { debit: 0, credit: 0 } };
       
       for (const entry of entries) {
-        totals[entry.currency].debit += entry.debit;
-        totals[entry.currency].credit += entry.credit;
+        totals.USD.debit += entry.debit_usd;
+        totals.USD.credit += entry.credit_usd;
+        totals.LBP.debit += entry.debit_lbp;
+        totals.LBP.credit += entry.credit_lbp;
       }
       
       result.debits = { USD: totals.USD.debit, LBP: totals.LBP.debit };
@@ -179,19 +183,29 @@ export class JournalValidationService {
       
       // Check for invalid entries
       for (const entry of entries) {
-        if (entry.debit < 0 || entry.credit < 0) {
+        // Check USD amounts
+        if (entry.debit_usd < 0 || entry.credit_usd < 0 || entry.debit_lbp < 0 || entry.credit_lbp < 0) {
           result.isBalanced = false;
           result.errors.push(`Entry ${entry.id} has negative amounts`);
         }
         
-        if (entry.debit > 0 && entry.credit > 0) {
+        // Check that entry has either USD or LBP amounts (or both), but not both debit and credit in same currency
+        const hasUSD = entry.debit_usd > 0 || entry.credit_usd > 0;
+        const hasLBP = entry.debit_lbp > 0 || entry.credit_lbp > 0;
+        
+        if (!hasUSD && !hasLBP) {
           result.isBalanced = false;
-          result.errors.push(`Entry ${entry.id} has both debit and credit amounts`);
+          result.errors.push(`Entry ${entry.id} has zero amounts for both currencies`);
         }
         
-        if (entry.debit === 0 && entry.credit === 0) {
+        if (entry.debit_usd > 0 && entry.credit_usd > 0) {
           result.isBalanced = false;
-          result.errors.push(`Entry ${entry.id} has zero amounts`);
+          result.errors.push(`Entry ${entry.id} has both USD debit and credit amounts`);
+        }
+        
+        if (entry.debit_lbp > 0 && entry.credit_lbp > 0) {
+          result.isBalanced = false;
+          result.errors.push(`Entry ${entry.id} has both LBP debit and credit amounts`);
         }
       }
       
@@ -253,17 +267,26 @@ export class JournalValidationService {
   validateJournalEntry(entry: JournalEntry): { isValid: boolean; errors: string[] } {
     const errors: string[] = [];
     
-    // Check amounts
-    if (entry.debit < 0 || entry.credit < 0) {
-      errors.push('Debit and credit amounts must be non-negative');
+    // Check amounts - must be non-negative
+    if (entry.debit_usd < 0 || entry.credit_usd < 0 || entry.debit_lbp < 0 || entry.credit_lbp < 0) {
+      errors.push('All debit and credit amounts must be non-negative');
     }
     
-    if (entry.debit > 0 && entry.credit > 0) {
-      errors.push('Entry cannot have both debit and credit amounts');
+    // Check that entry has at least one currency amount
+    const hasUSD = entry.debit_usd > 0 || entry.credit_usd > 0;
+    const hasLBP = entry.debit_lbp > 0 || entry.credit_lbp > 0;
+    
+    if (!hasUSD && !hasLBP) {
+      errors.push('Entry must have at least one currency amount (USD or LBP)');
     }
     
-    if (entry.debit === 0 && entry.credit === 0) {
-      errors.push('Entry must have either debit or credit amount');
+    // Check that each currency doesn't have both debit and credit
+    if (entry.debit_usd > 0 && entry.credit_usd > 0) {
+      errors.push('Entry cannot have both USD debit and credit amounts');
+    }
+    
+    if (entry.debit_lbp > 0 && entry.credit_lbp > 0) {
+      errors.push('Entry cannot have both LBP debit and credit amounts');
     }
     
     // Check required fields
@@ -277,10 +300,6 @@ export class JournalValidationService {
     
     if (!entry.transaction_id) {
       errors.push('Transaction ID is required');
-    }
-    
-    if (!['USD', 'LBP'].includes(entry.currency)) {
-      errors.push('Currency must be USD or LBP');
     }
     
     // Check date format
@@ -319,13 +338,15 @@ export class JournalValidationService {
       if (!balancesByAccount[entry.account_code]) {
         balancesByAccount[entry.account_code] = { USD: 0, LBP: 0 };
       }
-      balancesByAccount[entry.account_code][entry.currency] += entry.debit - entry.credit;
+      balancesByAccount[entry.account_code].USD += entry.debit_usd - entry.credit_usd;
+      balancesByAccount[entry.account_code].LBP += entry.debit_lbp - entry.credit_lbp;
       
       // Entity balances
       if (!balancesByEntity[entry.entity_id]) {
         balancesByEntity[entry.entity_id] = { USD: 0, LBP: 0 };
       }
-      balancesByEntity[entry.entity_id][entry.currency] += entry.debit - entry.credit;
+      balancesByEntity[entry.entity_id].USD += entry.debit_usd - entry.credit_usd;
+      balancesByEntity[entry.entity_id].LBP += entry.debit_lbp - entry.credit_lbp;
       
       // Entries by period
       const period = entry.fiscal_period || entry.posted_date.substring(0, 7); // YYYY-MM
