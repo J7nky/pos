@@ -3,7 +3,7 @@
 //
 // Creates journal entries alongside existing transactions for explicit double-entry bookkeeping
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { JournalEntry, CreateJournalEntryParams } from '../types/accounting';
 import { accountingInitService } from './accountingInitService';
 import { journalValidationService } from './journalValidationService';
@@ -76,7 +76,7 @@ export class JournalService {
     }
     
     // Get entity info
-    const entity = await db.entities.get(entityId);
+    const entity = await getDB().entities.get(entityId);
     if (!entity) {
       throw new Error(`Entity not found: ${entityId}`);
     }
@@ -139,7 +139,7 @@ export class JournalService {
     }
     
     // Insert both entries atomically
-    await db.journal_entries.bulkAdd([debitEntry, creditEntry]);
+    await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);
     
     // Verify transaction balance after insertion
     const balanceCheck = await this.verifyTransactionBalance(transactionId);
@@ -337,7 +337,7 @@ export class JournalService {
    * Get journal entries for a transaction
    */
   async getJournalEntriesForTransaction(transactionId: string): Promise<JournalEntry[]> {
-    return await db.journal_entries
+    return await getDB().journal_entries
       .where('transaction_id')
       .equals(transactionId)
       .toArray();
@@ -351,7 +351,7 @@ export class JournalService {
     startDate?: string,
     endDate?: string
   ): Promise<JournalEntry[]> {
-    let query = db.journal_entries.where('entity_id').equals(entityId);
+    let query = getDB().journal_entries.where('entity_id').equals(entityId);
     
     if (startDate && endDate) {
       query = query.filter(entry => 
@@ -371,7 +371,7 @@ export class JournalService {
     startDate?: string,
     endDate?: string
   ): Promise<JournalEntry[]> {
-    let query = db.journal_entries
+    let query = getDB().journal_entries
       .where('[store_id+account_code]')
       .equals([storeId, accountCode]);
     
@@ -393,7 +393,7 @@ export class JournalService {
     accountCode: string,
     asOfDate?: string
   ): Promise<{ USD: number; LBP: number }> {
-    let query = db.journal_entries
+    let query = getDB().journal_entries
       .where('[store_id+account_code]')
       .equals([storeId, accountCode]);
     
@@ -438,7 +438,7 @@ export class JournalService {
   // Helper methods
   
   private async getStoreIdFromEntity(entityId: string): Promise<string> {
-    const entity = await db.entities.get(entityId);
+    const entity = await getDB().entities.get(entityId);
     if (!entity) {
       throw new Error(`Entity not found: ${entityId}`);
     }

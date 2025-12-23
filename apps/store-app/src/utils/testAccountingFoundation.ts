@@ -1,7 +1,10 @@
 // Simple Browser Test for Accounting Foundation
 // Run this in the browser console to test the implementation
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
+
+// Get singleton database instance
+const db = getDB();
 
 /**
  * Simple test that can be run in the browser console
@@ -78,7 +81,7 @@ async function createTestData(storeId: string): Promise<void> {
     is_active: true
   };
   
-  await db.chart_of_accounts.add(account as any);
+  await getDB().chart_of_accounts.add(account as any);
   console.log('   ✅ Chart of accounts entry created');
   
   // Create entity
@@ -101,7 +104,7 @@ async function createTestData(storeId: string): Promise<void> {
     _synced: false
   };
   
-  await db.entities.add(entity as any);
+  await getDB().entities.add(entity as any);
   console.log('   ✅ Entity created');
   
   // Create journal entries
@@ -145,7 +148,7 @@ async function createTestData(storeId: string): Promise<void> {
     }
   ];
   
-  await db.journal_entries.bulkAdd(journalEntries as any);
+  await getDB().journal_entries.bulkAdd(journalEntries as any);
   console.log('   ✅ Journal entries created (double-entry)');
   
   // Create balance snapshot
@@ -164,13 +167,13 @@ async function createTestData(storeId: string): Promise<void> {
     _synced: false
   };
   
-  await db.balance_snapshots.add(snapshot as any);
+  await getDB().balance_snapshots.add(snapshot as any);
   console.log('   ✅ Balance snapshot created');
 }
 
 async function queryTestData(storeId: string): Promise<void> {
   // Query entities
-  const entities = await db.entities
+  const entities = await getDB().entities
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -181,7 +184,7 @@ async function queryTestData(storeId: string): Promise<void> {
   });
   
   // Query journal entries
-  const journalEntries = await db.journal_entries
+  const journalEntries = await getDB().journal_entries
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -189,7 +192,7 @@ async function queryTestData(storeId: string): Promise<void> {
   console.log(`   📚 Found ${journalEntries.length} journal entries`);
   
   // Query snapshots
-  const snapshots = await db.balance_snapshots
+  const snapshots = await getDB().balance_snapshots
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -200,7 +203,7 @@ async function queryTestData(storeId: string): Promise<void> {
 async function performanceTest(storeId: string): Promise<void> {
   // Test entity query performance
   const entityStart = performance.now();
-  const entities = await db.entities
+  const entities = await getDB().entities
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -209,7 +212,7 @@ async function performanceTest(storeId: string): Promise<void> {
   // Test snapshot query performance (O(1) lookup)
   const snapshotStart = performance.now();
   const today = new Date().toISOString().split('T')[0];
-  const snapshot = await db.balance_snapshots
+  const snapshot = await getDB().balance_snapshots
     .where('[entity_id+account_code+snapshot_date]')
     .equals(['test-customer-browser', '1200', today])
     .first();
@@ -225,7 +228,7 @@ async function performanceTest(storeId: string): Promise<void> {
 
 async function dataIntegrityTest(storeId: string): Promise<void> {
   // Check journal entry balance
-  const journalEntries = await db.journal_entries
+  const journalEntries = await getDB().journal_entries
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -252,7 +255,7 @@ async function dataIntegrityTest(storeId: string): Promise<void> {
   console.log(`      LBP - Debits: ${totalDebitsLBP.toFixed(2)}, Credits: ${totalCreditsLBP.toFixed(2)}`);
   
   // Check snapshot accuracy
-  const snapshot = await db.balance_snapshots
+  const snapshot = await getDB().balance_snapshots
     .where('store_id')
     .equals(storeId)
     .first();
@@ -263,16 +266,16 @@ async function dataIntegrityTest(storeId: string): Promise<void> {
 }
 
 async function cleanupTestData(storeId: string): Promise<void> {
-  await db.transaction('rw', [
-    db.chart_of_accounts,
-    db.entities,
-    db.journal_entries,
-    db.balance_snapshots
+  await getDB().transaction('rw', [
+    getDB().chart_of_accounts,
+    getDB().entities,
+    getDB().journal_entries,
+    getDB().balance_snapshots
   ], async () => {
-    await db.chart_of_accounts.where('store_id').equals(storeId).delete();
-    await db.entities.where('store_id').equals(storeId).delete();
-    await db.journal_entries.where('store_id').equals(storeId).delete();
-    await db.balance_snapshots.where('store_id').equals(storeId).delete();
+    await getDB().chart_of_accounts.where('store_id').equals(storeId).delete();
+    await getDB().entities.where('store_id').equals(storeId).delete();
+    await getDB().journal_entries.where('store_id').equals(storeId).delete();
+    await getDB().balance_snapshots.where('store_id').equals(storeId).delete();
   });
   
   console.log('   🧹 Test data cleaned up');

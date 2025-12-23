@@ -81,7 +81,8 @@ export async function testDatabaseTables(): Promise<void> {
   console.log('🧪 Testing Database Tables...');
   
   try {
-    const { db } = await import('../lib/db');
+    const { getDB } = await import('../lib/db');
+    const db = getDB();
     
     // Test journal_entries table
     const journalCount = await db.journal_entries.count();

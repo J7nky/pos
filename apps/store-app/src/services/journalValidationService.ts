@@ -1,7 +1,7 @@
 // Journal Validation Service - Phase 3 of Accounting Foundation Migration
 // Ensures double-entry bookkeeping integrity and validates journal entries
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { JournalEntry } from '../types/accounting';
 
 export interface ValidationResult {
@@ -48,7 +48,7 @@ export class JournalValidationService {
     
     try {
       // Get all journal entries for the store
-      const entries = await db.journal_entries
+      const entries = await getDB().journal_entries
         .where('store_id')
         .equals(storeId)
         .toArray();
@@ -134,7 +134,7 @@ export class JournalValidationService {
     const results: TransactionValidationResult[] = [];
     
     for (const transactionId of transactionIds) {
-      const entries = await db.journal_entries
+      const entries = await getDB().journal_entries
         .where('transaction_id')
         .equals(transactionId)
         .toArray();
@@ -219,7 +219,7 @@ export class JournalValidationService {
    * Find journal entries that don't have corresponding transaction records
    */
   async findOrphanedEntries(storeId: string): Promise<JournalEntry[]> {
-    const journalEntries = await db.journal_entries
+    const journalEntries = await getDB().journal_entries
       .where('store_id')
       .equals(storeId)
       .toArray();
@@ -227,7 +227,7 @@ export class JournalValidationService {
     const orphanedEntries: JournalEntry[] = [];
     
     for (const entry of journalEntries) {
-      const transaction = await db.transactions.get(entry.transaction_id);
+      const transaction = await getDB().transactions.get(entry.transaction_id);
       if (!transaction) {
         orphanedEntries.push(entry);
       }
@@ -240,7 +240,7 @@ export class JournalValidationService {
    * Find transactions that don't have journal entries
    */
   async findTransactionsWithoutJournalEntries(storeId: string): Promise<string[]> {
-    const transactions = await db.transactions
+    const transactions = await getDB().transactions
       .where('store_id')
       .equals(storeId)
       .toArray();
@@ -248,7 +248,7 @@ export class JournalValidationService {
     const transactionsWithoutJournalEntries: string[] = [];
     
     for (const transaction of transactions) {
-      const journalEntries = await db.journal_entries
+      const journalEntries = await getDB().journal_entries
         .where('transaction_id')
         .equals(transaction.id)
         .count();
@@ -323,7 +323,7 @@ export class JournalValidationService {
     balancesByEntity: Record<string, { USD: number; LBP: number }>;
     entriesByPeriod: Record<string, number>;
   }> {
-    const entries = await db.journal_entries
+    const entries = await getDB().journal_entries
       .where('store_id')
       .equals(storeId)
       .toArray();

@@ -3,7 +3,7 @@
  * Verifies that branch context is automatically working across all services
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { ensureDefaultBranch } from '../lib/branchHelpers';
 import { crudHelperService } from '../services/crudHelperService';
 
@@ -16,7 +16,7 @@ export async function testBranchContextIntegration(): Promise<void> {
   try {
     // Create test store
     const testStoreId = 'test-store-branch-context';
-    await db.stores.put({
+    await getDB().stores.put({
       id: testStoreId,
       name: 'Test Store for Branch Context',
       preferred_currency: 'USD',
@@ -32,7 +32,7 @@ export async function testBranchContextIntegration(): Promise<void> {
     console.log('\n📝 Test 1: Creating branch-specific data...');
     
     // Create inventory item for this branch
-    const inventoryItemId = await db.inventory_items.add({
+    const inventoryItemId = await getDB().inventory_items.add({
       store_id: testStoreId,
       branch_id: branchId,
       product_id: 'test-product',
@@ -51,7 +51,7 @@ export async function testBranchContextIntegration(): Promise<void> {
     });
     
     // Create transaction for this branch
-    const transactionId = await db.transactions.add({
+    const transactionId = await getDB().transactions.add({
       store_id: testStoreId,
       branch_id: branchId,
       type: 'income',
@@ -98,7 +98,7 @@ export async function testBranchContextIntegration(): Promise<void> {
     console.log('\n🔒 Test 4: Testing branch isolation...');
     
     // Create second branch
-    const branch2Id = await db.branches.add({
+    const branch2Id = await getDB().branches.add({
       store_id: testStoreId,
       name: 'Branch 2',
       created_at: new Date().toISOString(),
@@ -108,7 +108,7 @@ export async function testBranchContextIntegration(): Promise<void> {
     });
     
     // Create data for second branch
-    await db.inventory_items.add({
+    await getDB().inventory_items.add({
       store_id: testStoreId,
       branch_id: branch2Id,
       product_id: 'test-product-2',
@@ -147,10 +147,10 @@ export async function testBranchContextIntegration(): Promise<void> {
     
     // Cleanup
     console.log('\n🧹 Cleaning up test data...');
-    await db.stores.delete(testStoreId);
-    await db.branches.where('store_id').equals(testStoreId).delete();
-    await db.inventory_items.where('store_id').equals(testStoreId).delete();
-    await db.transactions.where('store_id').equals(testStoreId).delete();
+    await getDB().stores.delete(testStoreId);
+    await getDB().branches.where('store_id').equals(testStoreId).delete();
+    await getDB().inventory_items.where('store_id').equals(testStoreId).delete();
+    await getDB().transactions.where('store_id').equals(testStoreId).delete();
     
     console.log('✅ Branch context integration test completed successfully!');
     

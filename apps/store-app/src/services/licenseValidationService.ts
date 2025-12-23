@@ -3,7 +3,7 @@
 
 import { LocalSubscription, LicenseValidation, LicenseFile, OfflineSubscriptionConfig } from '../types/subscription';
 import { DeviceFingerprintGenerator } from '../utils/deviceFingerprint';
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -185,7 +185,7 @@ export class LicenseValidationService {
    * Get current subscription for store
    */
   private async getCurrentSubscription(storeId: string): Promise<LocalSubscription | null> {
-    return await db.subscriptions
+    return await getDB().subscriptions
       .where('store_id')
       .equals(storeId)
       .and(sub => sub.status === 'active' || sub.status === 'trial')
@@ -216,7 +216,7 @@ export class LicenseValidationService {
       created_at: new Date().toISOString()
     };
     
-    await db.license_validations.add({
+    await getDB().license_validations.add({
       id: crypto.randomUUID(),
       ...validation
     });
@@ -226,7 +226,7 @@ export class LicenseValidationService {
    * Update last validation timestamp
    */
   private async updateLastValidation(subscriptionId: string): Promise<void> {
-    await db.subscriptions.update(subscriptionId, {
+    await getDB().subscriptions.update(subscriptionId, {
       last_validated_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     });
@@ -280,13 +280,13 @@ export class LicenseValidationService {
       };
       
       // Deactivate existing subscriptions
-      await db.subscriptions
+      await getDB().subscriptions
         .where('store_id')
         .equals(storeId)
         .modify({ status: 'suspended' });
       
       // Add new subscription
-      await db.subscriptions.add({
+      await getDB().subscriptions.add({
         id: crypto.randomUUID(),
         ...subscription
       });

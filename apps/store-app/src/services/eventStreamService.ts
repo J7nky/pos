@@ -17,8 +17,11 @@
  */
 
 import { supabase } from '../lib/supabase';
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { RealtimeChannel } from '@supabase/supabase-js';
+
+// Get singleton database instance
+const db = getDB();
 
 export interface BranchEvent {
   id: string;
@@ -251,9 +254,9 @@ export class EventStreamService {
         console.log(`[EventStream] No sync state found for branch ${branchId}, checking if database has data...`);
         
         // Check if database has any data (pick a table that's likely to have records)
-        const hasData = await db.products.limit(1).count() > 0 || 
-                        await db.bills.limit(1).count() > 0 ||
-                        await db.transactions.limit(1).count() > 0;
+        const hasData = await getDB().products.limit(1).count() > 0 || 
+                        await getDB().bills.limit(1).count() > 0 ||
+                        await getDB().transactions.limit(1).count() > 0;
 
         if (hasData) {
           console.log(`[EventStream] Database has data but no sync state - initializing to current max version to avoid replaying all events`);
@@ -719,7 +722,7 @@ export class EventStreamService {
    */
   private async getSyncState(branchId: string): Promise<SyncState | null> {
     try {
-      const state = await db.sync_state.get(branchId);
+      const state = await getDB().sync_state.get(branchId);
       if (state) {
         return {
           branch_id: state.branch_id,
@@ -740,7 +743,7 @@ export class EventStreamService {
    */
   private async updateSyncState(branchId: string, lastVersion: number): Promise<void> {
     try {
-      await db.sync_state.put({
+      await getDB().sync_state.put({
         branch_id: branchId,
         last_seen_event_version: lastVersion,
         updated_at: new Date().toISOString(),

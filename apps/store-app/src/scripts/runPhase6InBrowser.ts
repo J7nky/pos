@@ -1,7 +1,10 @@
 // Phase 6: Browser-Compatible Testing Script
 // Run this in the browser console to test all phases
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
+
+// Get singleton database instance
+const db = getDB();
 
 /**
  * Simple Phase 6 Test Runner for Browser Console
@@ -89,16 +92,16 @@ async function testEntitiesTable(storeId: string): Promise<boolean> {
       _synced: false
     };
     
-    await db.entities.add(testEntity as any);
+    await getDB().entities.add(testEntity as any);
     
     // Retrieve and verify
-    const retrieved = await db.entities.get('test-entity-browser');
+    const retrieved = await getDB().entities.get('test-entity-browser');
     if (!retrieved || retrieved.entity_type !== 'customer') {
       throw new Error('Entity creation/retrieval failed');
     }
     
     // Test query by type
-    const customers = await db.entities
+    const customers = await getDB().entities
       .where('store_id')
       .equals(storeId)
       .filter((entity: any) => entity.entity_type === 'customer')
@@ -107,7 +110,7 @@ async function testEntitiesTable(storeId: string): Promise<boolean> {
     console.log(`   📊 Found ${customers.length} customers`);
     
     // Cleanup
-    await db.entities.delete('test-entity-browser');
+    await getDB().entities.delete('test-entity-browser');
     
     console.log('   ✅ Entities table working correctly');
     return true;
@@ -160,10 +163,10 @@ async function testJournalEntries(storeId: string): Promise<boolean> {
       _synced: false
     };
     
-    await db.journal_entries.bulkAdd([debitEntry, creditEntry] as any);
+    await getDB().journal_entries.bulkAdd([debitEntry, creditEntry] as any);
     
     // Verify entries
-    const entries = await db.journal_entries
+    const entries = await getDB().journal_entries
       .where('transaction_id')
       .equals(transactionId)
       .toArray();
@@ -183,7 +186,7 @@ async function testJournalEntries(storeId: string): Promise<boolean> {
     console.log(`   📊 Created balanced journal entries: ${totalDebits} debits = ${totalCredits} credits`);
     
     // Cleanup
-    await db.journal_entries.where('transaction_id').equals(transactionId).delete();
+    await getDB().journal_entries.where('transaction_id').equals(transactionId).delete();
     
     console.log('   ✅ Journal entries working correctly');
     return true;
@@ -213,16 +216,16 @@ async function testBalanceSnapshots(storeId: string): Promise<boolean> {
       _synced: false
     };
     
-    await db.balance_snapshots.add(testSnapshot as any);
+    await getDB().balance_snapshots.add(testSnapshot as any);
     
     // Retrieve and verify
-    const retrieved = await db.balance_snapshots.get('test-snapshot-browser');
+    const retrieved = await getDB().balance_snapshots.get('test-snapshot-browser');
     if (!retrieved || retrieved.balance_usd !== 1000) {
       throw new Error('Snapshot creation/retrieval failed');
     }
     
     // Test query by date
-    const snapshots = await db.balance_snapshots
+    const snapshots = await getDB().balance_snapshots
       .where('snapshot_date')
       .equals(today)
       .toArray();
@@ -230,7 +233,7 @@ async function testBalanceSnapshots(storeId: string): Promise<boolean> {
     console.log(`   📊 Found ${snapshots.length} snapshots for ${today}`);
     
     // Cleanup
-    await db.balance_snapshots.delete('test-snapshot-browser');
+    await getDB().balance_snapshots.delete('test-snapshot-browser');
     
     console.log('   ✅ Balance snapshots working correctly');
     return true;

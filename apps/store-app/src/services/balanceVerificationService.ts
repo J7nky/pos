@@ -8,7 +8,7 @@
  * Uses the canonical calculateBalance() function as the single source of truth.
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { calculateEntityBalance } from '../utils/balanceCalculation';
 
 export interface BalanceVerificationResult {
@@ -73,7 +73,7 @@ export class BalanceVerificationService {
    */
   async verifyEntityBalance(entityId: string): Promise<BalanceVerificationResult> {
     // Get entity from database
-    const entity = await db.entities.get(entityId);
+    const entity = await getDB().entities.get(entityId);
     if (!entity) {
       throw new Error(`Entity not found: ${entityId}`);
     }
@@ -149,7 +149,7 @@ export class BalanceVerificationService {
   async verifyAllBalances(storeId: string): Promise<BalanceReconciliationResult> {
     try {
       // Get all entities for the store
-      const entities = await db.entities
+      const entities = await getDB().entities
         .where('store_id')
         .equals(storeId)
         .and(e => !e._deleted && (e.entity_type === 'customer' || e.entity_type === 'supplier' || e.entity_type === 'employee'))

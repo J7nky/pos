@@ -5,7 +5,10 @@
  * and actual records processed during sync.
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
+
+// Get singleton database instance
+const db = getDB();
 
 export interface SyncDiscrepancy {
   tableName: string;

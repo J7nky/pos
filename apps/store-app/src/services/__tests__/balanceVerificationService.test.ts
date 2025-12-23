@@ -8,7 +8,7 @@ import { BalanceVerificationService, balanceVerificationService } from '../balan
 import { TransactionService } from '../transactionService';
 import { auditLogService } from '../auditLogService';
 import { currencyService } from '../currencyService';
-import { db } from '../../lib/db';
+import { getDB } from '../../lib/db';
 // Import removed - not used in balance verification tests
 
 // Mock dependencies
@@ -72,7 +72,7 @@ describe('BalanceVerificationService', () => {
         lb_balance: 150000.00
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       // Mock transactions that result in the same balance
       const mockTransactions = [
@@ -89,7 +89,7 @@ describe('BalanceVerificationService', () => {
       const result = await service.verifyEntityBalance('customer-123', 'customer');
 
       expect(result).toBeNull();
-      expect(db.customers.get).toHaveBeenCalledWith('customer-123');
+      expect(getDB().customers.get).toHaveBeenCalledWith('customer-123');
       expect(mockTransactionService.getTransactionsByEntity).toHaveBeenCalledWith('customer-123', 'customer');
     });
 
@@ -101,7 +101,7 @@ describe('BalanceVerificationService', () => {
         lb_balance: 0.00
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       // Mock transactions that should result in 50.00 balance
       const mockTransactions = [
@@ -141,7 +141,7 @@ describe('BalanceVerificationService', () => {
         lb_balance: 100000.00 // Stored balance
       };
 
-      (db.suppliers.get as any).mockResolvedValue(mockSupplier);
+      (getDB().suppliers.get as any).mockResolvedValue(mockSupplier);
 
       // Mock transactions that should result in 50000 LBP balance
       const mockTransactions = [
@@ -174,7 +174,7 @@ describe('BalanceVerificationService', () => {
     });
 
     it('should handle entity not found', async () => {
-      (db.customers.get as any).mockResolvedValue(null);
+      (getDB().customers.get as any).mockResolvedValue(null);
 
       await expect(service.verifyEntityBalance('non-existent', 'customer'))
         .rejects.toThrow('customer not found: non-existent');
@@ -188,7 +188,7 @@ describe('BalanceVerificationService', () => {
         lb_balance: 0.00
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       // Mock transactions with tiny rounding difference
       const mockTransactions = [
@@ -227,7 +227,7 @@ describe('BalanceVerificationService', () => {
         { id: 'supplier-1', name: 'Supplier 1', usd_balance: 0, lb_balance: 150000, _deleted: false }
       ];
 
-      (db.customers.where as any).mockReturnValue({
+      (getDB().customers.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             toArray: vi.fn().mockResolvedValue(mockCustomers)
@@ -235,7 +235,7 @@ describe('BalanceVerificationService', () => {
         })
       });
 
-      (db.suppliers.where as any).mockReturnValue({
+      (getDB().suppliers.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             toArray: vi.fn().mockResolvedValue(mockSuppliers)
@@ -276,7 +276,7 @@ describe('BalanceVerificationService', () => {
 
       const mockSuppliers: any[] = [];
 
-      (db.customers.where as any).mockReturnValue({
+      (getDB().customers.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             toArray: vi.fn().mockResolvedValue(mockCustomers)
@@ -284,7 +284,7 @@ describe('BalanceVerificationService', () => {
         })
       });
 
-      (db.suppliers.where as any).mockReturnValue({
+      (getDB().suppliers.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             toArray: vi.fn().mockResolvedValue(mockSuppliers)
@@ -326,7 +326,7 @@ describe('BalanceVerificationService', () => {
         difference: { USD: -50, LBP: 0 }
       };
 
-      (db.customers.update as any).mockResolvedValue(undefined);
+      (getDB().customers.update as any).mockResolvedValue(undefined);
 
       const result = await service.fixDiscrepancies([discrepancy], 'user-456', 'Test correction');
 
@@ -335,7 +335,7 @@ describe('BalanceVerificationService', () => {
       expect(result.errors).toHaveLength(0);
 
       // Should update customer balance
-      expect(db.customers.update).toHaveBeenCalledWith('customer-123', {
+      expect(getDB().customers.update).toHaveBeenCalledWith('customer-123', {
         usd_balance: 50,
         lb_balance: 0,
         updated_at: expect.any(String),
@@ -362,7 +362,7 @@ describe('BalanceVerificationService', () => {
         difference: { USD: 0, LBP: -25000 }
       };
 
-      (db.suppliers.update as any).mockResolvedValue(undefined);
+      (getDB().suppliers.update as any).mockResolvedValue(undefined);
 
       const result = await service.fixDiscrepancies([discrepancy], 'user-456', 'Test correction');
 
@@ -370,7 +370,7 @@ describe('BalanceVerificationService', () => {
       expect(result.failed).toBe(0);
 
       // Should update supplier balance
-      expect(db.suppliers.update).toHaveBeenCalledWith('supplier-456', {
+      expect(getDB().suppliers.update).toHaveBeenCalledWith('supplier-456', {
         usd_balance: 0,
         lb_balance: 75000,
         updated_at: expect.any(String),
@@ -397,7 +397,7 @@ describe('BalanceVerificationService', () => {
         difference: { USD: -50, LBP: 0 }
       };
 
-      (db.customers.update as any).mockRejectedValue(new Error('Database error'));
+      (getDB().customers.update as any).mockRejectedValue(new Error('Database error'));
 
       const result = await service.fixDiscrepancies([discrepancy], 'user-456', 'Test correction');
 
@@ -421,7 +421,7 @@ describe('BalanceVerificationService', () => {
         lb_balance: 0.00
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
       mockTransactionService.getTransactionsByEntity.mockResolvedValue([
         { type: 'expense', amount: 50, currency: 'USD' } // Should result in 50, but stored is 100
       ]);
@@ -439,7 +439,7 @@ describe('BalanceVerificationService', () => {
         lb_balance: 0.00
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
       mockTransactionService.getTransactionsByEntity.mockResolvedValue([
         { type: 'expense', amount: 100, currency: 'USD' } // Matches stored balance
       ]);
@@ -450,7 +450,7 @@ describe('BalanceVerificationService', () => {
     });
 
     it('should handle errors gracefully', async () => {
-      (db.customers.get as any).mockRejectedValue(new Error('Database error'));
+      (getDB().customers.get as any).mockRejectedValue(new Error('Database error'));
 
       const result = await service.hasDiscrepancies('customer-123', 'customer');
 
@@ -472,7 +472,7 @@ describe('BalanceVerificationService', () => {
         { id: 'supplier-1', name: 'Supplier 1', usd_balance: 0, lb_balance: 150000, _deleted: false }
       ];
 
-      (db.customers.where as any).mockReturnValue({
+      (getDB().customers.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             toArray: vi.fn().mockResolvedValue(mockCustomers)
@@ -480,7 +480,7 @@ describe('BalanceVerificationService', () => {
         })
       });
 
-      (db.suppliers.where as any).mockReturnValue({
+      (getDB().suppliers.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             toArray: vi.fn().mockResolvedValue(mockSuppliers)

@@ -1,4 +1,4 @@
-import { createId, db } from '../lib/db';
+import { createId, getDB } from '../lib/db';
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
 import { TransactionService } from './transactionService';
 
@@ -201,7 +201,7 @@ export class InventoryPurchaseService {
     
     try {
       // Get supplier entity (transactionService will handle balance update)
-      const supplierEntity = await db.entities.get(data.supplier_id);
+      const supplierEntity = await getDB().entities.get(data.supplier_id);
       const supplierName = supplierEntity?.name || 'Supplier';
 
       // Create transaction record for credit purchase using transactionService
@@ -349,7 +349,7 @@ export class InventoryPurchaseService {
   public async getOrCreateTradeSupplier(storeId: string): Promise<string> {
     try {
       // Look for existing "Trade" supplier entity
-      const existingSupplier = await db.entities
+      const existingSupplier = await getDB().entities
         .where('[store_id+entity_type]')
         .equals([storeId, 'supplier'])
         .filter(e => e.name === 'Trade' && !e._deleted)
@@ -386,7 +386,7 @@ export class InventoryPurchaseService {
         _deleted: false
       };
 
-      await db.entities.add(tradeSupplier);
+      await getDB().entities.add(tradeSupplier);
       return tradeSupplierId;
     } catch (error) {
       console.error('Error getting/creating Trade supplier:', error);

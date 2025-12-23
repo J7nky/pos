@@ -11,7 +11,7 @@
     "dev:simple": "node dev-simple.js",
     "dev:advanced": "concurrently \"npm run vite:dev\" \"npm run dev:electron\" --kill-others --prefix-colors cyan,blue",
     "vite:dev": "vite",
-    "dev:electron": "wait-on http://localhost:5175 && npm run build:electron && npx electron-reloader dist-electron/main.cjs --watch dist-electron --exec \"node_modules\\electron\\dist\\electron.exe .\"",
+    "dev:electron": "wait-on http://localhost:5178 && npm run build:electron && npx electron-reloader dist-electron/main.cjs --watch dist-electron --exec \"node_modules\\electron\\dist\\electron.exe .\"",
     "dev:electron:watch": "nodemon --watch electron --ext ts --exec \"npm run build:electron\"",
     "pack": "electron-builder --dir",
     "dist": "npm run build && electron-builder --publish=always",

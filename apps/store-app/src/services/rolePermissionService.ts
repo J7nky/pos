@@ -17,7 +17,7 @@
  * Follows offline-first pattern: IndexedDB → Supabase sync
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { ModuleName } from '../types';
 
 export class RolePermissionService {
@@ -36,13 +36,13 @@ export class RolePermissionService {
     storeId: string,
     module: ModuleName
   ): Promise<void> {
-    const user = await db.users.get(userId);
+    const user = await getDB().users.get(userId);
     if (!user) {
       throw new Error(`User not found: ${userId}`);
     }
 
     // Check for user-specific module access record
-    const moduleAccess = await db.user_module_access
+    const moduleAccess = await getDB().user_module_access
       .where('[user_id+store_id+module]')
       .equals([userId, storeId, module])
       .first();
@@ -78,7 +78,7 @@ export class RolePermissionService {
     userId: string,
     operation: string
   ): Promise<void> {
-    const user = await db.users.get(userId);
+    const user = await getDB().users.get(userId);
     if (!user) {
       throw new Error(`User not found: ${userId}`);
     }
@@ -112,7 +112,7 @@ export class RolePermissionService {
     
     if (!role) {
       // Fallback to database lookup if role not provided
-      const user = await db.users.get(userId);
+      const user = await getDB().users.get(userId);
       if (!user) {
         // If user not found and no role provided, return all false
         return {
@@ -128,7 +128,7 @@ export class RolePermissionService {
     }
 
     // Get all user-specific module access records
-    const userAccess = await db.user_module_access
+    const userAccess = await getDB().user_module_access
       .where('[user_id+store_id]')
       .equals([userId, storeId])
       .toArray();

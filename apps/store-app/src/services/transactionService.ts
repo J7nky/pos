@@ -5,7 +5,7 @@
  * ALL transaction operations MUST go through this service - NO EXCEPTIONS
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { currencyService } from './currencyService';
 import { auditLogService } from './auditLogService';
 import { journalService } from './journalService';
@@ -215,8 +215,8 @@ export class TransactionService {
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
       // ALL database write operations happen atomically
-      await db.transaction('rw', 
-        [db.transactions, db.cash_drawer_sessions, db.journal_entries, db.entities, db.chart_of_accounts, db.cash_drawer_accounts], 
+      await getDB().transaction('rw', 
+        [getDB().transactions, getDB().cash_drawer_sessions, getDB().journal_entries, getDB().entities, getDB().chart_of_accounts, getDB().cash_drawer_accounts], 
         async () => {
           // Create timestamp inside transaction block for accurate commit time
           const timestamp = new Date().toISOString();
@@ -224,7 +224,7 @@ export class TransactionService {
           
       console.log(timestamp,8383883)
       // 5. CREATE TRANSACTION RECORD
-          await db.transactions.add(transaction);
+          await getDB().transactions.add(transaction);
 
           // 6. CREATE JOURNAL ENTRIES (MANDATORY - ACCOUNTING RULE)
           // ✅ Journal entries are the source of truth for financial data
@@ -499,7 +499,7 @@ export class TransactionService {
   ): Promise<TransactionResult> {
     try {
       // Get original transaction (outside transaction - read-only)
-      const original = await db.transactions.get(transactionId);
+      const original = await getDB().transactions.get(transactionId);
       if (!original) {
         return {
           success: false,
@@ -526,8 +526,8 @@ export class TransactionService {
       const affectedRecords: string[] = [transactionId];
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
-      await db.transaction('rw', 
-        [db.transactions, db.entities, db.cash_drawer_sessions], 
+      await getDB().transaction('rw', 
+        [getDB().transactions, getDB().entities, getDB().cash_drawer_sessions], 
         async () => {
           // Get current balance before update
           balanceBefore = await this.getEntityBalance(
@@ -579,7 +579,7 @@ export class TransactionService {
           // Remove context from updates as it's not a transaction field
           delete updateData.context;
 
-          await db.transactions.update(transactionId, updateData);
+          await getDB().transactions.update(transactionId, updateData);
         }
       );
       // ⭐⭐⭐ END ATOMIC TRANSACTION ⭐⭐⭐
@@ -635,7 +635,7 @@ export class TransactionService {
   ): Promise<TransactionResult> {
     try {
       // Get original transaction (outside transaction - read-only)
-      const transaction = await db.transactions.get(transactionId);
+      const transaction = await getDB().transactions.get(transactionId);
       if (!transaction) {
         return {
           success: false,
@@ -666,8 +666,8 @@ export class TransactionService {
       // Include all object stores that updateCashDrawerAtomic needs:
       // - cash_drawer_accounts (for updating balance)
       // - journal_entries (for reading cash journal entries)
-      await db.transaction('rw', 
-        [db.transactions, db.entities, db.cash_drawer_sessions, db.cash_drawer_accounts, db.journal_entries], 
+      await getDB().transaction('rw', 
+        [getDB().transactions, getDB().entities, getDB().cash_drawer_sessions, getDB().cash_drawer_accounts, getDB().journal_entries], 
         async () => {
           // Get current balance before deletion
           balanceBefore = await this.getEntityBalance(
@@ -684,11 +684,11 @@ export class TransactionService {
           // Reverse cash drawer impact if applicable
           if (this.isCashDrawerCategory(transaction.category as TransactionCategory)) {
             // Calculate the original cash drawer impact and negate it
-            const account = await db.getCashDrawerAccount(context.storeId, context.branchId);
+            const account = await getDB().getCashDrawerAccount(context.storeId, context.branchId);
             
             if (account) {
               // Get journal entries for the original transaction to calculate what it did
-              const cashJournalEntries = await db.journal_entries
+              const cashJournalEntries = await getDB().journal_entries
                 .where('transaction_id')
                 .equals(transactionId)
                 .and(entry => entry.account_code === '1100' && entry.is_posted === true)
@@ -720,7 +720,7 @@ export class TransactionService {
 
           // Mark transaction as canceled using metadata (preserves history)
           const existingMetadata = transaction.metadata || {};
-          await db.transactions.update(transactionId, {
+          await getDB().transactions.update(transactionId, {
             metadata: {
               ...existingMetadata,
               deleted: true,
@@ -785,7 +785,7 @@ export class TransactionService {
    */
   public async getTransaction(transactionId: string): Promise<Transaction | null> {
     try {
-      const transaction = await db.transactions.get(transactionId);
+      const transaction = await getDB().transactions.get(transactionId);
       return transaction || null;
     } catch (error) {
       console.error('Error getting transaction:', error);
@@ -806,7 +806,7 @@ export class TransactionService {
     } = {}
   ): Promise<Transaction[]> {
     try {
-      let transactions = await db.transactions
+      let transactions = await getDB().transactions
         .where('store_id')
         .equals(storeId)
         .toArray();
@@ -852,7 +852,7 @@ export class TransactionService {
   ): Promise<Transaction[]> {
     try {
       const fieldName = `${entityType}_id`;
-      const transactions = await db.transactions
+      const transactions = await getDB().transactions
         .where(fieldName)
         .equals(entityId)
         .and(t => !t._deleted)
@@ -885,7 +885,7 @@ export class TransactionService {
     };
   }> {
     try {
-      const transaction = await db.transactions.get(transactionId);
+      const transaction = await getDB().transactions.get(transactionId);
       if (!transaction) {
         return {
           cashDrawerImpact: false,
@@ -900,12 +900,12 @@ export class TransactionService {
       let entityId: string | null = null;
 
       if (transaction.customer_id) {
-        const entity = await db.entities.get(transaction.customer_id);
+        const entity = await getDB().entities.get(transaction.customer_id);
         entityName = entity?.name || 'Unknown Customer';
         entityType = 'customer';
         entityId = transaction.customer_id;
       } else if (transaction.supplier_id) {
-        const entity = await db.entities.get(transaction.supplier_id);
+        const entity = await getDB().entities.get(transaction.supplier_id);
         entityName = entity?.name || 'Unknown Supplier';
         entityType = 'supplier';
         entityId = transaction.supplier_id;
@@ -1016,7 +1016,7 @@ export class TransactionService {
       }
 
       // Get entity to determine type
-      const entity = await db.entities.get(entityId);
+      const entity = await getDB().entities.get(entityId);
       if (!entity) {
         return 0;
       }
@@ -1057,7 +1057,7 @@ export class TransactionService {
 
   /**
    * Update cash drawer account balance atomically within IndexedDB transaction
-   * This method MUST be called within a db.transaction() block
+   * This method MUST be called within a getDB().transaction() block
    * 
    * ✅ Calculates cash drawer balance impact from journal entries (account_code = 1100)
    * ✅ Journal entries are the single source of truth - balance is computed, not stored
@@ -1069,7 +1069,7 @@ export class TransactionService {
   ): Promise<{ previousBalance: number; newBalance: number } | undefined> {
     try {
       // ✅ Get cash drawer ACCOUNT (not session) - this is what we update
-      const account = await db.getCashDrawerAccount(storeId, branchId);
+      const account = await getDB().getCashDrawerAccount(storeId, branchId);
 
       if (!account) {
         console.warn('⚠️ No cash drawer account found for store:', storeId, 'branch:', branchId);
@@ -1080,7 +1080,7 @@ export class TransactionService {
 
       // ✅ Calculate balance change from journal entries (account_code = 1100) for this transaction
       // Journal entries are the single source of truth
-      const cashJournalEntries = await db.journal_entries
+      const cashJournalEntries = await getDB().journal_entries
         .where('transaction_id')
         .equals(transaction.id)
         .and(entry => entry.account_code === '1100' && entry.is_posted === true)
@@ -1140,7 +1140,7 @@ export class TransactionService {
       // For backward compatibility, wrap in transaction
       let result: { previousBalance: number; newBalance: number } | undefined;
       
-      await db.transaction('rw', [db.cash_drawer_sessions], async () => {
+      await getDB().transaction('rw', [getDB().cash_drawer_sessions], async () => {
         result = await this.updateCashDrawerAtomic(transaction, context.storeId, context.branchId);
       });
       
@@ -1214,7 +1214,7 @@ export class TransactionService {
       if (providedEntityCode && uuidPattern.test(providedEntityCode)) {
         // It's already a UUID (customer/supplier/employee ID), use it directly
         entityId = providedEntityCode;
-        entity = await db.entities.get(entityId);
+        entity = await getDB().entities.get(entityId);
       } else {
         // It's a system entity code (e.g., "CASH-CUST"), need to look it up
         entity = await getSystemEntity(db, transaction.store_id, entityCode);

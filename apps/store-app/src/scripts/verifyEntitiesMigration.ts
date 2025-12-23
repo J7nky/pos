@@ -7,7 +7,7 @@
  *   console.log(report);
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 export interface VerificationReport {
   customers: {
@@ -81,7 +81,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
   try {
     // Verify customers
     console.log('📊 Verifying customers...');
-    const customers = await db.customers
+    const customers = await getDB().customers
       .where('store_id')
       .equals(storeId)
       .filter(c => !c._deleted)
@@ -91,7 +91,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
     console.log(`   Found ${customers.length} customers in legacy table`);
 
     for (const customer of customers) {
-      const entity = await db.entities.get(customer.id);
+      const entity = await getDB().entities.get(customer.id);
       
       if (!entity) {
         report.customers.missing.push(customer.id);
@@ -131,7 +131,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
 
     // Verify suppliers
     console.log('📊 Verifying suppliers...');
-    const suppliers = await db.suppliers
+    const suppliers = await getDB().suppliers
       .where('store_id')
       .equals(storeId)
       .filter(s => !s._deleted)
@@ -141,7 +141,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
     console.log(`   Found ${suppliers.length} suppliers in legacy table`);
 
     for (const supplier of suppliers) {
-      const entity = await db.entities.get(supplier.id);
+      const entity = await getDB().entities.get(supplier.id);
       
       if (!entity) {
         report.suppliers.missing.push(supplier.id);
@@ -181,7 +181,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
 
     // Verify employees
     console.log('📊 Verifying employees...');
-    const employees = await db.users
+    const employees = await getDB().users
       .where('store_id')
       .equals(storeId)
       .filter(e => !e._deleted)
@@ -191,7 +191,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
     console.log(`   Found ${employees.length} employees in legacy table`);
 
     for (const employee of employees) {
-      const entity = await db.entities.get(employee.id);
+      const entity = await getDB().entities.get(employee.id);
       
       if (!entity) {
         report.employees.missing.push(employee.id);
@@ -236,7 +236,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
     console.log('📊 Verifying foreign key references...');
     
     // Check bills.customer_id
-    const bills = await db.bills
+    const bills = await getDB().bills
       .where('store_id')
       .equals(storeId)
       .filter(b => !b._deleted && b.customer_id)
@@ -244,7 +244,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
     
     for (const bill of bills) {
       if (bill.customer_id) {
-        const entity = await db.entities.get(bill.customer_id);
+        const entity = await getDB().entities.get(bill.customer_id);
         if (entity && entity.entity_type === 'customer') {
           report.foreignKeys.valid++;
         } else {
@@ -261,7 +261,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
     }
 
     // Check inventory_bills.supplier_id
-    const inventoryBills = await db.inventory_bills
+    const inventoryBills = await getDB().inventory_bills
       .where('store_id')
       .equals(storeId)
       .filter(b => !b._deleted && b.supplier_id)
@@ -269,7 +269,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
     
     for (const bill of inventoryBills) {
       if (bill.supplier_id) {
-        const entity = await db.entities.get(bill.supplier_id);
+        const entity = await getDB().entities.get(bill.supplier_id);
         if (entity && entity.entity_type === 'supplier') {
           report.foreignKeys.valid++;
         } else {
@@ -286,7 +286,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
     }
 
     // Check transactions.customer_id and transactions.supplier_id
-    const transactions = await db.transactions
+    const transactions = await getDB().transactions
       .where('store_id')
       .equals(storeId)
       .filter(t => !t._deleted)
@@ -294,7 +294,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
     
     for (const transaction of transactions) {
       if ((transaction as any).customer_id) {
-        const entity = await db.entities.get((transaction as any).customer_id);
+        const entity = await getDB().entities.get((transaction as any).customer_id);
         if (entity && entity.entity_type === 'customer') {
           report.foreignKeys.valid++;
         } else {
@@ -310,7 +310,7 @@ export async function verifyEntitiesMigration(storeId: string): Promise<Verifica
       }
       
       if ((transaction as any).supplier_id) {
-        const entity = await db.entities.get((transaction as any).supplier_id);
+        const entity = await getDB().entities.get((transaction as any).supplier_id);
         if (entity && entity.entity_type === 'supplier') {
           report.foreignKeys.valid++;
         } else {

@@ -1,7 +1,7 @@
 // Snapshot Service Tests - Phase 4 of Accounting Foundation Migration
 // Tests for balance snapshots and historical queries
 
-import { db } from '../../lib/db';
+import { getDB } from '../../lib/db';
 import { snapshotService } from '../snapshotService';
 import { snapshotSchedulerService } from '../snapshotSchedulerService';
 import { journalService } from '../journalService';
@@ -94,7 +94,7 @@ async function setupTestData(): Promise<void> {
     { id: 'acc-1300', store_id: mockStoreId, account_code: '1300', account_name: 'Inventory', account_type: 'asset', requires_entity: false, is_active: true }
   ];
   
-  await db.chart_of_accounts.bulkAdd(accounts as any);
+  await getDB().chart_of_accounts.bulkAdd(accounts as any);
   
   // Create test entities
   const entities = [
@@ -154,7 +154,7 @@ async function setupTestData(): Promise<void> {
     }
   ];
   
-  await db.entities.bulkAdd(entities as any);
+  await getDB().entities.bulkAdd(entities as any);
 }
 
 /**
@@ -231,7 +231,7 @@ async function testDailySnapshotCreation(): Promise<void> {
   }
   
   // Verify snapshots were created in database
-  const snapshots = await db.balance_snapshots
+  const snapshots = await getDB().balance_snapshots
     .where('[store_id+snapshot_date]')
     .equals([mockStoreId, snapshotDate])
     .toArray();
@@ -446,18 +446,18 @@ async function testSnapshotScheduler(): Promise<void> {
  * Clean up test data
  */
 async function cleanupTestData(): Promise<void> {
-  await db.transaction('rw', [
-    db.balance_snapshots,
-    db.journal_entries, 
-    db.transactions, 
-    db.entities, 
-    db.chart_of_accounts
+  await getDB().transaction('rw', [
+    getDB().balance_snapshots,
+    getDB().journal_entries, 
+    getDB().transactions, 
+    getDB().entities, 
+    getDB().chart_of_accounts
   ], async () => {
-    await db.balance_snapshots.where('store_id').equals(mockStoreId).delete();
-    await db.journal_entries.where('store_id').equals(mockStoreId).delete();
-    await db.transactions.where('store_id').equals(mockStoreId).delete();
-    await db.entities.where('store_id').equals(mockStoreId).delete();
-    await db.chart_of_accounts.where('store_id').equals(mockStoreId).delete();
+    await getDB().balance_snapshots.where('store_id').equals(mockStoreId).delete();
+    await getDB().journal_entries.where('store_id').equals(mockStoreId).delete();
+    await getDB().transactions.where('store_id').equals(mockStoreId).delete();
+    await getDB().entities.where('store_id').equals(mockStoreId).delete();
+    await getDB().chart_of_accounts.where('store_id').equals(mockStoreId).delete();
   });
   
   // Clean up scheduler jobs

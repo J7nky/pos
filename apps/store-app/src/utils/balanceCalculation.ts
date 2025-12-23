@@ -9,7 +9,7 @@
  * All balances are calculated from journal entries using the base currency schema.
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import type { JournalEntry } from '../types';
 
 /**
@@ -70,7 +70,7 @@ export async function calculateEntityBalance(
 ): Promise<number> {
   try {
     // Get all journal entries for this entity and account (both currencies in same entries)
-    const entries = await db.journal_entries
+    const entries = await getDB().journal_entries
       .where('[entity_id+account_code]')
       .equals([entityId, accountCode])
       .and(e => e.is_posted === true)
@@ -82,7 +82,7 @@ export async function calculateEntityBalance(
     // This happens during migration or if schema upgrade hasn't run yet
     console.warn('Compound index not available, using fallback query:', error);
     
-    const entries = await db.journal_entries
+    const entries = await getDB().journal_entries
       .where('entity_id')
       .equals(entityId)
       .and(e => e.account_code === accountCode && e.is_posted === true)
@@ -111,7 +111,7 @@ export async function calculateCashDrawerBalance(
   try {
     console.log('0191019', storeId, branchId, currency);
     // Get all cash journal entries for this store and branch (both currencies in same entries)
-    const entries = await db.journal_entries
+    const entries = await getDB().journal_entries
       .where('[store_id+account_code]')
       .equals([storeId, '1100'])
       .and(e => e.is_posted === true && e.branch_id === branchId)
@@ -123,7 +123,7 @@ export async function calculateCashDrawerBalance(
     console.warn('Compound index [store_id+account_code] not available, using fallback query');
     
     // Use store_id+branch_id index for exact match
-    const entries = await db.journal_entries
+    const entries = await getDB().journal_entries
       .where('[store_id+branch_id]')
       .equals([storeId, branchId])
       .and(e => 
@@ -156,7 +156,7 @@ export async function calculateExpectedCashInSession(
   expectedAmount: number;
 }> {
   // Get session
-  const session = await db.cash_drawer_sessions.get(sessionId);
+  const session = await getDB().cash_drawer_sessions.get(sessionId);
   if (!session) {
     throw new Error(`Session not found: ${sessionId}`);
   }
@@ -166,7 +166,7 @@ export async function calculateExpectedCashInSession(
   const closedAt = session.closed_at ? new Date(session.closed_at) : new Date();
 
   // Get all cash (1100) journal entries during this session
-  const entries = await db.journal_entries
+  const entries = await getDB().journal_entries
     .where('account_code')
     .equals('1100')
     .and(e => {
@@ -214,7 +214,7 @@ export async function verifyCachedBalance(
 }> {
   // Balances are now always calculated from journal entries (source of truth)
   // There are no cached balance fields to verify against
-  const entity = await db.entities.get(entityId);
+  const entity = await getDB().entities.get(entityId);
   if (!entity) {
     throw new Error(`Entity not found: ${entityId}`);
   }
@@ -250,7 +250,7 @@ export async function getDisplayBalance(
   entityId: string,
   currency: 'USD' | 'LBP'
 ): Promise<number> {
-  const entity = await db.entities.get(entityId);
+  const entity = await getDB().entities.get(entityId);
   if (!entity) return 0;
 
   // Calculate balance from journal entries (no cached balance fields)
@@ -275,7 +275,7 @@ export async function getTrueBalance(
   entityId: string,
   currency: 'USD' | 'LBP'
 ): Promise<number> {
-  const entity = await db.entities.get(entityId);
+  const entity = await getDB().entities.get(entityId);
   if (!entity) return 0;
 
   const accountCode = entity.entity_type === 'supplier' ? '2100' : '1200';

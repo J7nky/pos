@@ -1,7 +1,7 @@
 // Local-Only Authentication Service
 // For Starter tier - No Supabase, purely local authentication
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { User } from '../types';
 import { createId } from '@paralleldrive/cuid2';
 import bcrypt from 'bcryptjs'; // You'll need to install: npm install bcryptjs
@@ -32,7 +32,7 @@ export class LocalAuthService {
    */
   async signUp(email: string, password: string, name: string, storeName: string): Promise<User> {
     // Check if any users exist
-    const existingUsers = await db.users.toArray();
+    const existingUsers = await getDB().users.toArray();
     if (existingUsers.length > 0) {
       throw new Error('Local account already exists. Please sign in.');
     }
@@ -44,7 +44,7 @@ export class LocalAuthService {
     const storeId = createId();
     const now = new Date().toISOString();
     
-    await db.stores.add({
+    await getDB().stores.add({
       id: storeId,
       store_id: storeId,
       name: storeName,
@@ -72,10 +72,10 @@ export class LocalAuthService {
       created_at: now,
     };
 
-    await db.users.add(user);
+    await getDB().users.add(user);
 
     // Store password hash separately (not in user table)
-    await db.localPasswords.add({
+    await getDB().localPasswords.add({
       userId: userId,
       passwordHash: passwordHash,
     });
@@ -91,13 +91,13 @@ export class LocalAuthService {
    */
   async signIn(email: string, password: string): Promise<User> {
     // Find user by email
-    const user = await db.users.where('email').equals(email).first();
+    const user = await getDB().users.where('email').equals(email).first();
     if (!user) {
       throw new Error('Invalid email or password');
     }
 
     // Get password hash
-    const passwordRecord = await db.localPasswords.get(user.id);
+    const passwordRecord = await getDB().localPasswords.get(user.id);
     if (!passwordRecord) {
       throw new Error('Invalid email or password');
     }
@@ -150,7 +150,7 @@ export class LocalAuthService {
     const session = this.getSession();
     if (!session) return null;
 
-    const user = await db.users.get(session.userId);
+    const user = await getDB().users.get(session.userId);
     return user || null;
   }
 
@@ -174,7 +174,7 @@ export class LocalAuthService {
    */
   async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
     // Get password hash
-    const passwordRecord = await db.localPasswords.get(userId);
+    const passwordRecord = await getDB().localPasswords.get(userId);
     if (!passwordRecord) {
       throw new Error('User not found');
     }
@@ -189,7 +189,7 @@ export class LocalAuthService {
     const newPasswordHash = await bcrypt.hash(newPassword, 10);
 
     // Update password
-    await db.localPasswords.update(userId, {
+    await getDB().localPasswords.update(userId, {
       passwordHash: newPasswordHash,
     });
   }
@@ -198,7 +198,7 @@ export class LocalAuthService {
    * Check if local-only mode is initialized
    */
   async isInitialized(): Promise<boolean> {
-    const users = await db.users.toArray();
+    const users = await getDB().users.toArray();
     return users.length > 0;
   }
 }

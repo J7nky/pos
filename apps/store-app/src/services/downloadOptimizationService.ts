@@ -10,7 +10,10 @@
  */
 
 import { supabase } from '../lib/supabase';
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
+
+// Get singleton database instance
+const db = getDB();
 
 // Table dependency graph for parallel downloads
 const TABLE_DEPENDENCIES: Record<string, string[]> = {
@@ -427,13 +430,13 @@ export class DownloadOptimizationService {
 
       // Step 2: Clear existing data
       console.log('🧹 Clearing local database...');
-      await db.transaction('rw', db.tables, async () => {
+      await getDB().transaction('rw', getDB().tables, async () => {
         for (const tableName of tables) {
           if ((db as any)[tableName]) {
             await (db as any)[tableName].clear();
           }
         }
-        await db.sync_metadata.clear();
+        await getDB().sync_metadata.clear();
       });
 
       // Step 3: Group tables by dependencies
@@ -484,7 +487,7 @@ export class DownloadOptimizationService {
             result.dataSize += recordSize;
 
             // Update sync metadata
-            await db.updateSyncMetadata(tableName, new Date().toISOString());
+            await getDB().updateSyncMetadata(tableName, new Date().toISOString());
           }
         }
       }

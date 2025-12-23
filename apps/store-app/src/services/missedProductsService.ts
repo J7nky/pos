@@ -1,6 +1,5 @@
 
-import { db } from '../lib/db';
-import { createId } from '../lib/db';
+import { getDB, createId } from '../lib/db';
 
 export interface MissedProductData {
   itemId: string;
@@ -95,7 +94,7 @@ export class MissedProductsService {
       }
 
       // Get inventory items to get the unit
-      const inventoryItems = await db.inventory_items
+      const inventoryItems = await getDB().inventory_items
         .where('store_id')
         .equals(storeId)
         .toArray();
@@ -118,7 +117,7 @@ export class MissedProductsService {
         };
       });
 
-      await db.missed_products.bulkAdd(missedProducts);
+      await getDB().missed_products.bulkAdd(missedProducts);
 
       console.log(`📊 Recorded ${missedProducts.length} missed products for session ${sessionId}`);
 
@@ -165,7 +164,7 @@ export class MissedProductsService {
         session = contextData.sessions?.find(s => s.id === sessionId);
       } else {
         // Fallback to database queries
-        missedProducts = await db.missed_products
+        missedProducts = await getDB().missed_products
           .where('session_id')
           .equals(sessionId)
           .toArray();
@@ -176,19 +175,19 @@ export class MissedProductsService {
 
         // Get inventory items and products for details
         const inventoryItemIds = missedProducts.map(mp => mp.inventory_item_id);
-        inventoryItems = await db.inventory_items
+        inventoryItems = await getDB().inventory_items
           .where('id')
           .anyOf(inventoryItemIds)
           .toArray();
 
         const productIds = inventoryItems.map(ii => ii.product_id);
-        products = await db.products
+        products = await getDB().products
           .where('id')
           .anyOf(productIds)
           .toArray();
 
         // Get session details
-        session = await db.cash_drawer_sessions.get(sessionId);
+        session = await getDB().cash_drawer_sessions.get(sessionId);
       }
 
       if (missedProducts.length === 0) {
@@ -255,20 +254,20 @@ export class MissedProductsService {
         products = contextData.products || [];
       } else {
         // Fallback to database queries
-        missedProducts = await db.missed_products
+        missedProducts = await getDB().missed_products
           .where('store_id')
           .equals(storeId)
           .toArray();
 
         // Get inventory items and products for details
         const inventoryItemIds = missedProducts.map(mp => mp.inventory_item_id);
-        inventoryItems = await db.inventory_items
+        inventoryItems = await getDB().inventory_items
           .where('id')
           .anyOf(inventoryItemIds)
           .toArray();
 
         const productIds = inventoryItems.map(ii => ii.product_id);
-        products = await db.products
+        products = await getDB().products
           .where('id')
           .anyOf(productIds)
           .toArray();
@@ -276,7 +275,7 @@ export class MissedProductsService {
 
       // Filter by date range if provided
       if (startDate || endDate) {
-        const sessions = await db.cash_drawer_sessions
+        const sessions = await getDB().cash_drawer_sessions
           .where('store_id')
           .equals(storeId)
           .toArray();
@@ -307,7 +306,7 @@ export class MissedProductsService {
 
       // Get session details
       const sessionIds = [...new Set(missedProducts.map(mp => mp.session_id))];
-      const sessions = await db.cash_drawer_sessions
+      const sessions = await getDB().cash_drawer_sessions
         .where('id')
         .anyOf(sessionIds)
         .toArray();
@@ -414,7 +413,7 @@ export class MissedProductsService {
       cutoffDate.setDate(cutoffDate.getDate() - days);
 
       // Get inventory items for this product
-      const inventoryItems = await db.inventory_items
+      const inventoryItems = await getDB().inventory_items
         .where('store_id')
         .equals(storeId)
         .filter(ii => ii.product_id === productId)
@@ -427,7 +426,7 @@ export class MissedProductsService {
       const inventoryItemIds = inventoryItems.map(ii => ii.id);
 
       // Get missed products for these inventory items
-      const missedProducts = await db.missed_products
+      const missedProducts = await getDB().missed_products
         .where('inventory_item_id')
         .anyOf(inventoryItemIds)
         .filter(mp => new Date(mp.created_at) >= cutoffDate)
@@ -435,7 +434,7 @@ export class MissedProductsService {
 
       // Get sessions for these missed products
       const sessionIds = [...new Set(missedProducts.map(mp => mp.session_id))];
-      const sessions = await db.cash_drawer_sessions
+      const sessions = await getDB().cash_drawer_sessions
         .where('id')
         .anyOf(sessionIds)
         .toArray();
@@ -516,7 +515,7 @@ export class MissedProductsService {
   }>> {
     try {
       // Get all missed products for the store
-      let missedProducts = await db.missed_products
+      let missedProducts = await getDB().missed_products
         .where('store_id')
         .equals(storeId)
         .toArray();
@@ -527,7 +526,7 @@ export class MissedProductsService {
 
       // Get session IDs to fetch session details
       const sessionIds = [...new Set(missedProducts.map(mp => mp.session_id))];
-      const sessions = await db.cash_drawer_sessions
+      const sessions = await getDB().cash_drawer_sessions
         .where('id')
         .anyOf(sessionIds)
         .toArray();
@@ -579,7 +578,7 @@ export class MissedProductsService {
         return false;
       }
 
-      await db.missed_products
+      await getDB().missed_products
         .where('id')
         .equals(itemId)
         .delete();
@@ -593,7 +592,7 @@ export class MissedProductsService {
   }
   public async deleteSessionMissedProducts(sessionId: string): Promise<boolean> {
     try {
-      await db.missed_products
+      await getDB().missed_products
         .where('session_id')
         .equals(sessionId)
         .delete();

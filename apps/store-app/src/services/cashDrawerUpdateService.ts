@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { currencyService } from './currencyService';
 import { QueryHelpers, DateFilters } from '../utils/queryHelpers';
 import { CacheManager, CacheKeys } from '../utils/cacheManager';
@@ -102,7 +102,7 @@ export class CashDrawerUpdateService {
     return this.acquireOperationLock(storeId, async () => {
       try {
         // Check if there's already an active session
-        const existingSession = await db.getCurrentCashDrawerSession(storeId, branchId);
+        const existingSession = await getDB().getCurrentCashDrawerSession(storeId, branchId);
         if (existingSession && existingSession.status === 'open') {
           return {
             success: false,
@@ -121,7 +121,7 @@ export class CashDrawerUpdateService {
         }
 
         // Open new session using database method
-        const sessionId = await db.openCashDrawerSession(storeId, branchId, account.id, openingAmount, openedBy);
+        const sessionId = await getDB().openCashDrawerSession(storeId, branchId, account.id, openingAmount, openedBy);
         
         console.log(`💰 Cash drawer session opened: ${sessionId} with opening amount: $${openingAmount.toFixed(2)}`);
         
@@ -157,7 +157,7 @@ export class CashDrawerUpdateService {
   }> {
     
     // Get session to determine store ID and branch ID for validation
-    const session = await db.cash_drawer_sessions.get(sessionId);
+    const session = await getDB().cash_drawer_sessions.get(sessionId);
     if (!session) {
       return {
         success: false,
@@ -191,10 +191,10 @@ export class CashDrawerUpdateService {
     return this.acquireOperationLock(session.store_id, async () => {
       try {
         // Close the cash drawer session using the database method
-        await db.closeCashDrawerSession(sessionId, actualAmount, closedBy, notes);
+        await getDB().closeCashDrawerSession(sessionId, actualAmount, closedBy, notes);
         
         // Get the updated session to return details
-        const session = await db.cash_drawer_sessions.get(sessionId);
+        const session = await getDB().cash_drawer_sessions.get(sessionId);
         if (!session) {
           throw new Error('Session not found after closing');
         }
@@ -376,7 +376,7 @@ export class CashDrawerUpdateService {
           async () => {
             try {
               // Get cash drawer transactions using optimized query
-              const transactions = await QueryHelpers.byStore(db.transactions, storeId)
+              const transactions = await QueryHelpers.byStore(getDB().transactions, storeId)
                 .filter(trans => trans.category.startsWith('cash_drawer_'))
                 .toArray();
 
@@ -432,7 +432,7 @@ export class CashDrawerUpdateService {
       return null;
     }
     try {
-      const account = await db.getCashDrawerAccount(storeId, branchId);
+      const account = await getDB().getCashDrawerAccount(storeId, branchId);
       if (!account ) {
         console.warn(`❌ No cash drawer account exists for store ${storeId}, branch ${branchId}`);
         return null;
@@ -467,7 +467,7 @@ export class CashDrawerUpdateService {
       );
     }
     
-    let session = await db.getCurrentCashDrawerSession(storeId, branchId);
+    let session = await getDB().getCurrentCashDrawerSession(storeId, branchId);
     
     if (!session || session.status !== 'open') {
       // If auto-open is allowed (for hooks), try to open a session
@@ -488,7 +488,7 @@ export class CashDrawerUpdateService {
         }
         
         // Get the newly opened session
-        session = await db.getCurrentCashDrawerSession(storeId, branchId);
+        session = await getDB().getCurrentCashDrawerSession(storeId, branchId);
       } else {
         console.warn('No active cash drawer session and auto-opening not allowed');
         return null;
@@ -532,7 +532,7 @@ export class CashDrawerUpdateService {
     return this.acquireOperationLock(`cleanup_${storeId}_${branchId}`, async () => {
       try {
         // Get all accounts for this store AND branch
-        const allAccounts = await db.cash_drawer_accounts
+        const allAccounts = await getDB().cash_drawer_accounts
           .where(['store_id', 'branch_id'])
           .equals([storeId, branchId])
           .toArray();
@@ -567,7 +567,7 @@ export class CashDrawerUpdateService {
 
         // Update all sessions to reference the account we're keeping
         for (const duplicateId of duplicateAccountIds) {
-          await db.cash_drawer_sessions
+          await getDB().cash_drawer_sessions
             .where('account_id')
             .equals(duplicateId)
             .modify({
@@ -580,7 +580,7 @@ export class CashDrawerUpdateService {
         const totalBalance = allAccounts.reduce((sum, acc) => sum + (acc.current_balance || 0), 0);
 
         // Update the kept account with the combined balance
-        await db.cash_drawer_accounts.update(accountToKeep.id, {
+        await getDB().cash_drawer_accounts.update(accountToKeep.id, {
           current_balance: totalBalance,
           is_active: true,
           updated_at: new Date().toISOString(),
@@ -589,7 +589,7 @@ export class CashDrawerUpdateService {
 
         // Delete the duplicate accounts
         for (const duplicateId of duplicateAccountIds) {
-          await db.cash_drawer_accounts.delete(duplicateId);
+          await getDB().cash_drawer_accounts.delete(duplicateId);
         }
 
         const duplicatesRemoved = duplicateAccountIds.length;

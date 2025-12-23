@@ -8,7 +8,7 @@
  *   console.log(result);
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Entity } from '../types/accounting';
 
 export interface MigrationResult {
@@ -58,10 +58,10 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
   console.log(`🚀 Starting migration for store: ${storeId}`);
 
   try {
-    await db.transaction('rw', [db.entities, db.customers, db.suppliers, db.users], async () => {
+    await getDB().transaction('rw', [getDB().entities, getDB().customers, getDB().suppliers, getDB().users], async () => {
       // Migrate customers
       console.log('📦 Migrating customers...');
-      const customers = await db.customers
+      const customers = await getDB().customers
         .where('store_id')
         .equals(storeId)
         .filter(c => !c._deleted)
@@ -71,7 +71,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
 
       for (const customer of customers) {
         try {
-          const existing = await db.entities.get(customer.id);
+          const existing = await getDB().entities.get(customer.id);
           
           if (!existing) {
             // Create new entity
@@ -99,7 +99,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
               _synced: customer._synced ?? false
             };
 
-            await db.entities.add(entity);
+            await getDB().entities.add(entity);
             result.customersMigrated++;
             console.log(`   ✅ Migrated customer: ${customer.name}`);
           } else {
@@ -109,7 +109,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
               Math.abs((customer.lb_balance || 0) - (existing.lb_balance || 0)) > 0.01;
 
             if (balanceMismatch || existing.entity_type !== 'customer') {
-              await db.entities.update(customer.id, {
+              await getDB().entities.update(customer.id, {
                 entity_type: 'customer',
                 name: customer.name,
                 phone: customer.phone || null,
@@ -142,7 +142,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
 
       // Migrate suppliers
       console.log('📦 Migrating suppliers...');
-      const suppliers = await db.suppliers
+      const suppliers = await getDB().suppliers
         .where('store_id')
         .equals(storeId)
         .filter(s => !s._deleted)
@@ -152,7 +152,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
 
       for (const supplier of suppliers) {
         try {
-          const existing = await db.entities.get(supplier.id);
+          const existing = await getDB().entities.get(supplier.id);
           
           if (!existing) {
             // Create new entity
@@ -181,7 +181,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
               _synced: (supplier as any)._synced ?? false
             };
 
-            await db.entities.add(entity);
+            await getDB().entities.add(entity);
             result.suppliersMigrated++;
             console.log(`   ✅ Migrated supplier: ${supplier.name}`);
           } else {
@@ -191,7 +191,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
               Math.abs((supplier.lb_balance || 0) - (existing.lb_balance || 0)) > 0.01;
 
             if (balanceMismatch || existing.entity_type !== 'supplier') {
-              await db.entities.update(supplier.id, {
+              await getDB().entities.update(supplier.id, {
                 entity_type: 'supplier',
                 name: supplier.name,
                 phone: (supplier as any).phone || null,
@@ -225,7 +225,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
 
       // Migrate employees
       console.log('📦 Migrating employees...');
-      const employees = await db.users
+      const employees = await getDB().users
         .where('store_id')
         .equals(storeId)
         .filter(e => !e._deleted)
@@ -235,7 +235,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
 
       for (const employee of employees) {
         try {
-          const existing = await db.entities.get(employee.id);
+          const existing = await getDB().entities.get(employee.id);
           
           if (!existing) {
             // Create new entity
@@ -258,7 +258,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
               _synced: (employee as any)._synced ?? false
             };
 
-            await db.entities.add(entity);
+            await getDB().entities.add(entity);
             result.employeesMigrated++;
             console.log(`   ✅ Migrated employee: ${employee.name || employee.email}`);
           } else {
@@ -271,7 +271,7 @@ export async function migrateToEntitiesOnly(storeId: string): Promise<MigrationR
               Math.abs(employeeLbpBalance - (existing.lb_balance || 0)) > 0.01;
 
             if (balanceMismatch || existing.entity_type !== 'employee') {
-              await db.entities.update(employee.id, {
+              await getDB().entities.update(employee.id, {
                 entity_type: 'employee',
                 name: employee.name || employee.email,
                 phone: (employee as any).phone || null,

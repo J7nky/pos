@@ -7,7 +7,7 @@
  * This service replaces direct access to entities.usd_balance and entities.lb_balance fields.
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { calculateEntityBalance, calculateBothCurrencies } from '../utils/balanceCalculation';
 import { snapshotService } from './snapshotService';
 
@@ -92,13 +92,13 @@ export class EntityBalanceService {
     }
 
     // Direct calculation from journal entries (source of truth)
-    const entity = await db.entities.get(entityId);
+    const entity = await getDB().entities.get(entityId);
     if (!entity) {
       throw new Error(`Entity not found: ${entityId}`);
     }
 
     // Get all journal entries for this entity and account
-    const entries = await db.journal_entries
+    const entries = await getDB().journal_entries
       .where('[entity_id+account_code]')
       .equals([entityId, accountCode])
       .and(e => e.is_posted === true)
@@ -128,7 +128,7 @@ export class EntityBalanceService {
     accountCode: '1200' | '2100'
   ): Promise<number> {
     // Get entity to determine store_id
-    const entity = await db.entities.get(entityId);
+    const entity = await getDB().entities.get(entityId);
     if (!entity) {
       throw new Error(`Entity not found: ${entityId}`);
     }
@@ -154,7 +154,7 @@ export class EntityBalanceService {
       const snapshotDate = new Date(snapshot.snapshotDate);
       snapshotDate.setHours(23, 59, 59, 999); // End of snapshot day
       
-      const incrementalEntries = await db.journal_entries
+      const incrementalEntries = await getDB().journal_entries
         .where('[entity_id+account_code]')
         .equals([entityId, accountCode])
         .and(e => {
@@ -191,7 +191,7 @@ export class EntityBalanceService {
     accountCode: '1200' | '2100'
   ): Promise<{ USD: number; LBP: number; lastCalculated: string }> {
     // Get entity to determine store_id
-    const entity = await db.entities.get(entityId);
+    const entity = await getDB().entities.get(entityId);
     if (!entity) {
       throw new Error(`Entity not found: ${entityId}`);
     }
@@ -220,7 +220,7 @@ export class EntityBalanceService {
       const snapshotDate = new Date(snapshot.snapshotDate);
       snapshotDate.setHours(23, 59, 59, 999); // End of snapshot day
       
-      const incrementalEntries = await db.journal_entries
+      const incrementalEntries = await getDB().journal_entries
         .where('[entity_id+account_code]')
         .equals([entityId, accountCode])
         .and(e => {
@@ -239,7 +239,7 @@ export class EntityBalanceService {
     }
 
     // No snapshot available, fall back to full calculation
-    const entries = await db.journal_entries
+    const entries = await getDB().journal_entries
       .where('[entity_id+account_code]')
       .equals([entityId, accountCode])
       .and(e => e.is_posted === true)

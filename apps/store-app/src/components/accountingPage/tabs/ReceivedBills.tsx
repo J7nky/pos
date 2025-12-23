@@ -138,8 +138,8 @@ export default function ReceivedBills({
 
     // Get the actual batch status from the database
     // Access db instance to get batch status
-    const { db } = await import('../../../lib/db');
-    const batch = await db.inventory_bills.get(batchId);
+    const { getDB } = await import('../../../lib/db');
+    const batch = await getDB().inventory_bills.get(batchId);
     console.log('[ReceivedBills] initializeBatchEdit - Batch from DB:', { batch, batchId });
     const currentBatchStatus = batch?.status || 'Created';
     const currentSupplierId = batch?.supplier_id || first?.supplierId || '';

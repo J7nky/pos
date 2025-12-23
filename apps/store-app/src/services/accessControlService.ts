@@ -14,7 +14,7 @@
  * Follows offline-first pattern: IndexedDB → Cache → Fast checks
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { permissionCache } from './permissionCache';
 import { 
   ModuleName, 
@@ -39,7 +39,7 @@ export class AccessControlService {
     }
 
     // Load user
-    const user = await db.users.get(userId);
+    const user = await getDB().users.get(userId);
     if (!user) {
       // User not synced yet - return minimal permissions (all false)
       // This allows the app to continue loading while sync completes in the background
@@ -73,13 +73,13 @@ export class AccessControlService {
     }
 
     // Load role permissions (GLOBAL - no store_id filter)
-    const rolePermissions = await db.role_permissions
+    const rolePermissions = await getDB().role_permissions
       .where('role')
       .equals(user.role)
       .toArray();
 
     // Load user permission overrides
-    const userPermissions = await db.user_permissions
+    const userPermissions = await getDB().user_permissions
       .where('[user_id+store_id]')
       .equals([userId, storeId])
       .toArray();
@@ -187,13 +187,13 @@ export class AccessControlService {
     }
 
     // Load user
-    const user = await db.users.get(userId);
+    const user = await getDB().users.get(userId);
     if (!user) {
       throw new Error(`User not found: ${userId}`);
     }
 
     // Check for user-specific override
-    const userPermission = await db.user_permissions
+    const userPermission = await getDB().user_permissions
       .where('[user_id+store_id+operation]')
       .equals([userId, storeId, operation])
       .first();
@@ -209,7 +209,7 @@ export class AccessControlService {
     }
 
     // Check role default (GLOBAL - no store_id)
-    const rolePermission = await db.role_permissions
+    const rolePermission = await getDB().role_permissions
       .where('[role+operation]')
       .equals([user.role, operation])
       .first();
@@ -287,7 +287,7 @@ export class AccessControlService {
     let name = userName;
     
     if (!role) {
-      const user = await db.users.get(userId);
+      const user = await getDB().users.get(userId);
       if (!user) {
         throw new Error(`User not found: ${userId}`);
       }
@@ -301,7 +301,7 @@ export class AccessControlService {
     
     // Admin can access all branches
     if (role === 'admin') {
-      const branch = await db.branches.get(branchId);
+      const branch = await getDB().branches.get(branchId);
       if (!branch) {
         throw new Error(`Branch not found: ${branchId}`);
       }
@@ -326,8 +326,8 @@ export class AccessControlService {
         );
       }
       if (assignedBranchId !== branchId) {
-        const userBranch = await db.branches.get(assignedBranchId);
-        const attemptedBranch = await db.branches.get(branchId);
+        const userBranch = await getDB().branches.get(assignedBranchId);
+        const attemptedBranch = await getDB().branches.get(branchId);
         const userBranchName = userBranch?.name || assignedBranchId;
         const attemptedBranchName = attemptedBranch?.name || branchId;
         throw new Error(
@@ -336,7 +336,7 @@ export class AccessControlService {
           `Please contact an administrator if you need access to a different branch.`
         );
       }
-      const branch = await db.branches.get(branchId);
+      const branch = await getDB().branches.get(branchId);
       if (!branch) {
         throw new Error(`Branch not found: ${branchId}`);
       }
@@ -384,7 +384,7 @@ export class AccessControlService {
     let branchId = userBranchId;
     
     if (!role) {
-      const user = await db.users.get(userId);
+      const user = await getDB().users.get(userId);
       if (!user || user.store_id !== storeId) {
         return [];
       }
@@ -393,8 +393,8 @@ export class AccessControlService {
     }
     
     if (role === 'admin') {
-      await db.ensureOpen();
-      const branches = await db.branches
+      await getDB().ensureOpen();
+      const branches = await getDB().branches
         .where('store_id')
         .equals(storeId)
         .filter(b => !(b._deleted === true))
@@ -406,7 +406,7 @@ export class AccessControlService {
       if (!branchId) {
         return [];
       }
-      const branch = await db.branches.get(branchId);
+      const branch = await getDB().branches.get(branchId);
       if (!branch || branch._deleted === true || branch.store_id !== storeId) {
         return [];
       }
@@ -454,7 +454,7 @@ export class AccessControlService {
     branchId: string,
     storeId: string
   ): Promise<void> {
-    const branch = await db.branches.get(branchId);
+    const branch = await getDB().branches.get(branchId);
     if (!branch) {
       throw new Error(`Branch not found: ${branchId}`);
     }
@@ -473,7 +473,7 @@ export class AccessControlService {
    * Gets the user's assigned branch ID (for manager/cashier)
    */
   static async getUserBranchId(userId: string): Promise<string | null> {
-    const user = await db.users.get(userId);
+    const user = await getDB().users.get(userId);
     if (!user) {
       throw new Error(`User not found: ${userId}`);
     }

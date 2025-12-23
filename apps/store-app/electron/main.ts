@@ -38,7 +38,7 @@ const createWindow = () => {
   });
 
   // Check for Vite dev server URL
-  const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5175';
+  const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5178';
   console.log('🔍 Vite URL:', viteUrl);
   
   if (process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL) {

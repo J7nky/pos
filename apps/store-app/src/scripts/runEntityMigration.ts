@@ -1,7 +1,7 @@
 // Entity Migration Script - Phase 2 Implementation
 // Run this script to migrate existing customers/suppliers to entities table
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { entityMigrationService } from '../services/entityMigrationService';
 import { accountingInitService } from '../services/accountingInitService';
 
@@ -51,10 +51,10 @@ export async function runEntityMigration(storeId: string): Promise<void> {
     // Step 3: Show current data counts
     console.log('3️⃣ Analyzing current data...');
     const [customersCount, suppliersCount, employeesCount, entitiesCount] = await Promise.all([
-      db.customers.where('store_id').equals(storeId).count(),
-      db.suppliers.where('store_id').equals(storeId).count(),
-      db.users.where('store_id').equals(storeId).count(),
-      db.entities.where('store_id').equals(storeId).count()
+      getDB().customers.where('store_id').equals(storeId).count(),
+      getDB().suppliers.where('store_id').equals(storeId).count(),
+      getDB().users.where('store_id').equals(storeId).count(),
+      getDB().entities.where('store_id').equals(storeId).count()
     ]);
     
     console.log(`   📊 Current Data:`);
@@ -149,7 +149,7 @@ export async function runMigrationForAllStores(): Promise<void> {
   console.log('=' .repeat(60));
   
   try {
-    const stores = await db.stores.toArray();
+    const stores = await getDB().stores.toArray();
     
     if (stores.length === 0) {
       console.log('ℹ️ No stores found in database');

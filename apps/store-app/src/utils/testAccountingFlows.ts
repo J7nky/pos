@@ -5,7 +5,7 @@
  * before launching to production.
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { transactionService } from '../services/transactionService';
 import { balanceVerificationService } from '../services/balanceVerificationService';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
@@ -105,7 +105,7 @@ export class AccountingFlowTester {
       
       // Create test customer with proper UUID
       const customerId = createId();
-      await db.entities.add({
+      await getDB().entities.add({
         id: customerId,
         store_id: this.testStoreId,
         branch_id: this.testBranchId,
@@ -126,7 +126,7 @@ export class AccountingFlowTester {
 
       // Create test supplier with proper UUID
       const supplierId = createId();
-      await db.entities.add({
+      await getDB().entities.add({
         id: supplierId,
         store_id: this.testStoreId,
         branch_id: this.testBranchId,
@@ -165,7 +165,7 @@ export class AccountingFlowTester {
       if (!this.testCustomerId) throw new Error('Test customer not found');
 
       // Get initial balance
-      const initialCustomer = await db.entities.get(this.testCustomerId);
+      const initialCustomer = await getDB().entities.get(this.testCustomerId);
       const initialBalance = initialCustomer?.lb_balance || 0;
 
       // Create credit sale transaction
@@ -192,7 +192,7 @@ export class AccountingFlowTester {
       }
 
       // Verify customer balance increased
-      const updatedCustomer = await db.entities.get(this.testCustomerId);
+      const updatedCustomer = await getDB().entities.get(this.testCustomerId);
       const newBalance = updatedCustomer?.lb_balance || 0;
       const expectedBalance = initialBalance + 100;
       const balanceIncreased = Math.abs(newBalance - expectedBalance) < 0.01; // Allow tiny rounding errors
@@ -207,7 +207,7 @@ export class AccountingFlowTester {
       });
 
       // Verify journal entries exist
-      const journals = await db.journal_entries
+      const journals = await getDB().journal_entries
         .where('transaction_id')
         .equals(result.transactionId!)
         .toArray();
@@ -245,7 +245,7 @@ export class AccountingFlowTester {
       if (!this.testCustomerId) throw new Error('Test customer not found');
 
       // Get initial balance
-      const initialCustomer = await db.entities.get(this.testCustomerId);
+      const initialCustomer = await getDB().entities.get(this.testCustomerId);
       const initialBalance = initialCustomer?.lb_balance || 0;
 
       // Process customer payment
@@ -271,12 +271,12 @@ export class AccountingFlowTester {
       }
 
       // Verify customer balance decreased
-      const updatedCustomer = await db.entities.get(this.testCustomerId);
+      const updatedCustomer = await getDB().entities.get(this.testCustomerId);
       const newBalance = updatedCustomer?.lb_balance || 0;
       const balanceDecreased = newBalance === initialBalance - 50;
 
       // Verify journal entries
-      const journals = await db.journal_entries
+      const journals = await getDB().journal_entries
         .where('transaction_id')
         .equals(result.transactionId!)
         .toArray();
@@ -330,7 +330,7 @@ export class AccountingFlowTester {
       }
 
       // Verify journal entries
-      const journals = await db.journal_entries
+      const journals = await getDB().journal_entries
         .where('transaction_id')
         .equals(result.transactionId!)
         .toArray();
@@ -387,7 +387,7 @@ export class AccountingFlowTester {
       });
 
       // Get balance before payment
-      const initialSupplier = await db.entities.get(this.testSupplierId);
+      const initialSupplier = await getDB().entities.get(this.testSupplierId);
       const initialBalance = initialSupplier?.lb_balance || 0;
 
       // Pay supplier
@@ -413,12 +413,12 @@ export class AccountingFlowTester {
       }
 
       // Verify supplier balance decreased
-      const updatedSupplier = await db.entities.get(this.testSupplierId);
+      const updatedSupplier = await getDB().entities.get(this.testSupplierId);
       const newBalance = updatedSupplier?.lb_balance || 0;
       const balanceDecreased = newBalance === initialBalance - 100;
 
       // Verify journal entries
-      const journals = await db.journal_entries
+      const journals = await getDB().journal_entries
         .where('transaction_id')
         .equals(result.transactionId!)
         .toArray();
@@ -496,7 +496,7 @@ export class AccountingFlowTester {
     
     try {
       // Get all journal entries for test transactions
-      const allJournals = await db.journal_entries
+      const allJournals = await getDB().journal_entries
         .where('store_id')
         .equals(this.testStoreId)
         .toArray();
@@ -564,7 +564,7 @@ export class AccountingFlowTester {
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
 
       // Get current cash drawer account
-      const cashDrawerAccount = await db.cash_drawer_accounts
+      const cashDrawerAccount = await getDB().cash_drawer_accounts
         .where(['store_id', 'branch_id'])
         .equals([this.testStoreId, this.testBranchId])
         .first();
@@ -635,16 +635,16 @@ export class AccountingFlowTester {
     try {
       // Delete test customer
       if (this.testCustomerId) {
-        await db.entities.delete(this.testCustomerId);
+        await getDB().entities.delete(this.testCustomerId);
       }
 
       // Delete test supplier
       if (this.testSupplierId) {
-        await db.entities.delete(this.testSupplierId);
+        await getDB().entities.delete(this.testSupplierId);
       }
 
       // Delete test transactions
-      const testTransactions = await db.transactions
+      const testTransactions = await getDB().transactions
         .where('store_id')
         .equals(this.testStoreId)
         .and(t => {
@@ -654,11 +654,11 @@ export class AccountingFlowTester {
         .toArray();
 
       for (const txn of testTransactions) {
-        await db.transactions.delete(txn.id);
+        await getDB().transactions.delete(txn.id);
       }
 
       // Delete test journal entries
-      const testJournals = await db.journal_entries
+      const testJournals = await getDB().journal_entries
         .where('store_id')
         .equals(this.testStoreId)
         .and(j => {
@@ -668,7 +668,7 @@ export class AccountingFlowTester {
         .toArray();
 
       for (const journal of testJournals) {
-        await db.journal_entries.delete(journal.id);
+        await getDB().journal_entries.delete(journal.id);
       }
 
       console.log('✅ Test entities cleaned up');

@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { EmployeeAttendance } from '../types';
 import { createId } from '../lib/db';
 
@@ -11,7 +11,7 @@ export class EmployeeAttendanceService {
    */
   static async checkIn(employeeId: string, storeId: string, notes?: string): Promise<EmployeeAttendance> {
     // Check if employee already has an active check-in (no check-out)
-    const activeCheckIn = await db.employee_attendance
+    const activeCheckIn = await getDB().employee_attendance
       .where('employee_id')
       .equals(employeeId)
       .filter(att => att.check_out_at === null && !att._deleted)
@@ -35,7 +35,7 @@ export class EmployeeAttendanceService {
       _deleted: false
     };
 
-    await db.employee_attendance.add(attendance);
+    await getDB().employee_attendance.add(attendance);
     return attendance;
   }
 
@@ -44,7 +44,7 @@ export class EmployeeAttendanceService {
    */
   static async checkOut(employeeId: string, notes?: string): Promise<EmployeeAttendance | null> {
     // Find active check-in
-    const activeCheckIn = await db.employee_attendance
+    const activeCheckIn = await getDB().employee_attendance
       .where('employee_id')
       .equals(employeeId)
       .filter(att => att.check_out_at === null && !att._deleted)
@@ -55,7 +55,7 @@ export class EmployeeAttendanceService {
     }
 
     const now = new Date().toISOString();
-    await db.employee_attendance.update(activeCheckIn.id, {
+    await getDB().employee_attendance.update(activeCheckIn.id, {
       check_out_at: now,
       notes: notes || activeCheckIn.notes,
       updated_at: now,
@@ -74,7 +74,7 @@ export class EmployeeAttendanceService {
    * Get current check-in status for an employee
    */
   static async getCurrentStatus(employeeId: string): Promise<EmployeeAttendance | null> {
-    return await db.employee_attendance
+    return await getDB().employee_attendance
       .where('employee_id')
       .equals(employeeId)
       .filter(att => att.check_out_at === null && !att._deleted)
@@ -89,7 +89,7 @@ export class EmployeeAttendanceService {
     startDate?: string,
     endDate?: string
   ): Promise<EmployeeAttendance[]> {
-    let query = db.employee_attendance
+    let query = getDB().employee_attendance
       .where('employee_id')
       .equals(employeeId)
       .filter(att => !att._deleted);
@@ -117,7 +117,7 @@ export class EmployeeAttendanceService {
     startDate?: string,
     endDate?: string
   ): Promise<EmployeeAttendance[]> {
-    let query = db.employee_attendance
+    let query = getDB().employee_attendance
       .where('store_id')
       .equals(storeId)
       .filter(att => !att._deleted);

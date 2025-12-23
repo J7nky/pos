@@ -4,7 +4,7 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
 import { BillLineItem, BillLineItemTransforms, NotificationRecord, NotificationType, NotificationPreferences, InventoryItem, Transaction, CashDrawerAccount, Branch } from '../types';
 import {
-  db,
+  getDB,
   createId,
 } from '../lib/db';
 import { InventoryPurchaseService } from '../services/inventoryPurchaseService';
@@ -362,10 +362,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
         try {
           // Close the database
-          await db.close();
+          await getDB().close();
           
           // Delete the entire database
-          await db.delete();
+          await getDB().delete();
           
           // Update localStorage with new store ID
           try {
@@ -383,7 +383,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           isClearingStorageRef.current = false;
           // Try to reopen database even if clear failed
           try {
-            await db.ensureOpen();
+            await getDB().ensureOpen();
           } catch (reopenError) {
             console.error('❌ Failed to reopen database:', reopenError);
           }
@@ -552,7 +552,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       // Load store data from IndexedDB
-      const existingStore = await db.stores.where('id').equals(storeId).first();
+      const existingStore = await getDB().stores.where('id').equals(storeId).first();
 
       if (existingStore) {
         // Use existing store data
@@ -645,7 +645,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
       
       // Check if branches already exist locally
-      const existingBranches = await db.branches
+      const existingBranches = await getDB().branches
         .where('store_id')
         .equals(storeId)
         .filter(b => !(b._deleted === true))
@@ -679,8 +679,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           
           // Verify branches are actually queryable before marking sync as complete
           try {
-            await db.ensureOpen();
-            const branchCount = await db.branches
+            await getDB().ensureOpen();
+            const branchCount = await getDB().branches
               .where('store_id')
               .equals(storeId)
               .filter(b => !(b._deleted === true))
@@ -698,7 +698,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               console.log('⏳ Waiting for branches to become queryable...');
               await new Promise(resolve => setTimeout(resolve, 500));
               
-              const retryCount = await db.branches
+              const retryCount = await getDB().branches
                 .where('store_id')
                 .equals(storeId)
                 .filter(b => !(b._deleted === true))
@@ -755,7 +755,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
       
       // Check if the assigned branch exists locally
-      const assignedBranch = await db.branches.get(userProfile.branch_id);
+      const assignedBranch = await getDB().branches.get(userProfile.branch_id);
       
       if (assignedBranch && !assignedBranch._deleted && assignedBranch.store_id === storeId) {
         // Branch already exists and is valid
@@ -775,7 +775,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           await new Promise(resolve => setTimeout(resolve, 300));
           
           // Verify the assigned branch is now available
-          const branchAfterSync = await db.branches.get(userProfile.branch_id);
+          const branchAfterSync = await getDB().branches.get(userProfile.branch_id);
           if (branchAfterSync && !branchAfterSync._deleted && branchAfterSync.store_id === storeId) {
             console.log(`✅ Assigned branch is now available after sync: ${userProfile.branch_id}`);
           } else {
@@ -813,7 +813,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           const storedBranchId = localStorage.getItem(`branch_preference_${storeId}`);
           if (storedBranchId) {
             // Validate the stored branch exists and is accessible
-            const branch = await db.branches.get(storedBranchId);
+            const branch = await getDB().branches.get(storedBranchId);
             if (branch && !branch._deleted && branch.store_id === storeId) {
               setCurrentBranchId(storedBranchId);
               console.log('✅ Admin: Restored preferred branch:', storedBranchId);
@@ -833,7 +833,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Manager/Cashier - Use their assigned branch_id
         if ((userProfile.role === 'manager' || userProfile.role === 'cashier') && userProfile.branch_id) {
           // Validate their assigned branch - with retry logic if branch is not synced yet
-          let branch = await db.branches.get(userProfile.branch_id);
+          let branch = await getDB().branches.get(userProfile.branch_id);
           
           // If branch not found, wait a bit for sync to complete and retry
           if (!branch && isOnline) {
@@ -841,7 +841,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             // Wait for sync to complete (max 3 seconds)
             for (let attempt = 0; attempt < 6; attempt++) {
               await new Promise(resolve => setTimeout(resolve, 500));
-              branch = await db.branches.get(userProfile.branch_id);
+              branch = await getDB().branches.get(userProfile.branch_id);
               if (branch) {
                 console.log(`✅ ${userProfile.role}: Branch found after ${attempt + 1} attempt(s)`);
                 break;
@@ -883,7 +883,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   if (!storeId || !currentBranchId) return;
 
   try {
-    const status = await db.getCurrentCashDrawerStatus(storeId, currentBranchId);
+    const status = await getDB().getCurrentCashDrawerStatus(storeId, currentBranchId);
     if (status && status.status === 'active') {
       // Update local state with current session info
       setCashDrawer({
@@ -910,7 +910,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       // Load branches FIRST - critical for branch selection screen
-      const branchesData = await db.branches
+      const branchesData = await getDB().branches
         .where('store_id')
         .equals(storeId)
         .filter(b => !b._deleted)
@@ -1039,7 +1039,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Reload store settings from IndexedDB (important for real-time updates from other devices)
       console.log(`🔄 refreshData: Reloading store settings for store ${storeId}`);
-      const storeData = await db.stores.get(storeId);
+      const storeData = await getDB().stores.get(storeId);
       if (storeData) {
         console.log(`🔄 refreshData: Store data loaded:`, {
           id: storeData.id,
@@ -1080,10 +1080,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Check if we should switch to a synced branch from Supabase
       if (currentBranchId) {
-        const currentBranch = await db.branches.get(currentBranchId);
+        const currentBranch = await getDB().branches.get(currentBranchId);
         if (currentBranch && !currentBranch._synced) {
           // Current branch is local-only, check for synced branch
-          const syncedBranch = await db.branches
+          const syncedBranch = await getDB().branches
             .where('store_id')
             .equals(storeId)
             .and(b => !b._deleted && b._synced === true)
@@ -1109,10 +1109,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (!storeId || !currentBranchId) return;
       
       // Check if current branch is local-only (not synced)
-      const currentBranch = await db.branches.get(currentBranchId);
+      const currentBranch = await getDB().branches.get(currentBranchId);
       if (currentBranch && !currentBranch._synced) {
         // Look for a synced branch from Supabase
-        const syncedBranch = await db.branches
+        const syncedBranch = await getDB().branches
           .where('store_id')
           .equals(storeId)
           .and(b => !b._deleted && b._synced === true)
@@ -1145,8 +1145,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Clean up any invalid/orphaned data first
       const [invalidCleaned, orphanedCleaned] = await Promise.all([
-        db.cleanupInvalidInventoryItems(),
-        db.cleanupOrphanedRecords(storeId)
+        getDB().cleanupInvalidInventoryItems(),
+        getDB().cleanupOrphanedRecords(storeId)
       ]);
 
       if (invalidCleaned > 0 || orphanedCleaned > 0) {
@@ -1158,7 +1158,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
         
         // Get all branches for this store
-        const branches = await db.branches
+        const branches = await getDB().branches
           .where('store_id')
           .equals(storeId)
           .filter(b => !b._deleted)
@@ -1187,10 +1187,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Check if local database is empty (no essential data)
       // For products, include both store-specific and global products
       const [storeProductCount, globalProductCount, supplierEntityCount, customerEntityCount] = await Promise.all([
-        db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
-        db.products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
-        db.entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter((item: any) => !item._deleted).count(),
-        db.entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter((item: any) => !item._deleted).count()
+        getDB().products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        getDB().products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
+        getDB().entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter((item: any) => !item._deleted).count(),
+        getDB().entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter((item: any) => !item._deleted).count()
       ]);
       const productCount = storeProductCount + globalProductCount;
 
@@ -1285,7 +1285,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       // Check if account already exists locally (direct DB query to avoid auto-creation)
-      const localAccounts = await db.cash_drawer_accounts
+      const localAccounts = await getDB().cash_drawer_accounts
         .where(['store_id', 'branch_id'])
         .equals([storeId, branchId])
         .filter(acc => !acc._deleted && (acc.is_active !== false))
@@ -1334,7 +1334,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           _lastSyncedAt: new Date().toISOString()
         };
 
-        await db.cash_drawer_accounts.put(localAccountData);
+        await getDB().cash_drawer_accounts.put(localAccountData);
         debug(`✅ Synced cash drawer account from Supabase to local DB`);
       } else {
         debug('ℹ️ No cash drawer account found in Supabase - will be created on-demand');
@@ -1366,10 +1366,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Check if local database is empty
       // For products, include both store-specific and global products
       const [storeProductCount, globalProductCount, supplierEntityCount, customerEntityCount] = await Promise.all([
-        db.products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
-        db.products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
-        db.entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter((item: any) => !item._deleted).count(),
-        db.entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter((item: any) => !item._deleted).count()
+        getDB().products.where('store_id').equals(storeId).filter(item => !item._deleted).count(),
+        getDB().products.where('is_global').equals(1).filter(item => !item._deleted).count(), // Dexie stores boolean as 0 or 1
+        getDB().entities.where('[store_id+entity_type]').equals([storeId, 'supplier']).filter((item: any) => !item._deleted).count(),
+        getDB().entities.where('[store_id+entity_type]').equals([storeId, 'customer']).filter((item: any) => !item._deleted).count()
       ]);
       const productCount = storeProductCount + globalProductCount;
 
@@ -1867,7 +1867,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // ✅ PRE-FETCH ENTITY: Avoid nested transaction by fetching entity before main transaction
     let preFetchedEntity = null;
     if (customerBalanceUpdate) {
-      preFetchedEntity = await db.entities.get(customerBalanceUpdate.customerId);
+      preFetchedEntity = await getDB().entities.get(customerBalanceUpdate.customerId);
       if (!preFetchedEntity || (preFetchedEntity.entity_type !== 'customer' && preFetchedEntity.entity_type !== 'supplier')) {
         throw new Error('Invalid entity for balance update');
       }
@@ -1878,18 +1878,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Use transaction to ensure atomicity for all operations including inventory, cash drawer, customer balance, and audit logs
     // ✅ OPTIMIZED: Added journal_entries and chart_of_accounts to avoid nested transaction
-    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items, db.entities, db.transactions, db.journal_entries, db.chart_of_accounts, db.bill_audit_logs], async () => {
+    await getDB().transaction('rw', [getDB().bills, getDB().bill_line_items, getDB().inventory_items, getDB().entities, getDB().transactions, getDB().journal_entries, getDB().chart_of_accounts, getDB().bill_audit_logs], async () => {
       // Add bill and line items
-      await db.bills.add(bill);
+      await getDB().bills.add(bill);
       if (mappedLineItems.length > 0) {
-        await db.bill_line_items.bulkAdd(mappedLineItems);
+        await getDB().bill_line_items.bulkAdd(mappedLineItems);
       }
 
       // ==================== CREATE AUDIT LOG ====================
       // Create ONE audit log entry for bill creation with human-readable information
       const generatedReason = `Creating bill #${bill.bill_number} with total amount ${bill.total_amount || 0}`;
       
-      await db.bill_audit_logs.add({
+      await getDB().bill_audit_logs.add({
         id: createId(),
         branch_id: currentBranchId || '',
         store_id: storeId,
@@ -1914,7 +1914,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (itemsWithInventoryId.length > 0) {
         // Bulk fetch all inventory items at once
         const inventoryIds = itemsWithInventoryId.map(item => item.inventory_item_id!);
-        const inventoryItems = await db.inventory_items.bulkGet(inventoryIds);
+        const inventoryItems = await getDB().inventory_items.bulkGet(inventoryIds);
         
         // Create a map for efficient lookup
         const inventoryMap = new Map(inventoryItems
@@ -1948,7 +1948,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         
         // Bulk update all inventory items at once
         if (inventoryUpdatesToSave.length > 0) {
-          await db.inventory_items.bulkPut(inventoryUpdatesToSave);
+          await getDB().inventory_items.bulkPut(inventoryUpdatesToSave);
         }
       }
       
@@ -1962,7 +1962,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             throw new Error(`Invalid product_id: ${item.product_id}. Product ID must be a string or number.`);
           }
           
-          const inventoryRecords = await db.inventory_items
+          const inventoryRecords = await getDB().inventory_items
             .where('product_id')
             .equals(item.product_id)
             .and(inv => inv.quantity > 0)
@@ -1983,13 +1983,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
             if (newQuantity <= 0) {
               // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(inv.id, {
+              await getDB().inventory_items.update(inv.id, {
                 quantity: 0,
                 _synced: false
               });
             } else {
               // Update with new quantity
-              await db.inventory_items.update(inv.id, {
+              await getDB().inventory_items.update(inv.id, {
                 quantity: newQuantity,
                 _synced: false
               });
@@ -2000,7 +2000,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
 
       // ✅ OPTIMIZED: Handle credit sale transaction WITHOUT nested transaction
-      // Use pre-fetched entity to avoid nested db.transaction()
+      // Use pre-fetched entity to avoid nested getDB().transaction()
       // IMPORTANT: Skip creating journal entries/transactions when amountDue = 0 (non-priced items)
       if (customerBalanceUpdate && customerBalanceUpdate.amountDue > 0 && preFetchedEntity) {
         const entity = preFetchedEntity;
@@ -2035,7 +2035,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           }
         };
         
-        await db.transactions.add(creditSaleTransaction);
+        await getDB().transactions.add(creditSaleTransaction);
         
         // 2. Create journal entries directly (double-entry bookkeeping)
         // ✅ IMPORTANT: Each entry must have ONLY debit OR credit, not both (database constraint)
@@ -2097,7 +2097,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           _synced: false
         };
         
-        await db.journal_entries.bulkAdd([debitEntry, creditEntry]);
+        await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);
         
         // Balances are now calculated from journal entries - no need to update
         // The journal entries created above will automatically reflect the correct balance
@@ -2122,7 +2122,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         });
 
         // // Record cash sale transaction for financial tracking
-        // await db.transaction('rw', [db.transactions], async () => {
+        // await getDB().transaction('rw', [getDB().transactions], async () => {
         //   const cashTransaction = {
         //     id: createId(),
         //     store_id: storeId,
@@ -2139,7 +2139,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         //     category: "sale",
         //     created_by: currentUserId,
         //   };
-        //   await db.transactions.add(cashTransaction as any);
+        //   await getDB().transactions.add(cashTransaction as any);
         // });
 
         debug(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
@@ -2227,7 +2227,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) throw new Error('No store ID available');
 
     // Get original bill for undo and comparison
-    const originalBill = await db.bills.get(billId);
+    const originalBill = await getDB().bills.get(billId);
     if (!originalBill) throw new Error('Bill not found');
     
     // ✅ Validate branch access before updating bill
@@ -2254,9 +2254,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const auditLogs: any[] = [];
     const auditLogIds: string[] = [];
 
-    await db.transaction('rw', [db.bills, db.bill_audit_logs, db.entities], async () => {
+    await getDB().transaction('rw', [getDB().bills, getDB().bill_audit_logs, getDB().entities], async () => {
       // Update the bill
-      await db.bills.update(billId, {
+      await getDB().bills.update(billId, {
         ...updates,
         updated_at: now,
         _synced: false // Mark as unsynced for background sync
@@ -2275,14 +2275,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             // Resolve customer_id to customer name
             if (field === 'customer_id') {
               if (oldValue) {
-                const oldEntity = await db.entities.get(oldValue);
+                const oldEntity = await getDB().entities.get(oldValue);
                 oldValueDisplay = oldEntity?.name || oldValue;
               } else {
                 oldValueDisplay = 'Walk-in Customer';
               }
               
               if (newValue) {
-                const newEntity = await db.entities.get(newValue);
+                const newEntity = await getDB().entities.get(newValue);
                 newValueDisplay = newEntity?.name || newValue as string;
               } else {
                 newValueDisplay = 'Walk-in Customer';
@@ -2322,7 +2322,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             };
 
             auditLogs.push(auditLog);
-            await db.bill_audit_logs.add(auditLog);
+            await getDB().bill_audit_logs.add(auditLog);
           }
         }
       }
@@ -2364,14 +2364,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const auditLogId = createId();
 
     // Get bill and line items for undo and audit trail
-    const bill = await db.bills.get(billId);
-    const lineItems = await db.bill_line_items.where('bill_id').equals(billId).toArray();
+    const bill = await getDB().bills.get(billId);
+    const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
 
     // Pure offline-first approach - delete from local database only
-    await db.transaction('rw', [db.bills, db.bill_line_items, db.bill_audit_logs], async () => {
+    await getDB().transaction('rw', [getDB().bills, getDB().bill_line_items, getDB().bill_audit_logs], async () => {
       if (softDelete) {
         // Soft delete - mark as deleted
-        await db.bills.update(billId, {
+        await getDB().bills.update(billId, {
           _deleted: true,
           updated_at: now,
           _synced: false // Mark as unsynced for background sync
@@ -2379,15 +2379,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
         // Also soft delete line items
         for (const item of lineItems) {
-          await db.bill_line_items.update(item.id, {
+          await getDB().bill_line_items.update(item.id, {
             _deleted: true,
             _synced: false // Mark as unsynced for background sync
           });
         }
       } else {
         // Hard delete
-        await db.bills.delete(billId);
-        await db.bill_line_items.where('bill_id').equals(billId).delete();
+        await getDB().bills.delete(billId);
+        await getDB().bill_line_items.where('bill_id').equals(billId).delete();
       }
 
       // ==================== CREATE AUDIT LOG ====================
@@ -2415,7 +2415,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         _synced: false
       };
 
-      await db.bill_audit_logs.add(auditLog);
+      await getDB().bill_audit_logs.add(auditLog);
     });
 
     // Build undo data
@@ -2452,7 +2452,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return [];
 
     // Pure offline-first approach - read only from local database
-    let query = db.bills.where('store_id').equals(storeId).filter(bill => !bill._deleted);
+    let query = getDB().bills.where('store_id').equals(storeId).filter(bill => !bill._deleted);
 
     // Apply filters that can be done at the query level
     if (filters) {
@@ -2461,7 +2461,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
       if (filters.supplier_id) {
         // Filter by supplier through bill line items
-        const billIdsWithSupplier = await db.bill_line_items
+        const billIdsWithSupplier = await getDB().bill_line_items
           .where('supplier_id')
           .equals(filters.supplier_id)
           .primaryKeys();
@@ -2505,7 +2505,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const searchLower = filters.searchTerm.toLowerCase();
       // Get customer entities for name lookup
       const customersMap = new Map<string, string>();
-      const allCustomerEntities = await db.entities
+      const allCustomerEntities = await getDB().entities
         .where('[store_id+entity_type]')
         .equals([storeId, 'customer'])
         .filter((e: any) => !e._deleted)
@@ -2529,7 +2529,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Attach line items to each bill
     const billsWithLineItems = await Promise.all(
       billsData.map(async (bill) => {
-        const lineItems = await db.bill_line_items
+        const lineItems = await getDB().bill_line_items
           .where('bill_id')
           .equals(bill.id)
           .filter(item => !item._deleted)
@@ -2549,16 +2549,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return null;
 
     // Pure offline-first approach - read only from local database
-    const bill = await db.bills.get(billId);
+    const bill = await getDB().bills.get(billId);
     if (!bill || bill._deleted) return null;
 
-    const lineItems = await db.bill_line_items
+    const lineItems = await getDB().bill_line_items
       .where('bill_id')
       .equals(billId)
       .filter(item => !item._deleted)
       .toArray();
 
-    const auditLogs = await db.bill_audit_logs
+    const auditLogs = await getDB().bill_audit_logs
       .where('bill_id')
       .equals(billId)
       .filter(log => !log._deleted)
@@ -2568,7 +2568,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Join audit logs with users to get user names and emails
     const auditLogsWithUsers = await Promise.all(
       auditLogs.map(async (log) => {
-        const user = await db.users.get(log.changed_by);
+        const user = await getDB().users.get(log.changed_by);
         return {
           ...log,
           users: user ? { name: user.name, email: user.email } : undefined
@@ -2596,7 +2596,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       ...auditData
     };
 
-    await db.bill_audit_logs.add(auditLog);
+    await getDB().bill_audit_logs.add(auditLog);
     await refreshData();
     await updateUnsyncedCount();
     debouncedSync();
@@ -2605,7 +2605,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const getStore = async (storeId: string): Promise<any | null> => {
     try {
       // Pure offline-first approach - read only from local database
-      const store = await db.stores.get(storeId);
+      const store = await getDB().stores.get(storeId);
       return store || null;
     } catch (error) {
       console.error('Error getting store from local database:', error);
@@ -2678,7 +2678,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _deleted: false
     };
     
-    await db.entities.add(entity);
+    await getDB().entities.add(entity);
     
     // Store undo data
     pushUndo({
@@ -2729,7 +2729,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _deleted: false
     };
     
-    await db.entities.add(entity);
+    await getDB().entities.add(entity);
     
     // Store undo data
     pushUndo({
@@ -2753,7 +2753,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateCustomer = async (id: string, updates: Tables['customers']['Update']): Promise<void> => {
     // Get original entity data for undo
-    const originalEntity = await db.entities.get(id);
+    const originalEntity = await getDB().entities.get(id);
     if (!originalEntity || originalEntity.entity_type !== 'customer') {
       throw new Error('Customer entity not found');
     }
@@ -2785,7 +2785,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       };
     }
     
-    await db.entities.update(id, entityUpdates);
+    await getDB().entities.update(id, entityUpdates);
     
     // Store undo data with original values
     // Note: Balances are calculated from journal entries, not stored on the entity
@@ -2818,7 +2818,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateSupplier = async (id: string, updates: Tables['suppliers']['Update']): Promise<void> => {
     // Get original entity data for undo
-    const originalEntity = await db.entities.get(id);
+    const originalEntity = await getDB().entities.get(id);
     if (!originalEntity || originalEntity.entity_type !== 'supplier') {
       throw new Error('Supplier entity not found');
     }
@@ -2850,7 +2850,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       };
     }
     
-    await db.entities.update(id, entityUpdates);
+    await getDB().entities.update(id, entityUpdates);
     
     // Store undo data with original values
     // Note: Balances are calculated from journal entries, not stored on the entity
@@ -2882,7 +2882,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateProduct = async (id: string, updates: Tables['products']['Update']): Promise<void> => {
     // Get original data for undo
-    const originalProduct = await db.products.get(id);
+    const originalProduct = await getDB().products.get(id);
     if (!originalProduct) throw new Error('Product not found');
     
     await crudHelperService.updateEntity('products', id, updates);
@@ -2914,7 +2914,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateBranch = async (id: string, updates: { name?: string; address?: string | null; phone?: string | null }): Promise<void> => {
     // Get original branch data
-    const originalBranch = await db.branches.get(id);
+    const originalBranch = await getDB().branches.get(id);
     if (!originalBranch) throw new Error('Branch not found');
     
     // Prepare update payload
@@ -2925,7 +2925,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
     
     // Update branch in IndexedDB
-    await db.branches.update(id, updatePayload);
+    await getDB().branches.update(id, updatePayload);
     
     // Store undo data with original values
     const undoChanges: any = {};
@@ -2956,7 +2956,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const deleteProduct = async (id: string): Promise<void> => {
     // Get original data for undo
-    const originalProduct = await db.products.get(id);
+    const originalProduct = await getDB().products.get(id);
     if (!originalProduct) throw new Error('Product not found');
     
     await crudHelperService.deleteEntity('products', id);
@@ -3008,7 +3008,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateEmployee = async (id: string, updates: Tables['users']['Update']): Promise<void> => {
     // Get original data for undo
-    const originalEmployee = await db.users.get(id);
+    const originalEmployee = await getDB().users.get(id);
     if (!originalEmployee) throw new Error('Employee not found');
     
     await crudHelperService.updateEntity('users', id, updates);
@@ -3040,7 +3040,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const deleteEmployee = async (id: string): Promise<void> => {
     // Get original data for undo
-    const originalEmployee = await db.users.get(id);
+    const originalEmployee = await getDB().users.get(id);
     if (!originalEmployee) throw new Error('Employee not found');
     
     await crudHelperService.deleteEntity('users', id);
@@ -3095,7 +3095,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateInventoryItem = async (id: string, updates: Tables['inventory_items']['Update']): Promise<void> => {
     // Get original data for undo
-    const originalItem = await db.inventory_items.get(id);
+    const originalItem = await getDB().inventory_items.get(id);
     if (!originalItem) throw new Error('Inventory item not found');
     
     await crudHelperService.updateEntity('inventory_items', id, updates);
@@ -3123,13 +3123,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     hasReferences: boolean;
   }> => {
     try {
-      const sales = await db.bill_line_items
+      const sales = await getDB().bill_line_items
         .where('inventory_item_id')
         .equals(id)
         .and(item => !item._deleted)
         .toArray();
 
-      const variances = await db.missed_products
+      const variances = await getDB().missed_products
         .where('inventory_item_id')
         .equals(id)
         .and(item => !item._deleted)
@@ -3155,17 +3155,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.log(`🗑️ Deleting inventory item ${id}`);
       
       // Get the inventory item for undo
-      const originalItem = await db.inventory_items.get(id);
+      const originalItem = await getDB().inventory_items.get(id);
       if (!originalItem) throw new Error('Inventory item not found');
       
       // Get all related records
-      const sales = await db.bill_line_items
+      const sales = await getDB().bill_line_items
         .where('inventory_item_id')
         .equals(id)
         .and(item => !item._deleted)
         .toArray();
 
-      const missedProducts = await db.missed_products
+      const missedProducts = await getDB().missed_products
         .where('inventory_item_id')
         .equals(id)
         .and(item => !item._deleted)
@@ -3288,14 +3288,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _synced: false
     };
     // Query products before transaction to use for SKU generation
-    const allProducts = await db.products.toArray();
+    const allProducts = await getDB().products.toArray();
     const productMap = new Map(allProducts.map(p => [p.id, p]));
 
     // Both batch and items are persisted locally and will be synced to Supabase.
     // The sync service ensures inventory_bills are uploaded before inventory_items
     // to maintain foreign key constraints.
-    await db.transaction('rw', [db.inventory_bills, db.inventory_items], async () => {
-      await db.inventory_bills.add(batchRecord);
+    await getDB().transaction('rw', [getDB().inventory_bills, getDB().inventory_items], async () => {
+      await getDB().inventory_bills.add(batchRecord);
       debug(batchRecord, 'batchrecord')
       const now = new Date().toISOString();
       const allowedUnits = ["box", "kg", "piece", "bag","bundle"] as const;
@@ -3322,7 +3322,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updated_at: now
       }));
 
-      await db.inventory_items.bulkAdd(mappedItems);
+      await getDB().inventory_items.bulkAdd(mappedItems);
       
       // Generate SKU/barcode for items that don't have one
       // Format: [CATEGORY_PREFIX]-#[INVENTORY_ITEM_ID_LAST4]
@@ -3350,7 +3350,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             const sku = `${categoryPrefix}-${itemIdPart}`;
             
             // Update inventory item with generated SKU
-            await db.inventory_items.update(item.id, { sku });
+            await getDB().inventory_items.update(item.id, { sku });
           }
         }
       }
@@ -3453,28 +3453,28 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }));
 
     // Use transaction to ensure atomicity for all operations
-    await db.transaction('rw', [db.bills, db.bill_line_items, db.inventory_items], async () => {
+    await getDB().transaction('rw', [getDB().bills, getDB().bill_line_items, getDB().inventory_items], async () => {
       // Add bill and line items
-      await db.bills.add(billData as any);
-      await db.bill_line_items.bulkAdd(lineItems);
+      await getDB().bills.add(billData as any);
+      await getDB().bill_line_items.bulkAdd(lineItems);
 
       // Deduct from specific inventory items
       for (const item of items) {
         if (item.inventory_item_id) {
           // Use the specific inventory item ID if provided
-          const inventoryItem = await db.inventory_items.get(item.inventory_item_id);
+          const inventoryItem = await getDB().inventory_items.get(item.inventory_item_id);
           if (inventoryItem && inventoryItem.quantity >= item.quantity) {
             const newQuantity = inventoryItem.quantity - item.quantity;
 
             if (newQuantity <= 0) {
               // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(item.inventory_item_id, {
+              await getDB().inventory_items.update(item.inventory_item_id, {
                 quantity: 0,
                 _synced: false
               });
             } else {
               // Update with new quantity
-              await db.inventory_items.update(item.inventory_item_id, {
+              await getDB().inventory_items.update(item.inventory_item_id, {
                 quantity: newQuantity,
                 _synced: false
               });
@@ -3488,7 +3488,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             throw new Error(`Invalid product_id: ${item.product_id}. Product ID must be a string or number.`);
           }
           
-          const inventoryRecords = await db.inventory_items
+          const inventoryRecords = await getDB().inventory_items
             .where('product_id')
             .equals(item.product_id)
             .and(inv => inv.quantity > 0)
@@ -3503,13 +3503,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
             if (newQuantity <= 0) {
               // Keep inventory item with quantity = 0 for received bills review instead of deleting
-              await db.inventory_items.update(inv.id, {
+              await getDB().inventory_items.update(inv.id, {
                 quantity: 0,
                 _synced: false
               });
             } else {
               // Update with new quantity
-              await db.inventory_items.update(inv.id, {
+              await getDB().inventory_items.update(inv.id, {
                 quantity: newQuantity,
                 _synced: false
               });
@@ -3536,7 +3536,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Add inventory restoration steps
     for (const item of items) {
       if (item.inventory_item_id) {
-        const inventoryItem = await db.inventory_items.get(item.inventory_item_id);
+        const inventoryItem = await getDB().inventory_items.get(item.inventory_item_id);
         if (inventoryItem) {
           saleUndoData.steps.push({
             op: 'update',
@@ -3613,7 +3613,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
 
     // Get the original sale item to compare quantities
-    const originalSale = await db.bill_line_items.get(id);
+    const originalSale = await getDB().bill_line_items.get(id);
     if (!originalSale) throw new Error('Sale item not found');
 
     // Transform updates to database format
@@ -3627,8 +3627,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const priceChanged = updates.unit_price !== undefined || updates.received_value !== undefined || updates.weight !== undefined;
 
     // ==================== USE AUDIT TRAIL FUNCTION ====================
-    // Use db.updateBillLineItem which creates audit logs with ID resolution
-    await db.updateBillLineItem(id, dbUpdates, currentUserId);
+    // Use getDB().updateBillLineItem which creates audit logs with ID resolution
+    await getDB().updateBillLineItem(id, dbUpdates, currentUserId);
 
     // Handle inventory adjustments outside the transaction if quantity changed
     if (quantityChanged && originalSale.product_id) {
@@ -3643,14 +3643,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Update related bills if price-related fields changed
     if (priceChanged) {
-      await db.updateBillsForLineItem(id);
+      await getDB().updateBillsForLineItem(id);
       
       // Check if we need to update customer balance for credit sales
       // This happens when pricing a non-priced item (unit_price goes from 0 to > 0)
-      const bill = await db.bills.get(originalSale.bill_id);
+      const bill = await getDB().bills.get(originalSale.bill_id);
       if (bill && bill.payment_method === 'credit' && bill.customer_id) {
         // Get all line items for this bill to calculate totals
-        const allLineItems = await db.bill_line_items
+        const allLineItems = await getDB().bill_line_items
           .where('bill_id')
           .equals(bill.id)
           .and(item => !item._deleted)
@@ -3680,7 +3680,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // 2. Amount due increased (item was priced)
         if (originalItemHadZeroPrice && amountDueIncrease > 0) {
           // This is a non-priced item being priced - update customer balance
-          const entity = await db.entities.get(bill.customer_id);
+          const entity = await getDB().entities.get(bill.customer_id);
           if (entity && (entity.entity_type === 'customer' || entity.entity_type === 'supplier')) {
             const entityType = entity.entity_type as 'customer' | 'supplier';
             const now = new Date().toISOString();
@@ -3713,7 +3713,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               }
             };
             
-            await db.transactions.add(creditSaleTransaction);
+            await getDB().transactions.add(creditSaleTransaction);
             
             // 2. Create journal entries (double-entry bookkeeping)
             // ✅ FIX: Use transactionId (not a separate journalTransactionId) so account statements can find the transaction
@@ -3765,7 +3765,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               _synced: false
             };
             
-            await db.journal_entries.bulkAdd([debitEntry, creditEntry]);
+            await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);
             
             // 3. Update entity balance
             const transactionCurrency = creditSaleTransaction.currency;
@@ -3784,7 +3784,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               updateData.lb_balance = newBalance;
             }
             
-            await db.entities.update(bill.customer_id, updateData);
+            await getDB().entities.update(bill.customer_id, updateData);
             
             console.log(`✅ Updated ${entityType} balance for ${entity.name}: ${previousBalance} → ${newBalance} (increase: ${amountDueIncrease})`);
           }
@@ -3825,13 +3825,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) throw new Error('No store ID available');
 
     // Get the sale item before deletion to restore inventory
-    const saleItem = await db.bill_line_items.get(id);
+    const saleItem = await getDB().bill_line_items.get(id);
     if (!saleItem) throw new Error('Sale item not found');
 
     // Use transaction to ensure atomicity for the sale deletion only
-    await db.transaction('rw', [db.bill_line_items], async () => {
+    await getDB().transaction('rw', [getDB().bill_line_items], async () => {
       // Delete the sale item
-      await db.bill_line_items.delete(id);
+      await getDB().bill_line_items.delete(id);
     });
 
     // Restore inventory quantities outside the transaction
@@ -3904,7 +3904,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         is_reversal: (transactionData as any).is_reversal ?? false,
         reversal_of_transaction_id: (transactionData as any).reversal_of_transaction_id ?? null
       };
-      await db.transactions.add(transaction);
+      await getDB().transactions.add(transaction);
     } else {
       // Use unified transaction service for validated categories
       await transactionService.createTransaction({
@@ -3956,7 +3956,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateInventoryBatch = async (id: string, updates: Partial<Tables['inventory_bills']['Update']>): Promise<void> => {
     // Get original data for undo
-    const originalBatch = await db.inventory_bills.get(id);
+    const originalBatch = await getDB().inventory_bills.get(id);
     if (!originalBatch) throw new Error('Inventory batch not found');
     
     // Process updates to ensure proper data types
@@ -4017,13 +4017,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     delete processedUpdates.plastic_count;
     delete processedUpdates.plastic_price;
 
-    await db.inventory_bills.update(id, processedUpdates);
+    await getDB().inventory_bills.update(id, processedUpdates);
     
     // Check if bill was just closed - clean up notifications
     if (updates.status && typeof updates.status === 'string' && updates.status.includes('[CLOSED]')) {
       if (storeId) {
         // Get all inventory items with this batch_id and mark them as closed in monitoring
-        const inventoryItems = await db.inventory_items
+        const inventoryItems = await getDB().inventory_items
           .where('batch_id')
           .equals(id)
           .toArray();
@@ -4061,11 +4061,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const applyCommissionRateToBatch = async (batchId: string, commissionRate: number): Promise<void> => {
     // Get original data for undo
-    const originalBatch = await db.inventory_bills.get(batchId);
+    const originalBatch = await getDB().inventory_bills.get(batchId);
     if (!originalBatch) throw new Error('Inventory batch not found');
     
     // Update commission rate for the batch
-    await db.inventory_bills
+    await getDB().inventory_bills
       .where('id')
       .equals(batchId)
       .modify({ commission_rate: commissionRate, _synced: false });
@@ -4088,7 +4088,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // Expose the updateBillsForSaleItem method for direct access
   const updateBillsForSaleItem = async (saleItemId: string): Promise<void> => {
-    await db.updateBillsForLineItem(saleItemId);
+    await getDB().updateBillsForLineItem(saleItemId);
   };
 
   const fullResync = async (): Promise<SyncResult> => {
@@ -4134,8 +4134,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Clean up orphaned records and invalid inventory items
       const [orphanedCleaned, invalidCleaned] = await Promise.all([
-        db.cleanupOrphanedRecords(storeId),
-        db.cleanupInvalidInventoryItems()
+        getDB().cleanupOrphanedRecords(storeId),
+        getDB().cleanupInvalidInventoryItems()
       ]);
       
       const cleaned = orphanedCleaned + invalidCleaned;
@@ -4283,7 +4283,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
 
       // Get the cash drawer account ID for undo purposes
-      const account = await db.getCashDrawerAccount(storeId, currentBranchId!);
+      const account = await getDB().getCashDrawerAccount(storeId, currentBranchId!);
       const accountId = account?.id;
 
       // Notify UI of cash drawer update
@@ -4369,7 +4369,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         return 0;
       }
       
-      const currentAccount = await db.cash_drawer_accounts
+      const currentAccount = await getDB().cash_drawer_accounts
         .where('store_id')
         .equals(storeId)
         .and(account => account.is_active)
@@ -4720,12 +4720,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       let cashDrawerResult: any;
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK - ALL OR NOTHING ⭐⭐⭐
-      await db.transaction('rw', 
+      await getDB().transaction('rw', 
         [
-          db.users, 
-          db.transactions, 
-          db.cash_drawer_accounts, 
-          db.cash_drawer_sessions
+          getDB().users, 
+          getDB().transactions, 
+          getDB().cash_drawer_accounts, 
+          getDB().cash_drawer_sessions
         ], 
         async () => {
           console.log('💳 [ATOMIC] Starting atomic employee payment transaction...');
@@ -4736,7 +4736,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             updated_at: new Date().toISOString(),
             _synced: false 
           };
-          await db.users.update(employeeId, updateData);
+          await getDB().users.update(employeeId, updateData);
           console.log(`💳 [ATOMIC] Employee balance updated: ${balanceField} = ${newBalance}`);
 
           // 2. Process cash drawer transaction atomically (within existing transaction)
@@ -4744,7 +4744,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           // Instead, we'll do the cash drawer operations directly within this atomic block
           
           // Get cash drawer account
-          const cashDrawerAccount = await db.getCashDrawerAccount(storeId, currentBranchId!);
+          const cashDrawerAccount = await getDB().getCashDrawerAccount(storeId, currentBranchId!);
           if (!cashDrawerAccount) {
             throw new Error('No cash drawer account found. Please create one before processing payments.');
           }
@@ -4784,7 +4784,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             _synced: false
           };
 
-          await db.transactions.add(transactionRecord);
+          await getDB().transactions.add(transactionRecord);
 
           // Set result for undo data creation
           cashDrawerResult = {
@@ -5058,7 +5058,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const deleteSupplierAdvance = async (transactionId: string): Promise<void> => {
     try {
       // Find the transaction
-      const transaction = await db.transactions.get(transactionId);
+      const transaction = await getDB().transactions.get(transactionId);
       if (!transaction) {
         throw new Error('Transaction not found');
       }
@@ -5221,7 +5221,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       pushUndo(undoData);
 
       // Delete transaction from IndexedDB (soft delete)
-      await db.transactions.update(transactionId, {
+      await getDB().transactions.update(transactionId, {
         _deleted: true,
         _synced: false
       });
@@ -5251,7 +5251,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   ): Promise<void> => {
     try {
       // Find the old transaction
-      const oldTransaction = await db.transactions.get(transactionId);
+      const oldTransaction = await getDB().transactions.get(transactionId);
       if (!oldTransaction) {
         throw new Error('Transaction not found');
       }
@@ -5461,7 +5461,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       };
 
       // Update transaction in IndexedDB
-      await db.transactions.update(transactionId, transactionUpdate);
+      await getDB().transactions.update(transactionId, transactionUpdate);
 
       // Create undo data - restore old transaction and supplier balances
       const affectedTables: any[] = [
@@ -5619,28 +5619,28 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
 
       // Execute undo steps
-      await db.transaction('rw', [...db.tables, db.pending_syncs], async () => {
+      await getDB().transaction('rw', [...getDB().tables, getDB().pending_syncs], async () => {
         for (const step of action.steps || []) {
           if (step.op === 'delete' && step.id) {
             // Special handling for journal_entries - delete by transaction_id
             if (step.table === 'journal_entries' && (step as any).transaction_id) {
               const transactionId = (step as any).transaction_id;
-              const journalEntries = await db.journal_entries
+              const journalEntries = await getDB().journal_entries
                 .where('transaction_id')
                 .equals(transactionId)
                 .toArray();
               
               // Delete all journal entries for this transaction
               for (const entry of journalEntries) {
-                await db.journal_entries.delete(entry.id);
+                await getDB().journal_entries.delete(entry.id);
                 // Remove from pending syncs
-                await db.pending_syncs.where('table_name').equals('journal_entries')
+                await getDB().pending_syncs.where('table_name').equals('journal_entries')
                   .filter(item => item.record_id === entry.id).delete();
               }
             } else {
               await (db as any)[step.table].delete(step.id);
               // Remove from pending syncs if it exists
-              await db.pending_syncs.where('table_name').equals(step.table)
+              await getDB().pending_syncs.where('table_name').equals(step.table)
                 .filter(item => item.record_id === step.id).delete();
             }
           } else if (step.op === 'restore' && step.record) {
@@ -5648,14 +5648,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           } else if (step.op === 'update' && step.id && step.changes) {
             await (db as any)[step.table].update(step.id, step.changes);
             // Remove from pending syncs if it exists
-            await db.pending_syncs.where('table_name').equals(step.table)
+            await getDB().pending_syncs.where('table_name').equals(step.table)
               .filter(item => item.record_id === step.id).delete();
           }
         }
 
         // Remove any pending syncs for affected records
         for (const item of action.affected || []) {
-          await db.pending_syncs.where('table_name').equals(item.table)
+          await getDB().pending_syncs.where('table_name').equals(item.table)
             .filter(pending => pending.record_id === item.id).delete();
         }
       });
@@ -5702,7 +5702,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
 
       // Get the account for local state
-      const account = await db.getCashDrawerAccount(storeId, currentBranchId);
+      const account = await getDB().getCashDrawerAccount(storeId, currentBranchId);
       if (!account) {
         throw new Error('Failed to retrieve cash drawer account after opening session');
       }
@@ -5761,18 +5761,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       // Get current session state before closing
-      const session = await db.cash_drawer_sessions.get(cashDrawer.id);
+      const session = await getDB().cash_drawer_sessions.get(cashDrawer.id);
       if (!session) return;
 
       if (!storeId) return;
-      const account = await db.getCashDrawerAccount(storeId, currentBranchId!);
+      const account = await getDB().getCashDrawerAccount(storeId, currentBranchId!);
       if (!account) return;
 
       // Calculate balance from journal entries for undo data
       const currency = (account as any)?.currency || 'USD';
       const previousBalance = await calculateCashDrawerBalance(storeId, currentBranchId!, currency);
 
-      await db.closeCashDrawerSession(cashDrawer.id, actualAmount, closedBy, notes);
+      await getDB().closeCashDrawerSession(cashDrawer.id, actualAmount, closedBy, notes);
 
       // Update local state to null since there's no active session
       setCashDrawer(null);
@@ -5826,17 +5826,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const getCashDrawerBalanceReport = async (startDate?: string, endDate?: string) => {
     if (!storeId || !currentBranchId) return [];
-    return await db.getCashDrawerBalanceReport(storeId, currentBranchId, startDate, endDate);
+    return await getDB().getCashDrawerBalanceReport(storeId, currentBranchId, startDate, endDate);
   };
 
   const getCurrentCashDrawerStatus = async () => {
     if (!storeId || !currentBranchId) return null;
-    return await db.getCurrentCashDrawerStatus(storeId, currentBranchId);
+    return await getDB().getCurrentCashDrawerStatus(storeId, currentBranchId);
   };
 
   const getCashDrawerSessionDetails = async (sessionId: string) => {
     if (!storeId) return null;
-    return await db.getCashDrawerSessionDetails(sessionId);
+    return await getDB().getCashDrawerSessionDetails(sessionId);
   };
 
   const getRecommendedOpeningAmount = async () => {
@@ -5844,7 +5844,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     
     try {
       // Get the last closed session
-      const closedSessions = await db.cash_drawer_sessions
+      const closedSessions = await getDB().cash_drawer_sessions
         .where('store_id')
         .equals(storeId)
         .filter(sess => sess.status === 'closed')
@@ -5891,7 +5891,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setLowStockAlertsEnabled(enabled);
 
       // Update IndexedDB
-      await db.stores
+      await getDB().stores
         .where('id')
         .equals(storeId)
         .modify({
@@ -5937,12 +5937,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setDefaultCommissionRate(rate);
 
       // Update IndexedDB using .update() instead of .modify() to ensure hooks fire
-      const store = await db.stores.get(storeId);
+      const store = await getDB().stores.get(storeId);
       if (!store) {
         throw new Error('Store not found');
       }
 
-      await db.stores.update(storeId, {
+      await getDB().stores.update(storeId, {
         preferred_commission_rate: rate,
         _synced: false,
         updated_at: new Date().toISOString()
@@ -5980,7 +5980,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setCurrency(newCurrency);
 
       // Update IndexedDB using .update() instead of .modify() to ensure hooks fire
-      await db.stores.update(storeId, {
+      await getDB().stores.update(storeId, {
         preferred_currency: newCurrency,
         _synced: false,
         updated_at: new Date().toISOString()
@@ -6018,7 +6018,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setExchangeRate(rate);
 
       // Update IndexedDB using .update() instead of .modify() to ensure hooks fire
-      await db.stores.update(storeId, {
+      await getDB().stores.update(storeId, {
         exchange_rate: rate,
         _synced: false,
         updated_at: new Date().toISOString()
@@ -6056,7 +6056,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       setLanguage(newLanguage);
 
       // Update IndexedDB using .update() instead of .modify() to ensure hooks fire
-      await db.stores.update(storeId, {
+      await getDB().stores.update(storeId, {
         preferred_language: newLanguage,
         _synced: false,
         updated_at: new Date().toISOString()
@@ -6102,7 +6102,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return;
 
     try {
-      const inventoryRecords = await db.inventory_items
+      const inventoryRecords = await getDB().inventory_items
         .where('product_id')
         .equals(productId)
         .and(inv => inv.quantity > 0)
@@ -6117,13 +6117,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
         if (newQuantity <= 0) {
           // Keep inventory item with quantity = 0 for received bills review instead of deleting
-          await db.inventory_items.update(inv.id, {
+          await getDB().inventory_items.update(inv.id, {
             quantity: 0,
             _synced: false
           });
         } else {
           // Update with new quantity
-          await db.inventory_items.update(inv.id, {
+          await getDB().inventory_items.update(inv.id, {
             quantity: newQuantity,
             _synced: false
           });
@@ -6150,7 +6150,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     try {
       // Find existing inventory items for this product
-      const existingInventory = await db.inventory_items
+      const existingInventory = await getDB().inventory_items
         .where('product_id')
         .equals(productId)
         .sortBy('received_at');
@@ -6160,7 +6160,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const mostRecent = existingInventory[existingInventory.length - 1];
         const newQuantity = mostRecent.quantity + quantity;
 
-        await db.inventory_items.update(mostRecent.id, {
+        await getDB().inventory_items.update(mostRecent.id, {
           quantity: newQuantity,
           _synced: false
         });
@@ -6182,7 +6182,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           batch_id: null
         };
 
-        await db.inventory_items.add(newInventoryItem);
+        await getDB().inventory_items.add(newInventoryItem);
       }
 
       // Refresh data to update stock levels

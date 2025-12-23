@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 export interface ProductReferences {
   hasReferences: boolean;
@@ -15,14 +15,14 @@ export interface ProductReferences {
 export async function checkProductReferences(productId: string): Promise<ProductReferences> {
   try {
     // Check bill_line_items for references
-    const billLineItemsCount = await db.bill_line_items
+    const billLineItemsCount = await getDB().bill_line_items
       .where('product_id')
       .equals(productId)
       .and(item => !item._deleted)
       .count();
 
     // Check inventory_items for references
-    const inventoryItemsCount = await db.inventory_items
+    const inventoryItemsCount = await getDB().inventory_items
       .where('product_id')
       .equals(productId)
       .and(item => !item._deleted)

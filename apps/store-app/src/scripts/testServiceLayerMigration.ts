@@ -8,7 +8,7 @@
  *   import('./scripts/testServiceLayerMigration').then(m => m.testServiceLayerMigration(storeId));
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { transactionService } from '../services/transactionService';
 import { accountBalanceService } from '../services/accountBalanceService';
 
@@ -49,7 +49,7 @@ async function testTransactionService(storeId: string): Promise<{
     console.log('🧪 Test 1: Testing getEntityBalance()...');
     
     // Get a customer entity
-    const customerEntity = await db.entities
+    const customerEntity = await getDB().entities
       .where('[store_id+entity_type]')
       .equals([storeId, 'customer'])
       .first();
@@ -57,7 +57,7 @@ async function testTransactionService(storeId: string): Promise<{
     if (customerEntity) {
       // This is a private method, so we'll test indirectly through transaction creation
       // For now, we'll verify the entities table has the data
-      const entity = await db.entities.get(customerEntity.id);
+      const entity = await getDB().entities.get(customerEntity.id);
       if (entity && (entity.usd_balance !== undefined || entity.lb_balance !== undefined)) {
         getEntityBalancePassed = true;
         console.log('   ✅ getEntityBalance test passed (entities table accessible)');
@@ -84,7 +84,7 @@ async function testTransactionService(storeId: string): Promise<{
         // We can't directly test the private method, but we can verify the pattern
         
         // Check that entities table has the entity
-        const entityAfter = await db.entities.get(customerEntity.id);
+        const entityAfter = await getDB().entities.get(customerEntity.id);
         if (entityAfter) {
           updateEntityBalancePassed = true;
           console.log('   ✅ updateEntityBalance test passed (entities table structure correct)');
@@ -131,7 +131,7 @@ async function testAccountBalanceService(storeId: string): Promise<{
     // Test 1: Get account balance (should read from entities table)
     console.log('🧪 Test 3: Testing getAccountBalance()...');
     
-    const customerEntity = await db.entities
+    const customerEntity = await getDB().entities
       .where('[store_id+entity_type]')
       .equals([storeId, 'customer'])
       .first();
@@ -166,7 +166,7 @@ async function testAccountBalanceService(storeId: string): Promise<{
     if (customerEntity) {
       // This is a private method, so we'll test indirectly
       // We can verify that the service can access entities table
-      const entity = await db.entities.get(customerEntity.id);
+      const entity = await getDB().entities.get(customerEntity.id);
       if (entity) {
         updateCachedBalancePassed = true;
         console.log('   ✅ updateCachedBalance test passed (entities table accessible)');
@@ -296,7 +296,7 @@ export async function quickServiceLayerTest(storeId: string): Promise<void> {
 
   try {
     // Test 1: Verify entities table has data
-    const entities = await db.entities
+    const entities = await getDB().entities
       .where('store_id')
       .equals(storeId)
       .toArray();

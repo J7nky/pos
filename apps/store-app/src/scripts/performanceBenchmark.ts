@@ -1,7 +1,7 @@
 // Phase 6: Performance Benchmarking
 // Measures performance improvements from the accounting foundation migration
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 interface BenchmarkResult {
   operation: string;
@@ -84,7 +84,7 @@ async function setupPerformanceTestData(storeId: string): Promise<void> {
     });
   }
   
-  await db.entities.bulkAdd(entities as any);
+  await getDB().entities.bulkAdd(entities as any);
   
   // Create test journal entries
   const journalEntries = [];
@@ -136,7 +136,7 @@ async function setupPerformanceTestData(storeId: string): Promise<void> {
     });
   }
   
-  await db.journal_entries.bulkAdd(journalEntries as any);
+  await getDB().journal_entries.bulkAdd(journalEntries as any);
   
   // Create test snapshots
   const snapshots = [];
@@ -157,7 +157,7 @@ async function setupPerformanceTestData(storeId: string): Promise<void> {
     });
   }
   
-  await db.balance_snapshots.bulkAdd(snapshots as any);
+  await getDB().balance_snapshots.bulkAdd(snapshots as any);
   
   console.log('✅ Performance test data created');
 }
@@ -165,7 +165,7 @@ async function setupPerformanceTestData(storeId: string): Promise<void> {
 async function benchmarkEntityQueries(storeId: string): Promise<BenchmarkResult> {
   // Simulate legacy approach (direct table scan)
   const legacyStart = performance.now();
-  const legacyCustomers = await db.entities
+  const legacyCustomers = await getDB().entities
     .where('store_id')
     .equals(storeId)
     .filter((entity: any) => entity.entity_type === 'customer' && entity.is_active)
@@ -174,7 +174,7 @@ async function benchmarkEntityQueries(storeId: string): Promise<BenchmarkResult>
   
   // Simulate new approach (optimized query with indexing)
   const newStart = performance.now();
-  const newCustomers = await db.entities
+  const newCustomers = await getDB().entities
     .where('[store_id+entity_type]')
     .equals([storeId, 'customer'])
     .filter((entity: any) => entity.is_active)
@@ -198,7 +198,7 @@ async function benchmarkBalanceCalculations(storeId: string): Promise<BenchmarkR
   
   // Legacy approach: Calculate from all journal entries
   const legacyStart = performance.now();
-  const allEntries = await db.journal_entries
+  const allEntries = await getDB().journal_entries
     .where('entity_id')
     .equals(entityId)
     .toArray();
@@ -214,7 +214,7 @@ async function benchmarkBalanceCalculations(storeId: string): Promise<BenchmarkR
   // New approach: Use snapshot
   const newStart = performance.now();
   const today = new Date().toISOString().split('T')[0];
-  const snapshot = await db.balance_snapshots
+  const snapshot = await getDB().balance_snapshots
     .where('[entity_id+account_code+snapshot_date]')
     .equals([entityId, '1200', today])
     .first();
@@ -239,7 +239,7 @@ async function benchmarkReportGeneration(storeId: string): Promise<BenchmarkResu
   
   // Legacy approach: Calculate trial balance from journal entries
   const legacyStart = performance.now();
-  const allJournalEntries = await db.journal_entries
+  const allJournalEntries = await getDB().journal_entries
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -255,7 +255,7 @@ async function benchmarkReportGeneration(storeId: string): Promise<BenchmarkResu
   
   // New approach: Use snapshots for trial balance
   const newStart = performance.now();
-  const snapshots = await db.balance_snapshots
+  const snapshots = await getDB().balance_snapshots
     .where('[store_id+snapshot_date]')
     .equals([storeId, today])
     .toArray();
@@ -287,7 +287,7 @@ async function benchmarkHistoricalQueries(storeId: string): Promise<BenchmarkRes
   
   // Legacy approach: Calculate historical balance from journal entries
   const legacyStart = performance.now();
-  const historicalEntries = await db.journal_entries
+  const historicalEntries = await getDB().journal_entries
     .where('entity_id')
     .equals(entityId)
     .filter((entry: any) => entry.posted_date <= targetDate)
@@ -303,7 +303,7 @@ async function benchmarkHistoricalQueries(storeId: string): Promise<BenchmarkRes
   
   // New approach: Direct snapshot lookup
   const newStart = performance.now();
-  const historicalSnapshot = await db.balance_snapshots
+  const historicalSnapshot = await getDB().balance_snapshots
     .where('[entity_id+account_code+snapshot_date]')
     .equals([entityId, '1200', targetDate])
     .first();
@@ -362,10 +362,10 @@ function generatePerformanceReport(results: BenchmarkResult[]): void {
 }
 
 async function cleanupPerformanceTestData(storeId: string): Promise<void> {
-  await db.transaction('rw', [db.entities, db.journal_entries, db.balance_snapshots], async () => {
-    await db.entities.where('store_id').equals(storeId).delete();
-    await db.journal_entries.where('store_id').equals(storeId).delete();
-    await db.balance_snapshots.where('store_id').equals(storeId).delete();
+  await getDB().transaction('rw', [getDB().entities, getDB().journal_entries, getDB().balance_snapshots], async () => {
+    await getDB().entities.where('store_id').equals(storeId).delete();
+    await getDB().journal_entries.where('store_id').equals(storeId).delete();
+    await getDB().balance_snapshots.where('store_id').equals(storeId).delete();
   });
   
   console.log('🧹 Performance test data cleaned up');

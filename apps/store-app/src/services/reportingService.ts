@@ -1,7 +1,7 @@
 // Reporting Service - Phase 5 of Accounting Foundation Migration
 // High-performance reports using journal entries and balance snapshots
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { snapshotService } from './snapshotService';
 import { entityQueryService } from './entityQueryService';
 
@@ -107,7 +107,7 @@ export class ReportingService {
   ): Promise<GeneralLedgerReport> {
     try {
       // Get account information
-      const account = await db.chart_of_accounts
+      const account = await getDB().chart_of_accounts
         .where('[store_id+account_code]')
         .equals([storeId, accountCode])
         .first();
@@ -139,7 +139,7 @@ export class ReportingService {
         }
       } else {
         // Account total opening balance - sum across all entities
-        const entities = await db.entities.where('store_id').equals(storeId).toArray();
+        const entities = await getDB().entities.where('store_id').equals(storeId).toArray();
         
         for (const entity of entities) {
           try {
@@ -158,7 +158,7 @@ export class ReportingService {
       }
       
       // Get journal entries for the period
-      let query = db.journal_entries
+      let query = getDB().journal_entries
         .where('[store_id+account_code]')
         .equals([storeId, accountCode])
         .filter(entry => entry.posted_date >= startDate && entry.posted_date <= endDate);
@@ -187,7 +187,7 @@ export class ReportingService {
         // Get entity name
         let entityName: string | null = null;
         if (entry.entity_id) {
-          const entity = await db.entities.get(entry.entity_id);
+          const entity = await getDB().entities.get(entry.entity_id);
           entityName = entity?.name || null;
         }
         
@@ -251,8 +251,8 @@ export class ReportingService {
     try {
       // Get entity and account information
       const [entity, account] = await Promise.all([
-        db.entities.get(entityId),
-        db.chart_of_accounts
+        getDB().entities.get(entityId),
+        getDB().chart_of_accounts
           .where('[store_id+account_code]')
           .equals([storeId, accountCode])
           .first()
@@ -287,7 +287,7 @@ export class ReportingService {
       }
       
       // Get journal entries for the period
-      const journalEntries = await db.journal_entries
+      const journalEntries = await getDB().journal_entries
         .where('[store_id+account_code+entity_id]')
         .equals([storeId, accountCode, entityId])
         .filter(entry => entry.posted_date >= startDate && entry.posted_date <= endDate)
@@ -350,7 +350,7 @@ export class ReportingService {
    */
   async generateTrialBalance(storeId: string, asOfDate: string): Promise<TrialBalance> {
     try {
-      const accounts = await db.chart_of_accounts
+      const accounts = await getDB().chart_of_accounts
         .where('store_id')
         .equals(storeId)
         .filter(account => account.is_active)
@@ -366,7 +366,7 @@ export class ReportingService {
         
         if (account.requires_entity) {
           // Sum balances across all entities for this account
-          const entities = await db.entities.where('store_id').equals(storeId).toArray();
+          const entities = await getDB().entities.where('store_id').equals(storeId).toArray();
           
           for (const entity of entities) {
             try {
@@ -533,7 +533,7 @@ export class ReportingService {
     netIncome: { USD: number; LBP: number };
   }> {
     try {
-      const accounts = await db.chart_of_accounts
+      const accounts = await getDB().chart_of_accounts
         .where('store_id')
         .equals(storeId)
         .filter(account => account.is_active)
@@ -554,7 +554,7 @@ export class ReportingService {
         
         if (account.requires_entity) {
           // Sum across all entities
-          const entities = await db.entities.where('store_id').equals(storeId).toArray();
+          const entities = await getDB().entities.where('store_id').equals(storeId).toArray();
           
           for (const entity of entities) {
             try {

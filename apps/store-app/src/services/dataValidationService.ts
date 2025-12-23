@@ -1,5 +1,8 @@
 // Centralized validation service to eliminate redundancy across syncService and OfflineDataContext
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
+
+// Get singleton database instance
+const db = getDB();
 
 interface ValidationCache {
   products: Set<string>;
@@ -179,7 +182,7 @@ export class DataValidationService {
 
     // First, try to get from local IndexedDB (offline-first)
     try {
-      const localEntities = await db.entities
+      const localEntities = await getDB().entities
         .where('store_id')
         .equals(storeId)
         .toArray();
@@ -491,7 +494,7 @@ export class DataValidationService {
         try {
           if (rule.foreignKey.table === 'entities') {
             // Check local entities table with entity_type filter if specified
-            const entity = await db.entities.get(value);
+            const entity = await getDB().entities.get(value);
             if (entity) {
               // Validate entity_type matches if specified
               if (rule.foreignKey.entityType && entity.entity_type !== rule.foreignKey.entityType) {
@@ -530,9 +533,9 @@ export class DataValidationService {
       }
 
       // Fix missing product - use first available (include global products)
-      if (!await db.products.get(record.product_id)) {
+      if (!await getDB().products.get(record.product_id)) {
         // Try store-specific products first
-        let validProduct = await db.products
+        let validProduct = await getDB().products
           .where('store_id')
           .equals(storeId)
           .filter(p => !p._deleted)
@@ -540,7 +543,7 @@ export class DataValidationService {
         
         // If no store products, try global products
         if (!validProduct) {
-          validProduct = await db.products
+          validProduct = await getDB().products
             .where('is_global')
             .equals(1)
             .filter(p => !p._deleted)
@@ -561,7 +564,7 @@ export class DataValidationService {
       }
 
       // Fix invalid batch reference
-      if (record.batch_id && !await db.inventory_bills.get(record.batch_id)) {
+      if (record.batch_id && !await getDB().inventory_bills.get(record.batch_id)) {
         record.batch_id = null;
       }
     }

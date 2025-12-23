@@ -78,6 +78,7 @@ export function PrintPreview({
     }
     if (selectedPages.length === totalPages) {
       // Print all pages
+      console.log('print all pages');
       onPrint();
     } else {
       // Print selected pages only

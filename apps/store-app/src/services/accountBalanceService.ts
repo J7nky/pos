@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Customer, Supplier, Transaction, LocalSaleItem } from '../lib/db';
 import { transactionService } from './transactionService';
 import { BalanceCalculator } from '../utils/balanceCalculator';
@@ -50,7 +50,7 @@ export class AccountBalanceService {
     try {
       // Get entity (customer or supplier)
       // Get entity from unified entities table
-      const entity = await db.entities.get(entityId);
+      const entity = await getDB().entities.get(entityId);
 
       if (!entity) {
         throw new Error(`${entityType} not found: ${entityId}`);
@@ -268,7 +268,7 @@ export class AccountBalanceService {
     endDate?: string
   ): Promise<Transaction[]> {
     // Use QueryHelpers for consistent query pattern
-    return await QueryHelpers.query(db.transactions, {
+    return await QueryHelpers.query(getDB().transactions, {
       entityType,
       entityId,
       startDate,
@@ -295,7 +295,7 @@ export class AccountBalanceService {
     } else {
       // For customers, we need credit sales - use normalized schema
       // Step 1: Get credit bills for this customer
-      let billQuery = db.bills
+      let billQuery = getDB().bills
         .where('customer_id')
         .equals(entityId)
         .and(b => b.payment_method === 'credit');
@@ -314,7 +314,7 @@ export class AccountBalanceService {
       if (bills.length === 0) return [];
       
       const billIds = bills.map(b => b.id);
-      return await db.bill_line_items
+      return await getDB().bill_line_items
         .where('bill_id')
         .anyOf(billIds)
         .toArray();
@@ -338,7 +338,7 @@ export class AccountBalanceService {
     };
 
     // Update unified entities table
-    await db.entities.update(entityId, updateData);
+    await getDB().entities.update(entityId, updateData);
 
     console.log(`Updated cached balance for ${entityType} ${entityId}:`, balance);
   }
@@ -360,7 +360,7 @@ export class AccountBalanceService {
     try {
       // Reconcile all customers
       // Get customers from entities table
-      const customers = await db.entities
+      const customers = await getDB().entities
         .where('[store_id+entity_type]')
         .equals([storeId, 'customer'])
         .toArray();
@@ -376,7 +376,7 @@ export class AccountBalanceService {
       }
 
       // Reconcile all suppliers from entities table
-      const suppliers = await db.entities
+      const suppliers = await getDB().entities
         .where('[store_id+entity_type]')
         .equals([storeId, 'supplier'])
         .filter(e => !e._deleted && e.is_active)
@@ -444,7 +444,7 @@ export class AccountBalanceService {
     createdBy: string
   ): Promise<Transaction> {
     try {
-      const originalTransaction = await db.transactions.get(originalTransactionId);
+      const originalTransaction = await getDB().transactions.get(originalTransactionId);
       
       if (!originalTransaction) {
         throw new Error(`Original transaction not found: ${originalTransactionId}`);
@@ -498,7 +498,7 @@ export class AccountBalanceService {
           );
           // Update with reversal fields after creation
           if (reversalResult.success && reversalResult.transactionId) {
-            await db.transactions.update(reversalResult.transactionId, {
+            await getDB().transactions.update(reversalResult.transactionId, {
               is_reversal: true,
               reversal_of_transaction_id: originalTransactionId,
               _synced: false
@@ -535,7 +535,7 @@ export class AccountBalanceService {
           );
           // Update with reversal fields after creation
           if (reversalResult.success && reversalResult.transactionId) {
-            await db.transactions.update(reversalResult.transactionId, {
+            await getDB().transactions.update(reversalResult.transactionId, {
               is_reversal: true,
               reversal_of_transaction_id: originalTransactionId,
               _synced: false
@@ -588,7 +588,7 @@ export class AccountBalanceService {
         throw new Error('Failed to create reversal transaction: No transaction ID returned');
       }
       
-      let reversalTransaction = await db.transactions.get(reversalResult.transactionId);
+      let reversalTransaction = await getDB().transactions.get(reversalResult.transactionId);
       
       if (!reversalTransaction) {
         throw new Error('Failed to retrieve created reversal transaction');
@@ -599,13 +599,13 @@ export class AccountBalanceService {
       // Verify the fields are set correctly
       if (!reversalTransaction.is_reversal || reversalTransaction.reversal_of_transaction_id !== originalTransactionId) {
         // Fallback: update if not already set (shouldn't happen, but safety check)
-        await db.transactions.update(reversalResult.transactionId, {
+        await getDB().transactions.update(reversalResult.transactionId, {
           is_reversal: true,
           reversal_of_transaction_id: originalTransactionId,
           _synced: false
         });
         // Get the updated transaction
-        reversalTransaction = await db.transactions.get(reversalResult.transactionId);
+        reversalTransaction = await getDB().transactions.get(reversalResult.transactionId);
         if (!reversalTransaction) {
           throw new Error('Failed to retrieve updated reversal transaction');
         }

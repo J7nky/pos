@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { db } from '../../lib/db';
+import { getDB } from '../../lib/db';
 import { ModuleName, UserModuleAccess } from '../../types';
 import { RolePermissionService } from '../../services/rolePermissionService';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
@@ -56,7 +56,7 @@ export function ModuleAccessManager({
       const roleDefaults = RolePermissionService.getDefaultModuleAccess(userRole);
 
       // Get user-specific overrides (not deleted)
-      const userOverrides = await db.user_module_access
+      const userOverrides = await getDB().user_module_access
         .where('[user_id+store_id]')
         .equals([userId, storeId])
         .filter(record => !record._deleted) // Only active records
@@ -91,7 +91,7 @@ export function ModuleAccessManager({
     try {
       console.log(`🔄 ${canAccess ? 'Granting' : 'Blocking'} ${module} access for user`);
       
-      const existingRecord = await db.user_module_access
+      const existingRecord = await getDB().user_module_access
         .where('[user_id+store_id+module]')
         .equals([userId, storeId, module])
         .first();
@@ -99,7 +99,7 @@ export function ModuleAccessManager({
       if (existingRecord) {
         // Update existing record
         console.log('📝 Updating existing record');
-        await db.user_module_access.update(existingRecord.id, {
+        await getDB().user_module_access.update(existingRecord.id, {
           can_access: canAccess,
           updated_at: new Date().toISOString(),
           _synced: false,
@@ -108,7 +108,7 @@ export function ModuleAccessManager({
       } else {
         // Create new record
         console.log('➕ Creating new override record');
-        await db.user_module_access.add({
+        await getDB().user_module_access.add({
           id: crypto.randomUUID(),
           user_id: userId,
           store_id: storeId,
@@ -150,7 +150,7 @@ export function ModuleAccessManager({
     try {
       console.log('🗑️ Removing custom module access override for:', module);
       
-      const existingRecord = await db.user_module_access
+      const existingRecord = await getDB().user_module_access
         .where('[user_id+store_id+module]')
         .equals([userId, storeId, module])
         .first();
@@ -165,7 +165,7 @@ export function ModuleAccessManager({
       console.log('📝 Found override record:', existingRecord);
       
       // Mark as deleted (soft delete) - follows offline-first pattern
-      const updateResult = await db.user_module_access.update(existingRecord.id, {
+      const updateResult = await getDB().user_module_access.update(existingRecord.id, {
         _deleted: true,
         _synced: false,
         updated_at: new Date().toISOString()

@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { TransactionService } from '../transactionService';
 import { auditLogService } from '../auditLogService';
 import { currencyService } from '../currencyService';
-import { db } from '../../lib/db';
+import { getDB } from '../../lib/db';
 import { TRANSACTION_CATEGORIES } from '../../constants/transactionCategories';
 
 // Mock dependencies
@@ -36,16 +36,16 @@ describe('Atomic Transactions', () => {
 
     // Mock IndexedDB transaction
     mockDbTransaction = vi.fn();
-    (db.transaction as any) = mockDbTransaction;
+    (getDB().transaction as any) = mockDbTransaction;
 
     // Mock database collections
-    (db.transactions.add as any) = vi.fn().mockResolvedValue(undefined);
-    (db.customers.get as any) = vi.fn();
-    (db.customers.update as any) = vi.fn().mockResolvedValue(undefined);
-    (db.suppliers.get as any) = vi.fn();
-    (db.suppliers.update as any) = vi.fn().mockResolvedValue(undefined);
-    (db.cash_drawer_sessions.where as any) = vi.fn();
-    (db.cash_drawer_sessions.update as any) = vi.fn().mockResolvedValue(undefined);
+    (getDB().transactions.add as any) = vi.fn().mockResolvedValue(undefined);
+    (getDB().customers.get as any) = vi.fn();
+    (getDB().customers.update as any) = vi.fn().mockResolvedValue(undefined);
+    (getDB().suppliers.get as any) = vi.fn();
+    (getDB().suppliers.update as any) = vi.fn().mockResolvedValue(undefined);
+    (getDB().cash_drawer_sessions.where as any) = vi.fn();
+    (getDB().cash_drawer_sessions.update as any) = vi.fn().mockResolvedValue(undefined);
 
     // Mock currency service
     (currencyService.convertCurrency as any) = vi.fn().mockImplementation((amount, from, to) => {
@@ -82,10 +82,10 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       // Mock active cash drawer session
-      (db.cash_drawer_sessions.where as any).mockReturnValue({
+      (getDB().cash_drawer_sessions.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             first: vi.fn().mockResolvedValue({
@@ -114,14 +114,14 @@ describe('Atomic Transactions', () => {
       // Verify atomic transaction was used
       expect(mockDbTransaction).toHaveBeenCalledWith(
         'rw',
-        [db.transactions, db.customers, db.suppliers, db.cash_drawer_sessions],
+        [getDB().transactions, getDB().customers, getDB().suppliers, getDB().cash_drawer_sessions],
         expect.any(Function)
       );
 
       // Verify all operations were called within transaction
-      expect(db.transactions.add).toHaveBeenCalled();
-      expect(db.customers.update).toHaveBeenCalled();
-      expect(db.cash_drawer_sessions.update).toHaveBeenCalled();
+      expect(getDB().transactions.add).toHaveBeenCalled();
+      expect(getDB().customers.update).toHaveBeenCalled();
+      expect(getDB().cash_drawer_sessions.update).toHaveBeenCalled();
     });
 
     it('should rollback all operations if any step fails', async () => {
@@ -132,7 +132,7 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       // Mock transaction that fails during cash drawer update
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
@@ -190,19 +190,19 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       let balanceUpdateCalled = false;
       let transactionCreated = false;
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
         // Mock the atomic operations
-        (db.transactions.add as any).mockImplementation(() => {
+        (getDB().transactions.add as any).mockImplementation(() => {
           transactionCreated = true;
           return Promise.resolve();
         });
 
-        (db.customers.update as any).mockImplementation(() => {
+        (getDB().customers.update as any).mockImplementation(() => {
           balanceUpdateCalled = true;
           return Promise.resolve();
         });
@@ -235,18 +235,18 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.suppliers.get as any).mockResolvedValue(mockSupplier);
+      (getDB().suppliers.get as any).mockResolvedValue(mockSupplier);
 
       let balanceUpdateCalled = false;
       let transactionCreated = false;
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
-        (db.transactions.add as any).mockImplementation(() => {
+        (getDB().transactions.add as any).mockImplementation(() => {
           transactionCreated = true;
           return Promise.resolve();
         });
 
-        (db.suppliers.update as any).mockImplementation(() => {
+        (getDB().suppliers.update as any).mockImplementation(() => {
           balanceUpdateCalled = true;
           return Promise.resolve();
         });
@@ -292,8 +292,8 @@ describe('Atomic Transactions', () => {
         closed_at: null
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
-      (db.cash_drawer_sessions.where as any).mockReturnValue({
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().cash_drawer_sessions.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             first: vi.fn().mockResolvedValue(mockCashSession)
@@ -305,12 +305,12 @@ describe('Atomic Transactions', () => {
       let transactionCreated = false;
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
-        (db.transactions.add as any).mockImplementation(() => {
+        (getDB().transactions.add as any).mockImplementation(() => {
           transactionCreated = true;
           return Promise.resolve();
         });
 
-        (db.cash_drawer_sessions.update as any).mockImplementation((sessionId: string, updateData: any) => {
+        (getDB().cash_drawer_sessions.update as any).mockImplementation((sessionId: string, updateData: any) => {
           cashDrawerUpdated = true;
           expect(sessionId).toBe('session-123');
           expect(updateData.current_amount).toBe(550); // 500 + 50 = 550
@@ -346,8 +346,8 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
-      (db.cash_drawer_sessions.where as any).mockReturnValue({
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().cash_drawer_sessions.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             first: vi.fn().mockResolvedValue(null) // No active session
@@ -371,7 +371,7 @@ describe('Atomic Transactions', () => {
       expect(result.cashDrawerImpact).toBeUndefined();
 
       // Transaction should still be created even without cash drawer
-      expect(db.transactions.add).toHaveBeenCalled();
+      expect(getDB().transactions.add).toHaveBeenCalled();
     });
   });
 
@@ -388,12 +388,12 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
         // Mock successful transaction creation but failed balance update
-        (db.transactions.add as any).mockResolvedValue(undefined);
-        (db.customers.update as any).mockRejectedValue(new Error('Balance update failed'));
+        (getDB().transactions.add as any).mockResolvedValue(undefined);
+        (getDB().customers.update as any).mockRejectedValue(new Error('Balance update failed'));
 
         await callback(); // This should throw and trigger rollback
       });
@@ -426,8 +426,8 @@ describe('Atomic Transactions', () => {
         current_amount: 500
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
-      (db.cash_drawer_sessions.where as any).mockReturnValue({
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().cash_drawer_sessions.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           and: vi.fn().mockReturnValue({
             first: vi.fn().mockResolvedValue(mockCashSession)
@@ -437,9 +437,9 @@ describe('Atomic Transactions', () => {
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
         // Mock successful transaction and balance update but failed cash drawer
-        (db.transactions.add as any).mockResolvedValue(undefined);
-        (db.customers.update as any).mockResolvedValue(undefined);
-        (db.cash_drawer_sessions.update as any).mockRejectedValue(new Error('Cash drawer locked'));
+        (getDB().transactions.add as any).mockResolvedValue(undefined);
+        (getDB().customers.update as any).mockResolvedValue(undefined);
+        (getDB().cash_drawer_sessions.update as any).mockRejectedValue(new Error('Cash drawer locked'));
 
         await callback(); // This should throw and trigger rollback
       });
@@ -465,24 +465,24 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
         // Simulate partial success then failure
         let operationCount = 0;
         
-        (db.transactions.add as any).mockImplementation(() => {
+        (getDB().transactions.add as any).mockImplementation(() => {
           operationCount++;
           return Promise.resolve();
         });
 
-        (db.customers.update as any).mockImplementation(() => {
+        (getDB().customers.update as any).mockImplementation(() => {
           operationCount++;
           return Promise.resolve();
         });
 
         // Third operation fails
-        (db.cash_drawer_sessions.update as any).mockImplementation(() => {
+        (getDB().cash_drawer_sessions.update as any).mockImplementation(() => {
           operationCount++;
           throw new Error('Third operation failed');
         });
@@ -522,7 +522,7 @@ describe('Atomic Transactions', () => {
         lb_balance: 150000 // 100 USD equivalent
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
         await callback();
@@ -542,7 +542,7 @@ describe('Atomic Transactions', () => {
       expect(currencyService.convertCurrency).toHaveBeenCalledWith(75000, 'LBP', 'USD');
 
       // Balance should be updated in LBP
-      expect(db.customers.update).toHaveBeenCalledWith('customer-123', 
+      expect(getDB().customers.update).toHaveBeenCalledWith('customer-123', 
         expect.objectContaining({
           lb_balance: 75000 // 150000 - 75000 = 75000
         })
@@ -557,7 +557,7 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.suppliers.get as any).mockResolvedValue(mockSupplier);
+      (getDB().suppliers.get as any).mockResolvedValue(mockSupplier);
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
         await callback();
@@ -576,7 +576,7 @@ describe('Atomic Transactions', () => {
       expect(result.balanceAfter).toBe(74.75); // 100.50 - 25.75 = 74.75
 
       // Verify precise balance update
-      expect(db.suppliers.update).toHaveBeenCalledWith('supplier-456',
+      expect(getDB().suppliers.update).toHaveBeenCalledWith('supplier-456',
         expect.objectContaining({
           usd_balance: 74.75
         })
@@ -597,7 +597,7 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {
         await callback();
@@ -652,7 +652,7 @@ describe('Atomic Transactions', () => {
         lb_balance: 0
       };
 
-      (db.customers.get as any).mockResolvedValue(mockCustomer);
+      (getDB().customers.get as any).mockResolvedValue(mockCustomer);
       (auditLogService.log as any).mockRejectedValue(new Error('Audit log failed'));
 
       mockDbTransaction.mockImplementation(async (_mode: any, _tables: any, callback: () => Promise<void>) => {

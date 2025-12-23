@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Transaction } from '../types';
 import { accountBalanceService } from './accountBalanceService';
 
@@ -71,14 +71,14 @@ export class TransactionValidationService {
     }
 
     if (transaction.customer_id) {
-      const entity = await db.entities.get(transaction.customer_id);
+      const entity = await getDB().entities.get(transaction.customer_id);
       if (!entity || entity.entity_type !== 'customer') {
         result.errors.push(`Customer not found: ${transaction.customer_id}`);
       }
     }
 
     if (transaction.supplier_id) {
-      const entity = await db.entities.get(transaction.supplier_id);
+      const entity = await getDB().entities.get(transaction.supplier_id);
       if (!entity || entity.entity_type !== 'supplier') {
         result.errors.push(`Supplier not found: ${transaction.supplier_id}`);
       }
@@ -111,7 +111,7 @@ export class TransactionValidationService {
     };
 
     // Get existing transaction
-    const existingTransaction = await db.transactions.get(transactionId);
+    const existingTransaction = await getDB().transactions.get(transactionId);
     if (!existingTransaction) {
       result.errors.push(`Transaction not found: ${transactionId}`);
       return result;
@@ -175,7 +175,7 @@ export class TransactionValidationService {
     };
 
     // Get existing transaction
-    const existingTransaction = await db.transactions.get(transactionId);
+    const existingTransaction = await getDB().transactions.get(transactionId);
     if (!existingTransaction) {
       result.errors.push(`Transaction not found: ${transactionId}`);
       return result;
@@ -209,7 +209,7 @@ export class TransactionValidationService {
   ): Promise<Transaction[]> {
     const oneMinuteAgo = new Date(Date.now() - 60000).toISOString();
     
-    const query = db.transactions
+    const query = getDB().transactions
       .where('store_id')
       .equals(transaction.store_id)
       .and(t => {

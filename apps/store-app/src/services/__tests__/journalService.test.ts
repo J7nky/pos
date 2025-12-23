@@ -1,7 +1,7 @@
 // Journal Service Tests - Phase 3 of Accounting Foundation Migration
 // Tests for double-entry bookkeeping and journal entry creation
 
-import { db } from '../../lib/db';
+import { getDB } from '../../lib/db';
 import { journalService } from '../journalService';
 import { journalValidationService } from '../journalValidationService';
 import { transactionService } from '../transactionService';
@@ -26,20 +26,20 @@ export async function testJournalService(): Promise<void> {
   try {
     // 1. Clean up any existing test data
     console.log('🧹 Cleaning up existing test data...');
-    await db.transaction('rw', [
-      db.journal_entries, 
-      db.transactions, 
-      db.entities, 
-      db.customers, 
-      db.suppliers,
-      db.chart_of_accounts
+    await getDB().transaction('rw', [
+      getDB().journal_entries, 
+      getDB().transactions, 
+      getDB().entities, 
+      getDB().customers, 
+      getDB().suppliers,
+      getDB().chart_of_accounts
     ], async () => {
-      await db.journal_entries.where('store_id').equals(mockStoreId).delete();
-      await db.transactions.where('store_id').equals(mockStoreId).delete();
-      await db.entities.where('store_id').equals(mockStoreId).delete();
-      await db.customers.where('store_id').equals(mockStoreId).delete();
-      await db.suppliers.where('store_id').equals(mockStoreId).delete();
-      await db.chart_of_accounts.where('store_id').equals(mockStoreId).delete();
+      await getDB().journal_entries.where('store_id').equals(mockStoreId).delete();
+      await getDB().transactions.where('store_id').equals(mockStoreId).delete();
+      await getDB().entities.where('store_id').equals(mockStoreId).delete();
+      await getDB().customers.where('store_id').equals(mockStoreId).delete();
+      await getDB().suppliers.where('store_id').equals(mockStoreId).delete();
+      await getDB().chart_of_accounts.where('store_id').equals(mockStoreId).delete();
     });
     
     // 2. Set up test data
@@ -101,7 +101,7 @@ async function setupTestData(): Promise<void> {
     { id: 'acc-5200', store_id: mockStoreId, account_code: '5200', account_name: 'Salaries Expense', account_type: 'expense', requires_entity: true, is_active: true }
   ];
   
-  await db.chart_of_accounts.bulkAdd(accounts as any);
+  await getDB().chart_of_accounts.bulkAdd(accounts as any);
   
   // Create test entities
   const entities = [
@@ -161,7 +161,7 @@ async function setupTestData(): Promise<void> {
     }
   ];
   
-  await db.entities.bulkAdd(entities as any);
+  await getDB().entities.bulkAdd(entities as any);
 }
 
 /**
@@ -177,7 +177,7 @@ async function testDirectJournalEntries(): Promise<void> {
   );
   
   // Verify journal entries were created
-  const saleEntries = await db.journal_entries
+  const saleEntries = await getDB().journal_entries
     .where('transaction_id')
     .equals(saleTransactionId)
     .toArray();
@@ -206,7 +206,7 @@ async function testDirectJournalEntries(): Promise<void> {
     'Test customer payment'
   );
   
-  const paymentEntries = await db.journal_entries
+  const paymentEntries = await getDB().journal_entries
     .where('transaction_id')
     .equals(paymentTransactionId)
     .toArray();
@@ -244,7 +244,7 @@ async function testTransactionServiceIntegration(): Promise<void> {
   }
   
   // Verify journal entries were created automatically
-  const journalEntries = await db.journal_entries
+  const journalEntries = await getDB().journal_entries
     .where('transaction_id')
     .equals(result.transactionId)
     .toArray();
@@ -302,7 +302,7 @@ async function testJournalValidation(): Promise<void> {
  */
 async function testDoubleEntryIntegrity(): Promise<void> {
   // Get all transactions and verify each is balanced
-  const transactions = await db.transactions
+  const transactions = await getDB().transactions
     .where('store_id')
     .equals(mockStoreId)
     .toArray();
@@ -350,20 +350,20 @@ async function testAccountBalances(): Promise<void> {
  * Clean up test data
  */
 async function cleanupTestData(): Promise<void> {
-  await db.transaction('rw', [
-    db.journal_entries, 
-    db.transactions, 
-    db.entities, 
-    db.customers, 
-    db.suppliers,
-    db.chart_of_accounts
+  await getDB().transaction('rw', [
+    getDB().journal_entries, 
+    getDB().transactions, 
+    getDB().entities, 
+    getDB().customers, 
+    getDB().suppliers,
+    getDB().chart_of_accounts
   ], async () => {
-    await db.journal_entries.where('store_id').equals(mockStoreId).delete();
-    await db.transactions.where('store_id').equals(mockStoreId).delete();
-    await db.entities.where('store_id').equals(mockStoreId).delete();
-    await db.customers.where('store_id').equals(mockStoreId).delete();
-    await db.suppliers.where('store_id').equals(mockStoreId).delete();
-    await db.chart_of_accounts.where('store_id').equals(mockStoreId).delete();
+    await getDB().journal_entries.where('store_id').equals(mockStoreId).delete();
+    await getDB().transactions.where('store_id').equals(mockStoreId).delete();
+    await getDB().entities.where('store_id').equals(mockStoreId).delete();
+    await getDB().customers.where('store_id').equals(mockStoreId).delete();
+    await getDB().suppliers.where('store_id').equals(mockStoreId).delete();
+    await getDB().chart_of_accounts.where('store_id').equals(mockStoreId).delete();
   });
 }
 

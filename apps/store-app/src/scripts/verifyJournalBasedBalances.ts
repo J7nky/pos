@@ -9,7 +9,7 @@
  * 5. Balance calculation utilities work correctly
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { entityBalanceService } from '../services/entityBalanceService';
 import { calculateBalance, calculateBothCurrencies } from '../utils/balanceCalculation';
 import { journalValidationService } from '../services/journalValidationService';
@@ -93,7 +93,7 @@ export async function verifyJournalBasedBalances(storeId: string): Promise<Verif
  */
 async function verifyJournalEntrySchema(storeId: string): Promise<VerificationResult> {
   try {
-    const sampleEntries = await db.journal_entries
+    const sampleEntries = await getDB().journal_entries
       .where('store_id')
       .equals(storeId)
       .limit(10)
@@ -159,7 +159,7 @@ async function verifyJournalEntrySchema(storeId: string): Promise<VerificationRe
  */
 async function verifyDoubleEntryBalance(storeId: string, currency: 'USD' | 'LBP'): Promise<VerificationResult> {
   try {
-    const allEntries = await db.journal_entries
+    const allEntries = await getDB().journal_entries
       .where('store_id')
       .equals(storeId)
       .and(e => e.is_posted === true)
@@ -230,7 +230,7 @@ async function verifyDoubleEntryBalance(storeId: string, currency: 'USD' | 'LBP'
 async function verifyEntityBalancesCalculated(storeId: string): Promise<VerificationResult> {
   try {
     // Get a sample entity
-    const sampleEntity = await db.entities
+    const sampleEntity = await getDB().entities
       .where('store_id')
       .equals(storeId)
       .and(e => (e.entity_type === 'customer' || e.entity_type === 'supplier') && !e._deleted)
@@ -285,7 +285,7 @@ async function verifyEntityBalancesCalculated(storeId: string): Promise<Verifica
 async function verifyBalanceCalculationUtilities(storeId: string): Promise<VerificationResult> {
   try {
     // Get sample journal entries
-    const sampleEntries = await db.journal_entries
+    const sampleEntries = await getDB().journal_entries
       .where('store_id')
       .equals(storeId)
       .and(e => e.is_posted === true)
@@ -342,7 +342,7 @@ async function verifyBalanceCalculationUtilities(storeId: string): Promise<Verif
  */
 async function verifyNoBalanceFieldsInEntities(storeId: string): Promise<VerificationResult> {
   try {
-    const sampleEntities = await db.entities
+    const sampleEntities = await getDB().entities
       .where('store_id')
       .equals(storeId)
       .limit(10)
@@ -416,7 +416,7 @@ async function verifyJournalValidationService(storeId: string): Promise<Verifica
 async function verifyEntityBalanceService(storeId: string): Promise<VerificationResult> {
   try {
     // Get a sample entity
-    const sampleEntity = await db.entities
+    const sampleEntity = await getDB().entities
       .where('store_id')
       .equals(storeId)
       .and(e => (e.entity_type === 'customer' || e.entity_type === 'supplier') && !e._deleted)

@@ -8,7 +8,7 @@
  * - Creates notification for user
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { notificationService } from './notificationService';
 import { BranchAccessValidationService } from './branchAccessValidationService';
 
@@ -31,7 +31,7 @@ export class UserReassignmentHandler {
     storeId: string,
     reassignedBy: string
   ): Promise<void> {
-    const user = await db.users.get(userId);
+    const user = await getDB().users.get(userId);
     
     if (!user || user.store_id !== storeId) {
       throw new Error('User not found or does not belong to store');
@@ -45,20 +45,20 @@ export class UserReassignmentHandler {
     }
     
     // Validate new branch
-    const newBranch = await db.branches.get(newBranchId);
+    const newBranch = await getDB().branches.get(newBranchId);
     if (!newBranch || newBranch._deleted || newBranch.store_id !== storeId) {
       throw new Error('Invalid branch for reassignment. Branch does not exist, is deleted, or does not belong to this store.');
     }
     
     const oldBranchId = user.branch_id;
     const oldBranchName = oldBranchId 
-      ? (await db.branches.get(oldBranchId))?.name || 'Unknown Branch'
+      ? (await getDB().branches.get(oldBranchId))?.name || 'Unknown Branch'
       : 'No Branch';
     const newBranchName = newBranch.name;
     
     // Close any active cash drawer sessions in old branch
     if (oldBranchId) {
-      const activeSessions = await db.cash_drawer_sessions
+      const activeSessions = await getDB().cash_drawer_sessions
         .where(['store_id', 'branch_id'])
         .equals([storeId, oldBranchId])
         .filter(s => s.status === 'open' && s.opened_by === userId)
@@ -66,7 +66,7 @@ export class UserReassignmentHandler {
       
       for (const session of activeSessions) {
         try {
-          await db.closeCashDrawerSession(
+          await getDB().closeCashDrawerSession(
             session.id,
             session.opening_amount, // Use opening amount as actual
             reassignedBy,
@@ -81,7 +81,7 @@ export class UserReassignmentHandler {
     }
     
     // Update user
-    await db.users.update(userId, {
+    await getDB().users.update(userId, {
       branch_id: newBranchId,
       updated_at: new Date().toISOString(),
       _synced: false
@@ -129,7 +129,7 @@ export class UserReassignmentHandler {
     newBranchId: string,
     storeId: string
   ): Promise<{ valid: boolean; error?: string }> {
-    const user = await db.users.get(userId);
+    const user = await getDB().users.get(userId);
     
     if (!user || user.store_id !== storeId) {
       return {
@@ -145,7 +145,7 @@ export class UserReassignmentHandler {
       };
     }
     
-    const newBranch = await db.branches.get(newBranchId);
+    const newBranch = await getDB().branches.get(newBranchId);
     if (!newBranch) {
       return {
         valid: false,
@@ -188,7 +188,7 @@ export class UserReassignmentHandler {
     opening_amount: number;
     status: string;
   }>> {
-    const sessions = await db.cash_drawer_sessions
+    const sessions = await getDB().cash_drawer_sessions
       .where(['store_id', 'branch_id'])
       .equals([storeId, branchId])
       .filter(s => s.status === 'open' && s.opened_by === userId)

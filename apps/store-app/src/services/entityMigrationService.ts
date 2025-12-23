@@ -4,7 +4,7 @@
 // Migrates existing customers, suppliers, and employees to the unified entities table
 // Maintains backward compatibility by keeping same IDs and preserving all data
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Entity } from '../types/accounting';
 import { SYSTEM_ENTITY_CODES, createSystemEntities, getSystemEntity } from '../constants/systemEntities';
 import { createId } from '../lib/db';
@@ -29,9 +29,9 @@ export class EntityMigrationService {
    */
   async isMigrationCompleted(storeId: string): Promise<boolean> {
     const [entitiesCount, customersCount, suppliersCount] = await Promise.all([
-      db.entities.where('store_id').equals(storeId).count(),
-      db.customers.where('store_id').equals(storeId).count(),
-      db.suppliers.where('store_id').equals(storeId).count()
+      getDB().entities.where('store_id').equals(storeId).count(),
+      getDB().customers.where('store_id').equals(storeId).count(),
+      getDB().suppliers.where('store_id').equals(storeId).count()
     ]);
     
     // Migration is complete if we have entities and they roughly match existing data
@@ -61,9 +61,9 @@ export class EntityMigrationService {
         return result;
       }
       
-      await db.transaction('rw', [db.entities, db.customers, db.suppliers, db.users], async () => {
+      await getDB().transaction('rw', [getDB().entities, getDB().customers, getDB().suppliers, getDB().users], async () => {
         // 1. Migrate customers to entities
-        const customers = await db.customers.where('store_id').equals(storeId).toArray();
+        const customers = await getDB().customers.where('store_id').equals(storeId).toArray();
         for (const customer of customers) {
           const entity: Omit<Entity, 'created_at' | 'updated_at'> = {
             id: customer.id, // Keep same ID for backward compatibility
@@ -86,7 +86,7 @@ export class EntityMigrationService {
             _synced: customer._synced ?? false
           };
           
-          await db.entities.add({
+          await getDB().entities.add({
             ...entity,
             created_at: customer.created_at || new Date().toISOString(),
             updated_at: customer.updated_at || new Date().toISOString()
@@ -96,7 +96,7 @@ export class EntityMigrationService {
         }
         
         // 2. Migrate suppliers to entities
-        const suppliers = await db.suppliers.where('store_id').equals(storeId).toArray();
+        const suppliers = await getDB().suppliers.where('store_id').equals(storeId).toArray();
         for (const supplier of suppliers) {
           const entity: Omit<Entity, 'created_at' | 'updated_at'> = {
             id: supplier.id, // Keep same ID for backward compatibility
@@ -120,7 +120,7 @@ export class EntityMigrationService {
             _synced: supplier._synced ?? false
           };
           
-          await db.entities.add({
+          await getDB().entities.add({
             ...entity,
             created_at: supplier.created_at || new Date().toISOString(),
             updated_at: supplier.updated_at || new Date().toISOString()
@@ -130,7 +130,7 @@ export class EntityMigrationService {
         }
         
         // 3. Migrate employees to entities
-        const employees = await db.users.where('store_id').equals(storeId).toArray();
+        const employees = await getDB().users.where('store_id').equals(storeId).toArray();
         for (const employee of employees) {
           const entity: Omit<Entity, 'created_at' | 'updated_at'> = {
             id: employee.id, // Keep same ID for backward compatibility
@@ -149,7 +149,7 @@ export class EntityMigrationService {
             _synced: employee._synced ?? false
           };
           
-          await db.entities.add({
+          await getDB().entities.add({
             ...entity,
             created_at: employee.created_at || new Date().toISOString(),
             updated_at: employee.updated_at || new Date().toISOString()
@@ -194,7 +194,7 @@ export class EntityMigrationService {
               _synced: false
             };
             
-            await db.entities.add(entity);
+            await getDB().entities.add(entity);
             result.systemEntitiesCount++;
           }
         }
@@ -229,10 +229,10 @@ export class EntityMigrationService {
     
     try {
       const [customers, suppliers, employees, entities] = await Promise.all([
-        db.customers.where('store_id').equals(storeId).toArray(),
-        db.suppliers.where('store_id').equals(storeId).toArray(),
-        db.users.where('store_id').equals(storeId).toArray(),
-        db.entities.where('store_id').equals(storeId).toArray()
+        getDB().customers.where('store_id').equals(storeId).toArray(),
+        getDB().suppliers.where('store_id').equals(storeId).toArray(),
+        getDB().users.where('store_id').equals(storeId).toArray(),
+        getDB().entities.where('store_id').equals(storeId).toArray()
       ]);
       
       const systemEntities = entities.filter(e => e.is_system_entity);
@@ -313,14 +313,14 @@ export class EntityMigrationService {
    * This allows existing code to continue working with the same IDs
    */
   async getEntityById(entityId: string): Promise<Entity | null> {
-    return await db.entities.get(entityId) || null;
+    return await getDB().entities.get(entityId) || null;
   }
   
   /**
    * Get entities by type for a store
    */
   async getEntitiesByType(storeId: string, entityType: 'customer' | 'supplier' | 'employee'): Promise<Entity[]> {
-    return await db.entities
+    return await getDB().entities
       .where('[store_id+entity_type]')
       .equals([storeId, entityType])
       .filter(entity => entity.is_active && !entity.is_system_entity)

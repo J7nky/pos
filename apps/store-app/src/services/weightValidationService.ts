@@ -1,6 +1,6 @@
 import { weightManagementService } from './weightManagementService';
 import { weightConfigurationService } from './weightConfigurationService';
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 export interface WeightValidationResult {
   isValid: boolean;
@@ -42,7 +42,7 @@ export class WeightValidationService {
 
     try {
       // Get inventory item
-      const inventoryItem = await db.inventory_items.get(input.inventoryItemId);
+      const inventoryItem = await getDB().inventory_items.get(input.inventoryItemId);
       if (!inventoryItem) {
         return {
           isValid: false,
@@ -54,7 +54,7 @@ export class WeightValidationService {
 
       // Get inventory bill to determine type
       const inventoryBill = inventoryItem.batch_id 
-        ? await db.inventory_bills.get(inventoryItem.batch_id)
+        ? await getDB().inventory_bills.get(inventoryItem.batch_id)
         : null;
       
       const isCommissionItem = inventoryBill?.type === 'commission';
@@ -77,7 +77,7 @@ export class WeightValidationService {
       // If weight is provided, validate it
       if (input.saleWeight && input.saleWeight > 0) {
         // Get existing sales for this inventory item
-        const existingSales = await db.bill_line_items
+        const existingSales = await getDB().bill_line_items
           .where('inventory_item_id')
           .equals(input.inventoryItemId)
           .toArray();
@@ -291,7 +291,7 @@ export class WeightValidationService {
 
       // Check for existing similar purchases to detect patterns
       try {
-        const recentPurchases = await db.inventory_items
+        const recentPurchases = await getDB().inventory_items
           .where('product_id')
           .equals(input.productId)
           .filter(item => item.supplier_id === input.supplierId)

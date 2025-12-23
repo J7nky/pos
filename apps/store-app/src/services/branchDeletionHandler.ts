@@ -7,7 +7,7 @@
  * - Prevents operations on deleted branches
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { notificationService } from './notificationService';
 
 export class BranchDeletionHandler {
@@ -27,7 +27,7 @@ export class BranchDeletionHandler {
     deletedBy: string
   ): Promise<void> {
     // Get branch info before deletion
-    const branch = await db.branches.get(branchId);
+    const branch = await getDB().branches.get(branchId);
     if (!branch) {
       throw new Error(`Branch not found: ${branchId}`);
     }
@@ -35,7 +35,7 @@ export class BranchDeletionHandler {
     const branchName = branch.name;
     
     // Find all users assigned to this branch
-    const affectedUsers = await db.users
+    const affectedUsers = await getDB().users
       .where('store_id')
       .equals(storeId)
       .filter(u => u.branch_id === branchId && !u._deleted)
@@ -45,7 +45,7 @@ export class BranchDeletionHandler {
     
     // Update users: set branch_id to null
     for (const user of affectedUsers) {
-      await db.users.update(user.id, {
+      await getDB().users.update(user.id, {
         branch_id: null,
         updated_at: new Date().toISOString(),
         _synced: false
@@ -87,7 +87,7 @@ export class BranchDeletionHandler {
   static async validateBranchNotDeleted(
     branchId: string
   ): Promise<void> {
-    const branch = await db.branches.get(branchId);
+    const branch = await getDB().branches.get(branchId);
     
     if (!branch) {
       throw new Error(`Branch not found: ${branchId}`);
@@ -116,7 +116,7 @@ export class BranchDeletionHandler {
     email: string;
     role: 'admin' | 'manager' | 'cashier';
   }>> {
-    const affectedUsers = await db.users
+    const affectedUsers = await getDB().users
       .where('store_id')
       .equals(storeId)
       .filter(u => u.branch_id === branchId && !u._deleted)

@@ -1,7 +1,7 @@
 // Entity Query Service - Phase 4 of Accounting Foundation Migration
 // Unified query layer using entities table and journal-based balance queries
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Entity } from '../types/accounting';
 import { snapshotService } from './snapshotService';
 import { QueryHelpers } from '../utils/queryHelpers';
@@ -82,7 +82,7 @@ export class EntityQueryService {
     options: EntityQueryOptions = {}
   ): Promise<EntityWithBalance[]> {
     try {
-      let query = db.entities
+      let query = getDB().entities
         .where('[store_id+entity_type]')
         .equals([storeId, entityType]);
       
@@ -191,7 +191,7 @@ export class EntityQueryService {
     options: EntityQueryOptions = {}
   ): Promise<EntityWithBalance | null> {
     try {
-      const entity = await db.entities
+      const entity = await getDB().entities
         .where('[store_id+id]')
         .equals([storeId, entityId])
         .first();
@@ -266,7 +266,7 @@ export class EntityQueryService {
     options: EntityQueryOptions = {}
   ): Promise<EntityWithBalance[]> {
     try {
-      let query = QueryHelpers.byStore(db.entities, storeId);
+      let query = QueryHelpers.byStore(getDB().entities, storeId);
       
       // Apply filters using QueryHelpers
       query = QueryHelpers.applyFilters(query, {
@@ -341,7 +341,7 @@ export class EntityQueryService {
     asOfDate?: string
   ): Promise<EntityBalanceReport | null> {
     try {
-      const entity = await db.entities
+      const entity = await getDB().entities
         .where('[store_id+id]')
         .equals([storeId, entityId])
         .first();
@@ -353,7 +353,7 @@ export class EntityQueryService {
       const targetDate = asOfDate || new Date().toISOString().split('T')[0];
       
       // Get all accounts that this entity has balances in
-      const relevantAccounts = await db.chart_of_accounts
+      const relevantAccounts = await getDB().chart_of_accounts
         .where('store_id')
         .equals(storeId)
         .filter(account => account.requires_entity && account.is_active)
@@ -390,7 +390,7 @@ export class EntityQueryService {
       }
       
       // Get last transaction date
-      const lastTransaction = await db.journal_entries
+      const lastTransaction = await getDB().journal_entries
         .where('[store_id+entity_id]')
         .equals([storeId, entityId])
         .reverse()
@@ -425,7 +425,7 @@ export class EntityQueryService {
     } = {}
   ): Promise<EntityWithBalance[]> {
     try {
-      let query = db.entities.where('store_id').equals(storeId);
+      let query = getDB().entities.where('store_id').equals(storeId);
       
       if (entityType) {
         query = query.filter(entity => entity.entity_type === entityType);
@@ -501,7 +501,7 @@ export class EntityQueryService {
     totalOutstandingAP: number;
   }> {
     try {
-      const entities = await db.entities.where('store_id').equals(storeId).toArray();
+      const entities = await getDB().entities.where('store_id').equals(storeId).toArray();
       
       const stats = {
         totalCustomers: 0,

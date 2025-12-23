@@ -1,7 +1,7 @@
 // Phase 6: Comprehensive Testing & Verification
 // Tests all phases (1-5) of the Accounting Foundation Migration
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { journalService } from '../services/journalService';
 import { snapshotService } from '../services/snapshotService';
 import { entityQueryService } from '../services/entityQueryService';
@@ -102,15 +102,15 @@ async function testPhase1(): Promise<boolean> {
       is_active: true
     };
     
-    await db.chart_of_accounts.add(testAccount as any);
-    const retrieved = await db.chart_of_accounts.get('test-acc-1100');
+    await getDB().chart_of_accounts.add(testAccount as any);
+    const retrieved = await getDB().chart_of_accounts.get('test-acc-1100');
     
     if (!retrieved || retrieved.account_code !== '1100') {
       throw new Error('Chart of accounts test failed');
     }
     
     // Cleanup
-    await db.chart_of_accounts.delete('test-acc-1100');
+    await getDB().chart_of_accounts.delete('test-acc-1100');
     
     console.log('   ✅ Phase 1: Database schema and chart of accounts working');
     return true;
@@ -148,8 +148,8 @@ async function testPhase2(): Promise<boolean> {
       _synced: false
     };
     
-    await db.entities.add(testEntity as any);
-    const retrieved = await db.entities.get('test-entity-phase6');
+    await getDB().entities.add(testEntity as any);
+    const retrieved = await getDB().entities.get('test-entity-phase6');
     
     if (!retrieved || retrieved.entity_type !== 'customer') {
       throw new Error('Entity creation test failed');
@@ -159,7 +159,7 @@ async function testPhase2(): Promise<boolean> {
     const migrationStats = await entityMigrationService.getMigrationStatistics(testStoreId);
     
     // Cleanup
-    await db.entities.delete('test-entity-phase6');
+    await getDB().entities.delete('test-entity-phase6');
     
     console.log('   ✅ Phase 2: Entity migration system working');
     return true;
@@ -193,7 +193,7 @@ async function testPhase3(): Promise<boolean> {
     }
     
     // Verify journal entry was created
-    const entries = await db.journal_entries
+    const entries = await getDB().journal_entries
       .where('transaction_id')
       .equals('test-txn-phase6')
       .toArray();
@@ -206,7 +206,7 @@ async function testPhase3(): Promise<boolean> {
     const validation = await journalService.validateJournalEntries(testStoreId);
     
     // Cleanup
-    await db.journal_entries.where('transaction_id').equals('test-txn-phase6').delete();
+    await getDB().journal_entries.where('transaction_id').equals('test-txn-phase6').delete();
     
     console.log('   ✅ Phase 3: Journal entry system working');
     return true;
@@ -244,7 +244,7 @@ async function testPhase4(): Promise<boolean> {
     const verification = await snapshotService.verifySnapshots(testStoreId, today);
     
     // Cleanup
-    await db.balance_snapshots.where('store_id').equals(testStoreId).delete();
+    await getDB().balance_snapshots.where('store_id').equals(testStoreId).delete();
     
     console.log('   ✅ Phase 4: Balance snapshot system working');
     return true;
@@ -434,8 +434,8 @@ async function testEndToEndWorkflows(): Promise<boolean> {
     }
     
     // Cleanup
-    await db.journal_entries.where('transaction_id').equals('test-e2e-sale').delete();
-    await db.balance_snapshots.where('store_id').equals(testStoreId).delete();
+    await getDB().journal_entries.where('transaction_id').equals('test-e2e-sale').delete();
+    await getDB().balance_snapshots.where('store_id').equals(testStoreId).delete();
     
     console.log('   ✅ End-to-End: Complete workflow successful');
     return true;

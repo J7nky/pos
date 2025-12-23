@@ -4,7 +4,7 @@
 // Creates and manages balance snapshots for performance optimization and historical queries
 // Uses journal-entry-based calculations with base currency schema (debit_usd, credit_usd, debit_lbp, credit_lbp)
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { BalanceSnapshot } from '../types/accounting';
 import { journalService } from './journalService';
 import { createId } from '../lib/db';
@@ -72,7 +72,7 @@ export class SnapshotService {
       console.log(`📊 Creating daily snapshots for store ${storeId} on ${targetDate}`);
       
       // Check if snapshots already exist for this date
-      const existingSnapshots = await db.balance_snapshots
+      const existingSnapshots = await getDB().balance_snapshots
         .where('[store_id+snapshot_date+snapshot_type]')
         .equals([storeId, targetDate, 'daily'])
         .count();
@@ -83,7 +83,7 @@ export class SnapshotService {
       }
       
       // Get all active accounts for the store
-      const accounts = await db.chart_of_accounts
+      const accounts = await getDB().chart_of_accounts
         .where('store_id')
         .equals(storeId)
         .filter(account => account.is_active)
@@ -95,7 +95,7 @@ export class SnapshotService {
       }
       
       // Get all active entities for the store
-      const entities = await db.entities
+      const entities = await getDB().entities
         .where('store_id')
         .equals(storeId)
         .filter(entity => entity.is_active)
@@ -148,7 +148,7 @@ export class SnapshotService {
       
       // Insert all snapshots atomically
       if (snapshots.length > 0) {
-        await db.balance_snapshots.bulkAdd(snapshots);
+        await getDB().balance_snapshots.bulkAdd(snapshots);
         console.log(`✅ Created ${snapshots.length} balance snapshots for ${targetDate}`);
       }
       
@@ -224,7 +224,7 @@ export class SnapshotService {
     entityId: string | null,
     asOfDate: string
   ): Promise<{ USD: number; LBP: number }> {
-    let query = db.journal_entries
+    let query = getDB().journal_entries
       .where('[store_id+account_code]')
       .equals([storeId, accountCode])
       .filter(entry => entry.posted_date <= asOfDate);
@@ -254,7 +254,7 @@ export class SnapshotService {
     entityId: string | null,
     asOfDate: string
   ): Promise<boolean> {
-    let query = db.journal_entries
+    let query = getDB().journal_entries
       .where('[store_id+account_code]')
       .equals([storeId, accountCode])
       .filter(entry => entry.posted_date <= asOfDate);
@@ -282,7 +282,7 @@ export class SnapshotService {
     fetch('http://127.0.0.1:7242/ingest/139cf66a-4f99-49d5-ae8c-eb6f67aef2cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'snapshotService.ts:283',message:'Attempting snapshot query',data:{storeId,accountCode,entityId,asOfDate,indexKey:'[store_id+account_code+entity_id+snapshot_date]'},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'B'})}).catch(()=>{});
     // #endregion
     // Try to find exact snapshot for the date
-    let snapshot = await db.balance_snapshots
+    let snapshot = await getDB().balance_snapshots
       .where('[store_id+account_code+entity_id+snapshot_date]')
       .equals([storeId, accountCode, entityId, asOfDate])
       .first()
@@ -305,7 +305,7 @@ export class SnapshotService {
     }
     
     // Try to find the most recent snapshot before the requested date
-    const recentSnapshot = await db.balance_snapshots
+    const recentSnapshot = await getDB().balance_snapshots
       .where('[store_id+account_code+entity_id]')
       .equals([storeId, accountCode, entityId])
       .filter(s => s.snapshot_date <= asOfDate)
@@ -320,7 +320,7 @@ export class SnapshotService {
       };
       
       // Get journal entries from snapshot date to requested date
-      const additionalEntries = await db.journal_entries
+      const additionalEntries = await getDB().journal_entries
         .where('[store_id+account_code]')
         .equals([storeId, accountCode])
         .filter(entry => 
@@ -374,7 +374,7 @@ export class SnapshotService {
     startDate: string,
     endDate: string
   ): Promise<HistoricalBalance[]> {
-    const snapshots = await db.balance_snapshots
+    const snapshots = await getDB().balance_snapshots
       .where('[store_id+account_code+entity_id]')
       .equals([storeId, accountCode, entityId])
       .filter(s => s.snapshot_date >= startDate && s.snapshot_date <= endDate)
@@ -408,7 +408,7 @@ export class SnapshotService {
     
     try {
       // Get all snapshots for the date
-      const snapshots = await db.balance_snapshots
+      const snapshots = await getDB().balance_snapshots
         .where('[store_id+snapshot_date]')
         .equals([storeId, snapshotDate])
         .toArray();
@@ -447,7 +447,7 @@ export class SnapshotService {
           result.validSnapshots++;
           
           // Mark snapshot as verified
-          await db.balance_snapshots.update(snapshot.id, { verified: true });
+          await getDB().balance_snapshots.update(snapshot.id, { verified: true });
         }
       }
       
@@ -470,7 +470,7 @@ export class SnapshotService {
     oldestSnapshot: string | null;
     newestSnapshot: string | null;
   }> {
-    const snapshots = await db.balance_snapshots
+    const snapshots = await getDB().balance_snapshots
       .where('store_id')
       .equals(storeId)
       .toArray();
@@ -523,7 +523,7 @@ export class SnapshotService {
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
     const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
     
-    const oldSnapshots = await db.balance_snapshots
+    const oldSnapshots = await getDB().balance_snapshots
       .where('store_id')
       .equals(storeId)
       .filter(snapshot => snapshot.snapshot_date < cutoffDateStr)
@@ -531,11 +531,11 @@ export class SnapshotService {
     
     if (oldSnapshots.length > 0) {
       const idsToDelete = oldSnapshots.map(s => s.id);
-      await db.balance_snapshots.bulkDelete(idsToDelete);
+      await getDB().balance_snapshots.bulkDelete(idsToDelete);
     }
     
     // Find oldest remaining snapshot
-    const oldestRemaining = await db.balance_snapshots
+    const oldestRemaining = await getDB().balance_snapshots
       .where('store_id')
       .equals(storeId)
       .orderBy('snapshot_date')

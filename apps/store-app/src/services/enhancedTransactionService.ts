@@ -3,7 +3,7 @@ import { auditLogService } from './auditLogService';
 import { TransactionService, TransactionResult } from './transactionService';
 import { journalService } from './journalService';
 // Remove dataAccessService import - use direct IndexedDB access
-import { db, createId } from '../lib/db';
+import { getDB, createId } from '../lib/db';
 
 const transactionService = TransactionService.getInstance();
 import { 
@@ -61,7 +61,7 @@ export class EnhancedTransactionService {
   ): Promise<EnhancedTransactionResult> {
     try {
       // Get customer data for balance tracking
-      const entity = await db.entities.get(customerId);
+      const entity = await getDB().entities.get(customerId);
       if (!entity || entity.entity_type !== 'customer') {
         throw new Error('Customer not found');
       }
@@ -95,7 +95,7 @@ export class EnhancedTransactionService {
       
       // ATOMIC TRANSACTION: Create both existing transaction and journal entries
       let result: TransactionResult;
-      await db.transaction('rw', [db.transactions, db.journal_entries, db.entities], async () => {
+      await getDB().transaction('rw', [getDB().transactions, getDB().journal_entries, getDB().entities], async () => {
         // 1. Create existing transaction record
         result = await transactionService.createCustomerPayment(
           customerId,
@@ -230,7 +230,7 @@ export class EnhancedTransactionService {
   ): Promise<EnhancedTransactionResult> {
     try {
       // Get supplier data
-      const entity = await db.entities.get(supplierId);
+      const entity = await getDB().entities.get(supplierId);
       if (!entity || entity.entity_type !== 'supplier') {
         throw new Error('Supplier not found');
       }
@@ -273,7 +273,7 @@ export class EnhancedTransactionService {
       
       // ATOMIC TRANSACTION: Create both existing transaction and journal entries
       let result: TransactionResult;
-      await db.transaction('rw', [db.transactions, db.journal_entries, db.entities], async () => {
+      await getDB().transaction('rw', [getDB().transactions, getDB().journal_entries, getDB().entities], async () => {
         // 1. Create existing transaction record
         result = await transactionService.createSupplierPayment(
           supplierId,
@@ -393,7 +393,7 @@ export class EnhancedTransactionService {
       // Store sale items data in bill_line_items format
       // Note: customer_id, payment_method, created_by are in bills table, not bill_line_items
       for (const item of completeSaleItems) {
-        await db.bill_line_items.add({
+        await getDB().bill_line_items.add({
           id: this.generateId(),
           bill_id: saleId,
           store_id: storeId,
@@ -418,7 +418,7 @@ export class EnhancedTransactionService {
       let customer: Customer | undefined;
 
       if (saleData.customerId && saleData.amountDue > 0) {
-        const entity = await db.entities.get(saleData.customerId);
+        const entity = await getDB().entities.get(saleData.customerId);
         if (entity && entity.entity_type === 'customer') {
           customer = {
             id: entity.id,
@@ -570,7 +570,7 @@ export class EnhancedTransactionService {
       };
 
       // Store inventory item in IndexedDB
-      await db.inventory_items.add({
+      await getDB().inventory_items.add({
         id: inventoryId,
         store_id: storeId,
         product_id: inventoryData.productId,
@@ -734,7 +734,7 @@ export class EnhancedTransactionService {
   ): Promise<void> {
     for (const saleItem of items) {
       // Find matching inventory items (FIFO - First In, First Out)
-      const matchingItems = await db.inventory_items
+      const matchingItems = await getDB().inventory_items
         .where('product_id')
         .equals(saleItem.productId)
         .and(item => item.supplier_id === saleItem.supplierId && item.quantity > 0)
@@ -754,7 +754,7 @@ export class EnhancedTransactionService {
         const previousQuantity = inventoryItem.quantity;
         
         // Update inventory in IndexedDB
-        await db.inventory_items.update(inventoryItem.id, { 
+        await getDB().inventory_items.update(inventoryItem.id, { 
           quantity: inventoryItem.quantity - quantityToDeduct,
           _synced: false
         });

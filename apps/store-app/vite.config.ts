@@ -6,9 +6,9 @@ export default defineConfig({
   base: './',
   server: {
     host: true,
-    port: 5175,
+    port: 5178,
     hmr: {
-      port: 5175,
+      port: 5178,
     },
   },
   plugins: [react()],
@@ -28,7 +28,7 @@ export default defineConfig({
   },
   define: {
     // Set the public URL for QR code generation
-    'import.meta.env.VITE_PUBLIC_URL': JSON.stringify(process.env.VITE_PUBLIC_URL || (process.env.NODE_ENV === 'production' ? 'https://souq-trablous.netlify.app' : 'http://localhost:5175')),
+    'import.meta.env.VITE_PUBLIC_URL': JSON.stringify(process.env.VITE_PUBLIC_URL || (process.env.NODE_ENV === 'production' ? 'https://souq-trablous.netlify.app' : 'http://localhost:5178')),
     // Define production mode flag
     'import.meta.env.PROD': JSON.stringify(process.env.NODE_ENV === 'production'),
   },

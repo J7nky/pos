@@ -5,7 +5,7 @@
  * to resolve Supabase sync errors.
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 export interface MigrationResult {
   success: boolean;
@@ -35,7 +35,7 @@ export class TransactionIdMigration {
       console.log('🔄 [MIGRATION] Starting transaction ID migration...');
 
       // Find all transactions with old ID format (starts with 'txn-')
-      const oldFormatTransactions = await db.transactions
+      const oldFormatTransactions = await getDB().transactions
         .filter((txn: any) => 
           txn.store_id === storeId && 
           txn.id && 
@@ -66,12 +66,12 @@ export class TransactionIdMigration {
           };
 
           // Use transaction to ensure atomicity
-          await db.transaction('rw', [db.transactions], async () => {
+          await getDB().transaction('rw', [getDB().transactions], async () => {
             // Add new transaction with UUID
-            await db.transactions.add(updatedTransaction);
+            await getDB().transactions.add(updatedTransaction);
             
             // Delete old transaction
-            await db.transactions.delete(oldId);
+            await getDB().transactions.delete(oldId);
           });
 
           result.details.push({
@@ -118,7 +118,7 @@ export class TransactionIdMigration {
    */
   static async hasOldFormatTransactions(storeId: string): Promise<boolean> {
     try {
-      const count = await db.transactions
+      const count = await getDB().transactions
         .filter((txn: any) => 
           txn.store_id === storeId && 
           txn.id && 
@@ -139,7 +139,7 @@ export class TransactionIdMigration {
    */
   static async getOldFormatTransactionCount(storeId: string): Promise<number> {
     try {
-      return await db.transactions
+      return await getDB().transactions
         .filter((txn: any) => 
           txn.store_id === storeId && 
           txn.id && 

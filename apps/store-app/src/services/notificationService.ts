@@ -1,5 +1,4 @@
-import { db } from '../lib/db';
-import { createId } from '../lib/db';
+import { getDB, createId } from '../lib/db';
 import { NotificationRecord, NotificationType, NotificationPreferences } from '../types';
 
 /**
@@ -39,7 +38,7 @@ export class NotificationService {
     };
 
     // Store in IndexedDB first (offline-first pattern)
-    await db.notifications.add(notification);
+    await getDB().notifications.add(notification);
 
     // Clean up old notifications if needed
     await this.cleanupOldNotifications(storeId);
@@ -58,7 +57,7 @@ export class NotificationService {
       limit?: number;
     }
   ): Promise<NotificationRecord[]> {
-    let query = db.notifications.where('store_id').equals(storeId);
+    let query = getDB().notifications.where('store_id').equals(storeId);
 
     if (options?.unread_only) {
       query = query.filter(n => !n.read);
@@ -87,14 +86,14 @@ export class NotificationService {
    * Mark notification as read
    */
   async markAsRead(notificationId: string): Promise<void> {
-    await db.notifications.update(notificationId, { read: true });
+    await getDB().notifications.update(notificationId, { read: true });
   }
 
   /**
    * Mark all as read for a store
    */
   async markAllAsRead(storeId: string): Promise<void> {
-    await db.notifications
+    await getDB().notifications
       .where('store_id')
       .equals(storeId)
       .and(n => !n.read)
@@ -105,14 +104,14 @@ export class NotificationService {
    * Delete notification
    */
   async deleteNotification(notificationId: string): Promise<void> {
-    await db.notifications.delete(notificationId);
+    await getDB().notifications.delete(notificationId);
   }
 
   /**
    * Delete all notifications for a store
    */
   async deleteAllNotifications(storeId: string): Promise<void> {
-    await db.notifications
+    await getDB().notifications
       .where('store_id')
       .equals(storeId)
       .delete();
@@ -122,7 +121,7 @@ export class NotificationService {
    * Get unread count
    */
   async getUnreadCount(storeId: string): Promise<number> {
-    return await db.notifications
+    return await getDB().notifications
       .where('store_id')
       .equals(storeId)
       .and(n => !n.read)
@@ -134,7 +133,7 @@ export class NotificationService {
    */
   async getPreferences(storeId: string): Promise<NotificationPreferences> {
     // Query by store_id since the table uses id as primary key
-    const prefs = await db.notification_preferences
+    const prefs = await getDB().notification_preferences
       .where('store_id')
       .equals(storeId)
       .and(p => !p._deleted)
@@ -166,7 +165,7 @@ export class NotificationService {
         _deleted: false,
       };
       
-      await db.notification_preferences.add(defaults);
+      await getDB().notification_preferences.add(defaults);
       // Return only the NotificationPreferences fields (without id and sync fields)
       return {
         store_id: defaults.store_id,
@@ -197,7 +196,7 @@ export class NotificationService {
     storeId: string,
     updates: Partial<NotificationPreferences>
   ): Promise<void> {
-    await db.notification_preferences.update(storeId, updates);
+    await getDB().notification_preferences.update(storeId, updates);
   }
 
   /**
@@ -213,7 +212,7 @@ export class NotificationService {
    */
   private async cleanupOldNotifications(storeId: string): Promise<void> {
     const prefs = await this.getPreferences(storeId);
-    const allNotifications = await db.notifications
+    const allNotifications = await getDB().notifications
       .where('store_id')
       .equals(storeId)
       .toArray();
@@ -225,7 +224,7 @@ export class NotificationService {
       );
       
       const toDelete = sorted.slice(prefs.max_notifications_in_history);
-      await db.notifications.bulkDelete(toDelete.map(n => n.id));
+      await getDB().notifications.bulkDelete(toDelete.map(n => n.id));
     }
   }
 
@@ -234,14 +233,14 @@ export class NotificationService {
    */
   async deleteExpiredNotifications(storeId: string): Promise<number> {
     const now = new Date().toISOString();
-    const expired = await db.notifications
+    const expired = await getDB().notifications
       .where('store_id')
       .equals(storeId)
       .filter(n => n.expires_at && n.expires_at <= now)
       .toArray();
 
     if (expired.length > 0) {
-      await db.notifications.bulkDelete(expired.map(n => n.id));
+      await getDB().notifications.bulkDelete(expired.map(n => n.id));
     }
 
     return expired.length;

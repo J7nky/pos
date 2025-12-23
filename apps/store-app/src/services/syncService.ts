@@ -1,12 +1,15 @@
 // Optimized sync service - reduced from 2109 to ~800 lines
 // @ts-nocheck
 /* eslint-disable */
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/database';
 import { dataValidationService } from './dataValidationService';
 import { universalChangeDetectionService, TABLES_WITH_UPDATED_AT } from './universalChangeDetectionService';
 import { eventEmissionService } from './eventEmissionService';
+
+// Get singleton database instance
+const db = getDB();
 
 type Tables = Database['public']['Tables'];
 
@@ -284,7 +287,7 @@ export class SyncService {
         // Use the existing removeBillLineItem logic to properly undo effects
         // This will restore inventory, recalculate bill totals, and create audit log
         const systemUserId = '00000000-0000-0000-0000-000000000000'; // System user for auto-deletions
-        await db.removeBillLineItem(record.id, systemUserId);
+        await getDB().removeBillLineItem(record.id, systemUserId);
         console.log(`🔄 Undone effects for bill_line_item ${record.id}: inventory restored, bill totals recalculated`);
       } else if (tableName === 'transactions') {
         // For transactions, we might need to reverse balance changes
@@ -345,14 +348,14 @@ export class SyncService {
       }
 
       // Also remove from pending syncs if it exists
-      const allPendingSyncs = await db.pending_syncs
+      const allPendingSyncs = await getDB().pending_syncs
         .where('table_name')
         .equals(tableName)
         .toArray();
 
       const matchingSyncs = allPendingSyncs.filter((sync: any) => sync.record_id === recordId);
       for (const pendingSync of matchingSyncs) {
-        await db.removePendingSync(pendingSync.id);
+        await getDB().removePendingSync(pendingSync.id);
       }
 
       console.warn(`✅ Successfully deleted and undone problematic record ${recordId} from ${tableName}`);
@@ -539,7 +542,7 @@ export class SyncService {
                 const validBatchIds = new Set(batchesData?.map((b: any) => b.id) || []);
 
                 // Also check local batches
-                const localBatches = await db.inventory_bills
+                const localBatches = await getDB().inventory_bills
                   .where('store_id')
                   .equals(storeId)
                   .filter((batch: any) => !batch._deleted)
@@ -634,7 +637,7 @@ export class SyncService {
         // Remove invalid records from sync queue
         for (const invalid of validation.errors) {
           console.warn(`🚫 Removing invalid ${tableName} record: ${invalid.reason}`, invalid.record);
-          await db.markAsSynced(tableName, invalid.record.id);
+          await getDB().markAsSynced(tableName, invalid.record.id);
         }
 
         const validRecords = activeRecords.filter((r: any) =>
@@ -733,7 +736,7 @@ export class SyncService {
                         _synced: false
                       });
                       // Mark original as synced to prevent retry
-                      await db.markAsSynced(tableName, conflictingLocalSession.id);
+                      await getDB().markAsSynced(tableName, conflictingLocalSession.id);
                     }
                   }
                 }
@@ -773,7 +776,7 @@ export class SyncService {
           } else {
             // Mark all records as synced
             for (const record of batch as any[]) {
-              await db.markAsSynced(tableName, record.id);
+              await getDB().markAsSynced(tableName, record.id);
             }
             result.uploaded += batch.length;
             console.log(`✅ [Sync] Successfully uploaded ${batch.length} ${tableName} records to Supabase`);
@@ -1113,7 +1116,7 @@ export class SyncService {
           }
         }
 
-        await db.updateSyncMetadata(tableName, new Date().toISOString());
+        await getDB().updateSyncMetadata(tableName, new Date().toISOString());
 
         const tableTime = performance.now() - tableStart;
         console.log(`  ⏱️  ${tableName} upload: ${tableTime.toFixed(2)}ms`);
@@ -1175,7 +1178,7 @@ export class SyncService {
               result.errors.push(`Delete failed for ${tableName}/${record.id}: ${error.message}`);
             } else {
               // Mark as synced and delete from local database
-              await db.markAsSynced(tableName, record.id);
+              await getDB().markAsSynced(tableName, record.id);
               await table.delete(record.id);
               result.uploaded++;
               console.log(`✅ Successfully deleted ${tableName} record ${record.id.substring(0, 8)}...`);
@@ -1243,10 +1246,10 @@ export class SyncService {
           } else {
             // Recoverable error - add to pending syncs for retry
             console.error(`❌ Individual record failed (will retry):`, record.id, individualError.message);
-            await db.addPendingSync(tableName, record.id, 'update', record);
+            await getDB().addPendingSync(tableName, record.id, 'update', record);
           }
         } else {
-          await db.markAsSynced(tableName, original.id);
+          await getDB().markAsSynced(tableName, original.id);
         }
       } catch (e) {
         console.error(`❌ Critical error with record:`, record, e);
@@ -1254,7 +1257,7 @@ export class SyncService {
         if (this.isUnrecoverableError(e, tableName, record)) {
           await this.deleteProblematicRecord(tableName, original.id, e);
         } else {
-          await db.addPendingSync(tableName, record.id, 'update', record);
+          await getDB().addPendingSync(tableName, record.id, 'update', record);
         }
       }
     }
@@ -1281,15 +1284,15 @@ export class SyncService {
             .upsert([record], { onConflict: 'id' });
           
           if (!error) {
-            await db.markAsSynced('cash_drawer_sessions', original.id);
+            await getDB().markAsSynced('cash_drawer_sessions', original.id);
             console.log(`✅ Synced closed session ${original.id.substring(0, 8)}...`);
           } else {
             console.error(`❌ Failed to sync closed session ${original.id}:`, error);
-            await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
+            await getDB().addPendingSync('cash_drawer_sessions', original.id, 'update', record);
           }
         } catch (e) {
           console.error(`❌ Error syncing closed session:`, e);
-          await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
+          await getDB().addPendingSync('cash_drawer_sessions', original.id, 'update', record);
         }
         continue;
       }
@@ -1305,7 +1308,7 @@ export class SyncService {
         
         if (checkError) {
           console.error(`❌ Error checking for existing session:`, checkError);
-          await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
+          await getDB().addPendingSync('cash_drawer_sessions', original.id, 'update', record);
           continue;
         }
         
@@ -1324,7 +1327,7 @@ export class SyncService {
           });
           
           // Mark as synced to prevent retry
-          await db.markAsSynced('cash_drawer_sessions', original.id);
+          await getDB().markAsSynced('cash_drawer_sessions', original.id);
           continue;
         }
         
@@ -1334,15 +1337,15 @@ export class SyncService {
           .upsert([record], { onConflict: 'id' });
         
         if (!uploadError) {
-          await db.markAsSynced('cash_drawer_sessions', original.id);
+          await getDB().markAsSynced('cash_drawer_sessions', original.id);
           console.log(`✅ Synced cash_drawer_session ${original.id.substring(0, 8)}...`);
         } else {
           console.error(`❌ Failed to sync session ${original.id}:`, uploadError);
-          await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
+          await getDB().addPendingSync('cash_drawer_sessions', original.id, 'update', record);
         }
       } catch (e) {
         console.error(`❌ Error handling session conflict:`, e);
-        await db.addPendingSync('cash_drawer_sessions', original.id, 'update', record);
+        await getDB().addPendingSync('cash_drawer_sessions', original.id, 'update', record);
       }
     }
   }
@@ -1397,7 +1400,7 @@ export class SyncService {
           continue;
         }
 
-        const syncMetadata = await db.getSyncMetadata(tableName);
+        const syncMetadata = await getDB().getSyncMetadata(tableName);
         let lastSyncAt = syncMetadata?.last_synced_at || '1970-01-01T00:00:00.000Z';
 
         if (lastSyncAt && isNaN(Date.parse(lastSyncAt))) {
@@ -1427,7 +1430,7 @@ export class SyncService {
           if (!changeDetection.hasChanges) {
             const detectionTime = performance.now() - tableStart;
             // Still update sync metadata to track that we checked
-            await db.updateSyncMetadata(tableName, new Date().toISOString());
+            await getDB().updateSyncMetadata(tableName, new Date().toISOString());
             continue; // Skip to next table
           }
 
@@ -1666,7 +1669,7 @@ export class SyncService {
 
         const latestRecord = remoteRecords[remoteRecords.length - 1];
         const latestTimestamp = latestRecord?.[timestampField] || new Date().toISOString();
-        await db.updateSyncMetadata(tableName, latestTimestamp);
+        await getDB().updateSyncMetadata(tableName, latestTimestamp);
 
         const tableTime = performance.now() - tableStart;
         console.log(`  ⏱️  ${tableName} download: ${tableTime.toFixed(2)}ms (${remoteRecords.length} records)`);
@@ -1919,7 +1922,7 @@ export class SyncService {
     const remoteModifiedAt = new Date(normalizedRemote[timestampField] || normalizedRemote.created_at);
 
     if (remoteModifiedAt >= localModifiedAt) {
-      await db.addPendingSync(tableName, localRecord.id, 'update', localRecord);
+      await getDB().addPendingSync(tableName, localRecord.id, 'update', localRecord);
       await (db as any)[tableName].put({
         ...normalizedRemote,
         _synced: true,
@@ -1963,7 +1966,7 @@ export class SyncService {
         };
         // Note: current_balance is not updated - it's computed from journal entries
 
-        await db.cash_drawer_accounts.update(localRecord.id, updateData);
+        await getDB().cash_drawer_accounts.update(localRecord.id, updateData);
 
         return true;
       } catch (error) {
@@ -1982,9 +1985,9 @@ export class SyncService {
           };
           // Remove current_balance from update - it's computed, not synced
           delete updateData.current_balance;
-          await db.cash_drawer_accounts.put(updateData);
+          await getDB().cash_drawer_accounts.put(updateData);
         } else {
-          await db.cash_drawer_accounts.update(localRecord.id, {
+          await getDB().cash_drawer_accounts.update(localRecord.id, {
             _synced: true,
             _lastSyncedAt: new Date().toISOString()
           });
@@ -1998,13 +2001,13 @@ export class SyncService {
     const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
 
     if (remoteTimestamp >= localTimestamp) {
-      await db.cash_drawer_accounts.put({
+      await getDB().cash_drawer_accounts.put({
         ...remoteRecord,
         _synced: true,
         _lastSyncedAt: new Date().toISOString()
       });
     } else {
-      await db.cash_drawer_accounts.update(localRecord.id, {
+      await getDB().cash_drawer_accounts.update(localRecord.id, {
         _synced: true,
         _lastSyncedAt: new Date().toISOString()
       });
@@ -2037,7 +2040,7 @@ export class SyncService {
       const finalUsdBalance = Math.max(localUsdBalance, remoteUsdBalance);
       const finalLbpBalance = Math.max(localLbpBalance, remoteLbpBalance);
 
-      await db.users.put({
+      await getDB().users.put({
         ...remoteRecord,
         usd_balance: finalUsdBalance,
         lbp_balance: finalLbpBalance,
@@ -2053,13 +2056,13 @@ export class SyncService {
     const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
 
     if (remoteTimestamp >= localTimestamp) {
-      await db.users.put({
+      await getDB().users.put({
         ...remoteRecord,
         _synced: true,
         _lastSyncedAt: new Date().toISOString()
       });
     } else {
-      await db.users.update(localRecord.id, {
+      await getDB().users.update(localRecord.id, {
         _synced: true,
         _lastSyncedAt: new Date().toISOString()
       });
@@ -2073,7 +2076,7 @@ export class SyncService {
     // If there's a conflict, it means the transaction was modified in Supabase (rare but possible)
     console.warn(`⚠️ Transaction conflict detected for ${localRecord.id} - remote version takes precedence`);
     
-    await db.transactions.put({
+    await getDB().transactions.put({
       ...remoteRecord,
       _synced: true,
       _lastSyncedAt: new Date().toISOString()
@@ -2099,7 +2102,7 @@ export class SyncService {
 
       // If local had changes, add to pending syncs for review
       if (!localRecord._synced) {
-        await db.addPendingSync(tableName, localRecord.id, 'update', localRecord);
+        await getDB().addPendingSync(tableName, localRecord.id, 'update', localRecord);
       }
 
       return true;
@@ -2114,7 +2117,7 @@ export class SyncService {
   }
 
   private async processPendingSyncs() {
-    const pendingSyncs = await db.getPendingSyncs();
+    const pendingSyncs = await getDB().getPendingSyncs();
 
     for (const pendingSync of pendingSyncs) {
       try {
@@ -2134,7 +2137,7 @@ export class SyncService {
               { message: lastError, code: '23503' }
             );
           }
-          await db.removePendingSync(pendingSync.id);
+          await getDB().removePendingSync(pendingSync.id);
           continue;
         }
 
@@ -2159,7 +2162,7 @@ export class SyncService {
               // If error is unrecoverable, delete the record
               if (upsertError && this.isUnrecoverableError(upsertError, pendingSync.table_name, cleanedPayload)) {
                 await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, upsertError);
-                await db.removePendingSync(pendingSync.id);
+                await getDB().removePendingSync(pendingSync.id);
                 continue;
               }
             }
@@ -2176,7 +2179,7 @@ export class SyncService {
         }
 
         if (success) {
-          await db.removePendingSync(pendingSync.id);
+          await getDB().removePendingSync(pendingSync.id);
         } else {
           // Check if error is unrecoverable
           if (error && this.isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
@@ -2184,9 +2187,9 @@ export class SyncService {
             if (pendingSync.operation !== 'delete') {
               await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
             }
-            await db.removePendingSync(pendingSync.id);
+            await getDB().removePendingSync(pendingSync.id);
           } else {
-            await db.pending_syncs.update(pendingSync.id, {
+            await getDB().pending_syncs.update(pendingSync.id, {
               retry_count: pendingSync.retry_count + 1,
               last_error: error instanceof Error ? error.message : (error?.message || 'Retry failed')
             });
@@ -2199,9 +2202,9 @@ export class SyncService {
           if (pendingSync.operation !== 'delete') {
             await this.deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
           }
-          await db.removePendingSync(pendingSync.id);
+          await getDB().removePendingSync(pendingSync.id);
         } else {
-          await db.pending_syncs.update(pendingSync.id, {
+          await getDB().pending_syncs.update(pendingSync.id, {
             retry_count: pendingSync.retry_count + 1,
             last_error: error instanceof Error ? error.message : 'Unknown error'
           });
@@ -2218,7 +2221,7 @@ export class SyncService {
     }
 
     try {
-      const hasAnySyncMetadata = await db.sync_metadata.count() > 0;
+      const hasAnySyncMetadata = await getDB().sync_metadata.count() > 0;
 
       if (!hasAnySyncMetadata) {
         const tableIndex = SYNC_TABLES.indexOf(tableName);
@@ -2228,7 +2231,7 @@ export class SyncService {
 
       const dependencyChecks = await Promise.all(
         dependencies.map(async (depTable) => {
-          const lastSynced = await db.sync_metadata
+          const lastSynced = await getDB().sync_metadata
             .where('table_name')
             .equals(depTable)
             .first();
@@ -2245,7 +2248,7 @@ export class SyncService {
 
   private async ensureStoreExists(storeId: string) {
     try {
-      const localStore = await db.stores.get(storeId);
+      const localStore = await getDB().stores.get(storeId);
       if (localStore) return;
 
       const { data: remoteStore, error } = await supabase
@@ -2260,7 +2263,7 @@ export class SyncService {
       }
 
       if (remoteStore) {
-        await db.stores.put({
+        await getDB().stores.put({
           ...remoteStore,
           _synced: true,
           _lastSyncedAt: new Date().toISOString()
@@ -2280,7 +2283,7 @@ export class SyncService {
         };
 
         await supabase.from('stores').insert(defaultStore);
-        await db.stores.put({
+        await getDB().stores.put({
           ...defaultStore,
           _synced: true,
           _lastSyncedAt: new Date().toISOString()
@@ -2292,7 +2295,7 @@ export class SyncService {
   }
 
   private async initializeSyncMetadata(storeId: string) {
-    const hasAnySyncMetadata = await db.sync_metadata.count() > 0;
+    const hasAnySyncMetadata = await getDB().sync_metadata.count() > 0;
 
     const currentTime = new Date().toISOString();
 
@@ -2301,7 +2304,7 @@ export class SyncService {
 
       for (const tableName of SYNC_TABLES) {
         try {
-          await db.updateSyncMetadata(tableName, currentTime);
+          await getDB().updateSyncMetadata(tableName, currentTime);
         } catch (error) {
           console.warn(`Failed to initialize sync metadata for ${tableName}:`, error);
         }
@@ -2310,12 +2313,12 @@ export class SyncService {
       // Ensure all tables have sync metadata rows; backfill any missing ones without overwriting existing entries
       for (const tableName of SYNC_TABLES) {
         try {
-          const existing = await db.sync_metadata
+          const existing = await getDB().sync_metadata
             .where('table_name')
             .equals(tableName)
             .first();
           if (!existing) {
-            await db.updateSyncMetadata(tableName, currentTime);
+            await getDB().updateSyncMetadata(tableName, currentTime);
           }
         } catch (error) {
           console.warn(`Failed to backfill sync metadata for ${tableName}:`, error);
@@ -2333,12 +2336,12 @@ export class SyncService {
     };
 
     try {
-      await db.transaction('rw', db.tables, async () => {
+      await getDB().transaction('rw', getDB().tables, async () => {
         for (const tableName of SYNC_TABLES) {
           await (db as any)[tableName].clear();
         }
-        await db.sync_metadata.clear();
-        await db.pending_syncs.clear();
+        await getDB().sync_metadata.clear();
+        await getDB().pending_syncs.clear();
       });
 
       for (const tableName of SYNC_TABLES) {
@@ -2405,7 +2408,7 @@ export class SyncService {
             console.log(`✅ Full resync: downloaded ${uniqueRecords.length} products (${storeProductsResult.data?.length || 0} store-specific + ${globalProductsResult.data?.length || 0} global)`);
           }
 
-          await db.updateSyncMetadata(tableName, new Date().toISOString());
+          await getDB().updateSyncMetadata(tableName, new Date().toISOString());
         } else {
           // For all other tables, use standard query with helper method
           let query = supabase.from(tableName as any).select('*');
@@ -2446,7 +2449,7 @@ export class SyncService {
             await (db as any)[tableName].bulkPut(recordsWithSync);
             result.synced.downloaded += remoteRecords.length;
 
-            await db.updateSyncMetadata(tableName, new Date().toISOString());
+            await getDB().updateSyncMetadata(tableName, new Date().toISOString());
           }
         }
       }
@@ -2471,7 +2474,7 @@ export class SyncService {
 
     try {
       // Upload unsynced records
-      const unsyncedRecords = await db.getUnsyncedRecords(tableName);
+      const unsyncedRecords = await getDB().getUnsyncedRecords(tableName);
 
       if (unsyncedRecords.length > 0) {
         const cleanedRecords = (unsyncedRecords as any[])
@@ -2485,14 +2488,14 @@ export class SyncService {
           result.errors.push(`Upload failed: ${error.message}`);
         } else {
           for (const record of unsyncedRecords as any[]) {
-            await db.markAsSynced(tableName, record.id);
+            await getDB().markAsSynced(tableName, record.id);
           }
           result.synced.uploaded = unsyncedRecords.length;
         }
       }
 
       // Download remote changes with change detection
-      const syncMetadata = await db.getSyncMetadata(tableName);
+      const syncMetadata = await getDB().getSyncMetadata(tableName);
       const lastSyncAt = syncMetadata?.last_synced_at || '1970-01-01T00:00:00.000Z';
       const isFirstSync = !lastSyncAt || lastSyncAt === '1970-01-01T00:00:00.000Z';
 
@@ -2526,7 +2529,7 @@ export class SyncService {
         
         if (needsTransaction) {
           const table = (db as any)[tableName];
-          await db.transaction('rw', [table], async () => {
+          await getDB().transaction('rw', [table], async () => {
             for (const record of remoteRecords as any[]) {
               const normalizedRecord = { ...record };
               
@@ -2638,7 +2641,7 @@ export class SyncService {
         // Use multiple verification attempts with increasing delays
         try {
           // Ensure database is open before querying
-          await db.ensureOpen();
+          await getDB().ensureOpen();
           
           // Wait a bit for transaction to fully commit
           await new Promise(resolve => setTimeout(resolve, 200));
@@ -2648,7 +2651,7 @@ export class SyncService {
           const maxVerificationAttempts = 5;
           
           while (verificationAttempts < maxVerificationAttempts) {
-            branchCount = await db.branches
+            branchCount = await getDB().branches
               .where('store_id')
               .equals(storeId)
               .filter(b => !(b._deleted === true))

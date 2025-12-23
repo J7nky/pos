@@ -11,7 +11,7 @@
  * This service enforces branch-level access control for all branch-scoped operations.
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Employee } from '../types';
 
 export class BranchAccessValidationService {
@@ -40,7 +40,7 @@ export class BranchAccessValidationService {
     
     if (!role) {
       // Fallback to database lookup if role not provided
-      const user = await db.users.get(userId);
+      const user = await getDB().users.get(userId);
       
       if (!user) {
         throw new Error(`User not found: ${userId}`);
@@ -59,7 +59,7 @@ export class BranchAccessValidationService {
     // Admin can access all branches
     if (role === 'admin') {
       // Still validate branch exists and is not deleted
-      const branch = await db.branches.get(branchId);
+      const branch = await getDB().branches.get(branchId);
       if (!branch) {
         throw new Error(`Branch not found: ${branchId}`);
       }
@@ -91,8 +91,8 @@ export class BranchAccessValidationService {
       
       if (assignedBranchId !== branchId) {
         // Get branch names for better error message
-        const userBranch = await db.branches.get(assignedBranchId);
-        const attemptedBranch = await db.branches.get(branchId);
+        const userBranch = await getDB().branches.get(assignedBranchId);
+        const attemptedBranch = await getDB().branches.get(branchId);
         
         const userBranchName = userBranch?.name || assignedBranchId;
         const attemptedBranchName = attemptedBranch?.name || branchId;
@@ -105,7 +105,7 @@ export class BranchAccessValidationService {
       }
       
       // Verify branch exists and is not deleted
-      const branch = await db.branches.get(branchId);
+      const branch = await getDB().branches.get(branchId);
       if (!branch) {
         throw new Error(`Branch not found: ${branchId}`);
       }
@@ -153,7 +153,7 @@ export class BranchAccessValidationService {
     
     if (!role) {
       // Fallback to database lookup if role not provided
-      const user = await db.users.get(userId);
+      const user = await getDB().users.get(userId);
       
       if (!user || user.store_id !== storeId) {
         return [];
@@ -166,9 +166,9 @@ export class BranchAccessValidationService {
     // Admin can access all branches
     if (role === 'admin') {
       // Ensure database is open before querying
-      await db.ensureOpen();
+      await getDB().ensureOpen();
       
-      const branches = await db.branches
+      const branches = await getDB().branches
         .where('store_id')
         .equals(storeId)
         .filter(b => !(b._deleted === true))
@@ -183,7 +183,7 @@ export class BranchAccessValidationService {
         return []; // No branch assigned
       }
       
-      const branch = await db.branches.get(branchId);
+      const branch = await getDB().branches.get(branchId);
       if (!branch || branch._deleted === true || branch.store_id !== storeId) {
         return []; // Branch doesn't exist or is invalid
       }
@@ -243,7 +243,7 @@ export class BranchAccessValidationService {
     branchId: string,
     storeId: string
   ): Promise<void> {
-    const branch = await db.branches.get(branchId);
+    const branch = await getDB().branches.get(branchId);
     
     if (!branch) {
       throw new Error(`Branch not found: ${branchId}`);
@@ -270,7 +270,7 @@ export class BranchAccessValidationService {
    * @returns Branch ID or null
    */
   static async getUserBranchId(userId: string): Promise<string | null> {
-    const user = await db.users.get(userId);
+    const user = await getDB().users.get(userId);
     
     if (!user) {
       throw new Error(`User not found: ${userId}`);

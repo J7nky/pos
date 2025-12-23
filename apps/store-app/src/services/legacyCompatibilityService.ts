@@ -1,7 +1,7 @@
 // Legacy Compatibility Service - Phase 5 of Accounting Foundation Migration
 // Provides backward compatibility layer for existing customer/supplier operations
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { entityQueryService } from './entityQueryService';
 import { Entity } from '../types/accounting';
 
@@ -126,7 +126,7 @@ export class LegacyCompatibilityService {
       const updateData: any = { _synced: false };
       updateData[balanceField] = newBalance;
       
-      await db.entities.update(customerId, updateData);
+      await getDB().entities.update(customerId, updateData);
     } catch (error) {
       console.error('Failed to update customer balance:', error);
       throw error; // No fallback - legacy tables removed
@@ -146,7 +146,7 @@ export class LegacyCompatibilityService {
       const updateData: any = { _synced: false };
       updateData[balanceField] = newBalance;
       
-      await db.entities.update(supplierId, updateData);
+      await getDB().entities.update(supplierId, updateData);
     } catch (error) {
       console.error('Failed to update supplier balance:', error);
       throw error; // No fallback - legacy tables removed
@@ -206,7 +206,7 @@ export class LegacyCompatibilityService {
   }> {
     try {
       // Try to find in entities table first
-      const entity = await db.entities.get(entityId);
+      const entity = await getDB().entities.get(entityId);
       
       if (entity) {
         if (entity.entity_type === 'customer') {

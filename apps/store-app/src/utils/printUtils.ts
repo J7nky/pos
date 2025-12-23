@@ -85,6 +85,7 @@ export function setupPrintWithPageSelection(
   selectedPages: number[] | undefined,
   totalPages: number
 ) {
+  console.log('setupPrintWithPageSelection', selectedPages, totalPages);
   // Add print class to body
   document.body.classList.add('printing');
   

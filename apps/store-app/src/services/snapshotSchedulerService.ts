@@ -2,7 +2,7 @@
 // Handles automatic scheduling and execution of daily balance snapshots
 
 import { snapshotService } from './snapshotService';
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 export interface SchedulerConfig {
   enabled: boolean;
@@ -125,7 +125,7 @@ export class SnapshotSchedulerService {
     
     try {
       // Get all active stores
-      const stores = await db.stores.toArray();
+      const stores = await getDB().stores.toArray();
       
       if (stores.length === 0) {
         console.log('📊 No stores found for snapshot creation');

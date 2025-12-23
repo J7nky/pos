@@ -14,13 +14,13 @@
  * Usage:
  * ```typescript
  * await batchUpdate(
- *   db.transactions,
+ *   getDB().transactions,
  *   transactions.map(t => ({ id: t.id, updates: { _synced: true } }))
  * );
  * ```
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Table } from 'dexie';
 
 export interface BatchUpdateItem<T = any> {
@@ -73,7 +73,7 @@ export async function batchUpdate<T>(
     for (let i = 0; i < items.length; i += chunkSize) {
       const chunk = items.slice(i, i + chunkSize);
       
-      await db.transaction('rw', table, async () => {
+      await getDB().transaction('rw', table, async () => {
         for (let j = 0; j < chunk.length; j++) {
           const item = chunk[j];
           const index = i + j;
@@ -149,7 +149,7 @@ export async function batchInsert<T>(
     for (let i = 0; i < items.length; i += chunkSize) {
       const chunk = items.slice(i, i + chunkSize);
       
-      await db.transaction('rw', table, async () => {
+      await getDB().transaction('rw', table, async () => {
         for (let j = 0; j < chunk.length; j++) {
           const item = chunk[j];
           const index = i + j;
@@ -223,7 +223,7 @@ export async function batchDelete<T>(
     for (let i = 0; i < ids.length; i += chunkSize) {
       const chunk = ids.slice(i, i + chunkSize);
       
-      await db.transaction('rw', table, async () => {
+      await getDB().transaction('rw', table, async () => {
         for (let j = 0; j < chunk.length; j++) {
           const id = chunk[j];
           const index = i + j;
@@ -379,7 +379,7 @@ export async function batchUpsert<T>(
   const errors: Array<{ index: number; error: string; item?: any }> = [];
 
   try {
-    await db.transaction('rw', table, async () => {
+    await getDB().transaction('rw', table, async () => {
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         const key = getKey(item);

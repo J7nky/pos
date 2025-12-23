@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { notificationService } from './notificationService';
 import { InventoryItem, inventory_bills, BillLineItem } from '../types';
 
@@ -81,32 +81,32 @@ export class ReceivedBillMonitoringService {
 
     try {
       // Get all inventory items for this store
-      const allInventoryItems = await db.inventory_items
+      const allInventoryItems = await getDB().inventory_items
         .where('store_id')
         .equals(storeId)
         .and(item => !item._deleted)
         .toArray();
 
       // Get all inventory bills (batches)
-      const allInventoryBills = await db.inventory_bills
+      const allInventoryBills = await getDB().inventory_bills
         .where('store_id')
         .equals(storeId)
         .and(bill => !bill._deleted)
         .toArray();
 
       // Get all products and suppliers
-      const products = await db.products
+      const products = await getDB().products
         .where('store_id')
         .equals(storeId)
         .toArray();
 
-      const suppliers = await db.suppliers
+      const suppliers = await getDB().suppliers
         .where('store_id')
         .equals(storeId)
         .toArray();
 
       // Get all sales (bill line items)
-      const sales = await db.bill_line_items
+      const sales = await getDB().bill_line_items
         .where('store_id')
         .equals(storeId)
         .and(item => !item._deleted)
@@ -198,7 +198,7 @@ export class ReceivedBillMonitoringService {
   ): Promise<void> {
     try {
       // Check if there's an existing notification for this bill
-      const existingNotifications = await db.notifications
+      const existingNotifications = await getDB().notifications
         .where('store_id')
         .equals(storeId)
         .filter(n => 
@@ -292,11 +292,11 @@ export class ReceivedBillMonitoringService {
   ): Promise<void> {
     try {
       // Get the inventory item
-      const inventoryItem = await db.inventory_items.get(inventoryItemId);
+      const inventoryItem = await getDB().inventory_items.get(inventoryItemId);
       if (!inventoryItem) return;
 
       // Get all sales for this item
-      const sales = await db.bill_line_items
+      const sales = await getDB().bill_line_items
         .where('inventory_item_id')
         .equals(inventoryItemId)
         .and(item => !item._deleted)
@@ -324,11 +324,11 @@ export class ReceivedBillMonitoringService {
       // If 100% complete, check if we need to send notification
       if (progress >= 100) {
         // Get product and supplier info
-        const product = await db.products.get(inventoryItem.product_id);
+        const product = await getDB().products.get(inventoryItem.product_id);
         const batch = inventoryItem.batch_id 
-          ? await db.inventory_bills.get(inventoryItem.batch_id)
+          ? await getDB().inventory_bills.get(inventoryItem.batch_id)
           : null;
-        const entity = batch ? await db.entities.get(batch.supplier_id) : null;
+        const entity = batch ? await getDB().entities.get(batch.supplier_id) : null;
         const supplier = entity && entity.entity_type === 'supplier' ? entity : null;
 
         if (product && supplier) {
@@ -352,7 +352,7 @@ export class ReceivedBillMonitoringService {
   public async markBillAsClosed(storeId: string, billId: string): Promise<void> {
     try {
       // Find all notifications for this bill and delete them
-      const notifications = await db.notifications
+      const notifications = await getDB().notifications
         .where('store_id')
         .equals(storeId)
         .filter(n => 

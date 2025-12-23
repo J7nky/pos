@@ -2150,9 +2150,14 @@ class POSDatabase extends Dexie {
   /**
    * Ensures the database is properly initialized before any operations
    * This prevents "DatabaseClosedError" by guaranteeing the database is open
+   * 
+   * Features:
+   * - Guards against multiple open() calls
+   * - Handles IndexedDB corruption by resetting the database
+   * - Ensures atomic initialization to prevent race conditions
    */
   async ensureOpen(): Promise<void> {
-    // If already initialized, return immediately
+    // If already initialized and open, return immediately
     if (this._isInitialized && this.isOpen()) {
       return;
     }
@@ -2165,22 +2170,33 @@ class POSDatabase extends Dexie {
     // Start initialization
     this._initPromise = (async () => {
       try {
-        // Check if database is already open
+        // Explicit guard: only open if not already open
         if (!this.isOpen()) {
           console.log('🔄 Opening IndexedDB database...');
           await this.open();
-          // #region agent log
-          const dbVersion = (this as any).verno || 'unknown';
-          fetch('http://127.0.0.1:7242/ingest/139cf66a-4f99-49d5-ae8c-eb6f67aef2cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'db.ts:ensureOpen',message:'Database opened - checking version',data:{dbVersion,isOpen:this.isOpen()},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'C'})}).catch(()=>{});
-          // #endregion
           console.log('✅ IndexedDB database opened successfully');
         }
         this._isInitialized = true;
-      } catch (error) {
-        console.error('❌ Failed to open database:', error);
-        this._isInitialized = false;
-        this._initPromise = null;
-        throw error;
+      } catch (err) {
+        // Handle IndexedDB corruption - this is critical for POS systems
+        console.error('❌ Dexie open failed, attempting corruption recovery:', err);
+        
+        try {
+          // Delete corrupted database
+          await Dexie.delete(this.name);
+          console.log('🗑️ Deleted corrupted database, recreating...');
+          
+          // Recreate and reopen
+          await this.open();
+          console.log('✅ Database recreated and opened successfully after corruption recovery');
+          this._isInitialized = true;
+        } catch (recoveryError) {
+          // If recovery also fails, reset state and throw
+          console.error('❌ Corruption recovery failed:', recoveryError);
+          this._isInitialized = false;
+          this._initPromise = null;
+          throw new Error(`Database initialization failed and recovery unsuccessful: ${recoveryError}`);
+        }
       }
     })();
 
@@ -3454,13 +3470,19 @@ class POSDatabase extends Dexie {
   }
 }
 
+// Singleton pattern: ensure only one database instance exists
+let dbInstance: POSDatabase | null = null;
 
-export const db = new POSDatabase();
-
-// Initialize database immediately to prevent race conditions
-db.ensureOpen().catch(err => {
-  console.error('Failed to initialize database on load:', err);
-});
+/**
+ * Get the singleton database instance
+ * This ensures only one POSDatabase instance exists across the entire application
+ */
+export function getDB(): POSDatabase {
+  if (!dbInstance) {
+    dbInstance = new POSDatabase();
+  }
+  return dbInstance;
+}
 
 // Re-export Bill type for convenience
 export type { Bill } from '../types';

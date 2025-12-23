@@ -9,13 +9,13 @@
  * fixCorruptedEmployees();
  */
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 export async function fixCorruptedEmployees() {
   console.log('🔧 Starting to fix corrupted employee records...');
   
   try {
-    const allUsers = await db.users.toArray();
+    const allUsers = await getDB().users.toArray();
     console.log(`📊 Found ${allUsers.length} total employee records`);
     
     let fixedCount = 0;
@@ -57,7 +57,7 @@ export async function fixCorruptedEmployees() {
         updates._synced = false;
         updates.updated_at = new Date().toISOString();
         
-        await db.users.update(user.id, updates);
+        await getDB().users.update(user.id, updates);
         fixedCount++;
         console.log(`  ✅ Updated employee: ${user.id}`);
       }
@@ -87,7 +87,7 @@ export async function fixCorruptedEmployees() {
 export async function checkForCorruptedEmployees() {
   console.log('🔍 Checking for corrupted employee records...');
   
-  const allUsers = await db.users.toArray();
+  const allUsers = await getDB().users.toArray();
   const corrupted = allUsers.filter(user => {
     if (!user.role || typeof user.role !== 'string') {
       return true;

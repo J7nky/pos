@@ -11,7 +11,7 @@ import { Building2, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { BranchAccessValidationService } from '../services/branchAccessValidationService';
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Branch } from '../types';
 
 interface BranchSelectionScreenProps {
@@ -90,7 +90,7 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
       
       try {
         // Ensure database is open before querying
-        await db.ensureOpen();
+        await getDB().ensureOpen();
         
         // If sync just completed, wait a bit longer to ensure transaction is fully committed
         if (branchSyncStatus.isComplete && attemptNumber === 0) {
@@ -131,7 +131,7 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
         // Load full branch details
         const branchDetails = await Promise.all(
           accessibleBranches.map(async (b) => {
-            const branch = await db.branches.get(b.id);
+            const branch = await getDB().branches.get(b.id);
             return branch;
           })
         );
@@ -302,7 +302,7 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
               <button
                 onClick={() => {
                   // Try to get the first available branch and auto-select it
-                  db.branches
+                  getDB().branches
                     .where('store_id')
                     .equals(userProfile?.store_id || '')
                     .filter(b => !b.is_deleted)

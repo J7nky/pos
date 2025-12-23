@@ -3,14 +3,14 @@
  * Ensures all branch-scoped operations have valid branch context
  */
 
-import { db, createId } from './db';
+import { getDB, createId } from './db';
 
 /**
  * Validates that a branch exists and belongs to the specified store
  * @throws Error if branch is invalid or doesn't belong to store
  */
 export async function validateBranch(storeId: string, branchId: string): Promise<void> {
-  const branch = await db.branches.get(branchId);
+  const branch = await getDB().branches.get(branchId);
   
   if (!branch) {
     throw new Error(`Branch not found: ${branchId}`);
@@ -59,7 +59,7 @@ function setStoredBranchPreference(storeId: string, branchId: string): void {
  * @returns Branch ID or null if no branch exists
  */
 export async function getDefaultBranchId(storeId: string): Promise<string | null> {
-  const branches = await db.branches
+  const branches = await getDB().branches
     .where('store_id')
     .equals(storeId)
     .filter(b => !b._deleted)
@@ -120,7 +120,7 @@ export async function getDefaultBranchId(storeId: string): Promise<string | null
  * Gets all active branches for a store
  */
 export async function getStoreBranches(storeId: string) {
-  return db.branches
+  return getDB().branches
     .where('store_id')
     .equals(storeId)
     .filter(b => !b._deleted)
@@ -144,7 +144,7 @@ export async function ensureDefaultBranch(storeId: string): Promise<string> {
     if (branchId) {
       // Found a branch, store preference and return
       setStoredBranchPreference(storeId, branchId);
-      const branch = await db.branches.get(branchId);
+      const branch = await getDB().branches.get(branchId);
       if (branch?._synced) {
         console.log(`✅ Using synced branch from Supabase: ${branchId}`);
       } else {
@@ -164,7 +164,7 @@ export async function ensureDefaultBranch(storeId: string): Promise<string> {
   // Still no branch after retries - create a local one as fallback
   // This handles cases where store hasn't been synced yet or is offline
   console.log(`⚠️ No branch found after ${maxRetries} attempts, creating fallback branch...`);
-  const store = await db.stores.get(storeId);
+  const store = await getDB().stores.get(storeId);
   
   const newBranch = {
     id: createId(),
@@ -179,7 +179,7 @@ export async function ensureDefaultBranch(storeId: string): Promise<string> {
   };
   
   try {
-    branchId = await db.branches.add(newBranch as any);
+    branchId = await getDB().branches.add(newBranch as any);
     setStoredBranchPreference(storeId, branchId);
     console.log(`✅ Created local fallback branch for store ${storeId}: ${branchId}`);
     console.log(`⚠️ Note: This is a temporary branch. The correct branch from Supabase will be used once synced.`);

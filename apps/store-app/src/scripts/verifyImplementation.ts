@@ -1,7 +1,7 @@
 // Implementation Verification Script
 // Verifies that Phases 2-4 are working correctly before proceeding to Phase 5
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 /**
  * Comprehensive verification of our accounting foundation implementation
@@ -48,10 +48,10 @@ async function verifyDatabaseSchema(): Promise<void> {
   try {
     // Check if tables exist by trying to access them
     const tableChecks = [
-      { name: 'journal_entries', table: db.journal_entries },
-      { name: 'balance_snapshots', table: db.balance_snapshots },
-      { name: 'entities', table: db.entities },
-      { name: 'chart_of_accounts', table: db.chart_of_accounts }
+      { name: 'journal_entries', table: getDB().journal_entries },
+      { name: 'balance_snapshots', table: getDB().balance_snapshots },
+      { name: 'entities', table: getDB().entities },
+      { name: 'chart_of_accounts', table: getDB().chart_of_accounts }
     ];
     
     for (const check of tableChecks) {
@@ -213,20 +213,20 @@ async function runIntegrationTest(): Promise<void> {
     console.log('   🧪 Running integration test...');
     
     // Clean up any existing test data
-    await db.transaction('rw', [
-      db.entities,
-      db.chart_of_accounts,
-      db.journal_entries,
-      db.balance_snapshots
+    await getDB().transaction('rw', [
+      getDB().entities,
+      getDB().chart_of_accounts,
+      getDB().journal_entries,
+      getDB().balance_snapshots
     ], async () => {
-      await db.entities.where('store_id').equals(testStoreId).delete();
-      await db.chart_of_accounts.where('store_id').equals(testStoreId).delete();
-      await db.journal_entries.where('store_id').equals(testStoreId).delete();
-      await db.balance_snapshots.where('store_id').equals(testStoreId).delete();
+      await getDB().entities.where('store_id').equals(testStoreId).delete();
+      await getDB().chart_of_accounts.where('store_id').equals(testStoreId).delete();
+      await getDB().journal_entries.where('store_id').equals(testStoreId).delete();
+      await getDB().balance_snapshots.where('store_id').equals(testStoreId).delete();
     });
     
     // Test 1: Create a simple chart of accounts entry
-    await db.chart_of_accounts.add({
+    await getDB().chart_of_accounts.add({
       id: 'test-acc-1100',
       store_id: testStoreId,
       account_code: '1100',
@@ -237,7 +237,7 @@ async function runIntegrationTest(): Promise<void> {
     } as any);
     
     // Test 2: Create a test entity
-    await db.entities.add({
+    await getDB().entities.add({
       id: 'test-entity-cash',
       store_id: testStoreId,
       branch_id: null,
@@ -270,7 +270,7 @@ async function runIntegrationTest(): Promise<void> {
     });
     
     // Test 4: Verify the journal entry was created
-    const journalEntries = await db.journal_entries
+    const journalEntries = await getDB().journal_entries
       .where('transaction_id')
       .equals('test-txn-001')
       .toArray();
@@ -308,16 +308,16 @@ async function runIntegrationTest(): Promise<void> {
     }
     
     // Clean up test data
-    await db.transaction('rw', [
-      db.entities,
-      db.chart_of_accounts,
-      db.journal_entries,
-      db.balance_snapshots
+    await getDB().transaction('rw', [
+      getDB().entities,
+      getDB().chart_of_accounts,
+      getDB().journal_entries,
+      getDB().balance_snapshots
     ], async () => {
-      await db.entities.where('store_id').equals(testStoreId).delete();
-      await db.chart_of_accounts.where('store_id').equals(testStoreId).delete();
-      await db.journal_entries.where('store_id').equals(testStoreId).delete();
-      await db.balance_snapshots.where('store_id').equals(testStoreId).delete();
+      await getDB().entities.where('store_id').equals(testStoreId).delete();
+      await getDB().chart_of_accounts.where('store_id').equals(testStoreId).delete();
+      await getDB().journal_entries.where('store_id').equals(testStoreId).delete();
+      await getDB().balance_snapshots.where('store_id').equals(testStoreId).delete();
     });
     
     console.log('   ✅ Integration test passed');
@@ -331,16 +331,16 @@ async function runIntegrationTest(): Promise<void> {
     
     // Clean up on failure
     try {
-      await db.transaction('rw', [
-        db.entities,
-        db.chart_of_accounts,
-        db.journal_entries,
-        db.balance_snapshots
+      await getDB().transaction('rw', [
+        getDB().entities,
+        getDB().chart_of_accounts,
+        getDB().journal_entries,
+        getDB().balance_snapshots
       ], async () => {
-        await db.entities.where('store_id').equals(testStoreId).delete();
-        await db.chart_of_accounts.where('store_id').equals(testStoreId).delete();
-        await db.journal_entries.where('store_id').equals(testStoreId).delete();
-        await db.balance_snapshots.where('store_id').equals(testStoreId).delete();
+        await getDB().entities.where('store_id').equals(testStoreId).delete();
+        await getDB().chart_of_accounts.where('store_id').equals(testStoreId).delete();
+        await getDB().journal_entries.where('store_id').equals(testStoreId).delete();
+        await getDB().balance_snapshots.where('store_id').equals(testStoreId).delete();
       });
     } catch (cleanupError) {
       console.error('Failed to clean up test data:', cleanupError);

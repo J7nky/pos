@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { transactionService, TransactionContext } from '../transactionService';
 import { TRANSACTION_CATEGORIES } from '../../constants/transactionCategories';
-import { db } from '../../lib/db';
+import { getDB } from '../../lib/db';
 
 // Mock dependencies
 vi.mock('../../lib/db', () => ({
@@ -69,14 +69,14 @@ describe('TransactionService - Phase 1 Foundation', () => {
     };
 
     // Setup default mocks
-    (db.customers.get as any).mockResolvedValue({
+    (getDB().customers.get as any).mockResolvedValue({
       id: 'customer-789',
       name: 'Test Customer',
       usd_balance: 100,
       lb_balance: 8950000
     });
 
-    (db.suppliers.get as any).mockResolvedValue({
+    (getDB().suppliers.get as any).mockResolvedValue({
       id: 'supplier-789',
       name: 'Test Supplier',
       usd_balance: 200,
@@ -174,7 +174,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
     });
 
     it('should allow cash drawer transactions without entity ID', async () => {
-      (db.transactions.add as any).mockResolvedValue(undefined);
+      (getDB().transactions.add as any).mockResolvedValue(undefined);
 
       const result = await transactionService.createTransaction({
         category: TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
@@ -195,9 +195,9 @@ describe('TransactionService - Phase 1 Foundation', () => {
 
   describe('Core Transaction Creation', () => {
     beforeEach(() => {
-      (db.transactions.add as any).mockResolvedValue(undefined);
-      (db.customers.update as any).mockResolvedValue(undefined);
-      (db.suppliers.update as any).mockResolvedValue(undefined);
+      (getDB().transactions.add as any).mockResolvedValue(undefined);
+      (getDB().customers.update as any).mockResolvedValue(undefined);
+      (getDB().suppliers.update as any).mockResolvedValue(undefined);
     });
 
     it('should create a valid transaction', async () => {
@@ -215,7 +215,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       expect(result.transactionId).toBeDefined();
       expect(result.balanceBefore).toBe(100); // From mock customer
       expect(result.affectedRecords).toContain(result.transactionId);
-      expect(db.transactions.add).toHaveBeenCalled();
+      expect(getDB().transactions.add).toHaveBeenCalled();
     });
 
     it('should generate transaction ID', async () => {
@@ -273,7 +273,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
         updateCashDrawer: false
       });
 
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.reference).toMatch(/^PAY-\d+$/);
     });
 
@@ -291,7 +291,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
         updateCashDrawer: false
       });
 
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.reference).toBe(customReference);
     });
 
@@ -309,7 +309,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
         updateCashDrawer: false
       });
 
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.metadata.invoiceNumber).toBe('INV-123');
       expect(addCall.metadata.customField).toBe('value');
       expect(addCall.metadata.correlationId).toBeDefined();
@@ -324,9 +324,9 @@ describe('TransactionService - Phase 1 Foundation', () => {
 
   describe('Convenience Methods', () => {
     beforeEach(() => {
-      (db.transactions.add as any).mockResolvedValue(undefined);
-      (db.customers.update as any).mockResolvedValue(undefined);
-      (db.suppliers.update as any).mockResolvedValue(undefined);
+      (getDB().transactions.add as any).mockResolvedValue(undefined);
+      (getDB().customers.update as any).mockResolvedValue(undefined);
+      (getDB().suppliers.update as any).mockResolvedValue(undefined);
     });
 
     it('should create customer payment', async () => {
@@ -340,7 +340,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       );
 
       expect(result.success).toBe(true);
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.category).toBe(TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT);
       expect(addCall.customer_id).toBe('customer-789');
     });
@@ -356,7 +356,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       );
 
       expect(result.success).toBe(true);
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.category).toBe(TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT);
       expect(addCall.supplier_id).toBe('supplier-789');
     });
@@ -371,7 +371,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       );
 
       expect(result.success).toBe(true);
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.category).toBe(TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE);
     });
 
@@ -386,7 +386,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       );
 
       expect(result.success).toBe(true);
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.category).toBe(TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT);
       expect(addCall.employee_id).toBe('employee-123');
     });
@@ -401,7 +401,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       );
 
       expect(result.success).toBe(true);
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.category).toBe(TRANSACTION_CATEGORIES.CASH_DRAWER_SALE);
     });
 
@@ -415,7 +415,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       );
 
       expect(result.success).toBe(true);
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.category).toBe(TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE);
       expect(addCall.metadata.expenseCategory).toBe('supplies');
     });
@@ -430,7 +430,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       );
 
       expect(result.success).toBe(true);
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.category).toBe(TRANSACTION_CATEGORIES.ACCOUNTS_RECEIVABLE);
       expect(addCall.reference).toMatch(/^AR-\d+$/);
     });
@@ -445,7 +445,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       );
 
       expect(result.success).toBe(true);
-      const addCall = (db.transactions.add as any).mock.calls[0][0];
+      const addCall = (getDB().transactions.add as any).mock.calls[0][0];
       expect(addCall.category).toBe(TRANSACTION_CATEGORIES.ACCOUNTS_PAYABLE);
       expect(addCall.reference).toMatch(/^AP-\d+$/);
     });
@@ -457,9 +457,9 @@ describe('TransactionService - Phase 1 Foundation', () => {
 
   describe('Balance Updates', () => {
     beforeEach(() => {
-      (db.transactions.add as any).mockResolvedValue(undefined);
-      (db.customers.update as any).mockResolvedValue(undefined);
-      (db.suppliers.update as any).mockResolvedValue(undefined);
+      (getDB().transactions.add as any).mockResolvedValue(undefined);
+      (getDB().customers.update as any).mockResolvedValue(undefined);
+      (getDB().suppliers.update as any).mockResolvedValue(undefined);
     });
 
     it('should update customer USD balance on payment', async () => {
@@ -475,7 +475,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       expect(result.success).toBe(true);
       expect(result.balanceBefore).toBe(100);
       expect(result.balanceAfter).toBe(50); // 100 - 50
-      expect(db.customers.update).toHaveBeenCalledWith(
+      expect(getDB().customers.update).toHaveBeenCalledWith(
         'customer-789',
         expect.objectContaining({
           usd_balance: 50,
@@ -495,7 +495,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       );
 
       expect(result.success).toBe(true);
-      expect(db.customers.update).toHaveBeenCalledWith(
+      expect(getDB().customers.update).toHaveBeenCalledWith(
         'customer-789',
         expect.objectContaining({
           lb_balance: expect.any(Number),
@@ -517,7 +517,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       expect(result.success).toBe(true);
       expect(result.balanceBefore).toBe(200);
       expect(result.balanceAfter).toBe(100); // 200 - 100
-      expect(db.suppliers.update).toHaveBeenCalledWith(
+      expect(getDB().suppliers.update).toHaveBeenCalledWith(
         'supplier-789',
         expect.objectContaining({
           usd_balance: 100,
@@ -539,7 +539,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(db.customers.update).not.toHaveBeenCalled();
+      expect(getDB().customers.update).not.toHaveBeenCalled();
     });
   });
 
@@ -554,16 +554,16 @@ describe('TransactionService - Phase 1 Foundation', () => {
         category: TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT,
         amount: 100
       };
-      (db.transactions.get as any).mockResolvedValue(mockTransaction);
+      (getDB().transactions.get as any).mockResolvedValue(mockTransaction);
 
       const result = await transactionService.getTransaction('txn-123');
 
       expect(result).toEqual(mockTransaction);
-      expect(db.transactions.get).toHaveBeenCalledWith('txn-123');
+      expect(getDB().transactions.get).toHaveBeenCalledWith('txn-123');
     });
 
     it('should return null for non-existent transaction', async () => {
-      (db.transactions.get as any).mockResolvedValue(null);
+      (getDB().transactions.get as any).mockResolvedValue(null);
 
       const result = await transactionService.getTransaction('non-existent');
 
@@ -576,7 +576,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
         { id: 'txn-2', store_id: 'store-456', created_at: '2024-01-02', _deleted: false }
       ];
 
-      (db.transactions.where as any).mockReturnValue({
+      (getDB().transactions.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           toArray: vi.fn().mockResolvedValue(mockTransactions)
         })
@@ -594,7 +594,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
         { id: 'txn-2', store_id: 'store-456', created_at: '2024-01-02', _deleted: true }
       ];
 
-      (db.transactions.where as any).mockReturnValue({
+      (getDB().transactions.where as any).mockReturnValue({
         equals: vi.fn().mockReturnValue({
           toArray: vi.fn().mockResolvedValue(mockTransactions)
         })
@@ -613,7 +613,7 @@ describe('TransactionService - Phase 1 Foundation', () => {
 
   describe('Error Handling', () => {
     it('should handle database errors gracefully', async () => {
-      (db.transactions.add as any).mockRejectedValue(new Error('DB Error'));
+      (getDB().transactions.add as any).mockRejectedValue(new Error('DB Error'));
 
       const result = await transactionService.createTransaction({
         category: TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT,
@@ -630,8 +630,8 @@ describe('TransactionService - Phase 1 Foundation', () => {
     });
 
     it('should handle missing customer gracefully', async () => {
-      (db.customers.get as any).mockResolvedValue(null);
-      (db.transactions.add as any).mockResolvedValue(undefined);
+      (getDB().customers.get as any).mockResolvedValue(null);
+      (getDB().transactions.add as any).mockResolvedValue(undefined);
 
       const result = await transactionService.createTransaction({
         category: TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT,

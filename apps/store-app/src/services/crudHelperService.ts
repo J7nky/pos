@@ -1,6 +1,9 @@
 // Generic CRUD helper to eliminate repetitive operations in OfflineDataContext
-import { db, createId, createBaseEntity } from '../lib/db';
+import { getDB, createId, createBaseEntity } from '../lib/db';
 import { Database } from '../types/database';
+
+// Get singleton database instance
+const db = getDB();
 
 type Tables = Database['public']['Tables'];
 
@@ -295,7 +298,7 @@ export class CRUDHelperService {
     storeId: string,
     setting: Partial<Tables['stores']['Update']>
   ): Promise<void> {
-    await db.stores
+    await getDB().stores
       .where('id')
       .equals(storeId)
       .modify({
@@ -373,7 +376,7 @@ export class CRUDHelperService {
 
     const startTime = Date.now();
     
-    const results = await db.transaction('r', db.tables, async () => {
+    const results = await getDB().transaction('r', getDB().tables, async () => {
       return await Promise.all(operations.map(op => op()));
     });
 
@@ -421,7 +424,7 @@ export class CRUDHelperService {
 
     // Run in a dedicated read transaction that includes all tables
     // This ensures we're not conflicting with any existing transaction
-    const counts = await db.transaction('r', tables, async () => {
+    const counts = await getDB().transaction('r', tables, async () => {
       return await Promise.all(
         tableNames.map(async name => {
           try {
@@ -467,7 +470,7 @@ export class CRUDHelperService {
 
     const tables = tableNames.map(name => (db as any)[name]).filter(Boolean);
 
-    const results = await db.transaction('r', tables, async () => {
+    const results = await getDB().transaction('r', tables, async () => {
       return await Promise.all(
         tableNames.map(async name => {
           try {
@@ -534,7 +537,7 @@ export class CRUDHelperService {
     storeId: string
   ): Promise<void> {
     // Get all items for this product, then filter by batch supplier_id
-    const allItems = await db.inventory_items
+    const allItems = await getDB().inventory_items
       .where('product_id')
       .equals(productId)
       .and(inv => inv.quantity > 0 && inv.store_id === storeId)
@@ -542,7 +545,7 @@ export class CRUDHelperService {
 
     // Get batches for all items
     const batchIds = [...new Set(allItems.map(item => item.batch_id).filter(Boolean))];
-    const batches = await db.inventory_bills.where('id').anyOf(batchIds).toArray();
+    const batches = await getDB().inventory_bills.where('id').anyOf(batchIds).toArray();
     const batchMap = new Map(batches.map(b => [b.id, b]));
 
     // Filter items by supplier_id from batch
@@ -561,7 +564,7 @@ export class CRUDHelperService {
       const deduct = Math.min(inv.quantity, qtyToDeduct);
       const newQuantity = inv.quantity - deduct;
 
-      await db.inventory_items.update(inv.id, {
+      await getDB().inventory_items.update(inv.id, {
         quantity: Math.max(0, newQuantity),
         _synced: false
       });
@@ -582,7 +585,7 @@ export class CRUDHelperService {
     storeId: string
   ): Promise<void> {
     // Get all items for this product, then filter by batch supplier_id
-    const allItems = await db.inventory_items
+    const allItems = await getDB().inventory_items
       .where('product_id')
       .equals(productId)
       .and(inv => inv.store_id === storeId)
@@ -590,7 +593,7 @@ export class CRUDHelperService {
 
     // Get batches for all items
     const batchIds = [...new Set(allItems.map(item => item.batch_id).filter(Boolean))];
-    const batches = await db.inventory_bills.where('id').anyOf(batchIds).toArray();
+    const batches = await getDB().inventory_bills.where('id').anyOf(batchIds).toArray();
     const batchMap = new Map(batches.map(b => [b.id, b]));
 
     // Filter items by supplier_id from batch
@@ -604,7 +607,7 @@ export class CRUDHelperService {
 
     if (existingInventory.length > 0) {
       const mostRecent = existingInventory[existingInventory.length - 1];
-      await db.inventory_items.update(mostRecent.id, {
+      await getDB().inventory_items.update(mostRecent.id, {
         quantity: mostRecent.quantity + quantity,
         _synced: false
       });

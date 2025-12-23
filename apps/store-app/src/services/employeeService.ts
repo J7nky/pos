@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Employee } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
@@ -12,7 +12,7 @@ export class EmployeeService {
    * Get all employees for a store (excluding deleted ones)
    */
   static async getEmployees(storeId: string): Promise<Employee[]> {
-    return await db.users
+    return await getDB().users
       .where('store_id')
       .equals(storeId)
       .filter(emp => !emp._deleted)
@@ -23,14 +23,14 @@ export class EmployeeService {
    * Get a single employee by ID
    */
   static async getEmployee(employeeId: string): Promise<Employee | undefined> {
-    return await db.users.get(employeeId);
+    return await getDB().users.get(employeeId);
   }
 
   /**
    * Get employees by role for a store (for quota checking)
    */
   static async getEmployeesByRole(storeId: string, role: 'admin' | 'manager' | 'cashier'): Promise<Employee[]> {
-    return await db.users
+    return await getDB().users
       .where('store_id')
       .equals(storeId)
       .filter(emp => emp.role === role && !emp._deleted)
@@ -55,7 +55,7 @@ export class EmployeeService {
     }
 
     // Check if email already exists
-    const existingByEmail = await db.users
+    const existingByEmail = await getDB().users
       .where('store_id')
       .equals(storeId)
       .filter(emp => emp.email === employeeData.email && !emp._deleted)
@@ -119,7 +119,7 @@ export class EmployeeService {
     }
 
     // Store in IndexedDB first (already synced)
-    await db.users.add(employee);
+    await getDB().users.add(employee);
 
     // Restore admin session if it was changed (do this AFTER storing to avoid race conditions)
     if (sessionChanged && currentSession) {
@@ -159,7 +159,7 @@ export class EmployeeService {
     }
 
     // Check if email already exists
-    const existingByEmail = await db.users
+    const existingByEmail = await getDB().users
       .where('store_id')
       .equals(storeId)
       .filter(emp => emp.email === employeeData.email && !emp._deleted)
@@ -181,7 +181,7 @@ export class EmployeeService {
       _deleted: false
     };
 
-    await db.users.add(employee);
+    await getDB().users.add(employee);
     return employee;
   }
 
@@ -189,7 +189,7 @@ export class EmployeeService {
    * Update an existing employee
    */
   static async updateEmployee(employeeId: string, updates: Partial<Omit<Employee, 'id' | 'store_id' | 'created_at' | '_synced'>>): Promise<void> {
-    const employee = await db.users.get(employeeId);
+    const employee = await getDB().users.get(employeeId);
     if (!employee || employee._deleted) {
       throw new Error('Employee not found');
     }
@@ -206,7 +206,7 @@ export class EmployeeService {
 
     // If email is being changed, check uniqueness
     if (updates.email && updates.email !== employee.email) {
-      const existingByEmail = await db.users
+      const existingByEmail = await getDB().users
         .where('store_id')
         .equals(employee.store_id)
         .filter(emp => emp.email === updates.email && emp.id !== employeeId && !emp._deleted)
@@ -237,7 +237,7 @@ export class EmployeeService {
 
     console.log(`🔄 Updating employee ${employeeId} with:`, cleanedUpdates);
 
-    const updateCount = await db.users.update(employeeId, cleanedUpdates);
+    const updateCount = await getDB().users.update(employeeId, cleanedUpdates);
 
     if (updateCount === 0) {
       console.error(`❌ Failed to update employee ${employeeId}. Update count: ${updateCount}`);
@@ -247,7 +247,7 @@ export class EmployeeService {
     console.log(`✅ Employee updated successfully: ${employeeId}, records updated: ${updateCount}`);
     
     // Verify the update was applied
-    const updated = await db.users.get(employeeId);
+    const updated = await getDB().users.get(employeeId);
     if (updated) {
       console.log(`✅ Verified employee after update:`, updated);
     }
@@ -257,12 +257,12 @@ export class EmployeeService {
    * Soft delete an employee
    */
   static async deleteEmployee(employeeId: string): Promise<void> {
-    const employee = await db.users.get(employeeId);
+    const employee = await getDB().users.get(employeeId);
     if (!employee || employee._deleted) {
       throw new Error('Employee not found');
     }
 
-    await db.users.update(employeeId, {
+    await getDB().users.update(employeeId, {
       _deleted: true,
       _synced: false,
       updated_at: new Date().toISOString()

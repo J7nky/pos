@@ -11,7 +11,7 @@ process.env.NODE_ENV = 'development';
 
 // Create .env file for development
 const envContent = `NODE_ENV=development
-VITE_DEV_SERVER_URL=http://localhost:5175
+VITE_DEV_SERVER_URL=http://localhost:5178
 `;
 
 if (!fs.existsSync('.env')) {

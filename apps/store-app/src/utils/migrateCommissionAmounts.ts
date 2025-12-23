@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 /**
  * Migration utility to populate commission_amount for existing closed bills
@@ -30,7 +30,7 @@ export async function migrateCommissionAmounts(): Promise<{
 
   try {
     // Find all closed bills without commission_amount
-    const closedBills = await db.inventory_bills
+    const closedBills = await getDB().inventory_bills
       .filter(bill => 
         (bill.status === 'closed' || bill.status === 'CLOSED' || 
          (bill.notes && bill.notes.includes('[CLOSED]'))) &&
@@ -43,7 +43,7 @@ export async function migrateCommissionAmounts(): Promise<{
     for (const bill of closedBills) {
       try {
         // Get all inventory items for this bill
-        const billItems = await db.inventory_items
+        const billItems = await getDB().inventory_items
           .where('batch_id')
           .equals(bill.id)
           .toArray();
@@ -57,7 +57,7 @@ export async function migrateCommissionAmounts(): Promise<{
         // Calculate total sales for all items in this bill
         let totalSales = 0;
         for (const item of billItems) {
-          const sales = await db.bill_line_items
+          const sales = await getDB().bill_line_items
             .where('inventory_item_id')
             .equals(item.id)
             .toArray();
@@ -71,7 +71,7 @@ export async function migrateCommissionAmounts(): Promise<{
 
         if (commissionAmount > 0) {
           // Update bill with calculated commission
-          await db.inventory_bills.update(bill.id, {
+          await getDB().inventory_bills.update(bill.id, {
             commission_amount: commissionAmount,
             closed_at: bill.created_at, // Use created_at as fallback for closed_at
             updated_at: new Date().toISOString(),
@@ -82,7 +82,7 @@ export async function migrateCommissionAmounts(): Promise<{
           results.migratedCount++;
         } else {
           console.log(`⚠️  Bill ${bill.id} has no sales, setting commission to 0`);
-          await db.inventory_bills.update(bill.id, {
+          await getDB().inventory_bills.update(bill.id, {
             commission_amount: 0,
             closed_at: bill.created_at,
             updated_at: new Date().toISOString(),
@@ -134,7 +134,7 @@ export async function verifyCommissionMigration(): Promise<{
 }> {
   console.log('🔍 Verifying commission migration...');
 
-  const closedBills = await db.inventory_bills
+  const closedBills = await getDB().inventory_bills
     .filter(bill => 
       bill.status === 'closed' || bill.status === 'CLOSED' || 
       (bill.notes && bill.notes.includes('[CLOSED]'))

@@ -78,8 +78,8 @@ export default function Layout() {
       
       if (!hasAnyPermission) {
         // Check if user exists in IndexedDB - if yes, we should have permissions
-        const { db } = await import('../lib/db');
-        const user = await db.users.get(userProfile.id);
+        const { getDB } = await import('../lib/db');
+        const user = await getDB().users.get(userProfile.id);
         
         if (user) {
           // User exists but no permissions - this shouldn't happen, try reloading
@@ -121,8 +121,8 @@ export default function Layout() {
       if (!userProfile) return;
       
       try {
-        const { db } = await import('../lib/db');
-        const user = await db.users.get(userProfile.id);
+        const { getDB } = await import('../lib/db');
+        const user = await getDB().users.get(userProfile.id);
         
         if (user) {
           // User exists, check if we have proper permissions
@@ -181,8 +181,8 @@ export default function Layout() {
       checkCount++;
       
       try {
-        const { db } = await import('../lib/db');
-        const user = await db.users.get(userProfile.id);
+        const { getDB } = await import('../lib/db');
+        const user = await getDB().users.get(userProfile.id);
         
         // If user exists, check if we need to reload permissions
         if (user && !hasReloaded) {

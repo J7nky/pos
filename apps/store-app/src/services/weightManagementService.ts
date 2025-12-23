@@ -1,4 +1,4 @@
-import { db, LocalSaleItem, InventoryItem } from '../lib/db';
+import { getDB, LocalSaleItem, InventoryItem } from '../lib/db';
 import { SaleItem, inventory_bills } from '../types';
 
 export interface WeightSummary {
@@ -107,8 +107,8 @@ export class WeightManagementService {
   ): Promise<WeightSummary | null> {
     try {
       // Get product and supplier info
-      const product = await db.products.get(productId);
-      const entity = await db.entities.get(supplierId);
+      const product = await getDB().products.get(productId);
+      const entity = await getDB().entities.get(supplierId);
       
       if (!product || !entity || entity.entity_type !== 'supplier') {
         return null;
@@ -117,7 +117,7 @@ export class WeightManagementService {
       const supplier = entity;
 
       // Get inventory items (received items)
-      let inventoryItems = await db.inventory_items
+      let inventoryItems = await getDB().inventory_items
         .where('product_id')
         .equals(productId)
         // supplier_id REMOVED: Must use linked batch for supplier filter
@@ -125,7 +125,7 @@ export class WeightManagementService {
 
       // Only include inventory items where the batch's supplier_id matches supplierId
       const batchIds = [...new Set(inventoryItems.map(item => item.batch_id).filter(Boolean))];
-      const inventoryBills = await db.inventory_bills
+      const inventoryBills = await getDB().inventory_bills
         .where('id')
         .anyOf(batchIds as string[])
         .toArray();
@@ -137,7 +137,7 @@ export class WeightManagementService {
       });
 
       // Get sales items (sold items)
-      let salesItems = await db.bill_line_items
+      let salesItems = await getDB().bill_line_items
         .where('product_id')
         .equals(productId)
         .toArray();
@@ -169,7 +169,7 @@ export class WeightManagementService {
 
       // Get inventory bills to determine batch types
       const batchIdsForBills = [...new Set(inventoryItems.map(item => item.batch_id).filter(Boolean))];
-      const inventoryBillsForBills = await db.inventory_bills
+      const inventoryBillsForBills = await getDB().inventory_bills
         .where('id')
         .anyOf(batchIdsForBills as string[])
         .toArray();
@@ -273,23 +273,23 @@ export class WeightManagementService {
   public async getBillWeightSummary(billId: string): Promise<BillWeightSummary | null> {
     try {
       // Get the inventory bill
-      const bill = await db.inventory_bills.get(billId);
+      const bill = await getDB().inventory_bills.get(billId);
       if (!bill) return null;
 
       // Get supplier info
-      const entity = await db.entities.get(bill.supplier_id);
+      const entity = await getDB().entities.get(bill.supplier_id);
       if (!entity || entity.entity_type !== 'supplier') return null;
       const supplier = entity;
 
       // Get all inventory items for this bill
-      const inventoryItems = await db.inventory_items
+      const inventoryItems = await getDB().inventory_items
         .where('batch_id')
         .equals(billId)
         .toArray();
 
       // Get all products for these items
       const productIds = [...new Set(inventoryItems.map(item => item.product_id))];
-      const products = await db.products
+      const products = await getDB().products
         .where('id')
         .anyOf(productIds)
         .toArray();
@@ -300,7 +300,7 @@ export class WeightManagementService {
           const product = products.find(p => p.id === inventoryItem.product_id);
           
           // Get sales for this specific inventory item
-          const salesForThisItem = await db.bill_line_items
+          const salesForThisItem = await getDB().bill_line_items
             .filter(item => item.inventory_item_id === inventoryItem.id)
             .toArray();
 
@@ -376,8 +376,8 @@ export class WeightManagementService {
       const alerts: WeightDiscrepancyAlert[] = [];
 
       // Get all products and suppliers (including global products)
-      const products = await db.getAvailableProducts(storeId);
-      const suppliers = await db.entities
+      const products = await getDB().getAvailableProducts(storeId);
+      const suppliers = await getDB().entities
         .where('[store_id+entity_type]')
         .equals([storeId, 'supplier'])
         .filter(s => !s._deleted)
@@ -457,14 +457,14 @@ export class WeightManagementService {
 
       try {
         // Get the inventory item
-        const inventoryItem = await db.inventory_items.get(inventoryItemId);
+        const inventoryItem = await getDB().inventory_items.get(inventoryItemId);
         if (!inventoryItem) {
           errors.push('Inventory item not found');
           return resolve({ isValid: false, warnings, errors });
         }
 
         // Get existing sales for this inventory item
-        const existingSales = await db.bill_line_items
+        const existingSales = await getDB().bill_line_items
           .filter(item => item.inventory_item_id === inventoryItemId)
           .toArray();
 

@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { Customer, Supplier, Transaction, BillLineItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
@@ -117,7 +117,7 @@ export class AccountStatementService {
     // Get all transaction IDs to look up related transactions and bills
     const transactionIds = Array.from(entriesByTransaction.keys());
     const transactions = transactionIds.length > 0
-      ? await db.transactions.where('id').anyOf(transactionIds).toArray()
+      ? await getDB().transactions.where('id').anyOf(transactionIds).toArray()
       : [];
 
     // Debug: Check if all transactions were found
@@ -136,7 +136,7 @@ export class AccountStatementService {
       .map(ref => ref!.replace('BILL-', ''));
     
     const bills = billReferences.length > 0
-      ? await db.bills.where('bill_number').anyOf(billReferences).toArray()
+      ? await getDB().bills.where('bill_number').anyOf(billReferences).toArray()
       : [];
     
     const billMap = new Map(bills.map(b => [b.bill_number, b]));
@@ -144,7 +144,7 @@ export class AccountStatementService {
     // Pre-fetch all bill_line_items and products for detailed view (performance optimization)
     const billIds = bills.map(b => b.id);
     const allBillLineItems = viewMode === 'detailed' && billIds.length > 0
-      ? await db.bill_line_items.where('bill_id').anyOf(billIds).toArray()
+      ? await getDB().bill_line_items.where('bill_id').anyOf(billIds).toArray()
       : [];
     
     const billLineItemsMap = new Map<string, any[]>();
@@ -158,7 +158,7 @@ export class AccountStatementService {
     // Pre-fetch all products for detailed view (performance optimization)
     const productIds = [...new Set(allBillLineItems.map(item => item.product_id))];
     const allProducts = viewMode === 'detailed' && productIds.length > 0
-      ? await db.products.where('id').anyOf(productIds).toArray()
+      ? await getDB().products.where('id').anyOf(productIds).toArray()
       : [];
     const productMap = new Map(allProducts.map(p => [p.id, p]));
 
@@ -413,7 +413,7 @@ export class AccountStatementService {
     // Get transaction IDs from journal entries
     const transactionIds = [...new Set(journalEntries.map(e => e.transaction_id))];
     const transactions = transactionIds.length > 0
-      ? await db.transactions.where('id').anyOf(transactionIds).toArray()
+      ? await getDB().transactions.where('id').anyOf(transactionIds).toArray()
       : [];
 
     // Get bills for credit sales
@@ -424,18 +424,18 @@ export class AccountStatementService {
       .map(ref => ref!.replace('BILL-', ''));
     
     const bills = billReferences.length > 0
-      ? await db.bills.where('bill_number').anyOf(billReferences).toArray()
+      ? await getDB().bills.where('bill_number').anyOf(billReferences).toArray()
       : [];
 
     const billIds = bills.map(b => b.id);
     const billLineItems = billIds.length > 0
-      ? await db.bill_line_items.where('bill_id').anyOf(billIds).toArray()
+      ? await getDB().bill_line_items.where('bill_id').anyOf(billIds).toArray()
       : [];
 
     // Get products
     const productIds = [...new Set(billLineItems.map(item => item.product_id))];
     const products = productIds.length > 0
-      ? await db.products.where('id').anyOf(productIds).toArray()
+      ? await getDB().products.where('id').anyOf(productIds).toArray()
       : [];
 
     const productMap = new Map(products.map(p => [p.id, p]));
@@ -516,7 +516,7 @@ export class AccountStatementService {
     const endDate = this.endOfDayISO(dateRange?.end || now);
 
     // Get entity information
-    const entity = await db.entities.get(customerId);
+    const entity = await getDB().entities.get(customerId);
     if (!entity || entity.entity_type !== 'customer') {
       throw new Error(`Customer ${customerId} not found`);
     }
@@ -527,7 +527,7 @@ export class AccountStatementService {
     startDateObj.setHours(0, 0, 0, 0);
     
     // Get all journal entries for this account and entity, then filter by date
-    const allAccountEntries = await db.journal_entries
+    const allAccountEntries = await getDB().journal_entries
       .where('[store_id+account_code]')
       .equals([storeId, '1200'])
       .filter(entry => 
@@ -613,7 +613,7 @@ export class AccountStatementService {
     const endDate = this.endOfDayISO(dateRange?.end || now);
 
     // Get entity information
-    const entity = await db.entities.get(supplierId);
+    const entity = await getDB().entities.get(supplierId);
     if (!entity || entity.entity_type !== 'supplier') {
       throw new Error(`Supplier ${supplierId} not found`);
     }
@@ -624,7 +624,7 @@ export class AccountStatementService {
     startDateObj.setHours(0, 0, 0, 0);
     
     // Get all journal entries for this account and entity, then filter by date
-    const allAccountEntries = await db.journal_entries
+    const allAccountEntries = await getDB().journal_entries
       .where('[store_id+account_code]')
       .equals([storeId, '2100'])
       .filter(entry => 

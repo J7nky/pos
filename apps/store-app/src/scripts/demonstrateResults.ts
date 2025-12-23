@@ -1,7 +1,7 @@
 // Demonstration Script - Show Phase 6 Results
 // This script demonstrates the complete accounting foundation migration
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 /**
  * Demonstrate the complete accounting foundation migration results
@@ -64,7 +64,7 @@ async function setupDemoData(storeId: string): Promise<void> {
     { id: 'demo-4100', store_id: storeId, account_code: '4100', account_name: 'Sales Revenue', account_type: 'revenue', requires_entity: true, is_active: true }
   ];
   
-  await db.chart_of_accounts.bulkAdd(accounts as any);
+  await getDB().chart_of_accounts.bulkAdd(accounts as any);
   
   // Unified entities
   const entities = [
@@ -106,7 +106,7 @@ async function setupDemoData(storeId: string): Promise<void> {
     }
   ];
   
-  await db.entities.bulkAdd(entities as any);
+  await getDB().entities.bulkAdd(entities as any);
   
   // Journal entries
   const today = new Date().toISOString().split('T')[0];
@@ -150,7 +150,7 @@ async function setupDemoData(storeId: string): Promise<void> {
     }
   ];
   
-  await db.journal_entries.bulkAdd(journalEntries as any);
+  await getDB().journal_entries.bulkAdd(journalEntries as any);
   
   // Balance snapshots
   const snapshots = [
@@ -170,14 +170,14 @@ async function setupDemoData(storeId: string): Promise<void> {
     }
   ];
   
-  await db.balance_snapshots.bulkAdd(snapshots as any);
+  await getDB().balance_snapshots.bulkAdd(snapshots as any);
   
   console.log('✅ Demo data created successfully');
 }
 
 async function demonstratePhase1(storeId: string): Promise<void> {
   // Show chart of accounts
-  const accounts = await db.chart_of_accounts
+  const accounts = await getDB().chart_of_accounts
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -194,7 +194,7 @@ async function demonstratePhase1(storeId: string): Promise<void> {
 
 async function demonstratePhase2(storeId: string): Promise<void> {
   // Show unified entities
-  const entities = await db.entities
+  const entities = await getDB().entities
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -215,7 +215,7 @@ async function demonstratePhase2(storeId: string): Promise<void> {
 
 async function demonstratePhase3(storeId: string): Promise<void> {
   // Show journal entries
-  const entries = await db.journal_entries
+  const entries = await getDB().journal_entries
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -254,7 +254,7 @@ async function demonstratePhase3(storeId: string): Promise<void> {
 
 async function demonstratePhase4(storeId: string): Promise<void> {
   // Show balance snapshots
-  const snapshots = await db.balance_snapshots
+  const snapshots = await getDB().balance_snapshots
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -269,7 +269,7 @@ async function demonstratePhase4(storeId: string): Promise<void> {
   
   // Demonstrate O(1) historical query
   const startTime = performance.now();
-  const historicalSnapshot = await db.balance_snapshots
+  const historicalSnapshot = await getDB().balance_snapshots
     .where('[entity_id+account_code+snapshot_date]')
     .equals(['demo-customer-1', '1200', new Date().toISOString().split('T')[0]])
     .first();
@@ -285,7 +285,7 @@ async function demonstratePhase5(storeId: string): Promise<void> {
   console.log('   📊 Advanced Reporting Capabilities:');
   
   // Simulate entity query service
-  const customers = await db.entities
+  const customers = await getDB().entities
     .where('[store_id+entity_type]')
     .equals([storeId, 'customer'])
     .toArray();
@@ -294,7 +294,7 @@ async function demonstratePhase5(storeId: string): Promise<void> {
   
   // Simulate reporting service
   const today = new Date().toISOString().split('T')[0];
-  const glEntries = await db.journal_entries
+  const glEntries = await getDB().journal_entries
     .where('store_id')
     .equals(storeId)
     .filter((entry: any) => entry.account_code === '1200')
@@ -303,7 +303,7 @@ async function demonstratePhase5(storeId: string): Promise<void> {
   console.log(`      📈 General Ledger: ${glEntries.length} entries for account 1200`);
   
   // Simulate trial balance
-  const allEntries = await db.journal_entries
+  const allEntries = await getDB().journal_entries
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -329,7 +329,7 @@ async function demonstratePhase6(storeId: string): Promise<void> {
   
   // Performance test: Entity query
   const entityStart = performance.now();
-  const entities = await db.entities
+  const entities = await getDB().entities
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -337,7 +337,7 @@ async function demonstratePhase6(storeId: string): Promise<void> {
   
   // Performance test: Snapshot query
   const snapshotStart = performance.now();
-  const snapshots = await db.balance_snapshots
+  const snapshots = await getDB().balance_snapshots
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -345,7 +345,7 @@ async function demonstratePhase6(storeId: string): Promise<void> {
   
   // Performance test: Journal query
   const journalStart = performance.now();
-  const journalEntries = await db.journal_entries
+  const journalEntries = await getDB().journal_entries
     .where('store_id')
     .equals(storeId)
     .toArray();
@@ -406,16 +406,16 @@ function showFinalSummary(): void {
 }
 
 async function cleanupDemoData(storeId: string): Promise<void> {
-  await db.transaction('rw', [
-    db.chart_of_accounts,
-    db.entities,
-    db.journal_entries,
-    db.balance_snapshots
+  await getDB().transaction('rw', [
+    getDB().chart_of_accounts,
+    getDB().entities,
+    getDB().journal_entries,
+    getDB().balance_snapshots
   ], async () => {
-    await db.chart_of_accounts.where('store_id').equals(storeId).delete();
-    await db.entities.where('store_id').equals(storeId).delete();
-    await db.journal_entries.where('store_id').equals(storeId).delete();
-    await db.balance_snapshots.where('store_id').equals(storeId).delete();
+    await getDB().chart_of_accounts.where('store_id').equals(storeId).delete();
+    await getDB().entities.where('store_id').equals(storeId).delete();
+    await getDB().journal_entries.where('store_id').equals(storeId).delete();
+    await getDB().balance_snapshots.where('store_id').equals(storeId).delete();
   });
   
   console.log('\n🧹 Demo data cleaned up');

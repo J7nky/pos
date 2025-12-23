@@ -13,7 +13,7 @@ console.log('🚀 Starting POS Development Environment (Windows Mode)...\n');
 
 // Set NODE_ENV to development
 process.env.NODE_ENV = 'development';
-process.env.VITE_DEV_SERVER_URL = 'http://localhost:5175';
+process.env.VITE_DEV_SERVER_URL = 'http://localhost:5178';
 
 let electronProcess = null;
 let viteProcess = null;

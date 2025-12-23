@@ -1,4 +1,4 @@
-import { db, createId } from '../lib/db';
+import { getDB, createId } from '../lib/db';
 import { notificationService } from './notificationService';
 import { Reminder, ReminderType, ReminderStatus, NotificationType, CreateReminderInput } from '../types';
 
@@ -78,7 +78,7 @@ export class ReminderMonitoringService {
       today.setHours(0, 0, 0, 0); // Normalize to start of day
 
       // Get all pending reminders for this store
-      const reminders = await db.reminders
+      const reminders = await getDB().reminders
         .where('store_id')
         .equals(storeId)
         .filter(r => 
@@ -119,7 +119,7 @@ export class ReminderMonitoringService {
           return; // Still snoozed
         } else {
           // Snooze period ended, reactivate
-          await db.reminders.update(reminder.id, {
+          await getDB().reminders.update(reminder.id, {
             status: daysUntilDue < 0 ? 'overdue' : 'pending',
             snoozed_until: undefined,
             _synced: false
@@ -134,7 +134,7 @@ export class ReminderMonitoringService {
         await this.sendReminderNotification(reminder, daysUntilDue);
         
         // Update last notified timestamp
-        await db.reminders.update(reminder.id, {
+        await getDB().reminders.update(reminder.id, {
           last_notified_at: new Date().toISOString(),
           notification_count: reminder.notification_count + 1,
           _synced: false
@@ -208,7 +208,7 @@ export class ReminderMonitoringService {
       const { title, message } = this.buildNotificationContent(reminder, daysUntilDue);
 
       // Check if notification already exists
-      const existingNotifications = await db.notifications
+      const existingNotifications = await getDB().notifications
         .where('store_id')
         .equals(reminder.store_id)
         .filter(n => 
@@ -309,7 +309,7 @@ export class ReminderMonitoringService {
       const todayStr = today.toISOString().split('T')[0];
 
       // Find all pending reminders past due date
-      const overdueReminders = await db.reminders
+      const overdueReminders = await getDB().reminders
         .where('store_id')
         .equals(storeId)
         .filter(r => 
@@ -321,7 +321,7 @@ export class ReminderMonitoringService {
 
       // Update status to overdue
       for (const reminder of overdueReminders) {
-        await db.reminders.update(reminder.id, {
+        await getDB().reminders.update(reminder.id, {
           status: 'overdue',
           _synced: false
         });
@@ -377,7 +377,7 @@ export class ReminderMonitoringService {
       _deleted: false
     };
 
-    await db.reminders.add(reminder);
+    await getDB().reminders.add(reminder);
     console.log(`✅ Reminder created: ${reminder.title} (due: ${reminder.due_date})`);
 
     return reminder;
@@ -391,12 +391,12 @@ export class ReminderMonitoringService {
     completedBy: string,
     completionNote?: string
   ): Promise<void> {
-    const reminder = await db.reminders.get(reminderId);
+    const reminder = await getDB().reminders.get(reminderId);
     if (!reminder) {
       throw new Error('Reminder not found');
     }
 
-    await db.reminders.update(reminderId, {
+    await getDB().reminders.update(reminderId, {
       status: 'completed',
       completed_at: new Date().toISOString(),
       completed_by: completedBy,
@@ -415,12 +415,12 @@ export class ReminderMonitoringService {
    * Dismiss a reminder (mark as dismissed without completing)
    */
   public async dismissReminder(reminderId: string): Promise<void> {
-    const reminder = await db.reminders.get(reminderId);
+    const reminder = await getDB().reminders.get(reminderId);
     if (!reminder) {
       throw new Error('Reminder not found');
     }
 
-    await db.reminders.update(reminderId, {
+    await getDB().reminders.update(reminderId, {
       status: 'dismissed',
       updated_at: new Date().toISOString(),
       _synced: false
@@ -436,7 +436,7 @@ export class ReminderMonitoringService {
    * Snooze a reminder until a specific date
    */
   public async snoozeReminder(reminderId: string, snoozeUntil: string): Promise<void> {
-    await db.reminders.update(reminderId, {
+    await getDB().reminders.update(reminderId, {
       status: 'snoozed',
       snoozed_until: snoozeUntil,
       updated_at: new Date().toISOString(),
@@ -450,7 +450,7 @@ export class ReminderMonitoringService {
    * Delete notifications related to a reminder
    */
   private async deleteReminderNotifications(storeId: string, reminderId: string): Promise<void> {
-    const notifications = await db.notifications
+    const notifications = await getDB().notifications
       .where('store_id')
       .equals(storeId)
       .filter(n => n.metadata?.reminderId === reminderId)
@@ -480,7 +480,7 @@ export class ReminderMonitoringService {
     weekFromNow.setDate(weekFromNow.getDate() + 7);
     const weekStr = weekFromNow.toISOString().split('T')[0];
 
-    const allReminders = await db.reminders
+    const allReminders = await getDB().reminders
       .where('store_id')
       .equals(storeId)
       .filter(r => !r._deleted)
@@ -512,7 +512,7 @@ export class ReminderMonitoringService {
       entityId?: string;
     }
   ): Promise<Reminder[]> {
-    let query = db.reminders
+    let query = getDB().reminders
       .where('store_id')
       .equals(storeId)
       .filter(r => !r._deleted);

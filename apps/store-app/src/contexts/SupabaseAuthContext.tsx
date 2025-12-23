@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { User } from '@supabase/supabase-js';
 import { SupabaseService } from '../services/supabaseService';
 import { supabase } from '../lib/supabase';
+import { getDB } from '../lib/db';
 
 interface UserProfile {
   id: string;
@@ -150,6 +151,15 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'https://placeholder.supabase.co') {
       console.log('No valid Supabase credentials found. Running in offline mode.');
+      
+      // Initialize database even in offline mode (readonly/guest mode)
+      try {
+         getDB().ensureOpen();
+        console.log('💾 Database initialized for offline mode');
+      } catch (dbError) {
+        console.error('❌ Database initialization failed in offline mode:', dbError);
+      }
+      
       setLoading(false);
       setUser(null);
       setUserProfile(null);
@@ -171,6 +181,17 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       setUser(currentUser);
       
       console.log('🔐 Session loaded:', currentUser ? 'authenticated' : 'not authenticated');
+      
+      // Initialize database now that auth state is stable
+      // This ensures DB opens only after we know authentication status
+      // Works for both authenticated (full access) and unauthenticated (readonly/guest mode)
+      try {
+        await getDB().ensureOpen();
+        console.log('💾 Database initialized after auth state check');
+      } catch (dbError) {
+        console.error('❌ Database initialization failed:', dbError);
+        // Don't block app startup if DB init fails - corruption recovery will handle it
+      }
       
       // Load profile immediately if user exists
       if (currentUser) {

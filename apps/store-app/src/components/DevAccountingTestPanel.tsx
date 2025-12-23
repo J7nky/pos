@@ -10,7 +10,7 @@ import { AccountingFlowTester } from '../utils/testAccountingFlows';
 import { balanceVerificationService } from '../services/balanceVerificationService';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 
 export function DevAccountingTestPanel() {
   const raw = useOfflineData();
@@ -40,7 +40,7 @@ export function DevAccountingTestPanel() {
 
       // Try 3: From database (get first user)
       try {
-        const users = await db.users.limit(1).toArray();
+        const users = await getDB().users.limit(1).toArray();
         if (users.length > 0 && users[0].id) {
           console.log('📝 Using user from database:', users[0].id);
           setResolvedUserId(users[0].id);

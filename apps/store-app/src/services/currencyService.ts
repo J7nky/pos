@@ -37,8 +37,8 @@ export class CurrencyService {
     }
     
     try {
-      const { db } = await import('../lib/db');
-      const store = await db.stores.get(storeId);
+      const { getDB } = await import('../lib/db');
+      const store = await getDB().stores.get(storeId);
       if (store && store.exchange_rate) {
         this.exchangeRate = store.exchange_rate;
         this.lastUpdate = store.updated_at;
@@ -55,8 +55,8 @@ export class CurrencyService {
       this.lastUpdate = new Date().toISOString();
       
       // Update the store's exchange rate
-      const { db } = await import('../lib/db');
-      await db.stores.update(storeId, { 
+      const { getDB } = await import('../lib/db');
+      await getDB().stores.update(storeId, { 
         exchange_rate: rate,
         updated_at: this.lastUpdate,
         _synced: false

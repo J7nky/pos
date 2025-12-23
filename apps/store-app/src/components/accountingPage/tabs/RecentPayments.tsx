@@ -8,7 +8,7 @@ import { transactionService } from '../../../services/transactionService';
 import { accountBalanceService } from '../../../services/accountBalanceService';
 import { transactionValidationService } from '../../../services/transactionValidationService';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
-import { db } from '../../../lib/db';
+import { getDB } from '../../../lib/db';
 import { 
   Search, 
   Filter, 
@@ -128,7 +128,7 @@ export default function RecentPayments({
       await Promise.all(
         Array.from(userIds).map(async (userId) => {
           try {
-            const user = await db.users.get(userId);
+            const user = await getDB().users.get(userId);
             if (user) {
               names[userId] = user.name || user.email || 'Unknown';
             } else {
@@ -532,7 +532,7 @@ export default function RecentPayments({
         // This links the original, reversal, and correction together
         try {
           const existingMetadata = originalTransaction.metadata || {};
-          await db.transactions.update(editingPayment.id, {
+          await getDB().transactions.update(editingPayment.id, {
             metadata: {
               ...existingMetadata,
               corrected: true,
@@ -639,7 +639,7 @@ export default function RecentPayments({
     try {
       // Use filter instead of where to avoid index requirements
       // Check both _deleted and metadata.deleted
-      const reversals = await db.transactions
+      const reversals = await getDB().transactions
         .filter(t => 
           t.reversal_of_transaction_id === transactionId && 
           !t._deleted && 
@@ -656,7 +656,7 @@ export default function RecentPayments({
   // Helper function to check if transaction affects cash drawer
   const checkCashDrawerImpact = async (payment: PaymentRow): Promise<boolean> => {
     try {
-      const transaction = await db.transactions.get(payment.id);
+      const transaction = await getDB().transactions.get(payment.id);
       if (!transaction) return false;
       
       // Check if this is a cash transaction category
@@ -682,7 +682,7 @@ export default function RecentPayments({
       const [balanceImpact, hasReversals, transaction, cashDrawerImpact] = await Promise.all([
         getBalanceImpact(payment),
         checkForReversals(payment.id),
-        db.transactions.get(payment.id),
+        getDB().transactions.get(payment.id),
         checkCashDrawerImpact(payment)
       ]);
 

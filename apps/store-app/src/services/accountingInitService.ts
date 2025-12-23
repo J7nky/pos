@@ -4,7 +4,7 @@
 // Note: Store initialization happens in admin-app via Supabase functions
 // This service provides read-only access and validation for the store app
 
-import { db } from '../lib/db';
+import { getDB } from '../lib/db';
 import { SYSTEM_ENTITY_CODES, getSystemEntity } from '../constants/systemEntities';
 import { ChartOfAccounts, Entity } from '../types/accounting';
 
@@ -19,10 +19,10 @@ export class AccountingInitService {
    * This validates that admin-app has properly set up the store
    */
   async isInitialized(storeId: string): Promise<boolean> {
-    const accountsCount = await db.chart_of_accounts.where('store_id').equals(storeId).count();
+    const accountsCount = await getDB().chart_of_accounts.where('store_id').equals(storeId).count();
     
     // Query system entities using filter instead of compound index to handle missing/null values
-    const systemEntities = await db.entities
+    const systemEntities = await getDB().entities
       .where('store_id')
       .equals(storeId)
       .filter(entity => entity.is_system_entity === true)
@@ -35,7 +35,7 @@ export class AccountingInitService {
    * Get account by code for a store
    */
   async getAccount(storeId: string, accountCode: string): Promise<ChartOfAccounts | null> {
-    return await db.chart_of_accounts
+    return await getDB().chart_of_accounts
       .where('[store_id+account_code]')
       .equals([storeId, accountCode])
       .first() || null;
@@ -45,7 +45,7 @@ export class AccountingInitService {
    * Get all accounts for a store
    */
   async getAccounts(storeId: string): Promise<ChartOfAccounts[]> {
-    return await db.chart_of_accounts
+    return await getDB().chart_of_accounts
       .where('store_id')
       .equals(storeId)
       .filter(account => account.is_active)
@@ -82,10 +82,10 @@ export class AccountingInitService {
    * Get all entities for a store
    */
   async getEntities(storeId: string, entityType?: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal'): Promise<Entity[]> {
-    let query = db.entities.where('store_id').equals(storeId);
+    let query = getDB().entities.where('store_id').equals(storeId);
     
     if (entityType) {
-      query = db.entities.where('[store_id+entity_type]').equals([storeId, entityType]);
+      query = getDB().entities.where('[store_id+entity_type]').equals([storeId, entityType]);
     }
     
     return await query.filter(entity => entity.is_active).toArray();
