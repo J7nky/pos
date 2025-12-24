@@ -1217,7 +1217,7 @@ export class TransactionService {
         entity = await getDB().entities.get(entityId);
       } else {
         // It's a system entity code (e.g., "CASH-CUST"), need to look it up
-        entity = await getSystemEntity(db, transaction.store_id, entityCode);
+        entity = await getSystemEntity(getDB(), transaction.store_id, entityCode);
         if (!entity) {
           throw new Error(`System entity not found: ${entityCode} for store ${transaction.store_id}. Make sure system entities are initialized.`);
         }

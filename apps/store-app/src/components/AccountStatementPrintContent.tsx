@@ -59,20 +59,6 @@ export function AccountStatementPrintContent({
               showAccountInfo={isFirstPage}
               showOpeningBalance={isFirstPage}
             >
-              {/* Opening Balance - Only on first page */}
-              {isFirstPage && (
-                <div className="print-opening-balance print-section">
-                  <span className="print-opening-balance-label">{t('customers.openingBalance')}:</span>
-                  <span className="print-opening-balance-value">
-                    {formatCurrency(
-                      statement.financialSummary.openingBalance[statement.transactions[0]?.currency || 'LBP'],
-                      statement.transactions[0]?.currency || 'LBP',
-                      true
-                    )}
-                  </span>
-                </div>
-              )}
-
               {/* Transaction Table */}
               <div className="print-table-container print-section">
                 <table className="print-table">
@@ -226,47 +212,61 @@ export function AccountStatementPrintContent({
                       );
                     })}
                   </tbody>
+                  {/* Summary Footer - Only on last page */}
+                  {isLastPage && (
+                    <tfoot>
+                      <tr className="print-summary-footer-row">
+                        <td className="print-table-col-date"></td>
+                        <td className="print-table-col-reference"></td>
+                        <td className="print-table-col-description"></td>
+                        {viewMode === 'detailed' && (
+                          <>
+                            <td className="print-table-col-quantity"></td>
+                            <td className="print-table-col-weight"></td>
+                            <td className="print-table-col-price"></td>
+                          </>
+                        )}
+                        <td className="print-table-col-debit print-number print-currency">
+                          {formatCurrency(
+                            statement.transactions
+                              .filter(t => t.type !== 'payment')
+                              .reduce((sum, t) => sum + (t.amount || 0), 0),
+                            statement.transactions[0]?.currency || 'LBP',
+                            true
+                          )}
+                        </td>
+                        <td className="print-table-col-credit print-number print-currency">
+                          {formatCurrency(
+                            statement.transactions
+                              .filter(t => t.type === 'payment')
+                              .reduce((sum, t) => sum + (t.amount || 0), 0),
+                            statement.transactions[0]?.currency || 'LBP',
+                            true
+                          )}
+                        </td>
+                        <td className="print-table-col-balance print-number print-currency">
+                          {formatCurrency(
+                            statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
+                            statement.transactions[0]?.currency || 'LBP',
+                            true
+                          )}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
 
-              {/* Summary Footer - Only on last page */}
+              {/* Balance Component - Only on last page */}
               {isLastPage && (
-                <div className="print-summary print-section">
-                  <div className="print-summary-row">
-                    <span>{t('balanceReport.debitTotal')}:</span>
-                    <span className="print-number">
-                      {formatCurrency(
-                        statement.transactions
-                          .filter(t => t.type !== 'payment')
-                          .reduce((sum, t) => sum + (t.amount || 0), 0),
-                        statement.transactions[0]?.currency || 'LBP',
-                        true
-                      )}
-                    </span>
-                  </div>
-                  <div className="print-summary-row">
-                    <span>{t('balanceReport.creditTotal')}:</span>
-                    <span className="print-number">
-                      {formatCurrency(
-                        statement.transactions
-                          .filter(t => t.type === 'payment')
-                          .reduce((sum, t) => sum + (t.amount || 0), 0),
-                        statement.transactions[0]?.currency || 'LBP',
-                        true
-                      )}
-                    </span>
-                  </div>
-                  <div className="print-total-row">
-                    <div className="print-final-balance">
-                      <div className="print-final-balance-label">{t('customers.balance')}</div>
-                      <div className="print-final-balance-value">
-                        {formatCurrency(
-                          statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
-                          statement.transactions[0]?.currency || 'LBP',
-                          true
-                        )}
-                      </div>
-                    </div>
+                <div className="print-balance-component">
+                  <div className="print-balance-label">{t('customers.balance')}:</div>
+                  <div className="print-balance-value print-number print-currency">
+                    {formatCurrency(
+                      statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
+                      statement.transactions[0]?.currency || 'LBP',
+                      true
+                    )}
                   </div>
                 </div>
               )}

@@ -13,11 +13,14 @@ interface PrintPreviewProps {
 export function PrintPreview({
   isOpen,
   onClose,
-  onPrint,
+  onPrint, // Kept for interface compatibility, but printing is handled internally
   content,
   totalPages = 1,
   title = 'Print Preview',
 }: PrintPreviewProps) {
+  // Suppress unused variable warning - onPrint is part of the interface
+  void onPrint;
+  
   const { t } = useI18n();
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedPages, setSelectedPages] = useState<number[]>([]);
@@ -71,20 +74,301 @@ export function PrintPreview({
     }
   };
 
+  const generatePrintContent = () => {
+    if (selectedPages.length === 0) return '';
+
+    // Get the content for selected pages
+    const pagesToPrint = selectedPages.sort((a, b) => a - b);
+    
+    // Get all styles from the document
+    const styles: string[] = [];
+    Array.from(document.styleSheets).forEach((styleSheet) => {
+      try {
+        Array.from(styleSheet.cssRules).forEach((rule) => {
+          styles.push(rule.cssText);
+        });
+      } catch (e) {
+        // Cross-origin stylesheets may throw errors, ignore them
+      }
+    });
+
+    // Create HTML content
+    let htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title || 'Print Preview'}</title>
+  <style>
+    ${styles.join('\n')}
+    @media print {
+      @page {
+        size: A4;
+        margin: 0;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      .page-number {
+        display: none;
+      }
+      * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: white;
+      width: 210mm;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      max-height: 297mm;
+      background: white;
+      margin: 0;
+      padding: 10mm;
+      page-break-after: always;
+      position: relative;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    .page:last-child {
+      page-break-after: auto;
+    }
+    .page-number {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      background: #1f2937;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    /* Content wrapper to ensure proper scaling */
+    .page-content-wrapper {
+      width: 100%;
+      max-width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    /* Ensure content scales to fit */
+    .page > * {
+      width: 100%;
+      max-width: 100%;
+    }
+    /* Remove any transforms from extracted content */
+    .page * {
+      transform: none !important;
+      -webkit-transform: none !important;
+    }
+    /* Ensure tables fit within page */
+    .page table {
+      width: 100% !important;
+      max-width: 100% !important;
+      table-layout: auto;
+      font-size: 9pt;
+    }
+    .page table th,
+    .page table td {
+      padding: 4px 6px;
+      font-size: 9pt;
+      word-wrap: break-word;
+    }
+    /* Ensure images and other elements fit */
+    .page img {
+      max-width: 100%;
+      height: auto;
+    }
+    /* Scale down large content if needed */
+    .page {
+      font-size: 10pt;
+    }
+    .page h1 { font-size: 16pt; }
+    .page h2 { font-size: 14pt; }
+    .page h3 { font-size: 12pt; }
+    .page h4 { font-size: 11pt; }
+    .page h5, .page h6 { font-size: 10pt; }
+  </style>
+</head>
+<body>
+`;
+
+    // Add content for each selected page
+    pagesToPrint.forEach((pageNum) => {
+      const pageElement = pageRefs.current.get(pageNum);
+      if (pageElement) {
+        const pageContent = pageElement.querySelector('.print-preview-content');
+        if (pageContent) {
+          // Clone the content to avoid modifying the original
+          const clonedContent = pageContent.cloneNode(true) as HTMLElement;
+          
+          // Remove any transform styles from cloned content
+          const allElements = clonedContent.querySelectorAll('*');
+          allElements.forEach((el) => {
+            const htmlEl = el as HTMLElement;
+            if (htmlEl.style) {
+              htmlEl.style.transform = 'none';
+              htmlEl.style.webkitTransform = 'none';
+            }
+          });
+          
+          htmlContent += `  <div class="page">\n`;
+          htmlContent += `    <div class="page-number">Page ${pageNum} of ${totalPages}</div>\n`;
+          htmlContent += `    <div class="page-content-wrapper">${clonedContent.innerHTML}</div>\n`;
+          htmlContent += `  </div>\n`;
+        }
+      }
+    });
+
+    htmlContent += `</body>\n</html>`;
+    return htmlContent;
+  };
+
+  const downloadContent = () => {
+    if (selectedPages.length === 0) return;
+    const htmlContent = generatePrintContent();
+    if (!htmlContent) return;
+
+    // Create blob and download
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const fileName = `${(title || 'document').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date().toISOString().split('T')[0]}.html`;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const printContentFromHTML = (htmlContent: string) => {
+    if (!htmlContent) return;
+    
+    // Create blob URL
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+
+    // Use hidden iframe for both Electron and web browsers
+    // This prevents opening visible windows and ensures clean printing
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    iframe.style.opacity = '0';
+    iframe.style.pointerEvents = 'none';
+    document.body.appendChild(iframe);
+
+    let printTriggered = false;
+
+    // Function to trigger print and cleanup
+    const triggerPrint = () => {
+      if (printTriggered) return;
+      printTriggered = true;
+
+      setTimeout(() => {
+        try {
+          if (iframe.contentWindow) {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+            
+            // Clean up after print dialog closes
+            // Listen for when the print dialog is dismissed
+            const cleanup = () => {
+              setTimeout(() => {
+                if (iframe.parentNode) {
+                  document.body.removeChild(iframe);
+                }
+                URL.revokeObjectURL(url);
+              }, 500);
+            };
+
+            // Try to detect when print dialog closes
+            // In Electron, we can listen to beforeunload or use a timeout
+            iframe.contentWindow.addEventListener('beforeunload', cleanup);
+            
+            // Fallback: cleanup after a reasonable delay
+            setTimeout(cleanup, 3000);
+          }
+        } catch (error) {
+          console.error('Error printing:', error);
+          // Clean up on error
+          if (iframe.parentNode) {
+            document.body.removeChild(iframe);
+          }
+          URL.revokeObjectURL(url);
+        }
+      }, 500);
+    };
+
+    // Load content into iframe
+    iframe.onload = triggerPrint;
+    iframe.src = url;
+
+    // Fallback: trigger print if onload doesn't fire
+    setTimeout(() => {
+      if (!printTriggered && iframe.contentWindow) {
+        const readyState = iframe.contentWindow.document?.readyState;
+        if (readyState === 'complete' || readyState === 'interactive') {
+          triggerPrint();
+        }
+      }
+    }, 1000);
+
+    // Final fallback cleanup
+    setTimeout(() => {
+      if (iframe.parentNode && !printTriggered) {
+        try {
+          triggerPrint();
+        } catch (error) {
+          // If all else fails, just clean up
+          document.body.removeChild(iframe);
+          URL.revokeObjectURL(url);
+        }
+      }
+    }, 2000);
+  };
+
   const handlePrint = () => {
     if (selectedPages.length === 0) {
       alert('Please select at least one page to print');
       return;
     }
-    if (selectedPages.length === totalPages) {
-      // Print all pages
-      console.log('print all pages');
-      onPrint();
-    } else {
-      // Print selected pages only
-      onPrint(selectedPages);
-    }
+    
+    // IMPORTANT: Generate content BEFORE closing modal (content is extracted from DOM)
+    const htmlContent = generatePrintContent();
+    
+    // Download the file first
+    downloadContent();
+    
+    // Close modal after extracting content
     onClose();
+    
+    // Then proceed with printing after modal closes
+    // Use a small delay to ensure modal is closed
+    setTimeout(() => {
+      // Print using the pre-generated content (handles both Electron and web)
+      if (htmlContent) {
+        printContentFromHTML(htmlContent);
+      }
+      
+      // Note: We don't call onPrint() here because we're handling printing directly
+      // This prevents duplicate windows/dialogs from opening
+    }, 300);
   };
 
   if (!isOpen) return null;
@@ -176,7 +460,7 @@ export function PrintPreview({
                       pageRefs.current.delete(pageNum);
                     }
                     if (pageNum === 1 && el) {
-                      previewRef.current = el;
+                      (previewRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
                     }
                   }}
                   className="relative bg-white shadow-2xl"
@@ -199,7 +483,7 @@ export function PrintPreview({
                       if (Array.isArray(content)) {
                         // Show the page content at index pageNum - 1
                         const pageContent = content[pageNum - 1];
-                        return pageContent || <div className="text-center py-20 text-gray-400">t{"balanceReport.page"} {pageNum} t{"balanceReport.contentNotAvailable"}</div>;
+                        return pageContent || <div className="text-center py-20 text-gray-400">t{".page"} {pageNum} t{"balanceReport.contentNotAvailable"}</div>;
                       } else {
                         // Single content - show for all pages (useful for single page documents)
                         return content;

@@ -2139,10 +2139,6 @@ class POSDatabase extends Dexie {
 
     // Version 48 upgrade: Log migration and verify balance_snapshots schema
     this.version(48).upgrade(trans => {
-      // #region agent log
-      const logData = {location:'db.ts:version48',message:'Database migration to version 48 started',data:{oldVersion:47,newVersion:48},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'C'};
-      fetch('http://127.0.0.1:7242/ingest/139cf66a-4f99-49d5-ae8c-eb6f67aef2cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData)}).catch(()=>{});
-      // #endregion
       console.log('🔄 Migrating database to version 48: Adding missing fields and indexes to balance_snapshots');
     });
   }

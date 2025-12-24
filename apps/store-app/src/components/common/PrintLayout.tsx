@@ -1,6 +1,6 @@
 import React from 'react';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
-
+import { useI18n } from '../../i18n';
 interface PrintLayoutProps {
   children: React.ReactNode;
   title: string;
@@ -36,6 +36,7 @@ export function PrintLayout({
   showAccountInfo = true,
   showOpeningBalance = true,
 }: PrintLayoutProps) {
+  const { t } = useI18n();
   const offlineData = useOfflineData();
   const receiptSettings = offlineData?.receiptSettings || {
     storeName: 'KIWI VEGETABLES MARKET',
@@ -85,12 +86,12 @@ export function PrintLayout({
             <div className="print-report-metadata">
               {reportDate && (
                 <div>
-                  <span className="print-account-label">تاريخ التقرير:</span>{' '}
+                  <span className="print-account-label">{t('receipt.date')}:</span>{' '}
                   <span className="print-account-value">{formatDate(reportDate)}</span>
                 </div>
               )}
               <div>
-                <span className="print-account-label">رقم الصفحة:</span>{' '}
+                <span className="print-account-label">{t('receipt.pageNumber')}:</span>{' '}
                 <span className="print-account-value">
                   {pageNumber} {totalPages > 1 && `/ ${totalPages}`}
                 </span>
@@ -100,57 +101,69 @@ export function PrintLayout({
 
           {/* Report Title */}
           <div className="print-report-title">{title}</div>
-
-          {/* Date Range */}
-          {dateRange && (
-            <div className="print-date-range">
-              <span className="print-account-label">من تاريخ:</span>{' '}
-              <span className="print-account-value">{formatDate(dateRange.start)}</span>
-              {' '}
-              <span className="print-account-label">إلى تاريخ:</span>{' '}
-              <span className="print-account-value">{formatDate(dateRange.end)}</span>
-            </div>
-          )}
         </div>
       )}
 
       {/* Account/Customer Info Section - Only on first page */}
       {showAccountInfo && (accountName || accountNumber || phone) && (
         <div className="print-account-info print-section">
-          <div>
-            {accountName && (
-              <div style={{ marginBottom: '6pt' }}>
-                <span className="print-account-label">اسم الحساب:</span>{' '}
-                <span className="print-account-value">{accountName}</span>
-              </div>
-            )}
-            {accountNumber && (
-              <div style={{ marginBottom: '6pt' }}>
-                <span className="print-account-label">رقم الحساب:</span>{' '}
-                <span className="print-account-value">{accountNumber}</span>
-              </div>
-            )}
-            {phone && (
-              <div>
-                <span className="print-account-label">الهاتف:</span>{' '}
-                <span className="print-account-value">{phone}</span>
-              </div>
-            )}
-          </div>
-          <div>
-            <div>
-              <span className="print-account-label">العملة:</span>{' '}
-              <span className="print-currency-box">{currency === 'USD' ? '$' : 'ل.ل'}</span>
+          {/* First Row: Account Name, Account Number, Phone */}
+          <div className="print-account-info-row center-items">
+            <div className="print-account-info-col">
+              {accountName && (
+                <div>
+                  <span className="print-account-label">{t('receipt.accountName')}:</span>{' '}
+                  <span className="print-account-value">{accountName}</span>
+                </div>
+              )}
             </div>
-            {showOpeningBalance && previousBalance && (
-              <div style={{ marginTop: '8pt', padding: '6pt', background: '#f9f9f9', border: '1px solid #ddd' }}>
-                <span className="print-account-label">الرصيد ما قبل:</span>{' '}
-                <span className="print-opening-balance-value">
-                  {formatCurrency(previousBalance[currency], currency)}{' '}
-                  {currency === 'LBP' ? 'ل.ل' : ''}
-                </span>
+            <div className="print-account-info-col">
+              {accountNumber && (
+                <div>
+                  <span className="print-account-label">{t('receipt.accountNumber')}:</span>{' '}
+                  <span className="print-account-value">{accountNumber}</span>
+                </div>
+              )}
+            </div>
+            <div className="print-account-info-col">
+              {phone && (
+                <div>
+                  <span className="print-account-label">{t('receipt.phone')}:</span>{' '}
+                  <span className="print-account-value">{phone}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          {/* Second Row: Date Range, Balance Before, Currency */}
+          <div className="print-account-info-row">
+            <div className="print-account-info-col">
+              {dateRange && (
+                <div>
+                  <span className="print-account-label">{t('receipt.fromDate')}:</span>{' '}
+                  <span className="print-account-value">{formatDate(dateRange.start)}</span>
+                  {' '}
+                  <span className="print-account-label">{t('receipt.toDate')}:</span>{' '}
+                  <span className="print-account-value">{formatDate(dateRange.end)}</span>
+                </div>
+              )}
+            </div>
+            <div className="print-account-info-col">
+              {showOpeningBalance && previousBalance && (
+                <div>
+                  <span className="print-account-label">{t('receipt.previousBalance')}:</span>{' '}
+                  <span className="print-opening-balance-value">
+                    {formatCurrency(previousBalance[currency], currency)}{' '}
+                    {currency === 'LBP' ? 'ل.ل' : ''}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="print-account-info-col">
+              <div>
+                <span className="print-account-label">{t('receipt.currency')}:</span>{' '}
+                <span className="print-currency-box">{currency === 'USD' ? '$' : 'ل.ل'}</span>
               </div>
-            )}
+            </div>
           </div>
         </div>
       )}
@@ -159,7 +172,7 @@ export function PrintLayout({
       {!showHeader && (
         <div className="print-header" style={{ marginBottom: '10pt', paddingBottom: '8pt', borderBottom: '1px solid #ddd' }}>
           <div className="print-report-metadata" style={{ textAlign: 'center', width: '100%' }}>
-            <span className="print-account-label">رقم الصفحة:</span>{' '}
+            <span className="print-account-label">{t('receipt.pageNumber')}:</span>{' '}
             <span className="print-account-value">
               {pageNumber} {totalPages > 1 && `/ ${totalPages}`}
             </span>

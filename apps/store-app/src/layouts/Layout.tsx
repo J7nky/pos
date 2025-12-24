@@ -44,6 +44,15 @@ export default function Layout() {
   const { isOnline, getSyncStatus } = useOfflineData();
   const { unsyncedCount, isSyncing } = getSyncStatus();
   const prevIsSyncingRef = useRef(isSyncing);
+  const prevIsOnlineRef = useRef(isOnline);
+
+  // Debug: Log when isOnline changes
+  useEffect(() => {
+    if (prevIsOnlineRef.current !== isOnline) {
+      console.log('🔄 Layout: isOnline changed from', prevIsOnlineRef.current, 'to', isOnline);
+      prevIsOnlineRef.current = isOnline;
+    }
+  }, [isOnline]);
 
   // Dynamic module access based on user permissions (syncs across devices)
   const [moduleAccess, setModuleAccess] = useState<Record<ModuleName, boolean>>({
@@ -84,7 +93,8 @@ export default function Layout() {
         if (user) {
           // User exists but no permissions - this shouldn't happen, try reloading
           console.log('⚠️ User exists but no permissions found, checking role permissions...');
-          const rolePerms = await db.role_permissions
+          const { getDB } = await import('../lib/db');
+          const rolePerms = await getDB().role_permissions
             .where('role')
             .equals(user.role)
             .toArray();

@@ -1498,7 +1498,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     let isValid = true;
 
     for (const item of action.affected || []) {
-      const record = await (db as any)[item.table].get(item.id);
+      const record = await (getDB() as any)[item.table].get(item.id);
       if (!record) {
         isValid = false;
         break;
@@ -5603,7 +5603,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Check if any affected records are synced
       // Exception: cash_drawer_accounts can be synced and still allow undo (only balance changes)
       for (const item of action.affected || []) {
-        const record = await (db as any)[item.table].get(item.id);
+        const record = await (getDB() as any)[item.table].get(item.id);
         
         if (!record) {
           localStorage.removeItem('last_undo_action');
@@ -5638,15 +5638,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                   .filter(item => item.record_id === entry.id).delete();
               }
             } else {
-              await (db as any)[step.table].delete(step.id);
+              await (getDB() as any)[step.table].delete(step.id);
               // Remove from pending syncs if it exists
               await getDB().pending_syncs.where('table_name').equals(step.table)
                 .filter(item => item.record_id === step.id).delete();
             }
           } else if (step.op === 'restore' && step.record) {
-            await (db as any)[step.table].add(step.record);
+            await (getDB() as any)[step.table].add(step.record);
           } else if (step.op === 'update' && step.id && step.changes) {
-            await (db as any)[step.table].update(step.id, step.changes);
+            await (getDB() as any)[step.table].update(step.id, step.changes);
             // Remove from pending syncs if it exists
             await getDB().pending_syncs.where('table_name').equals(step.table)
               .filter(item => item.record_id === step.id).delete();
