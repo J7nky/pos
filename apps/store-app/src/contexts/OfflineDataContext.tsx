@@ -124,7 +124,7 @@ interface OfflineDataContextType {
   updateSupplier: (id: string, updates: Tables['suppliers']['Update']) => Promise<void>;
   updateProduct: (id: string, updates: Tables['products']['Update']) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
-  updateBranch: (id: string, updates: { name?: string; address?: string | null; phone?: string | null }) => Promise<void>;
+  updateBranch: (id: string, updates: { name?: string; address?: string | null; phone?: string | null; logo?: string | null }) => Promise<void>;
   addEmployee: (employee: Omit<Tables['users']['Insert'], 'store_id'>) => Promise<void>;
   updateEmployee: (id: string, updates: Tables['users']['Update']) => Promise<void>;
   deleteEmployee: (id: string) => Promise<void>;
@@ -168,7 +168,8 @@ interface OfflineDataContextType {
 
   // Store operations
   getStore: (storeId: string) => Promise<any | null>;
-
+  getBranchLogo: (branchId: string, storeId: string) => Promise<string | null>;
+  getGlobalLogos: () => Promise<Array<{ name: string; url: string; path: string }>>;
 
   deductInventoryQuantity: (productId: string, quantity: number) => Promise<void>;
   restoreInventoryQuantity: (productId: string, quantity: number) => Promise<void>;
@@ -530,12 +531,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [receiptSettings, setReceiptSettings] = useState<any>(() => {
     const stored = localStorage.getItem('receiptSettings');
     return stored ? JSON.parse(stored) : {
-      storeName: 'KIWI VEGETABLES MARKET',
-      address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
-      phone1: '+961 70 123 456',
-      phone1Name: 'Samir',
-      phone2: '03 123 456',
-      phone2Name: 'Mohammad',
+      storeName: '',
+      address: '',
+      phone1: '',
+      phone1Name: '',
+      phone2: '',
+      phone2Name: '',
       thankYouMessage: 'Thank You!',
       billNumberPrefix: '000',
       showPreviousBalance: true,
@@ -545,6 +546,29 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   });
 
 
+
+  // Helper function to merge store data into receipt settings
+  const mergeStoreDataIntoReceiptSettings = (store: any, existingSettings: any): any => {
+    if (!store) return existingSettings;
+
+    return {
+      ...existingSettings,
+      // Store data fields - always use from database
+      storeName: store.name || existingSettings.storeName || '',
+      address: store.address || existingSettings.address || '',
+      // Map store.phone to phone1 if phone1 is not already set
+      phone1: existingSettings.phone1 || store.phone || '',
+      // Preserve receipt-specific settings (don't overwrite)
+      phone1Name: existingSettings.phone1Name || '',
+      phone2: existingSettings.phone2 || '',
+      phone2Name: existingSettings.phone2Name || '',
+      thankYouMessage: existingSettings.thankYouMessage || 'Thank You!',
+      billNumberPrefix: existingSettings.billNumberPrefix || '000',
+      showPreviousBalance: existingSettings.showPreviousBalance !== undefined ? existingSettings.showPreviousBalance : true,
+      showItemCount: existingSettings.showItemCount !== undefined ? existingSettings.showItemCount : true,
+      receiptWidth: existingSettings.receiptWidth || 32
+    };
+  };
 
   // Load store data and settings from IndexedDB
   const loadStoreData = async () => {
@@ -578,6 +602,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         if (existingStore.preferred_language) {
           setLanguage(existingStore.preferred_language);
         }
+
+        // Merge store data into receipt settings
+        const currentReceiptSettings = receiptSettings;
+        const mergedSettings = mergeStoreDataIntoReceiptSettings(existingStore, currentReceiptSettings);
+        setReceiptSettings(mergedSettings);
+        
+        // Save merged settings to localStorage
+        localStorage.setItem('receiptSettings', JSON.stringify(mergedSettings));
 
         // Load cash drawer status from IndexedDB
         await refreshCashDrawerStatus();
@@ -1070,7 +1102,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           console.log(`🔄 refreshData: Setting language to ${storeData.preferred_language}`);
           setLanguage(storeData.preferred_language);
         }
-        console.log(`✅ refreshData: Store settings reloaded successfully`);
+        
+        // Merge store data into receipt settings
+        const currentReceiptSettings = receiptSettings;
+        const mergedSettings = mergeStoreDataIntoReceiptSettings(storeData, currentReceiptSettings);
+        setReceiptSettings(mergedSettings);
+        
+        // Save merged settings to localStorage
+        localStorage.setItem('receiptSettings', JSON.stringify(mergedSettings));
+        console.log(`✅ refreshData: Store settings and receipt settings reloaded successfully`);
       } else {
         console.warn(`⚠️ refreshData: Store data not found for store ${storeId}`);
       }
@@ -2613,6 +2653,80 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Get branch logo with priority: branch logo (custom or global) → store logo → null
+  const getBranchLogo = async (branchId: string, storeId: string): Promise<string | null> => {
+    try {
+      const branch = await getDB().branches.get(branchId);
+      if (!branch) return null;
+      
+      // 1. Priority: Branch logo (can be custom base64 or global logo URL)
+      if (branch.logo) {
+        return branch.logo;
+      }
+      
+      // 2. Fallback: Store logo (store-specific, optional)
+      const store = await getDB().stores.get(storeId);
+      if (store?.logo) {
+        return store.logo;
+      }
+      
+      // 3. Return null (no logo)
+      return null;
+    } catch (error) {
+      console.error('Error getting branch logo:', error);
+      return null;
+    }
+  };
+
+  // Get all global logos from Supabase Storage
+  const getGlobalLogos = async (): Promise<Array<{ name: string; url: string; path: string }>> => {
+    try {
+      // Import supabase client
+      const { supabase } = await import('../lib/supabase');
+      
+      // List all files in the global-logos bucket
+      const { data, error } = await supabase.storage
+        .from('global-logos')
+        .list('', {
+          limit: 100,
+          offset: 0,
+          sortBy: { column: 'name', order: 'asc' }
+        });
+
+      if (error) {
+        console.error('Error fetching global logos from storage:', error);
+        return [];
+      }
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      // Get public URLs for each logo
+      const logos = await Promise.all(
+        data
+          .filter(file => file.name && !file.name.startsWith('.')) // Filter out hidden files
+          .map(async (file) => {
+            const path = file.name;
+            const { data: urlData } = supabase.storage
+              .from('global-logos')
+              .getPublicUrl(path);
+
+            return {
+              name: file.name.replace(/\.[^/.]+$/, ''), // Remove file extension for display name
+              url: urlData.publicUrl,
+              path: path
+            };
+          })
+      );
+
+      return logos;
+    } catch (error) {
+      console.error('Error getting global logos from storage:', error);
+      return [];
+    }
+  };
+
   // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
@@ -2912,20 +3026,39 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const updateBranch = async (id: string, updates: { name?: string; address?: string | null; phone?: string | null }): Promise<void> => {
+  const updateBranch = async (id: string, updates: { name?: string; address?: string | null; phone?: string | null; logo?: string | null }): Promise<void> => {
     // Get original branch data
     const originalBranch = await getDB().branches.get(id);
     if (!originalBranch) throw new Error('Branch not found');
     
-    // Prepare update payload
+    // Prepare update payload - merge with existing data to preserve all fields
     const updatePayload: any = {
+      ...originalBranch,
       ...updates,
       updated_at: new Date().toISOString(),
       _synced: false
     };
     
-    // Update branch in IndexedDB
-    await getDB().branches.update(id, updatePayload);
+    // Use put() instead of update() to ensure all fields (including non-indexed ones like logo, address, phone) are saved
+    await getDB().branches.put(updatePayload);
+    
+    // Verify the update was applied
+    const updatedBranch = await getDB().branches.get(id);
+    if (!updatedBranch) {
+      throw new Error('Branch was deleted after update');
+    }
+    
+    // Verify critical fields were saved
+    for (const key of Object.keys(updates)) {
+      const expectedValue = updates[key as keyof typeof updates];
+      const actualValue = (updatedBranch as any)[key];
+      if (expectedValue !== actualValue) {
+        console.warn(`⚠️ Field ${key} mismatch after update:`, {
+          expected: expectedValue,
+          actual: actualValue
+        });
+      }
+    }
     
     // Store undo data with original values
     const undoChanges: any = {};
@@ -2949,6 +3082,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       })
     );
     
+    // Refresh data to update UI, but after a small delay to ensure IndexedDB has committed
+    await new Promise(resolve => setTimeout(resolve, 50));
     await refreshData();
     await updateUnsyncedCount();
     debouncedSync();
@@ -6299,6 +6434,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         getBillDetails: async () => null,
         createBillAuditLog: async () => { },
         getStore: async () => null,
+        getBranchLogo: async () => null,
+        getGlobalLogos: async () => [],
         deductInventoryQuantity: async () => { },
         restoreInventoryQuantity: async () => { },
         refreshData: async () => { },
@@ -6435,6 +6572,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Store operations
       getStore,
+      getBranchLogo,
+      getGlobalLogos,
 
       deductInventoryQuantity,
       restoreInventoryQuantity,

@@ -76,6 +76,8 @@ export async function runComprehensivePhase6Test(): Promise<void> {
  */
 async function testPhase1(): Promise<boolean> {
   try {
+    const db = getDB();
+    
     // Check if all required tables exist
     const requiredTables = [
       'chart_of_accounts',

@@ -412,7 +412,7 @@ export class CRUDHelperService {
    */
   async getUnsyncedCount(): Promise<{ total: number; byTable: Record<string, number> }> {
     const tableNames = [
-      'stores', 'products', 'suppliers', 'customers', 'users',
+      'stores', 'branches', 'products', 'suppliers', 'customers', 'users',
       'cash_drawer_accounts',
       'inventory_bills', 'inventory_items', 'transactions', 'bills',
       'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',
@@ -461,7 +461,7 @@ export class CRUDHelperService {
     summary: string;
   }> {
     const tableNames = [
-      'stores', 'products', 'suppliers', 'customers', 'users',
+      'stores', 'branches', 'products', 'suppliers', 'customers', 'users',
       'cash_drawer_accounts',
       'inventory_bills', 'inventory_items', 'transactions', 'bills',
       'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',

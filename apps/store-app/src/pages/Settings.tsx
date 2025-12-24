@@ -3,6 +3,7 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import BranchSelectionScreen from '../components/BranchSelectionScreen';
+import packageJson from '../../package.json';
 import { 
   Settings as SettingsIcon,
   Bell,
@@ -20,12 +21,33 @@ import {
   Building,
   RefreshCw,
   Briefcase,
+  Trash2,
 } from 'lucide-react';
 
 type SettingsTab = 'account' | 'business' | 'inventory' | 'receipt' | 'preferences';
 
 export default function Settings() {
   const { userProfile } = useSupabaseAuth();
+  const [appVersion, setAppVersion] = useState<string>(packageJson.version);
+  
+  // Get app version from Electron if available, otherwise use package.json
+  useEffect(() => {
+    const getVersion = async () => {
+      // Check if running in Electron
+      if (typeof window !== 'undefined' && window.electronAPI?.getAppVersion) {
+        try {
+          const result = await window.electronAPI.getAppVersion();
+          if (result.success && result.version) {
+            setAppVersion(result.version);
+          }
+        } catch (error) {
+          console.error('Failed to get app version from Electron:', error);
+          // Keep package.json version as fallback
+        }
+      }
+    };
+    getVersion();
+  }, []);
   
   // Check if user is admin or manager
   const isAdminOrManager = userProfile?.role === 'admin' || userProfile?.role === 'manager';
@@ -531,7 +553,7 @@ export default function Settings() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <h3 className="font-medium text-gray-900 mb-2">{t('settings.appVersion')}</h3>
-                  <p className="text-gray-600">ProducePOS v1.0.0</p>
+                  <p className="text-gray-600">ProducePOS v{appVersion}</p>
                 </div>
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <h3 className="font-medium text-gray-900 mb-2">{t('settings.dataStorage')}</h3>
@@ -539,7 +561,15 @@ export default function Settings() {
                 </div>
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <h3 className="font-medium text-gray-900 mb-2">{t('settings.lastSync')}</h3>
-                  <p className="text-gray-600">Never (Local only)</p>
+                  <p className="text-gray-600">
+                    {(() => {
+                      const syncStatus = offlineData?.getSyncStatus?.();
+                      const lastSync = syncStatus?.lastSync;
+                      return lastSync 
+                        ? new Date(lastSync).toLocaleString()
+                        : 'Never (Local only)';
+                    })()}
+                  </p>
                 </div>
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <h3 className="font-medium text-gray-900 mb-2">{t('settings.deviceType')}</h3>
@@ -566,14 +596,14 @@ function ReceiptSettings() {
   // Check if user is admin or manager (defensive check)
   const isAdminOrManager = userProfile?.role === 'admin' || userProfile?.role === 'manager';
   
-  // Get receipt settings from offline context (with defaults)
+  // Get receipt settings from offline context (populated from store data)
   const receiptSettings = offlineData?.receiptSettings || {
-    storeName: 'KIWI VEGETABLES MARKET',
-    address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
-    phone1: '+961 70 123 456',
-    phone1Name: 'Samir',
-    phone2: '03 123 456',
-    phone2Name: 'Mohammad',
+    storeName: '',
+    address: '',
+    phone1: '',
+    phone1Name: '',
+    phone2: '',
+    phone2Name: '',
     thankYouMessage: 'Thank You!',
     billNumberPrefix: '000',
     showPreviousBalance: true,
@@ -586,17 +616,27 @@ function ReceiptSettings() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const handleSave = async () => {
+    console.log('🔄 handleSave called for receipt settings', { hasUpdateReceiptSettings: !!offlineData?.updateReceiptSettings, settings: tempSettings });
+    
+    if (!offlineData?.updateReceiptSettings) {
+      const errorMsg = 'Update function not available. Please refresh the page.';
+      console.error('❌', errorMsg);
+      setSaveError(errorMsg);
+      setTimeout(() => setSaveError(null), 3000);
+      return;
+    }
+    
     try {
-      // Update receipt settings in offline context
-      if (offlineData?.updateReceiptSettings) {
-        await offlineData.updateReceiptSettings(tempSettings);
-        setShowSaveMessage(true);
-        setSaveError(null);
-        setTimeout(() => setShowSaveMessage(false), 2000);
-      }
+      console.log('💾 Saving receipt settings:', tempSettings);
+      await offlineData.updateReceiptSettings(tempSettings);
+      console.log('✅ Receipt settings saved successfully');
+      setShowSaveMessage(true);
+      setSaveError(null);
+      setTimeout(() => setShowSaveMessage(false), 2000);
     } catch (error) {
-      console.error('Error saving receipt settings:', error);
-      setSaveError('Failed to save receipt settings');
+      console.error('❌ Error saving receipt settings:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Failed to save receipt settings';
+      setSaveError(errorMsg);
       setTimeout(() => setSaveError(null), 3000);
     }
   };
@@ -729,6 +769,16 @@ function ReceiptSettings() {
         </div>
       </div>
 
+      {/* Branch Logo */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium text-gray-900 flex items-center">
+          <Building className="w-5 h-5 mr-2" />
+          Branch Logo
+        </h3>
+        
+        <BranchLogoUpload />
+      </div>
+
       {/* Receipt Options */}
       <div className="space-y-4">
         <h3 className="text-lg font-medium text-gray-900 flex items-center">
@@ -817,7 +867,12 @@ function ReceiptSettings() {
       {isAdminOrManager && (
         <div className="flex justify-end">
           <button
-            onClick={handleSave}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('🔘 Save Receipt Settings button clicked');
+              handleSave();
+            }}
             className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
           >
             <Save className="w-4 h-4 mr-2" />
@@ -825,6 +880,324 @@ function ReceiptSettings() {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// Branch Logo Upload Component
+function BranchLogoUpload() {
+  const { userProfile } = useSupabaseAuth();
+  const offlineData = useOfflineData();
+  const [logo, setLogo] = useState<string | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [globalLogos, setGlobalLogos] = useState<Array<{ name: string; url: string; path: string }>>([]);
+  const [logoSource, setLogoSource] = useState<'custom' | 'global' | 'store' | null>(null);
+
+  const isAdminOrManager = userProfile?.role === 'admin' || userProfile?.role === 'manager';
+  const currentBranchId = offlineData?.currentBranchId;
+
+  // Load current branch logo, global logos, and determine logo source
+  useEffect(() => {
+    const loadLogos = async () => {
+      if (!currentBranchId || !offlineData?.getBranchLogo) return;
+      
+      try {
+        const storeId = userProfile?.store_id;
+        if (storeId) {
+          // Load global logos
+          if (offlineData?.getGlobalLogos) {
+            const logos = await offlineData.getGlobalLogos();
+            setGlobalLogos(logos);
+          }
+          
+          // Load branch data to check logo source
+          const { getDB } = await import('../lib/db');
+          const branch = await getDB().branches.get(currentBranchId);
+          
+          if (branch) {
+            // Check if branch has logo (can be custom base64 or global logo URL)
+            if (branch.logo) {
+              setLogo(branch.logo);
+              setLogoPreview(branch.logo);
+              // Determine if it's a URL (global) or base64 (custom)
+              if (branch.logo.startsWith('http://') || branch.logo.startsWith('https://')) {
+                setLogoSource('global');
+              } else {
+                setLogoSource('custom');
+              }
+            }
+            // Fallback to store logo
+            else {
+              const store = await offlineData.getStore(storeId);
+              if (store?.logo) {
+                setLogoPreview(store.logo);
+                setLogoSource('store');
+              } else {
+                setLogoPreview(null);
+                setLogoSource(null);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading logos:', error);
+      }
+    };
+
+    loadLogos();
+  }, [currentBranchId, offlineData?.getBranchLogo, offlineData?.getStore, offlineData?.getGlobalLogos, userProfile?.store_id]);
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file size (2MB limit)
+    if (file.size > 2 * 1024 * 1024) {
+      setError('File size too large. Please choose an image under 2MB.');
+      e.target.value = '';
+      return;
+    }
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please select a valid image file.');
+      e.target.value = '';
+      return;
+    }
+
+    setError(null);
+    setUploading(true);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target?.result as string;
+      setLogo(base64);
+      setLogoPreview(base64);
+      setLogoSource('custom');
+      setUploading(false);
+    };
+    reader.onerror = () => {
+      setError('Failed to read image file.');
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleSelectGlobalLogo = (logoUrl: string) => {
+    console.log('🖼️ Global logo selected:', logoUrl);
+    const selectedLogo = globalLogos.find(logo => logo.url === logoUrl);
+    if (selectedLogo) {
+      setLogo(logoUrl);
+      setLogoPreview(logoUrl);
+      setLogoSource('global');
+      console.log('✅ Global logo state updated');
+    } else {
+      console.warn('⚠️ Selected logo not found in globalLogos');
+    }
+  };
+
+  const handleSave = async () => {
+    console.log('🔄 handleSave called for logo', { currentBranchId, hasUpdateBranch: !!offlineData?.updateBranch, logo: logo ? 'present' : 'null' });
+    
+    if (!currentBranchId) {
+      const errorMsg = 'Branch not available. Please select a branch.';
+      console.error('❌', errorMsg);
+      setError(errorMsg);
+      return;
+    }
+    
+    if (!offlineData?.updateBranch) {
+      const errorMsg = 'Update function not available. Please refresh the page.';
+      console.error('❌', errorMsg);
+      setError(errorMsg);
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setError(null);
+      
+      // Save logo (can be base64 for custom or URL for global)
+      const updates: any = {
+        logo: logo || null
+      };
+      
+      console.log('💾 Saving branch logo:', { branchId: currentBranchId, logoType: logo ? (logo.startsWith('http') ? 'URL' : 'base64') : 'null' });
+      
+      await offlineData.updateBranch(currentBranchId, updates);
+      
+      console.log('✅ Branch logo saved successfully');
+      setSaveMessage('Branch logo saved successfully!');
+      setTimeout(() => setSaveMessage(null), 3000);
+    } catch (error) {
+      console.error('❌ Error saving branch logo:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Failed to save branch logo';
+      setError(errorMsg);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!currentBranchId || !offlineData?.updateBranch) {
+      setError('Branch not available');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setError(null);
+      
+      await offlineData.updateBranch(currentBranchId, { logo: null });
+      
+      setLogo(null);
+      setLogoPreview(null);
+      setLogoSource(null);
+      setSaveMessage('Branch logo removed successfully!');
+      setTimeout(() => setSaveMessage(null), 3000);
+    } catch (error) {
+      console.error('Error removing branch logo:', error);
+      setError('Failed to remove branch logo');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {saveMessage && (
+        <div className="flex items-center px-4 py-2 bg-green-100 text-green-800 rounded-lg">
+          <CheckCircle className="w-5 h-5 mr-2" />
+          {saveMessage}
+        </div>
+      )}
+      {error && (
+        <div className="flex items-center px-4 py-2 bg-red-100 text-red-800 rounded-lg">
+          <AlertTriangle className="w-5 h-5 mr-2" />
+          {error}
+        </div>
+      )}
+
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0">
+          <div className="w-32 h-32 border-2 border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 overflow-hidden">
+            {logoPreview ? (
+              <img 
+                src={logoPreview} 
+                alt="Branch Logo Preview" 
+                className="max-w-full max-h-full object-contain"
+              />
+            ) : (
+              <span className="text-gray-400 text-sm">No logo</span>
+            )}
+          </div>
+        </div>
+        
+        <div className="flex-1 space-y-4">
+          {/* Global Logos Selection */}
+          {globalLogos.length > 0 && (
+            <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                Select from Global Logos
+              </label>
+              <p className="text-xs text-gray-500 mb-3">
+                Global logos are managed by Super Admin and available to all branches.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {globalLogos.map((globalLogo) => (
+                  <div
+                    key={globalLogo.url}
+                    onClick={() => handleSelectGlobalLogo(globalLogo.url)}
+                    className={`relative border-2 rounded-lg p-2 cursor-pointer transition-all ${
+                      logo === globalLogo.url
+                        ? 'border-blue-600 bg-blue-50'
+                        : 'border-gray-300 hover:border-gray-400'
+                    } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <div className="w-full h-20 border border-gray-200 rounded flex items-center justify-center bg-white overflow-hidden mb-2">
+                      <img 
+                        src={globalLogo.url} 
+                        alt={globalLogo.name || 'Global Logo'} 
+                        className="max-w-full max-h-full object-contain"
+                      />
+                    </div>
+                    <p className="text-xs text-center text-gray-700 truncate">
+                      {globalLogo.name || 'Unnamed Logo'}
+                    </p>
+                    {logo === globalLogo.url && (
+                      <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-1">
+                        <CheckCircle className="w-3 h-3 text-white" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custom Logo Upload */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Upload Custom Branch Logo
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageSelect}
+              disabled={!isAdminOrManager || uploading}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Supported formats: PNG, JPEG, WebP. Max size: 2MB
+            </p>
+          </div>
+          
+          {isAdminOrManager && (
+            <div className="flex gap-2">
+              {logoPreview && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('🔘 Save Logo button clicked');
+                    handleSave();
+                  }}
+                  disabled={uploading}
+                  className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  {uploading ? 'Saving...' : 'Save Logo Selection'}
+                </button>
+              )}
+              {(logoSource === 'custom' || logoSource === 'global') && (
+                <button
+                  onClick={handleRemove}
+                  disabled={uploading}
+                  className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Remove
+                </button>
+              )}
+            </div>
+          )}
+          
+          <p className="text-xs text-gray-500">
+            {logoSource === 'global' 
+              ? `Currently using global logo: "${globalLogos.find(l => l.url === logo)?.name || 'Selected'}". Upload a custom logo to override it.`
+              : logoSource === 'custom'
+              ? 'Currently using custom branch logo. This takes priority over global logos.'
+              : logoSource === 'store'
+              ? 'Currently using store logo. Select a global logo or upload a custom one to override.'
+              : 'Select a global logo or upload a custom branch logo. Custom logos take priority.'}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

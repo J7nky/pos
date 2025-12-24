@@ -31,6 +31,7 @@ import { generateBillReference } from '../utils/referenceGenerator';
 import { accountingInitService } from '../services/accountingInitService';
 import { useProductMultilingual } from '../hooks/useMultilingual';
 import { parseMultilingualString } from '../utils/multilingual';
+import { getDB } from '../lib/db';
 
 
 interface BillTab {
@@ -240,19 +241,63 @@ export default function POS() {
       hasQrCode: !!qrCodeData
     });
     // Get receipt settings from offline context
-    const receiptSettings = raw.receiptSettings || {
-      storeName: 'KIWI VEGETABLES MARKET',
-      address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
-      phone1: '+961 70 123 456',
-      phone1Name: 'Samir',
-      phone2: '03 123 456',
-      phone2Name: 'Mohammad',
-      thankYouMessage: 'Thank You!',
-      billNumberPrefix: '000',
-      showPreviousBalance: true,
-      showItemCount: true,
-      receiptWidth: 150
-    };
+    let receiptSettings = raw.receiptSettings;
+    
+    // If receipt settings are missing, fetch store data as fallback
+    if (!receiptSettings || !receiptSettings.storeName) {
+      const storeId = userProfile?.store_id;
+      if (storeId) {
+        try {
+          const store = await getDB().stores.get(storeId);
+          if (store) {
+            receiptSettings = {
+              storeName: store.name || '',
+              address: store.address || '',
+              phone1: store.phone || '',
+              phone1Name: '',
+              phone2: '',
+              phone2Name: '',
+              thankYouMessage: 'Thank You!',
+              billNumberPrefix: '000',
+              showPreviousBalance: true,
+              showItemCount: true,
+              receiptWidth: 150
+            };
+          }
+        } catch (error) {
+          console.error('Error fetching store data for receipt:', error);
+        }
+      }
+    }
+    
+    // Final fallback to empty values if still no settings
+    if (!receiptSettings) {
+      receiptSettings = {
+        storeName: '',
+        address: '',
+        phone1: '',
+        phone1Name: '',
+        phone2: '',
+        phone2Name: '',
+        thankYouMessage: 'Thank You!',
+        billNumberPrefix: '000',
+        showPreviousBalance: true,
+        showItemCount: true,
+        receiptWidth: 150
+      };
+    }
+
+    // Fetch logo
+    let logo: string | null = null;
+    const storeId = userProfile?.store_id;
+    const currentBranchId = raw.currentBranchId;
+    if (storeId && currentBranchId && raw.getBranchLogo) {
+      try {
+        logo = await raw.getBranchLogo(currentBranchId, storeId);
+      } catch (error) {
+        console.error('Error fetching logo for receipt:', error);
+      }
+    }
 
     const date = new Date(billData.bill_date).toLocaleDateString('en-GB');
     const customerName = entity ? entity.name : t('common.labels.walkInCustomer');
@@ -266,7 +311,13 @@ export default function POS() {
     const separator = '====================================================================================================';
     const dashSeparator = '----------------------------------------------------------------------------------------------------';
     console.log(separator.length, 'separator 123');
-    let content = `${separator}
+    
+    // Start content with logo if available (for HTML receipts)
+    let content = '';
+    if (logo) {
+      content += `[LOGO_PLACEHOLDER:${logo}]\n`;
+    }
+    content += `${separator}
          ${receiptSettings.storeName}
     ${receiptSettings.address}
       ${t('receipt.phones')}: ${receiptSettings.phone1Name}: ${receiptSettings.phone1} / ${receiptSettings.phone2Name}: ${receiptSettings.phone2}

@@ -4,6 +4,7 @@ import { ToastProvider } from './components/ui';
 import Layout from './layouts/Layout';
 import Dashboard from './pages/Dashboard';
 import GlobalProducts from './pages/GlobalProducts';
+import GlobalLogos from './pages/GlobalLogos';
 import Stores from './pages/Stores';
 import { StoreDetail } from './components/stores';
 import Subscriptions from './pages/Subscriptions';
@@ -30,6 +31,7 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/global-products" element={<GlobalProducts />} />
+        <Route path="/global-logos" element={<GlobalLogos />} />
         <Route path="/stores" element={<Stores />} />
         <Route path="/stores/:storeId" element={<StoreDetail />} />
         <Route path="/subscriptions" element={<Subscriptions />} />

@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Package, 
+  Image as ImageIcon,
   Store, 
   CreditCard, 
   DollarSign, 
@@ -24,6 +25,7 @@ export default function Layout({ children }: LayoutProps) {
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Global Products', href: '/global-products', icon: Package },
+    { name: 'Global Logos', href: '/global-logos', icon: ImageIcon },
     { name: 'Stores', href: '/stores', icon: Store },
     { name: 'Subscriptions', href: '/subscriptions', icon: CreditCard },
     { name: 'Payments', href: '/payments', icon: DollarSign },

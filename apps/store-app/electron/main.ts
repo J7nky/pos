@@ -1322,9 +1322,22 @@ async function printHTMLWithWindows(htmlContent: string, printerName: string): P
 function convertTextToHTML(content: string, qrCodeData?: string, qrCodeUrl?: string): string {
   console.log('🔍 QR Code data received:', { qrCodeData: !!qrCodeData, qrCodeUrl, hasPlaceholder: content.includes('[QR_CODE_PLACEHOLDER]') });
   
-  // Replace QR code placeholder with actual QR code image if available
+  // Replace logo placeholder with actual logo image if available
   let htmlContent = content;
   
+  // Handle logo placeholder: [LOGO_PLACEHOLDER:base64data]
+  const logoPlaceholderRegex = /\[LOGO_PLACEHOLDER:([^\]]+)\]/;
+  const logoMatch = htmlContent.match(logoPlaceholderRegex);
+  if (logoMatch && logoMatch[1]) {
+    const logoData = logoMatch[1];
+    const logoHtml = `
+      <div style="text-align: center; margin: 10px 0;">
+        <img src="${logoData}" alt="Logo" style="max-width: 150px; max-height: 80px; height: auto; object-fit: contain;" />
+      </div>`;
+    htmlContent = htmlContent.replace(logoPlaceholderRegex, logoHtml);
+  }
+  
+  // Replace QR code placeholder with actual QR code image if available
   if (qrCodeData && content.includes('[QR_CODE_PLACEHOLDER]')) {
     console.log('✅ Using QR code image data');
     const qrCodeHtml = `

@@ -11,6 +11,7 @@ export interface Store {
   address: string | null;
   phone: string | null;
   email: string | null;
+  logo: string | null;
   preferred_currency: 'USD' | 'LBP';
   preferred_language: 'en' | 'ar' | 'fr';
   preferred_commission_rate: number;
@@ -47,6 +48,7 @@ export interface UpdateStoreInput {
   address?: string;
   phone?: string;
   email?: string;
+  logo?: string | null;
   preferred_currency?: 'USD' | 'LBP';
   preferred_language?: 'en' | 'ar' | 'fr';
   preferred_commission_rate?: number;
@@ -65,6 +67,7 @@ export interface Branch {
   name: string;
   address: string | null;
   phone: string | null;
+  logo: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -85,6 +88,7 @@ export interface UpdateBranchInput {
   name?: string;
   address?: string;
   phone?: string;
+  logo?: string | null;
   is_active?: boolean;
 }
 

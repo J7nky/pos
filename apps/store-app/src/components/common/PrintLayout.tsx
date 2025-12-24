@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { useI18n } from '../../i18n';
+import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
+import { getDB } from '../../lib/db';
 interface PrintLayoutProps {
   children: React.ReactNode;
   title: string;
@@ -38,12 +40,64 @@ export function PrintLayout({
 }: PrintLayoutProps) {
   const { t } = useI18n();
   const offlineData = useOfflineData();
-  const receiptSettings = offlineData?.receiptSettings || {
-    storeName: 'KIWI VEGETABLES MARKET',
-    address: '63-B2-Whole Sale Market, Tripoli - Lebanon',
-    phone1: '+961 70 123 456',
-    phone2: '03 123 456',
-  };
+  const { userProfile } = useSupabaseAuth();
+  const [receiptSettings, setReceiptSettings] = useState<any>(offlineData?.receiptSettings || {
+    storeName: '',
+    address: '',
+    phone1: '',
+    phone2: '',
+  });
+  const [logo, setLogo] = useState<string | null>(null);
+
+  // Fetch store data and logo if receipt settings are missing store info
+  useEffect(() => {
+    const fetchStoreData = async () => {
+      // If receipt settings already have store name, use them
+      if (offlineData?.receiptSettings?.storeName) {
+        setReceiptSettings(offlineData.receiptSettings);
+      } else {
+        // Otherwise, try to fetch from store
+        const storeId = userProfile?.store_id;
+        if (storeId) {
+          try {
+            const store = await getDB().stores.get(storeId);
+            if (store) {
+              setReceiptSettings({
+                storeName: store.name || '',
+                address: store.address || '',
+                phone1: store.phone || '',
+                phone2: '',
+              });
+            } else if (offlineData?.receiptSettings) {
+              // Fallback to receipt settings even if empty
+              setReceiptSettings(offlineData.receiptSettings);
+            }
+          } catch (error) {
+            console.error('Error fetching store data for print layout:', error);
+            if (offlineData?.receiptSettings) {
+              setReceiptSettings(offlineData.receiptSettings);
+            }
+          }
+        } else if (offlineData?.receiptSettings) {
+          setReceiptSettings(offlineData.receiptSettings);
+        }
+      }
+
+      // Fetch logo
+      const storeId = userProfile?.store_id;
+      const branchId = offlineData?.currentBranchId;
+      if (storeId && branchId && offlineData?.getBranchLogo) {
+        try {
+          const branchLogo = await offlineData.getBranchLogo(branchId, storeId);
+          setLogo(branchLogo);
+        } catch (error) {
+          console.error('Error fetching logo for print layout:', error);
+        }
+      }
+    };
+
+    fetchStoreData();
+  }, [offlineData?.receiptSettings, offlineData?.currentBranchId, offlineData?.getBranchLogo, userProfile?.store_id]);
 
   const formatCurrency = (amount: number, curr: 'USD' | 'LBP') => {
     if (curr === 'USD') {
@@ -70,7 +124,19 @@ export function PrintLayout({
           <div className="print-company-info">
             {/* Company Logo Area */}
             <div className="print-company-logo">
-              <span>Logo</span>
+              {logo ? (
+                <img 
+                  src={logo} 
+                  alt="Company Logo" 
+                  style={{ 
+                    maxWidth: '100%', 
+                    maxHeight: '100%', 
+                    objectFit: 'contain' 
+                  }} 
+                />
+              ) : (
+                <span>Logo</span>
+              )}
             </div>
 
             {/* Company Details */}

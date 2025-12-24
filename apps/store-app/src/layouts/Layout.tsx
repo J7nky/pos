@@ -207,7 +207,7 @@ export default function Layout() {
           
           if (!hasAnyPermission) {
             // Still no permissions, check if role permissions exist
-            const rolePerms = await db.role_permissions
+            const rolePerms = await getDB().role_permissions
               .where('role')
               .equals(user.role)
               .toArray();

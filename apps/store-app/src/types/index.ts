@@ -142,6 +142,7 @@ export interface Store {
   address: string;
   phone: string;
   email: string;
+  logo?: string | null;
   created_at: string;
 }
 
@@ -151,11 +152,19 @@ export interface Branch {
   name: string;
   address?: string | null;
   phone?: string | null;
+  logo?: string | null; // Branch logo: can be base64 (custom upload) or URL (selected global logo)
   created_at: string;
   updated_at: string;
   _synced?: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
+}
+
+// Global logo from Supabase Storage
+export interface GlobalLogo {
+  name: string; // File name (without extension)
+  url: string; // Public URL to the logo in Supabase Storage
+  path: string; // Storage path (e.g., "global_logos/logo1.png")
 }
 
 export interface Product {
@@ -562,6 +571,7 @@ export interface Store {
   address: string;
   phone: string;
   email: string;
+  logo?: string | null;
   preferred_currency: 'USD' | 'LBP';
   preferred_language: 'en' | 'ar' | 'fr';
   preferred_commission_rate: number;
