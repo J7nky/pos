@@ -130,16 +130,38 @@ export class AccountStatementService {
     const transactionMap = new Map(transactions.map(t => [t.id, t]));
 
     // Get bills for transactions that have references
-    const billReferences = transactions
-      .map(t => t.reference)
-      .filter(ref => ref && ref.startsWith('BILL-'))
-      .map(ref => ref!.replace('BILL-', ''));
+    // Handle both 'BILL-' prefix and direct bill numbers
+    const allBillReferences = new Set<string>();
+    transactions.forEach(t => {
+      if (t.reference) {
+        // Add the reference as-is
+        allBillReferences.add(t.reference);
+        // Also add normalized versions
+        if (t.reference.startsWith('BILL-')) {
+          allBillReferences.add(t.reference.replace('BILL-', ''));
+        } else {
+          allBillReferences.add(`BILL-${t.reference}`);
+        }
+      }
+    });
     
-    const bills = billReferences.length > 0
-      ? await getDB().bills.where('bill_number').anyOf(billReferences).toArray()
+    const billReferencesArray = Array.from(allBillReferences);
+    const bills = billReferencesArray.length > 0
+      ? await getDB().bills.where('bill_number').anyOf(billReferencesArray).toArray()
       : [];
     
-    const billMap = new Map(bills.map(b => [b.bill_number, b]));
+    // Create map with all possible lookup keys for flexible matching
+    const billMap = new Map<string, any>();
+    for (const bill of bills) {
+      // Add bill_number as-is
+      billMap.set(bill.bill_number, bill);
+      // Add with BILL- prefix
+      billMap.set(`BILL-${bill.bill_number}`, bill);
+      // Also handle if bill_number already has BILL- prefix
+      if (bill.bill_number.startsWith('BILL-')) {
+        billMap.set(bill.bill_number.replace('BILL-', ''), bill);
+      }
+    }
 
     // Pre-fetch all bill_line_items and products for detailed view (performance optimization)
     const billIds = bills.map(b => b.id);
@@ -234,7 +256,10 @@ export class AccountStatementService {
       // PRIMARY: Determine type from journal entry debit/credit values
       // This is more reliable than transaction categories
       let type: 'sale' | 'payment' | 'income' | 'expense' = 'payment';
-      let description = accountEntry.description || 'Transaction';
+      // Parse and translate account entry description (may be multilingual)
+      let description = accountEntry.description 
+        ? getTranslatedString(parseMultilingualString(accountEntry.description), language, 'en')
+        : 'Transaction';
       
       // Check debit/credit values to determine transaction type
       const hasDebitUSD = Math.abs(accountEntry.debit_usd) > 0.01;
@@ -271,32 +296,100 @@ export class AccountStatementService {
         // Both debit and credit exist, use transaction category
         if (transaction.category?.includes('CREDIT_SALE') || transaction.category?.includes('SALE')) {
           type = entityType === 'customer' ? 'sale' : 'expense';
-          description = transaction.description || description;
+          description = transaction.description 
+            ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
+            : description;
         } else if (transaction.category?.includes('PAYMENT')) {
           type = 'payment';
-          description = transaction.description || description;
+          description = transaction.description 
+            ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
+            : description;
         } else if (transaction.type === 'income') {
           type = 'income';
         } else if (transaction.type === 'expense') {
           type = 'expense';
         }
       } else if (transaction) {
-        // Update description from transaction if available
-        description = transaction.description || description;
+        // Update description from transaction if available (translate multilingual)
+        description = transaction.description 
+          ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
+          : description;
       }
 
       // Get bill information if available (using pre-fetched data)
       let bill: any = null;
       let billLineItems: any[] = [];
       if (transaction?.reference) {
-        const billNumber = transaction.reference.startsWith('BILL-') 
-          ? transaction.reference.replace('BILL-', '')
-          : transaction.reference;
-        bill = billMap.get(billNumber);
+        // Try multiple lookup strategies for bill reference
+        // First try direct lookup with the reference as-is
+        bill = billMap.get(transaction.reference);
         
-        if (bill && viewMode === 'detailed') {
-          // Use pre-fetched bill_line_items instead of DB call
+        // If not found, try without BILL- prefix
+        if (!bill && transaction.reference.startsWith('BILL-')) {
+          const billNumber = transaction.reference.replace('BILL-', '');
+          bill = billMap.get(billNumber);
+        }
+        
+        // If still not found, try with BILL- prefix
+        if (!bill && !transaction.reference.startsWith('BILL-')) {
+          bill = billMap.get(`BILL-${transaction.reference}`);
+        }
+        
+        // Last resort: if still not found and reference looks like a bill, search all bills
+        // This handles cases where bill_number format doesn't match exactly
+        if (!bill && (transaction.reference.startsWith('BILL-') || /^[0-9]+$/.test(transaction.reference))) {
+          const normalizedRef = transaction.reference.startsWith('BILL-') 
+            ? transaction.reference.replace('BILL-', '') 
+            : transaction.reference;
+          // Search for bills where bill_number matches (with or without BILL- prefix)
+          const allBills = await getDB().bills
+            .filter(b => 
+              b.bill_number === normalizedRef || 
+              b.bill_number === `BILL-${normalizedRef}` ||
+              b.bill_number === transaction.reference ||
+              (b.bill_number.startsWith('BILL-') && b.bill_number.replace('BILL-', '') === normalizedRef)
+            )
+            .toArray();
+          if (allBills.length > 0) {
+            bill = allBills[0];
+            // Add to map for future lookups
+            billMap.set(bill.bill_number, bill);
+            billMap.set(`BILL-${bill.bill_number}`, bill);
+            if (bill.bill_number.startsWith('BILL-')) {
+              billMap.set(bill.bill_number.replace('BILL-', ''), bill);
+            }
+          }
+        }
+        
+        // If bill is found, get line items (always fetch, but only use in detailed mode)
+        if (bill) {
           billLineItems = billLineItemsMap.get(bill.id) || [];
+          
+          // If no line items found in pre-fetched data and we're in detailed mode, try direct fetch
+          // This handles edge cases where bills might have been created after pre-fetch
+          if (viewMode === 'detailed' && billLineItems.length === 0) {
+            const directLineItems = await getDB().bill_line_items
+              .where('bill_id')
+              .equals(bill.id)
+              .toArray();
+            if (directLineItems.length > 0) {
+              billLineItems = directLineItems;
+              // Update the map for future use
+              billLineItemsMap.set(bill.id, directLineItems);
+              
+              // Also fetch products if not already in productMap
+              const missingProductIds = directLineItems
+                .map(item => item.product_id)
+                .filter(id => !productMap.has(id));
+              if (missingProductIds.length > 0) {
+                const missingProducts = await getDB().products
+                  .where('id')
+                  .anyOf(missingProductIds)
+                  .toArray();
+                missingProducts.forEach(p => productMap.set(p.id, p));
+              }
+            }
+          }
         }
       }
 
@@ -306,44 +399,67 @@ export class AccountStatementService {
         for (const item of billLineItems) {
           const product = productMap.get(item.product_id);
           // Parse and translate multilingual product name
-          const parsedName = parseMultilingualString(product?.name);
-          const translatedName = getTranslatedString(parsedName, language, 'en');
+          const parsedName = product?.name ? parseMultilingualString(product.name) : null;
+          const translatedName = parsedName ? getTranslatedString(parsedName, language, 'en') : 'Unknown Product';
           
           // Calculate credit/debit for each line item based on transaction type
           // Sales show as debit (increases receivable), payments show as credit (decreases receivable)
           let debit_amount = 0;
           let credit_amount = 0;
           
-          if (type === 'sale' || (type === 'income' && entityType === 'customer')) {
-            // Sales: show as debit
-            debit_amount = item.line_total || 0;
-            credit_amount = 0;
-          } else if (type === 'payment') {
-            // Payments: show as credit
-            debit_amount = 0;
-            credit_amount = item.line_total || 0;
-          } else if (type === 'income' && entityType === 'supplier') {
-            // Supplier receiving: show as credit (increases payable)
-            debit_amount = 0;
-            credit_amount = item.line_total || 0;
-          } else if (type === 'expense') {
-            // Expenses: show as debit
-            debit_amount = item.line_total || 0;
-            credit_amount = 0;
+          // Use the item's currency if available, otherwise use transaction currency
+          const itemCurrency = item.currency || currency;
+          const lineTotal = item.line_total || 0;
+          
+          // Determine debit/credit based on transaction type and entity type
+          // For customers: sales increase receivable (debit), payments decrease receivable (credit)
+          // For suppliers: purchases increase payable (credit), payments decrease payable (debit)
+          if (entityType === 'customer') {
+            if (type === 'sale' || (type === 'income' && transaction?.category?.includes('CREDIT_SALE'))) {
+              // Sales: show as debit (increases receivable)
+              debit_amount = lineTotal;
+              credit_amount = 0;
+            } else if (type === 'payment') {
+              // Payments: show as credit (decreases receivable)
+              debit_amount = 0;
+              credit_amount = lineTotal;
+            } else {
+              // Default: treat as sale for customers
+              debit_amount = lineTotal;
+              credit_amount = 0;
+            }
+          } else if (entityType === 'supplier') {
+            if (type === 'income' || (type === 'sale' && transaction?.category?.includes('CREDIT_SALE'))) {
+              // Supplier receiving: show as credit (increases payable)
+              debit_amount = 0;
+              credit_amount = lineTotal;
+            } else if (type === 'payment') {
+              // Payments: show as debit (decreases payable)
+              debit_amount = lineTotal;
+              credit_amount = 0;
+            } else if (type === 'expense') {
+              // Expenses: show as debit
+              debit_amount = lineTotal;
+              credit_amount = 0;
+            } else {
+              // Default: treat as purchase for suppliers
+              debit_amount = 0;
+              credit_amount = lineTotal;
+            }
           }
           
           productDetails.push({
             product_id: item.product_id,
-            product_name: translatedName || 'Unknown Product',
+            product_name: translatedName,
             quantity: item.quantity || 0,
-            unit: 'piece', // Could be enhanced to get from inventory
+            unit: item.unit || 'piece',
             unit_price: item.unit_price || 0,
-            total_price: item.line_total || 0,
+            total_price: lineTotal,
             weight: item.weight || undefined,
             notes: item.notes || undefined,
             debit_amount,
             credit_amount,
-            currency
+            currency: itemCurrency
           } as StatementProductDetail);
         }
       }
@@ -357,11 +473,17 @@ export class AccountStatementService {
         totals.paymentsLBP += Math.abs(amountLBP);
       }
 
+      // When product_details (line items) exist, don't use multilingual description
+      // The line items will be displayed instead, so description should be empty or a summary
+      const finalDescription = productDetails.length > 0 
+        ? '' // Empty when line items are shown - they will display the product details
+        : description; // Use multilingual description only when no line items
+
       statementTransactions.push({
         id: transactionId,
         date: transaction?.created_at || accountEntry.created_at,
         type,
-        description,
+        description: finalDescription,
         amount: Math.abs(amount),
         quantity: billLineItems.length || 0,
         weight: 0,

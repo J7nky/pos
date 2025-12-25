@@ -38,6 +38,9 @@ import { ensureDefaultBranch } from '../lib/branchHelpers';
 import { BranchAccessValidationService } from '../services/branchAccessValidationService';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
+import enLocale from '../i18n/locales/en';
+import arLocale from '../i18n/locales/ar';
+import type { MultilingualString } from '../utils/multilingual';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -2049,6 +2052,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         creditSaleTransactionId = transactionId; // Store for undo data
         
         // 1. Create transaction record directly (avoiding nested transaction)
+        // Create multilingual description for credit sale
+        const creditSaleDescription: MultilingualString = {
+          en: (entityType === 'customer' 
+            ? enLocale.payments.creditSaleDescriptionCustomer 
+            : enLocale.payments.creditSaleDescriptionSupplier)
+            .replace('{{billNumber}}', bill.bill_number),
+          ar: (entityType === 'customer' 
+            ? arLocale.payments.creditSaleDescriptionCustomer 
+            : arLocale.payments.creditSaleDescriptionSupplier)
+            .replace('{{billNumber}}', bill.bill_number),
+        };
+        
         const creditSaleTransaction: Transaction = {
           id: transactionId,
           store_id: storeId,
@@ -2059,8 +2074,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             : TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
           amount: customerBalanceUpdate.amountDue,
           currency: currency as 'USD' | 'LBP', // Use store's currency
-          description: `Credit sale - Bill ${bill.bill_number} (${entityType})`,
-          reference: `BILL-${bill.bill_number}`, // ✅ Ensure reference includes BILL- prefix for consistency
+          description: creditSaleDescription,
+          reference:bill.bill_number, // ✅ Ensure reference includes BILL- prefix for consistency
           customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
           supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
           employee_id: null,
@@ -4639,8 +4654,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       console.log(`💳 [PAYMENT] ${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${isCustomer ? 'customer' : 'supplier'}: ${currency} balance ${currency === 'LBP' ? currentLbBalance : currentUsdBalance} → ${newBalance} (${newBalance < 0 ? 'CREDIT' : 'DEBT'})`);
 
-      // Prepare transaction context
-      const transactionDescription = `${paymentDirection === 'receive' ? 'Payment received from' : 'Payment sent to'} ${entity.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`;
+      // Prepare transaction context with multilingual description
+      const transactionDescription: MultilingualString = {
+        en: (paymentDirection === 'receive' 
+          ? enLocale.payments.paymentReceivedFrom 
+          : enLocale.payments.paymentSentTo)
+          .replace('{{entityName}}', entity.name),
+        ar: (paymentDirection === 'receive' 
+          ? arLocale.payments.paymentReceivedFrom 
+          : arLocale.payments.paymentSentTo)
+          .replace('{{entityName}}', entity.name)
+      };
       
       const context = {
         userId: createdBy,
@@ -4849,8 +4873,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       console.log(`💳 [ATOMIC] Payment sent to employee: ${currency} balance ${currency === 'LBP' ? currentLbBalance : currentUsdBalance} → ${newBalance}`);
 
-      // Prepare transaction data
-      const transactionDescription = `Employee payment - ${employee.name}${description ? ': ' + description : ''} ${currency === 'USD' ? `($${numAmount.toFixed(2)} USD)` : ''}`;
+      // Prepare transaction data with multilingual description
+      const descriptionPart = description ? `: ${description}` : '';
+      const amountPart = currency === 'USD' ? ` ($${numAmount.toFixed(2)} USD)` : '';
+      const transactionDescription: MultilingualString = {
+        en: enLocale.payments.employeePayment
+          .replace('{{employeeName}}', employee.name)
+          .replace('{{description}}', descriptionPart)
+          .replace('{{amount}}', amountPart),
+        ar: arLocale.payments.employeePayment
+          .replace('{{employeeName}}', employee.name)
+          .replace('{{description}}', descriptionPart)
+          .replace('{{amount}}', amountPart),
+      };
       
       let cashDrawerResult: any;
 

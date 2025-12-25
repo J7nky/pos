@@ -129,8 +129,8 @@ export function PrintLayout({
                   src={logo} 
                   alt="Company Logo" 
                   style={{ 
-                    maxWidth: '100%', 
-                    maxHeight: '100%', 
+                    width: '40pt', 
+                    height: '40pt', 
                     objectFit: 'contain' 
                   }} 
                 />

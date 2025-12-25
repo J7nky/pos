@@ -1,7 +1,9 @@
+import React from 'react';
 import { AccountStatement } from '../services/accountStatementService';
 import { Customer, Supplier } from '../types';
 import { PrintLayout } from './common/PrintLayout';
 import { useI18n } from '../i18n';
+import { getTranslatedString } from '../utils/multilingual';
 
 /**
  * AccountStatementPrintContent Component
@@ -33,7 +35,7 @@ export function AccountStatementPrintContent({
   pages,
   formatCurrency
 }: AccountStatementPrintContentProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
 
   return (
     <>
@@ -99,10 +101,10 @@ export function AccountStatementPrintContent({
                       }
                       
                       return (
-                        <>
+                        <React.Fragment key={transaction.id || `transaction-${transactionIndex}`}>
                           {/* Main transaction row - only show if no line items */}
                           {!hasLineItems && (
-                            <tr key={transaction.id || transactionIndex}>
+                            <tr>
                               <td className="print-table-col-date">
                                 {new Date(transaction.date).toLocaleDateString('ar-LB', {
                                   year: 'numeric',
@@ -112,7 +114,7 @@ export function AccountStatementPrintContent({
                               </td>
                               <td className="print-table-col-reference">{transaction.reference || '-'}</td>
                               <td className="print-table-col-description">
-                                {transaction.description}
+                                {getTranslatedString(transaction.description, language, 'en')}
                               </td>
                               {viewMode === 'detailed' && (
                                 <>
@@ -208,65 +210,51 @@ export function AccountStatementPrintContent({
                               </tr>
                             );
                           })}
-                        </>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
-                  {/* Summary Footer - Only on last page */}
-                  {isLastPage && (
-                    <tfoot>
-                      <tr className="print-summary-footer-row">
-                        <td className="print-table-col-date"></td>
-                        <td className="print-table-col-reference"></td>
-                        <td className="print-table-col-description"></td>
-                        {viewMode === 'detailed' && (
-                          <>
-                            <td className="print-table-col-quantity"></td>
-                            <td className="print-table-col-weight"></td>
-                            <td className="print-table-col-price"></td>
-                          </>
-                        )}
-                        <td className="print-table-col-debit print-number print-currency">
-                          {formatCurrency(
-                            statement.transactions
-                              .filter(t => t.type !== 'payment')
-                              .reduce((sum, t) => sum + (t.amount || 0), 0),
-                            statement.transactions[0]?.currency || 'LBP',
-                            true
-                          )}
-                        </td>
-                        <td className="print-table-col-credit print-number print-currency">
-                          {formatCurrency(
-                            statement.transactions
-                              .filter(t => t.type === 'payment')
-                              .reduce((sum, t) => sum + (t.amount || 0), 0),
-                            statement.transactions[0]?.currency || 'LBP',
-                            true
-                          )}
-                        </td>
-                        <td className="print-table-col-balance print-number print-currency">
-                          {formatCurrency(
-                            statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
-                            statement.transactions[0]?.currency || 'LBP',
-                            true
-                          )}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  )}
                 </table>
               </div>
 
-              {/* Balance Component - Only on last page */}
+              {/* Summary Totals - Separated from table - Only on last page */}
               {isLastPage && (
-                <div className="print-balance-component">
-                  <div className="print-balance-label">{t('customers.balance')}:</div>
-                  <div className="print-balance-value print-number print-currency">
-                    {formatCurrency(
-                      statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
-                      statement.transactions[0]?.currency || 'LBP',
-                      true
-                    )}
+                <div className="print-summary-totals">
+                  <div className="print-summary-totals-row">
+                    <div className="print-summary-totals-item">
+                      <div className="print-summary-totals-label">{t('balanceReport.debitTotal')}:</div>
+                      <div className="print-summary-totals-value print-number print-currency">
+                        {formatCurrency(
+                          statement.transactions
+                            .filter(t => t.type !== 'payment')
+                            .reduce((sum, t) => sum + (t.amount || 0), 0),
+                          statement.transactions[0]?.currency || 'LBP',
+                          true
+                        )}
+                      </div>
+                    </div>
+                    <div className="print-summary-totals-item">
+                      <div className="print-summary-totals-label">{t('balanceReport.creditTotal')}:</div>
+                      <div className="print-summary-totals-value print-number print-currency">
+                        {formatCurrency(
+                          statement.transactions
+                            .filter(t => t.type === 'payment')
+                            .reduce((sum, t) => sum + (t.amount || 0), 0),
+                          statement.transactions[0]?.currency || 'LBP',
+                          true
+                        )}
+                      </div>
+                    </div>
+                    <div className="print-summary-totals-item">
+                      <div className="print-summary-totals-label">{t('customers.balance')}:</div>
+                      <div className="print-summary-totals-value print-number print-currency">
+                        {formatCurrency(
+                          statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
+                          statement.transactions[0]?.currency || 'LBP',
+                          true
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

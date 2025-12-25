@@ -564,7 +564,6 @@ const ar = {
     makePayment: 'إجراء دفعة',
     viewAccountStatement: 'عرض كشف الحساب',
     addNewCustomer: 'إضافة زبون جديد',
-    addNewSupplier: 'إضافة مورد جديد',
     editCustomerTitle: 'تعديل الزبون',
     editSupplierTitle: 'تعديل المورد',
     phone: 'الهاتف',
@@ -692,7 +691,6 @@ const ar = {
   payments: {
     recentPayments: 'المدفوعات الأخيرة'
     ,
-    employeePayment: 'دفعة موظف',
     supplierPayment: 'دفعة مورد',
     customerPayment: 'دفعة زبون',
     refund: 'دفعة مستردة',
@@ -808,6 +806,12 @@ const ar = {
     entityBalanceUpdated: 'تم تحديث رصيد {{entityType}}',
     // Payment Categories
     customerCreditSale: 'بيع آجل للعميل',
+    creditSaleDescription: 'فاتورة بيع دين - {{billNumber}}',
+    creditSaleDescriptionCustomer: 'فاتورة بيع دين - {{billNumber}}',
+    creditSaleDescriptionSupplier: 'فاتورة بيع دين - {{billNumber}}',
+    paymentReceivedFrom: 'دفعة مستلمة من {{entityName}}',
+    paymentSentTo: 'دفعة مرسلة إلى {{entityName}}',
+    employeePayment: 'دفعة موظف ل {{employeeName}}',
     supplierCommission: 'عمولة مورد',
     cashPayment: 'دفعة نقدية',
     cashSale: 'بيع نقدي',

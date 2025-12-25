@@ -19,6 +19,7 @@ import {
 } from '../constants/transactionCategories';
 import { getAccountMapping, getEntityCodeForTransaction, getJournalDescription } from '../utils/accountMapping';
 import { getSystemEntity } from '../constants/systemEntities';
+import type { MultilingualString } from '../utils/multilingual';
 import { 
   generatePaymentReference, 
   generateExpenseReference, 
@@ -48,7 +49,7 @@ export interface CreateTransactionParams {
   category: TransactionCategory;
   amount: number;
   currency: 'USD' | 'LBP';
-  description: string;
+  description: MultilingualString;
   context: TransactionContext;
   
   // Optional fields
@@ -311,7 +312,7 @@ export class TransactionService {
     customerId: string,
     amount: number,
     currency: 'USD' | 'LBP',
-    description: string,
+    description: MultilingualString,
     context: TransactionContext,
     options: { reference?: string; updateCashDrawer?: boolean } = {}
   ): Promise<TransactionResult> {
@@ -334,7 +335,7 @@ export class TransactionService {
     supplierId: string,
     amount: number,
     currency: 'USD' | 'LBP',
-    description: string,
+    description: MultilingualString,
     context: TransactionContext,
     options: { reference?: string; updateCashDrawer?: boolean } = {}
   ): Promise<TransactionResult> {
@@ -973,7 +974,7 @@ export class TransactionService {
     }
 
     // Validate description
-    if (!params.description || params.description.trim().length === 0) {
+    if (!params.description || Object.values(params.description).some(value => value.trim().length === 0)) {
       errors.push('Description is required');
     }
 

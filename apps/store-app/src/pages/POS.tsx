@@ -497,6 +497,9 @@ ${dashSeparator}`;
 
   const updateActiveTab = (updates: Partial<BillTab>) => {
     const updatedTabs = activeTabs.map(tab => {
+      if(tab.paymentMethod==='credit'){
+        updates.amountReceived='0';
+      }
       if (tab.id === activeTabId) {
         let updatedTab = { ...tab, ...updates };
         // If payment method is being updated, also update all cart items

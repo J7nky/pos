@@ -424,6 +424,44 @@ body[dir="ltr"] {
     return balance;
   }
   
+  function getTranslatedString(multilingualData, language, fallbackLanguage = 'en') {
+    if (!multilingualData) {
+      return '';
+    }
+    
+    // If it's already a string, return it (backwards compatible)
+    if (typeof multilingualData === 'string') {
+      return multilingualData;
+    }
+    
+    // If it's an object, try to get the translation for the requested language
+    if (typeof multilingualData === 'object') {
+      // Try requested language first
+      if (multilingualData[language]) {
+        return multilingualData[language];
+      }
+      
+      // Try fallback language
+      if (multilingualData[fallbackLanguage]) {
+        return multilingualData[fallbackLanguage];
+      }
+      
+      // Try Arabic (common in this app)
+      if (multilingualData.ar) {
+        return multilingualData.ar;
+      }
+      
+      // Try any available language
+      const availableLanguages = Object.keys(multilingualData);
+      if (availableLanguages.length > 0) {
+        return multilingualData[availableLanguages[0]];
+      }
+    }
+    
+    // Fallback to empty string
+    return '';
+  }
+  
   function renderStatement() {
     if (!payload || !payload.statement) {
       document.getElementById('statement-root').innerHTML = '<p>Error: No statement data available</p>';
@@ -511,7 +549,7 @@ body[dir="ltr"] {
         html += '<tr>' +
           '<td>' + formatDate(transaction.date) + '</td>' +
           '<td>' + (transaction.reference || '-') + '</td>' +
-          '<td>' + transaction.description + '</td>' +
+          '<td>' + getTranslatedString(transaction.description, language, 'en') + '</td>' +
           (viewMode === 'detailed' ? 
             '<td class="number">' + (transaction.quantity || '-') + '</td>' +
             '<td class="number">' + (transaction.weight ? transaction.weight + 'kg' : '-') + '</td>' +
@@ -1207,8 +1245,8 @@ function convertTextToHTML(content, qrCodeData, qrCodeUrl) {
     if (logoMatch && logoMatch[1]) {
         const logoData = logoMatch[1];
         const logoHtml = `
-      <div style="text-align: center; margin: 10px 0;">
-        <img src="${logoData}" alt="Logo" style="max-width: 150px; max-height: 80px; height: auto; object-fit: contain;" />
+      <div style="text-align: center; margin: 10px 0; width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+        <img src="${logoData}" alt="Logo" style="width: 150px; height: 150px; object-fit: contain;" />
       </div>`;
         htmlContent = htmlContent.replace(logoPlaceholderRegex, logoHtml);
     }

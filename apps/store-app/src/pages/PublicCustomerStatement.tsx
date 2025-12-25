@@ -21,6 +21,7 @@ import { AccountStatement, AccountStatementService } from '../services/accountSt
 import { Customer, Product } from '../types';
 import { supabase } from '../lib/supabase';
 import { useI18n } from '../i18n';
+import { getTranslatedString } from '../utils/multilingual';
 import { PrintLayout } from '../components/common/PrintLayout';
 import { PrintPreview } from '../components/common/PrintPreview';
 import { useState as useStateReact, useRef, useEffect } from 'react';
@@ -329,7 +330,7 @@ export default function PublicCustomerStatement() {
                             })}
                           </td>
                           <td className="print-table-col-reference">{transaction.reference || '-'}</td>
-                          <td className="print-table-col-description">{transaction.description}</td>
+                          <td className="print-table-col-description">{getTranslatedString(transaction.description, language, 'en')}</td>
                           {viewMode === 'detailed' && (
                             <>
                               <td className="print-table-col-quantity print-number">
@@ -477,7 +478,7 @@ export default function PublicCustomerStatement() {
                                 })}
                               </td>
                               <td className="print-table-col-reference">{transaction.reference || '-'}</td>
-                              <td className="print-table-col-description">{transaction.description}</td>
+                              <td className="print-table-col-description">{getTranslatedString(transaction.description, language, 'en')}</td>
                               {viewMode === 'detailed' && (
                                 <>
                                   <td className="print-table-col-quantity print-number">
@@ -781,7 +782,7 @@ export default function PublicCustomerStatement() {
                           </td>
                           <td className="px-6 py-4">
                             <div className="text-sm font-medium text-gray-900">
-                              {transaction.description}
+                              {getTranslatedString(transaction.description, language, 'en')}
                             </div>
                             {transaction.paymentMethod && (
                               <div className="text-xs text-gray-500 mt-1 flex items-center">

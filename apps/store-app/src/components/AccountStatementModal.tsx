@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Fragment } from 'react';
 import { 
   X, 
   Download, 
@@ -18,6 +18,7 @@ import {
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
 import { Customer, Supplier, Transaction, InventoryItem, Product, BillLineItem } from '../types';
 import { useI18n } from '../i18n';
+import { getTranslatedString } from '../utils/multilingual';
 import Toast from './common/Toast';
 import { PrintPreview } from './common/PrintPreview';
 import { setupPrintWithPageSelection } from '../utils/printUtils';
@@ -575,17 +576,17 @@ export default function AccountStatementModal({
                               : (statement.transactions[transactionIndex - 1].balance_after);
                             
                             return (
-                              <>
+                              <Fragment key={transaction.id}>
                                 {/* Main transaction row - only show if no line items */}
                                 {!hasLineItems && (
-                                  <tr key={transaction.id} className="hover:bg-gray-50 transition-colors">
+                                  <tr className="hover:bg-gray-50 transition-colors">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                       {new Date(transaction.date).toLocaleDateString()}
                                     </td>
                                  
                                     <td className="px-6 py-4">
                                       <div className="text-sm font-medium text-gray-900">
-                                        {transaction.description}
+                                        {getTranslatedString(transaction.description, language, 'en')}
                                       </div>
                                       {transaction.paymentMethod && (
                                         <div className="text-xs text-gray-500 mt-1 flex items-center">
@@ -734,7 +735,7 @@ export default function AccountStatementModal({
                                     </tr>
                                   );
                                 })}
-                              </>
+                              </Fragment>
                             );
                           })}
                         </tbody>

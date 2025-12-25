@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useI18n } from "../../../i18n";
+import { getTranslatedString, parseMultilingualString } from "../../../utils/multilingual";
 import {
   RefreshCw,
   Wallet,
@@ -356,7 +357,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   products,
   suppliers,
 }) => {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   // Enhanced filter state
   const [showFilters, setShowFilters] = useState(true);
   const [filters, setFilters] = useState<FilterState>({
@@ -389,10 +390,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   // Enhanced filtered transactions with advanced filtering
   const filteredTransactions = useMemo(() => {
     let filtered = transactions.filter((transaction) => {
-      // Search filter
+      // Search filter - convert multilingual strings to strings for searching
+      const categoryStr = getTranslatedString(parseMultilingualString(transaction.category as any), language as any);
+      const descriptionStr = getTranslatedString(parseMultilingualString(transaction.description as any), language as any);
       const matchesSearch = !filters.searchTerm || 
-        transaction.category.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-        transaction.description.toLowerCase().includes(filters.searchTerm.toLowerCase());
+        categoryStr.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
+        descriptionStr.toLowerCase().includes(filters.searchTerm.toLowerCase());
       
       // Type filter
       const matchesType = !filters.type || transaction.type === filters.type;
@@ -424,7 +427,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           comparison = a.amount - b.amount;
           break;
         case 'category':
-          comparison = a.category.localeCompare(b.category);
+          const aCategory = getTranslatedString(parseMultilingualString(a.category as any), language as any);
+          const bCategory = getTranslatedString(parseMultilingualString(b.category as any), language as any);
+          comparison = aCategory.localeCompare(bCategory);
           break;
         default:
           comparison = 0;
@@ -434,7 +439,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     });
 
     return filtered.slice(0, 10);
-  }, [transactions, filters]);
+  }, [transactions, filters, language]);
 
   // Memoized callback functions
   const handleRefreshCashDrawer = useCallback(async () => {
@@ -684,10 +689,10 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-gray-900 truncate">
-                        {transaction.category}
+                        {getTranslatedString(parseMultilingualString(transaction.category as any), language as any)}
                       </div>
                       <div className="text-xs text-gray-500 truncate">
-                        {transaction.description}
+                        {getTranslatedString(parseMultilingualString(transaction.description as any), language as any)}
                       </div>
                       <div className="flex items-center space-x-2 mt-1">
                         <span className="text-xs text-gray-400">

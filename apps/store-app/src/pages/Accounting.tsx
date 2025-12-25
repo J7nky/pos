@@ -296,7 +296,9 @@ export default function Accounting() {
       .filter(t => t.type === 'income')
       .reduce((sum, t) => {
         // Check if this transaction was originally LBP but converted to USD for storage
-        const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
+        const originalLBPAmount = (typeof t.description === 'string' && t.description) 
+          ? t.description.match(/Originally ([\d,]+) LBP/)
+          : null;
         if (originalLBPAmount) {
           // Use the original LBP amount for calculations
           const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
@@ -310,7 +312,9 @@ export default function Accounting() {
       .filter(t => t.type === 'expense')
       .reduce((sum, t) => {
         // Check if this transaction was originally LBP but converted to USD for storage
-        const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
+        const originalLBPAmount = (typeof t.description === 'string' && t.description) 
+          ? t.description.match(/Originally ([\d,]+) LBP/)
+          : null;
         if (originalLBPAmount) {
           // Use the original LBP amount for calculations
           const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));

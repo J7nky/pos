@@ -1228,31 +1228,73 @@ function BranchInfoSection() {
   // Update temp state when branch changes
   useEffect(() => {
     if (currentBranch) {
+      console.log('🔄 BranchInfoSection: currentBranch updated', {
+        id: currentBranch.id,
+        name: currentBranch.name,
+        address: currentBranch.address,
+        phone: currentBranch.phone
+      });
       setTempBranch({
         name: currentBranch.name || '',
         address: currentBranch.address || '',
         phone: currentBranch.phone || ''
       });
     }
-  }, [currentBranch]);
+  }, [currentBranch?.id, currentBranch?.name, currentBranch?.address, currentBranch?.phone]);
   
   const handleSave = async () => {
-    if (!currentBranchId || !isAdmin) return;
+    console.log('🔘 handleSave called for branch info:', { 
+      currentBranchId, 
+      isAdmin, 
+      hasUpdateBranch: !!offlineData?.updateBranch,
+      tempBranch 
+    });
+    
+    if (!currentBranchId) {
+      console.error('❌ No current branch ID');
+      setSaveError('No branch selected');
+      setTimeout(() => setSaveError(null), 3000);
+      return;
+    }
+    
+    if (!isAdmin) {
+      console.error('❌ User is not admin');
+      setSaveError('Only admins can update branch information');
+      setTimeout(() => setSaveError(null), 3000);
+      return;
+    }
+    
+    if (!offlineData?.updateBranch) {
+      console.error('❌ updateBranch function not available');
+      setSaveError('Update function not available. Please refresh the page.');
+      setTimeout(() => setSaveError(null), 3000);
+      return;
+    }
     
     try {
-      if (offlineData?.updateBranch) {
-        await offlineData.updateBranch(currentBranchId, {
+      console.log('💾 Calling updateBranch with:', {
+        id: currentBranchId,
+        updates: {
           name: tempBranch.name,
           address: tempBranch.address || null,
           phone: tempBranch.phone || null
-        });
-        setShowSaveMessage(true);
-        setSaveError(null);
-        setTimeout(() => setShowSaveMessage(false), 2000);
-      }
+        }
+      });
+      
+      await offlineData.updateBranch(currentBranchId, {
+        name: tempBranch.name,
+        address: tempBranch.address || null,
+        phone: tempBranch.phone || null
+      });
+      
+      console.log('✅ Branch update completed successfully');
+      setShowSaveMessage(true);
+      setSaveError(null);
+      setTimeout(() => setShowSaveMessage(false), 2000);
     } catch (error) {
-      console.error('Error saving branch info:', error);
-      setSaveError('Failed to save branch information');
+      console.error('❌ Error saving branch info:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Failed to save branch information';
+      setSaveError(errorMsg);
       setTimeout(() => setSaveError(null), 3000);
     }
   };

@@ -494,6 +494,14 @@ export class SyncService {
         const activeRecords = await table.filter((record: any) => !record._synced && !record._deleted).toArray();
         const deletedRecords = await table.filter((record: any) => record._deleted && !record._synced).toArray();
 
+        // Special logging for branches
+        if (tableName === 'branches' && activeRecords.length > 0) {
+          console.log(`📤 [Sync] Found ${activeRecords.length} unsynced branch record(s) to upload`);
+          activeRecords.forEach((r: any) => {
+            console.log(`   - Branch ${r.id}: name="${r.name}", address="${r.address}", phone="${r.phone}", _synced=${r._synced}`);
+          });
+        }
+
         if (activeRecords.length === 0 && deletedRecords.length === 0) {
           continue;
         }
@@ -746,12 +754,27 @@ export class SyncService {
             }
           }
 
+          // Special logging for branches before upload
+          if (tableName === 'branches' && cleanedBatch.length > 0) {
+            console.log(`📤 [Sync] Uploading ${cleanedBatch.length} branch record(s) to Supabase:`, 
+              cleanedBatch.map((r: any) => ({ id: r.id, name: r.name, address: r.address, phone: r.phone }))
+            );
+          }
+
           const { error } = await supabase
             .from(tableName as any)
             .upsert(cleanedBatch, { onConflict: 'id' });
 
           if (error) {
             console.error(`❌ Upload failed for ${tableName}:`, error);
+            if (tableName === 'branches') {
+              console.error(`❌ Branch upload error details:`, { 
+                errorCode: error.code, 
+                errorMessage: error.message, 
+                errorDetails: error.details,
+                records: cleanedBatch.map((r: any) => ({ id: r.id, name: r.name }))
+              });
+            }
             result.errors.push(`Upload failed for ${tableName}: ${error.message}`);
 
             // Special handling for cash_drawer_sessions unique constraint violation
@@ -780,6 +803,13 @@ export class SyncService {
             }
             result.uploaded += batch.length;
             console.log(`✅ [Sync] Successfully uploaded ${batch.length} ${tableName} records to Supabase`);
+            
+            // Special logging for branches
+            if (tableName === 'branches' && batch.length > 0) {
+              console.log(`✅ [Sync] Branch upload success details:`, 
+                batch.map((r: any) => ({ id: r.id, name: r.name, address: r.address, phone: r.phone }))
+              );
+            }
             
             // 🎯 EMIT EVENTS: After successful upload to Supabase
             // This ensures the record exists when other devices receive the event

@@ -284,6 +284,8 @@ export default function Customers() {
       });
 
       if (result.success) {
+        // Force immediate refresh to ensure UI updates with new balances
+        await raw.refreshData();
         // Show success message
         const action = entityType === 'customer' ? 'received' : 'sent';
         showToast(`Payment ${action}! ${entity.name} balance updated`, 'success');

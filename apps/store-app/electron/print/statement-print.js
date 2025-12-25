@@ -51,16 +51,54 @@ function getTransactionTypeLabel(type, entityType) {
 }
 
 // Calculate incremental balance for line items
-function calculateLineItemBalance(balanceBefore, lineItems, currentIndex) {
-  let balance = balanceBefore;
-  for (let i = 0; i <= currentIndex; i++) {
-    const item = lineItems[i];
-    const debit = item.debit_amount || 0;
-    const credit = item.credit_amount || 0;
-    balance += debit - credit;
+  function calculateLineItemBalance(balanceBefore, lineItems, currentIndex) {
+    let balance = balanceBefore;
+    for (let i = 0; i <= currentIndex; i++) {
+      const item = lineItems[i];
+      const debit = item.debit_amount || 0;
+      const credit = item.credit_amount || 0;
+      balance += debit - credit;
+    }
+    return balance;
   }
-  return balance;
-}
+  
+  function getTranslatedString(multilingualData, language, fallbackLanguage = 'en') {
+    if (!multilingualData) {
+      return '';
+    }
+    
+    // If it's already a string, return it (backwards compatible)
+    if (typeof multilingualData === 'string') {
+      return multilingualData;
+    }
+    
+    // If it's an object, try to get the translation for the requested language
+    if (typeof multilingualData === 'object') {
+      // Try requested language first
+      if (multilingualData[language]) {
+        return multilingualData[language];
+      }
+      
+      // Try fallback language
+      if (multilingualData[fallbackLanguage]) {
+        return multilingualData[fallbackLanguage];
+      }
+      
+      // Try Arabic (common in this app)
+      if (multilingualData.ar) {
+        return multilingualData.ar;
+      }
+      
+      // Try any available language
+      const availableLanguages = Object.keys(multilingualData);
+      if (availableLanguages.length > 0) {
+        return multilingualData[availableLanguages[0]];
+      }
+    }
+    
+    // Fallback to empty string
+    return '';
+  }
 
 // Render the statement
 function renderStatement(data) {
@@ -167,7 +205,7 @@ function renderStatement(data) {
         <tr>
           <td>${formatDate(transaction.date)}</td>
           <td>${transaction.reference || '-'}</td>
-          <td>${transaction.description}</td>
+          <td>${getTranslatedString(transaction.description, language, 'en')}</td>
           ${viewMode === 'detailed' ? `
             <td class="number">${transaction.quantity || '-'}</td>
             <td class="number">${transaction.weight ? `${transaction.weight}kg` : '-'}</td>
