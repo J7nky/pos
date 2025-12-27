@@ -3,6 +3,8 @@ import { User } from '@supabase/supabase-js';
 import { SupabaseService } from '../services/supabaseService';
 import { supabase } from '../lib/supabase';
 import { getDB } from '../lib/db';
+import { localAuthService } from '../services/localAuthService';
+import { credentialStorageService } from '../services/credentialStorageService';
 
 interface UserProfile {
   id: string;
@@ -36,6 +38,7 @@ interface SupabaseAuthContextType {
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   getStores: () => Promise<any[]>;
   refreshSession: () => Promise<boolean>;
+  syncCredentialsWithSupabase: (email: string, password: string) => Promise<boolean>;
   clearError: () => void;
 }
 
@@ -145,6 +148,67 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     
     cleanupCorruptedData();
     
+    // Initialize database first
+    getDB().ensureOpen().catch((dbError) => {
+      console.error('❌ Database initialization failed:', dbError);
+    });
+
+    // Check for local session first (offline support)
+    const localSession = localAuthService.getSession();
+    if (localSession) {
+      console.log('🔐 Local session found - loading user from local storage');
+      localAuthService.getCurrentUser().then(async (localUser) => {
+        if (localUser) {
+          // Load user profile from local storage
+          const localProfile = await localAuthService.getUserProfile(localUser.id);
+          if (localProfile) {
+            setUserProfile(localProfile);
+          }
+          
+          // Create a mock Supabase User object for compatibility
+          const mockSupabaseUser: User = {
+            id: localUser.id,
+            email: localUser.email,
+            created_at: localUser.created_at || new Date().toISOString(),
+            app_metadata: {},
+            user_metadata: {
+              name: localUser.name,
+              role: localUser.role,
+            },
+            aud: 'authenticated',
+            confirmation_sent_at: null,
+            recovery_sent_at: null,
+            email_confirmed_at: null,
+            invited_at: null,
+            action_link: null,
+            phone: null,
+            phone_confirmed_at: null,
+            confirmed_at: null,
+            last_sign_in_at: new Date().toISOString(),
+            role: 'authenticated',
+            updated_at: new Date().toISOString(),
+          };
+          
+          setUser(mockSupabaseUser);
+          setLoading(false);
+          
+          // Try to sync with Supabase if online
+          if (navigator.onLine) {
+            const credential = await credentialStorageService.getCredentials(localUser.id);
+            if (credential && !credential.supabaseUserId) {
+              // Try to sync in background
+              console.log('🔄 Attempting to sync local credentials with Supabase...');
+            }
+          }
+          
+          return;
+        }
+      }).catch((error) => {
+        console.error('Error loading local user:', error);
+        // Continue to Supabase check
+      });
+    }
+
     // Check if we have valid Supabase credentials
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -152,91 +216,89 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'https://placeholder.supabase.co') {
       console.log('No valid Supabase credentials found. Running in offline mode.');
       
-      // Initialize database even in offline mode (readonly/guest mode)
-      try {
-         getDB().ensureOpen();
-        console.log('💾 Database initialized for offline mode');
-      } catch (dbError) {
-        console.error('❌ Database initialization failed in offline mode:', dbError);
+      // If we have a local session, we're already set above
+      if (!localSession) {
+        setLoading(false);
+        setUser(null);
+        setUserProfile(null);
       }
-      
-      setLoading(false);
-      setUser(null);
-      setUserProfile(null);
       return;
     }
 
     // Set a timeout to prevent hanging
     const timeoutId = setTimeout(() => {
-      console.log('Supabase connection timeout - running in offline mode');
-      setLoading(false);
-      setUser(null);
-      setUserProfile(null);
+      console.log('Supabase connection timeout - using local session if available');
+      if (!localSession) {
+        setLoading(false);
+        setUser(null);
+        setUserProfile(null);
+      }
     }, 5000); // 5 second timeout
 
-    // Get initial session with timeout
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      clearTimeout(timeoutId);
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      
-      console.log('🔐 Session loaded:', currentUser ? 'authenticated' : 'not authenticated');
-      
-      // Initialize database now that auth state is stable
-      // This ensures DB opens only after we know authentication status
-      // Works for both authenticated (full access) and unauthenticated (readonly/guest mode)
-      try {
-        await getDB().ensureOpen();
-        console.log('💾 Database initialized after auth state check');
-      } catch (dbError) {
-        console.error('❌ Database initialization failed:', dbError);
-        // Don't block app startup if DB init fails - corruption recovery will handle it
-      }
-      
-      // Load profile immediately if user exists
-      if (currentUser) {
-        // Try to load cached profile first for instant UI
-        const cachedProfile = SupabaseService.getCachedUserProfile(currentUser.id);
-        if (cachedProfile) {
-          console.log('⚡ Using cached profile - UI ready immediately');
-          setUserProfile(cachedProfile);
-          // We have cached profile, show UI immediately
-          setLoading(false);
-          
-          // Then load fresh profile from server in background
-          loadUserProfile(currentUser.id).catch(err => {
-            console.error('Background profile update failed:', err);
-          });
-        } else {
-          console.log('📡 No cached profile - loading from server...');
-          // No cached profile, try to load from server with timeout
-          const profileLoadTimeout = setTimeout(() => {
-            console.warn('⏱️ Profile loading timeout - proceeding anyway');
+    // Get initial session with timeout (only if no local session)
+    if (!localSession && navigator.onLine) {
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        clearTimeout(timeoutId);
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+        
+        console.log('🔐 Session loaded:', currentUser ? 'authenticated' : 'not authenticated');
+        
+        // Load profile immediately if user exists
+        if (currentUser) {
+          // Try to load cached profile first for instant UI
+          const cachedProfile = SupabaseService.getCachedUserProfile(currentUser.id);
+          if (cachedProfile) {
+            console.log('⚡ Using cached profile - UI ready immediately');
+            setUserProfile(cachedProfile);
+            // We have cached profile, show UI immediately
             setLoading(false);
-          }, 3000);
-          
-          try {
-            await loadUserProfile(currentUser.id);
-            clearTimeout(profileLoadTimeout);
-            console.log('✅ Profile loaded successfully');
-            setLoading(false);
-          } catch (error) {
-            clearTimeout(profileLoadTimeout);
-            console.error('❌ Profile loading failed:', error);
-            setLoading(false);
+            
+            // Then load fresh profile from server in background
+            loadUserProfile(currentUser.id).catch(err => {
+              console.error('Background profile update failed:', err);
+            });
+          } else {
+            console.log('📡 No cached profile - loading from server...');
+            // No cached profile, try to load from server with timeout
+            const profileLoadTimeout = setTimeout(() => {
+              console.warn('⏱️ Profile loading timeout - proceeding anyway');
+              setLoading(false);
+            }, 3000);
+            
+            try {
+              await loadUserProfile(currentUser.id);
+              clearTimeout(profileLoadTimeout);
+              console.log('✅ Profile loaded successfully');
+              setLoading(false);
+            } catch (error) {
+              clearTimeout(profileLoadTimeout);
+              console.error('❌ Profile loading failed:', error);
+              setLoading(false);
+            }
           }
+        } else {
+          console.log('👤 No user - showing login');
+          setLoading(false);
         }
+      }).catch((error) => {
+        clearTimeout(timeoutId);
+        console.error('Error getting session:', error);
+        // If Supabase fails and no local session, show login
+        if (!localSession) {
+          setLoading(false);
+          setUser(null);
+          setUserProfile(null);
+        }
+      });
+    } else {
+      clearTimeout(timeoutId);
+      if (localSession) {
+        // Already handled above
       } else {
-        console.log('👤 No user - showing login');
         setLoading(false);
       }
-    }).catch((error) => {
-      clearTimeout(timeoutId);
-      console.error('Error getting session:', error);
-      setLoading(false);
-      setUser(null);
-      setUserProfile(null);
-    });
+    }
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -321,48 +383,132 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       setLoading(true);
       
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const isOnline = navigator.onLine;
       
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return { success: false, error: error.message };
-      }
-      
-      if (!data.user) {
-        setError('No user data returned');
-        setLoading(false);
-        return { success: false, error: 'No user data returned' };
-      }
-      
-      // Try to load cached profile immediately for faster UX
-      const cachedProfile = SupabaseService.getCachedUserProfile(data.user.id);
-      if (cachedProfile) {
-        setUserProfile(cachedProfile);
-        setLoading(false);
-      }
-      
-      // Record check-in for employee attendance tracking
-      if (cachedProfile?.store_id) {
+      // Try Supabase authentication first if online
+      if (isOnline) {
         try {
-          const { EmployeeAttendanceService } = await import('../services/employeeAttendanceService');
-          // Check if already checked in before attempting check-in
-          const currentStatus = await EmployeeAttendanceService.getCurrentStatus(data.user.id);
-          if (!currentStatus) {
-            await EmployeeAttendanceService.checkIn(data.user.id, cachedProfile.store_id);
-            console.log('✅ Employee check-in recorded');
-          } else {
-            console.log('ℹ️ Employee already checked in, skipping check-in');
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+          
+          if (!error && data?.user) {
+            // Successfully authenticated with Supabase
+            // Store credentials locally for offline access
+            try {
+              // Find local user by email to get userId
+              const localUser = await getDB().users.where('email').equals(email).first();
+              if (localUser) {
+                await localAuthService.storeCredentialsFromSupabase(
+                  localUser.id,
+                  email,
+                  password,
+                  data.user.id
+                );
+              } else {
+                // Create local user entry if it doesn't exist
+                // This might happen if user was created directly in Supabase
+                console.warn('Local user not found, credentials not stored for offline access');
+              }
+            } catch (credentialError) {
+              console.warn('Failed to store credentials for offline access:', credentialError);
+              // Don't fail login if credential storage fails
+            }
+            
+            // Try to load cached profile immediately for faster UX
+            const cachedProfile = SupabaseService.getCachedUserProfile(data.user.id);
+            if (cachedProfile) {
+              setUserProfile(cachedProfile);
+              setLoading(false);
+            }
+            
+            // Record check-in for employee attendance tracking
+            if (cachedProfile?.store_id) {
+              try {
+                const { EmployeeAttendanceService } = await import('../services/employeeAttendanceService');
+                const currentStatus = await EmployeeAttendanceService.getCurrentStatus(data.user.id);
+                if (!currentStatus) {
+                  await EmployeeAttendanceService.checkIn(data.user.id, cachedProfile.store_id);
+                  console.log('✅ Employee check-in recorded');
+                } else {
+                  console.log('ℹ️ Employee already checked in, skipping check-in');
+                }
+              } catch (attendanceError) {
+                console.warn('Failed to record employee check-in:', attendanceError);
+              }
+            }
+            
+            // Note: onAuthStateChange will handle loading fresh profile
+            return { success: true };
           }
-        } catch (attendanceError) {
-          // Don't fail login if attendance check-in fails
-          console.warn('Failed to record employee check-in:', attendanceError);
+          
+          // If Supabase auth failed, fall through to local auth
+          console.log('Supabase authentication failed, trying local authentication...');
+        } catch (supabaseError: any) {
+          // Network error or Supabase unavailable - try local auth
+          console.log('Supabase unavailable, trying local authentication...', supabaseError?.message);
         }
       }
       
-      // Note: onAuthStateChange will handle loading fresh profile
-      
-      return { success: true };
+      // Offline or Supabase failed - try local authentication
+      try {
+        const localUser = await localAuthService.signIn(email, password);
+        
+        // Load user profile from local storage
+        const localProfile = await localAuthService.getUserProfile(localUser.id);
+        if (localProfile) {
+          setUserProfile(localProfile);
+        }
+        
+        // Create a mock Supabase User object for compatibility
+        const mockSupabaseUser: User = {
+          id: localUser.id,
+          email: localUser.email,
+          created_at: localUser.created_at || new Date().toISOString(),
+          app_metadata: {},
+          user_metadata: {
+            name: localUser.name,
+            role: localUser.role,
+          },
+          aud: 'authenticated',
+          confirmation_sent_at: null,
+          recovery_sent_at: null,
+          email_confirmed_at: null,
+          invited_at: null,
+          action_link: null,
+          phone: null,
+          phone_confirmed_at: null,
+          confirmed_at: null,
+          last_sign_in_at: new Date().toISOString(),
+          role: 'authenticated',
+          updated_at: new Date().toISOString(),
+        };
+        
+        setUser(mockSupabaseUser);
+        setLoading(false);
+        
+        // Try to sync with Supabase in background when connection is restored
+        if (!isOnline) {
+          // Listen for online event to sync
+          const syncOnOnline = async () => {
+            if (navigator.onLine) {
+              try {
+                await localAuthService.syncWithSupabase(localUser.id, email, password);
+                console.log('✅ Credentials synced with Supabase');
+              } catch (syncError) {
+                console.warn('Failed to sync credentials with Supabase:', syncError);
+              }
+              window.removeEventListener('online', syncOnOnline);
+            }
+          };
+          window.addEventListener('online', syncOnOnline);
+        }
+        
+        return { success: true };
+      } catch (localError: any) {
+        const errorMessage = localError?.message || 'Invalid email or password';
+        setError(errorMessage);
+        setLoading(false);
+        return { success: false, error: errorMessage };
+      }
     } catch (error: any) {
       const errorMessage = error?.message || 'An unexpected error occurred';
       setError(errorMessage);
@@ -460,7 +606,19 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         console.warn('Failed to clear all branch preferences:', err);
       }
       
-      await supabase.auth.signOut();
+      // Sign out from Supabase (if online and has Supabase session)
+      if (navigator.onLine) {
+        try {
+          await supabase.auth.signOut();
+        } catch (error) {
+          console.warn('Supabase sign out failed:', error);
+        }
+      }
+      
+      // Sign out from local auth
+      localAuthService.signOut();
+      
+      setUser(null);
       setUserProfile(null);
       
       // Clear localStorage
@@ -499,10 +657,58 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const refreshSession = async (): Promise<boolean> => {
     try {
       setError(null);
+      
+      // If offline, check local session
+      if (!navigator.onLine) {
+        const localSession = localAuthService.getSession();
+        if (localSession) {
+          const localUser = await localAuthService.getCurrentUser();
+          if (localUser) {
+            const localProfile = await localAuthService.getUserProfile(localUser.id);
+            if (localProfile) {
+              setUserProfile(localProfile);
+            }
+            return true;
+          }
+        }
+        return false;
+      }
+      
       const { error } = await supabase.auth.refreshSession();
       return !error;
     } catch (error: any) {
       setError(error?.message || 'Session refresh failed');
+      return false;
+    }
+  };
+
+  /**
+   * Sync local credentials with Supabase when connection is restored
+   */
+  const syncCredentialsWithSupabase = async (email: string, password: string): Promise<boolean> => {
+    try {
+      if (!navigator.onLine) {
+        console.log('Cannot sync - offline');
+        return false;
+      }
+
+      // Find local user
+      const localUser = await getDB().users.where('email').equals(email).first();
+      if (!localUser) {
+        console.warn('Local user not found for sync');
+        return false;
+      }
+
+      // Try to sync
+      const synced = await localAuthService.syncWithSupabase(localUser.id, email, password);
+      if (synced) {
+        console.log('✅ Credentials synced with Supabase');
+        return true;
+      }
+
+      return false;
+    } catch (error: any) {
+      console.error('Error syncing credentials:', error);
       return false;
     }
   };
@@ -533,6 +739,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       resetPassword,
       getStores,
       refreshSession,
+      syncCredentialsWithSupabase,
       clearError
     }}>
       {children}

@@ -122,6 +122,19 @@ class POSDatabase extends Dexie {
   subscriptions!: Table<any, string>; // Will be properly typed when imported
   license_validations!: Table<any, string>;
   
+  // Local authentication tables
+  localPasswords!: Table<{ userId: string; passwordHash: string }, string>; // Legacy table for LocalAuthService
+  localCredentials!: Table<{
+    userId: string;
+    email: string;
+    encryptedPasswordHash: string;
+    iv: string;
+    salt: string;
+    createdAt: string;
+    lastSyncedAt?: string;
+    supabaseUserId?: string;
+  }, string>; // Secure credential storage
+  
   // Database initialization state
   private _isInitialized = false;
   private _initPromise: Promise<void> | null = null;
@@ -2195,7 +2208,11 @@ class POSDatabase extends Dexie {
       
       // Subscription management tables
       subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
-      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at'
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at',
+      
+      // Local authentication tables
+      localPasswords: 'userId, passwordHash', // Legacy table for LocalAuthService
+      localCredentials: 'userId, email, supabaseUserId' // Secure credential storage
     }).upgrade(trans => {
       console.log('🔧 Running migration v49: Add logo fields');
       console.log('   ✅ Added logo field to stores table (store-specific logo)');
@@ -2203,6 +2220,71 @@ class POSDatabase extends Dexie {
       console.log('   📢 Global logos are stored in Supabase Storage bucket "global-logos"');
       console.log('   📢 Branch logos can be base64 (custom) or URL (selected global logo)');
       // No data migration needed - new fields are nullable
+    });
+
+    // Migration for version 50 - add local authentication tables
+    this.version(50).stores({
+      // Store configuration
+      stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+      branches: 'id, store_id, name, is_active, updated_at, _synced, _deleted',
+      
+      // Core tables
+      products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
+      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+
+      // Inventory tables
+      inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, [store_id+branch_id], _synced, _deleted',
+      transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, reversal_of_transaction_id, [store_id+branch_id], _synced, _deleted',
+      inventory_bills: 'id, store_id, branch_id, supplier_id, received_at, created_by, currency, [store_id+branch_id], _synced, _deleted',
+  
+      // Bill management tables
+      bills: 'id, store_id, branch_id, customer_id, bill_number, payment_method, payment_status, bill_date, status, created_by, created_at, [store_id+branch_id], _synced, _deleted',
+      bill_line_items: 'id, store_id, branch_id, bill_id, inventory_item_id, product_id, created_at, [store_id+branch_id], [store_id+bill_id], _synced, _deleted',
+      bill_audit_logs: 'id, store_id, branch_id, bill_id, action, changed_by, created_at, [store_id+branch_id], [store_id+bill_id], _synced, _deleted',
+      
+      // Cash drawer
+      cash_drawer_sessions: 'id, store_id, branch_id, opened_by, opened_at, closed_at, status, [store_id+branch_id], [store_id+branch_id+status], _synced, _deleted',
+      cash_drawer_accounts: 'id, store_id, branch_id, currency, created_at, updated_at, [store_id+branch_id], [store_id+branch_id+currency], _synced, _deleted',
+
+      // Public access tokens
+      public_access_tokens: 'id, customer_id, token, expires_at, created_at, _synced, _deleted',
+      
+      // Notification preferences
+      notification_preferences: 'id, store_id, branch_id, updated_at, _synced, _deleted',
+      
+      // Reminder system
+      reminders: 'id, store_id, branch_id, type, title, due_date, status, created_by, created_at, updated_at, _synced, _deleted',
+      
+      // Employee attendance
+      employee_attendance: 'id, store_id, branch_id, employee_id, check_in_at, check_out_at, created_at, updated_at, _synced, _deleted',
+      
+      // Accounting foundation tables
+      journal_entries: 'id, store_id, branch_id, transaction_id, entity_id, account_code, posted_date, created_at, [store_id+branch_id], [store_id+account_code], [entity_id+account_code], [transaction_id], _synced, _deleted',
+      balance_snapshots: 'id, store_id, branch_id, account_code, entity_id, balance_usd, balance_lbp, snapshot_date, snapshot_type, verified, created_at, [store_id+branch_id], [store_id+account_code+entity_id+snapshot_date], [store_id+account_code+entity_id], [store_id+snapshot_date+snapshot_type], [store_id+snapshot_date], _synced, _deleted',
+      entities: 'id, store_id, branch_id, entity_type, entity_code, name, is_system_entity, updated_at, [store_id+branch_id], [store_id+entity_type], [store_id+entity_code], [store_id+is_system_entity], _synced, _deleted',
+      chart_of_accounts: 'id, store_id, branch_id, account_code, [store_id+account_code], account_name, updated_at, _synced, _deleted',
+      
+      // RBAC tables (Unified - replaces user_module_access)
+      role_permissions: 'id, [role+operation], role, updated_at, _synced, _deleted', // GLOBAL permissions (no store_id)
+      user_permissions: 'id, [user_id+store_id], [user_id+store_id+operation], user_id, store_id, updated_at, _synced, _deleted',
+      
+      // Sync management
+      sync_metadata: 'id, table_name, last_synced_at',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count',
+      sync_state: 'branch_id, last_seen_event_version, updated_at',
+      
+      // Subscription management tables
+      subscriptions: 'id, store_id, tier, status, expires_at, last_validated_at, created_at, updated_at, _synced',
+      license_validations: 'id, store_id, subscription_id, validation_type, validation_result, created_at',
+      
+      // Local authentication tables
+      localPasswords: 'userId, passwordHash', // Legacy table for LocalAuthService
+      localCredentials: 'userId, email, supabaseUserId' // Secure credential storage
+    }).upgrade(trans => {
+      console.log('🔧 Running migration v50: Add local authentication tables');
+      console.log('   ✅ Added localPasswords table (legacy support)');
+      console.log('   ✅ Added localCredentials table (secure credential storage)');
+      // No data migration needed - new tables are empty
     });
   }
 

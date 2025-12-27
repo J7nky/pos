@@ -28,9 +28,13 @@ const isOnline = () => navigator.onLine;
 const safeSupabaseUrl = supabaseUrl || 'https://placeholder.supabase.co';
 const safeSupabaseAnonKey = supabaseAnonKey || 'placeholder-key';
 
+// Determine if we should enable auto token refresh (only when online)
+// Note: We can't dynamically change this, but we'll block refresh attempts in the fetch interceptor
+const shouldAutoRefreshToken = isOnline();
+
 export const supabase = createClient<Database>(safeSupabaseUrl, safeSupabaseAnonKey, {
   auth: {
-    autoRefreshToken: true,
+    autoRefreshToken: shouldAutoRefreshToken, // Disable when offline to prevent ERR_NAME_NOT_RESOLVED
     persistSession: true,
     detectSessionInUrl: true
   },
@@ -39,19 +43,17 @@ export const supabase = createClient<Database>(safeSupabaseUrl, safeSupabaseAnon
       'X-Client-Info': `pos-app-${isOnline() ? 'online' : 'offline'}`
     },
     fetch: async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      // If offline, prevent all Supabase requests except auth token refresh
+      // If offline, prevent ALL Supabase requests including auth token refresh
+      // This prevents ERR_NAME_NOT_RESOLVED errors when there's no internet
       if (!navigator.onLine) {
         const url = typeof input === 'string' ? input : input.toString();
         
-        // Allow auth token refresh to prevent auth errors
-        if (url.includes('/auth/v1/token')) {
-          console.log('🔄 Attempting auth token refresh while offline');
-          try {
-            return await fetch(input, init);
-          } catch (error) {
-            console.log('⚠️ Auth token refresh failed while offline - this is expected');
-            throw new Error('Offline - auth refresh failed');
-          }
+        // Block ALL requests when offline, including token refresh
+        // The app will use local authentication instead
+        if (url.includes('/auth/v1/token') || url.includes('/auth/v1/')) {
+          console.log('🚫 Blocking auth token refresh while offline - using local authentication');
+          // Return a mock response to prevent errors, but the app should handle this gracefully
+          throw new Error('Offline - authentication unavailable. Please use local credentials.');
         }
         
         // Block all other requests when offline

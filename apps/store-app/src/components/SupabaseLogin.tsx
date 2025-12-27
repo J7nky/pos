@@ -1,9 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { ShoppingCart, Eye, EyeOff } from 'lucide-react';
 import SearchableSelect from './common/SearchableSelect';
+import SavedUserCard from './SavedUserCard';
+import { credentialStorageService } from '../services/credentialStorageService';
 // Removed SupabaseService import - using auth context methods only
 import { useI18n } from '../i18n';
+
+interface SavedUser {
+  id: string;
+  email: string;
+  name: string;
+}
 
 export default function SupabaseLogin() {
   const [email, setEmail] = useState('');
@@ -18,7 +26,31 @@ export default function SupabaseLogin() {
   const [storeId, setStoreId] = useState('');
   const [stores, setStores] = useState<any[]>([]);
   const [storesLoading, setStoresLoading] = useState(false);
+  const [savedUsers, setSavedUsers] = useState<SavedUser[]>([]);
+  const [selectedUser, setSelectedUser] = useState<SavedUser | null>(null);
+  const [loadingSavedUsers, setLoadingSavedUsers] = useState(true);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
   const { t } = useI18n();
+
+  // Load saved users on mount
+  useEffect(() => {
+    const loadSavedUsers = async () => {
+      try {
+        setLoadingSavedUsers(true);
+        const users = await credentialStorageService.getAllSavedUsers();
+        setSavedUsers(users);
+      } catch (error) {
+        console.error('Error loading saved users:', error);
+        setSavedUsers([]);
+      } finally {
+        setLoadingSavedUsers(false);
+      }
+    };
+
+    if (!showSignUp) {
+      loadSavedUsers();
+    }
+  }, [showSignUp]);
 
   useEffect(() => {
     if (showSignUp) {
@@ -34,6 +66,50 @@ export default function SupabaseLogin() {
       });
     }
   }, [showSignUp, getStores]);
+
+  // Focus password field when user is selected
+  useEffect(() => {
+    if (selectedUser && passwordInputRef.current) {
+      passwordInputRef.current.focus();
+    }
+  }, [selectedUser]);
+
+  const handleUserSelect = (user: SavedUser) => {
+    setSelectedUser(user);
+    setEmail(user.email);
+    setError('');
+    // Password field will be focused by useEffect
+  };
+
+  const handleUseDifferentAccount = () => {
+    setSelectedUser(null);
+    setEmail('');
+    setPassword('');
+    setError('');
+  };
+
+  const handleRemoveUser = async (userId: string, userName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!window.confirm(`Remove saved credentials for ${userName}? You'll need to enter your email and password next time.`)) {
+      return;
+    }
+
+    try {
+      await credentialStorageService.removeSavedUser(userId);
+      
+      // Remove from saved users list
+      setSavedUsers(prev => prev.filter(u => u.id !== userId));
+      
+      // If removed user was selected, clear selection
+      if (selectedUser?.id === userId) {
+        handleUseDifferentAccount();
+      }
+    } catch (error) {
+      console.error('Error removing saved user:', error);
+      setError('Failed to remove saved user');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,15 +127,29 @@ export default function SupabaseLogin() {
           setError('Sign up failed. Please try again.');
         } else {
           setShowSignUp(false);
+          // Reload saved users after signup
+          const users = await credentialStorageService.getAllSavedUsers();
+          setSavedUsers(users);
         }
       } else {
-        const success = await signIn(email, password);
-        if (!success) {
-          setError('Invalid email or password');
+        const result = await signIn(email, password);
+        if (!result.success) {
+          // Show appropriate error message
+          if (navigator.onLine) {
+            setError(result.error || 'Invalid email or password');
+          } else {
+            setError(result.error || 'Invalid email or password. Please check your credentials or connect to the internet.');
+          }
+        } else {
+          // Reload saved users after successful login (in case new credentials were saved)
+          const users = await credentialStorageService.getAllSavedUsers();
+          setSavedUsers(users);
         }
+        // If successful, the auth context will handle navigation
       }
-    } catch (error) {
-      setError('An error occurred. Please try again.');
+    } catch (error: any) {
+      const errorMessage = error?.message || 'An error occurred. Please try again.';
+      setError(errorMessage);
       console.log(error);
     } finally {
       setIsLoading(false);
@@ -76,6 +166,54 @@ export default function SupabaseLogin() {
           <h1 className="text-2xl font-bold text-gray-900">{t('login.title')}</h1>
           <p className="text-gray-600 mt-2">{t('login.subtitle')}</p>
         </div>
+
+        {/* Saved Users Section */}
+        {!showSignUp && savedUsers.length > 0 && !selectedUser && (
+          <div className="mb-6">
+            <p className="text-sm text-gray-600 mb-3">Saved accounts:</p>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {savedUsers.map((user) => (
+                <SavedUserCard
+                  key={user.id}
+                  user={user}
+                  onSelect={() => handleUserSelect(user)}
+                  onRemove={(e) => handleRemoveUser(user.id, user.name, e)}
+                  isSelected={false}
+                />
+              ))}
+            </div>
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={() => setShowSignUp(true)}
+                className="text-sm text-blue-600 hover:underline"
+                disabled={isLoading}
+              >
+                Create new account
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Selected User Info */}
+        {!showSignUp && selectedUser && (
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-900">Signing in as {selectedUser.name}</p>
+                <p className="text-xs text-gray-500">{selectedUser.email}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleUseDifferentAccount}
+                className="text-sm text-blue-600 hover:underline"
+                disabled={isLoading}
+              >
+                Use different account
+              </button>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {showSignUp && (
@@ -129,17 +267,27 @@ export default function SupabaseLogin() {
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              onChange={(e) => {
+                setEmail(e.target.value);
+                // Clear selected user if email is manually changed
+                if (selectedUser && e.target.value !== selectedUser.email) {
+                  setSelectedUser(null);
+                }
+              }}
+              className={`mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+                selectedUser ? 'bg-gray-50' : ''
+              }`}
               placeholder={t('login.emailPlaceholder')}
               required
-              disabled={isLoading}
+              disabled={isLoading || (selectedUser !== null && !showSignUp)}
+              readOnly={selectedUser !== null && !showSignUp}
             />
           </div>
           <div>
             <label htmlFor="password" className="block text-sm font-medium text-gray-700">{t('login.password')}</label>
             <div className="mt-1 relative">
               <input
+                ref={passwordInputRef}
                 id="password"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
@@ -165,7 +313,20 @@ export default function SupabaseLogin() {
           </div>
 
           {error && (
-            <div className="text-red-600 text-sm text-center bg-red-50 p-3 rounded-md">{error}</div>
+            <div className="text-red-600 text-sm text-center bg-red-50 p-3 rounded-md">
+              {error}
+              {!navigator.onLine && (
+                <div className="mt-2 text-xs text-gray-600">
+                  You are currently offline. Sign in with previously saved credentials.
+                </div>
+              )}
+            </div>
+          )}
+
+          {!navigator.onLine && !error && (
+            <div className="text-yellow-600 text-sm text-center bg-yellow-50 p-3 rounded-md">
+              You are currently offline. Sign in with previously saved credentials.
+            </div>
           )}
 
           <button
@@ -179,7 +340,7 @@ export default function SupabaseLogin() {
                 {showSignUp ? t('login.signingUp') : t('login.signingIn')}
               </div>
             ) : (
-              showSignUp ? t('login.signUp') : t('login.signIn')
+              showSignUp ? t('login.signUp') : (selectedUser ? `Sign in as ${selectedUser.name}` : t('login.signIn'))
             )}
           </button>
         </form>
@@ -189,20 +350,32 @@ export default function SupabaseLogin() {
             <button
               type="button"
               className="text-blue-600 hover:underline text-sm"
-              onClick={() => { setShowSignUp(false); setError(''); }}
+              onClick={() => { 
+                setShowSignUp(false); 
+                setError('');
+                setSelectedUser(null);
+                setEmail('');
+                setPassword('');
+              }}
               disabled={isLoading}
             >
               {t('login.signIn')}
             </button>
           ) : (
-            <button
-              type="button"
-              className="text-blue-600 hover:underline text-sm"
-              onClick={() => { setShowSignUp(true); setError(''); }}
-              disabled={isLoading}
-            >
-              {t('login.signUp')}
-            </button>
+            !selectedUser && (
+              <button
+                type="button"
+                className="text-blue-600 hover:underline text-sm"
+                onClick={() => { 
+                  setShowSignUp(true); 
+                  setError('');
+                  setSelectedUser(null);
+                }}
+                disabled={isLoading}
+              >
+                {t('login.signUp')}
+              </button>
+            )
           )}
         </div>
 
