@@ -38,9 +38,15 @@ import { ensureDefaultBranch } from '../lib/branchHelpers';
 import { BranchAccessValidationService } from '../services/branchAccessValidationService';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
+import { getLocalDateString } from '../utils/dateUtils';
 import enLocale from '../i18n/locales/en';
 import arLocale from '../i18n/locales/ar';
 import type { MultilingualString } from '../utils/multilingual';
+import { createMultilingualFromString } from '../utils/multilingual';
+import { journalService } from '../services/journalService';
+import { getAccountMapping, getEntityCodeForTransaction, getJournalDescription } from '../utils/accountMapping';
+import { getSystemEntity } from '../constants/systemEntities';
+import { currencyService } from '../services/currencyService';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -337,6 +343,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const autoSyncTimerRef = useRef<NodeJS.Timeout | null>(null);
   const previousStoreIdRef = useRef<string | null>(null);
   const isClearingStorageRef = useRef(false);
+  const isBranchSyncInProgressRef = useRef(false);
 
   debug('🔍 OfflineDataProvider: userProfile:', userProfile, 'storeId:', storeId, 'isOnline:', isOnline, 'justCameOnline:', justCameOnline);
 
@@ -669,6 +676,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // This ensures branches are available in IndexedDB when BranchSelectionScreen loads
   useEffect(() => {
     const syncBranchesForAdmin = async () => {
+      // Guard: Prevent concurrent syncs
+      if (isBranchSyncInProgressRef.current) {
+        console.log('⏭️ Branch sync already in progress, skipping');
+        return;
+      }
+      
+      // Guard: Check if sync is already complete or in progress
+      if (branchSyncStatus.isSyncing || branchSyncStatus.isComplete) {
+        return;
+      }
+      
       // Only sync for admin users who need branch selection
       if (!storeId || !userProfile || !isOnline) {
         return;
@@ -698,6 +716,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       
       // Branches not available - sync them immediately
       console.log('🔄 Admin user detected - syncing branches immediately for branch selection...');
+      
+      // Set guard flag
+      isBranchSyncInProgressRef.current = true;
       setBranchSyncStatus({
         isSyncing: true,
         isComplete: false,
@@ -769,11 +790,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           isComplete: false,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
+      } finally {
+        // Always clear the guard flag
+        isBranchSyncInProgressRef.current = false;
       }
     };
     
     syncBranchesForAdmin();
-  }, [storeId, userProfile, isOnline, currentBranchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId, userProfile?.role, userProfile?.branch_id, isOnline, currentBranchId]);
 
   // CRITICAL: Sync branches for cashier/manager users before branch initialization
   // This ensures their assigned branch is available in IndexedDB when initializeBranch runs
@@ -1839,6 +1864,397 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     });
   }, [refreshData, updateUnsyncedCount, debouncedSync, resetAutoSyncTimer]);
 
+  /**
+   * Helper function to create cash drawer expense transaction atomically inside a transaction
+   * This avoids nested transactions by creating transaction and journal entries directly
+   */
+  const createCashDrawerExpenseAtomic = async (
+    amount: number,
+    currency: 'USD' | 'LBP',
+    description: string,
+    reference: string,
+    supplierId: string | undefined
+  ): Promise<{ transactionId: string; previousBalance: number; newBalance: number; accountId: string | null }> => {
+    if (!storeId || !currentBranchId || !userProfile?.id) {
+      throw new Error('Store ID, branch ID, or user ID not available');
+    }
+
+    // Convert string description to MultilingualString
+    const multilingualDescription = createMultilingualFromString(description);
+
+    // Get cash drawer account
+    const account = await getDB().getCashDrawerAccount(storeId, currentBranchId);
+    if (!account) {
+      throw new Error('No cash drawer account found. Please create one before processing expenses.');
+    }
+
+    const previousBalance = Number((account as any)?.current_balance || 0);
+
+    // Create transaction ID
+    const transactionId = createId();
+    const timestamp = new Date().toISOString();
+
+    // Get entity code for cash drawer expense
+    const entityCode = getEntityCodeForTransaction(TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE, supplierId);
+    
+    // Get system entity or supplier entity
+    let entity;
+    if (supplierId) {
+      entity = await getDB().entities.get(supplierId);
+      if (!entity) {
+        throw new Error(`Supplier entity not found: ${supplierId}`);
+      }
+    } else {
+      entity = await getSystemEntity(getDB(), storeId, entityCode);
+      if (!entity) {
+        throw new Error(`System entity not found: ${entityCode} for store ${storeId}. Make sure system entities are initialized.`);
+      }
+    }
+
+    // Get account mapping for cash drawer expense
+    const accountMapping = getAccountMapping(TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE);
+
+    // Get journal description
+    const journalDesc = getJournalDescription(
+      TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
+      entity.name,
+      multilingualDescription
+    );
+
+    // Create transaction record
+    const transaction: Transaction = {
+      id: transactionId,
+      store_id: storeId,
+      branch_id: currentBranchId,
+      type: 'expense',
+      category: TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
+      amount,
+      currency,
+      description: multilingualDescription,
+      reference,
+      customer_id: null,
+      supplier_id: supplierId || null,
+      employee_id: null,
+      created_at: timestamp,
+      created_by: userProfile.id,
+      _synced: false,
+      _deleted: false,
+      metadata: {
+        correlationId: createId(),
+        source: 'offline',
+        module: 'supplier_management'
+      }
+    };
+
+    await getDB().transactions.add(transaction);
+
+    // Create journal entries
+    const postedDate = getLocalDateString(timestamp);
+    const isUSD = currency === 'USD';
+
+    await journalService.createJournalEntry({
+      transactionId,
+      debitAccount: accountMapping.debitAccount,
+      creditAccount: accountMapping.creditAccount,
+      amount,
+      currency,
+      entityId: entity.id,
+      description: journalDesc,
+      postedDate,
+      createdBy: userProfile.id,
+      branchId: currentBranchId
+    });
+
+    // Calculate new balance from journal entries (account_code = 1100)
+    const cashJournalEntries = await getDB().journal_entries
+      .where('transaction_id')
+      .equals(transactionId)
+      .and(entry => entry.account_code === '1100' && entry.is_posted === true)
+      .toArray();
+
+    let balanceChange = 0;
+    for (const entry of cashJournalEntries) {
+      const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
+      const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
+      
+      if (usdChange !== 0) {
+        const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
+        balanceChange += usdInLbp;
+      }
+      balanceChange += lbpChange;
+    }
+
+    const newBalance = previousBalance + balanceChange;
+
+    return {
+      transactionId,
+      previousBalance,
+      newBalance,
+      accountId: account.id || null
+    };
+  };
+
+  /**
+   * Helper function to create cash drawer payment transaction atomically inside a transaction
+   * Used for reversing expenses (adding money back to cash drawer)
+   */
+  const createCashDrawerPaymentAtomic = async (
+    amount: number,
+    currency: 'USD' | 'LBP',
+    description: string,
+    reference: string,
+    supplierId: string | undefined
+  ): Promise<{ transactionId: string; previousBalance: number; newBalance: number; accountId: string | null }> => {
+    if (!storeId || !currentBranchId || !userProfile?.id) {
+      throw new Error('Store ID, branch ID, or user ID not available');
+    }
+
+    // Convert string description to MultilingualString
+    const multilingualDescription = createMultilingualFromString(description);
+
+    // Get cash drawer account
+    const account = await getDB().getCashDrawerAccount(storeId, currentBranchId);
+    if (!account) {
+      throw new Error('No cash drawer account found. Please create one before processing payments.');
+    }
+
+    const previousBalance = Number((account as any)?.current_balance || 0);
+
+    // Create transaction ID
+    const transactionId = createId();
+    const timestamp = new Date().toISOString();
+
+    // Get entity code for customer/supplier payment
+    const entityCode = getEntityCodeForTransaction(TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT, supplierId);
+    
+    // Get supplier entity
+    let entity;
+    if (supplierId) {
+      entity = await getDB().entities.get(supplierId);
+      if (!entity) {
+        throw new Error(`Supplier entity not found: ${supplierId}`);
+      }
+    } else {
+      entity = await getSystemEntity(getDB(), storeId, entityCode);
+      if (!entity) {
+        throw new Error(`System entity not found: ${entityCode} for store ${storeId}. Make sure system entities are initialized.`);
+      }
+    }
+
+    // Get account mapping for supplier payment
+    const accountMapping = getAccountMapping(TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT);
+
+    // Get journal description
+    const journalDesc = getJournalDescription(
+      TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT,
+      entity.name,
+      multilingualDescription
+    );
+
+    // Create transaction record
+    const transaction: Transaction = {
+      id: transactionId,
+      store_id: storeId,
+      branch_id: currentBranchId,
+      type: 'income',
+      category: TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT,
+      amount,
+      currency,
+      description: multilingualDescription,
+      reference,
+      customer_id: null,
+      supplier_id: supplierId || null,
+      employee_id: null,
+      created_at: timestamp,
+      created_by: userProfile.id,
+      _synced: false,
+      _deleted: false,
+      metadata: {
+        correlationId: createId(),
+        source: 'offline',
+        module: 'supplier_management'
+      }
+    };
+
+    await getDB().transactions.add(transaction);
+
+    // Create journal entries
+    const postedDate = getLocalDateString(timestamp);
+
+    await journalService.createJournalEntry({
+      transactionId,
+      debitAccount: accountMapping.debitAccount,
+      creditAccount: accountMapping.creditAccount,
+      amount,
+      currency,
+      entityId: entity.id,
+      description: journalDesc,
+      postedDate,
+      createdBy: userProfile.id,
+      branchId: currentBranchId
+    });
+
+    // Calculate new balance from journal entries (account_code = 1100)
+    const cashJournalEntries = await getDB().journal_entries
+      .where('transaction_id')
+      .equals(transactionId)
+      .and(entry => entry.account_code === '1100' && entry.is_posted === true)
+      .toArray();
+
+    let balanceChange = 0;
+    for (const entry of cashJournalEntries) {
+      const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
+      const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
+      
+      if (usdChange !== 0) {
+        const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
+        balanceChange += usdInLbp;
+      }
+      balanceChange += lbpChange;
+    }
+
+    const newBalance = previousBalance + balanceChange;
+
+    return {
+      transactionId,
+      previousBalance,
+      newBalance,
+      accountId: account.id || null
+    };
+  };
+
+  /**
+   * Helper function to create cash drawer transaction atomically inside a transaction
+   * This avoids nested transactions by creating transaction and journal entries directly
+   */
+  const createCashDrawerTransactionAtomic = async (
+    amount: number,
+    currency: 'USD' | 'LBP',
+    description: string,
+    reference: string,
+    customerId: string | undefined,
+    billNumber: string
+  ): Promise<{ transactionId: string; previousBalance: number; newBalance: number; accountId: string | null }> => {
+    if (!storeId || !currentBranchId || !userProfile?.id) {
+      throw new Error('Store ID, branch ID, or user ID not available');
+    }
+
+    // Convert string description to MultilingualString
+    const multilingualDescription = createMultilingualFromString(description);
+
+    // Get cash drawer account
+    const account = await getDB().getCashDrawerAccount(storeId, currentBranchId);
+    if (!account) {
+      throw new Error('No cash drawer account found. Please create one before processing cash sales.');
+    }
+
+    const previousBalance = Number((account as any)?.current_balance || 0);
+
+    // Create transaction ID
+    const transactionId = createId();
+    const timestamp = new Date().toISOString();
+
+    // Get entity code for cash drawer sale
+    const entityCode = getEntityCodeForTransaction(TRANSACTION_CATEGORIES.CASH_DRAWER_SALE, customerId);
+    
+    // Get system entity for cash drawer (CASH-CUST or similar)
+    const entity = await getSystemEntity(getDB(), storeId, entityCode);
+    if (!entity) {
+      throw new Error(`System entity not found: ${entityCode} for store ${storeId}. Make sure system entities are initialized.`);
+    }
+
+    // Get account mapping for cash drawer sale
+    const accountMapping = getAccountMapping(TRANSACTION_CATEGORIES.CASH_DRAWER_SALE);
+
+    // Get journal description
+    const journalDesc = getJournalDescription(
+      TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
+      entity.name,
+      multilingualDescription
+    );
+
+    // Create transaction record
+    const transaction: Transaction = {
+      id: transactionId,
+      store_id: storeId,
+      branch_id: currentBranchId,
+      type: 'income',
+      category: TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
+      amount,
+      currency,
+      description: multilingualDescription,
+      reference,
+      customer_id: customerId || null,
+      supplier_id: null,
+      employee_id: null,
+      created_at: timestamp,
+      created_by: userProfile.id,
+      _synced: false,
+      _deleted: false,
+      metadata: {
+        correlationId: createId(),
+        source: 'offline',
+        module: 'billing'
+      }
+    };
+
+    await getDB().transactions.add(transaction);
+
+    // Create journal entries
+    const postedDate = getLocalDateString(timestamp);
+    const fiscalPeriod = getFiscalPeriodForDate(timestamp).period;
+    const isUSD = currency === 'USD';
+
+    await journalService.createJournalEntry({
+      transactionId,
+      debitAccount: accountMapping.debitAccount,
+      creditAccount: accountMapping.creditAccount,
+      amount,
+      currency,
+      entityId: entity.id,
+      description: journalDesc,
+      postedDate,
+      createdBy: userProfile.id,
+      branchId: currentBranchId
+    });
+
+    // Calculate new balance from journal entries (account_code = 1100)
+    // Cash drawer balance is always in LBP, so we need to convert USD amounts
+    const cashJournalEntries = await getDB().journal_entries
+      .where('transaction_id')
+      .equals(transactionId)
+      .and(entry => entry.account_code === '1100' && entry.is_posted === true)
+      .toArray();
+
+    let balanceChange = 0;
+    for (const entry of cashJournalEntries) {
+      // Calculate net change: (debit - credit) for each currency
+      const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
+      const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
+      
+      // Convert USD to LBP and add to LBP change
+      if (usdChange !== 0) {
+        const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
+        balanceChange += usdInLbp;
+      }
+      
+      // Add LBP change directly
+      balanceChange += lbpChange;
+    }
+
+    const newBalance = previousBalance + balanceChange;
+
+    // Note: Balance is computed from journal entries - no need to update current_balance field
+    // The balance will be recalculated from journal entries when needed
+
+    return {
+      transactionId,
+      previousBalance,
+      newBalance,
+      accountId: account.id || null
+    };
+  };
+
   // Bill management functions
   const createBill = async (billData: any, lineItems: any[], customerBalanceUpdate?: { customerId: string; amountDue: number; originalBalance: number }): Promise<string> => {
     if (!storeId) throw new Error('No store ID available');
@@ -1916,12 +2332,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Store transaction ID for undo (created inside transaction but needed for undo data)
+    // Store transaction IDs for undo (created inside transaction but needed for undo data)
     let creditSaleTransactionId: string | null = null;
+    let cashDrawerTransactionId: string | null = null;
+    let cashDrawerResult: { transactionId: string; previousBalance: number; newBalance: number; accountId: string | null } | null = null;
 
     // Use transaction to ensure atomicity for all operations including inventory, cash drawer, customer balance, and audit logs
-    // ✅ OPTIMIZED: Added journal_entries and chart_of_accounts to avoid nested transaction
-    await getDB().transaction('rw', [getDB().bills, getDB().bill_line_items, getDB().inventory_items, getDB().entities, getDB().transactions, getDB().journal_entries, getDB().chart_of_accounts, getDB().bill_audit_logs], async () => {
+    // ✅ OPTIMIZED: Added journal_entries, chart_of_accounts, cash_drawer_sessions, and cash_drawer_accounts to avoid nested transaction
+    await getDB().transaction('rw', [
+      getDB().bills, 
+      getDB().bill_line_items, 
+      getDB().inventory_items, 
+      getDB().entities, 
+      getDB().transactions, 
+      getDB().journal_entries, 
+      getDB().chart_of_accounts, 
+      getDB().bill_audit_logs,
+      getDB().cash_drawer_sessions,
+      getDB().cash_drawer_accounts
+    ], async () => {
       // Add bill and line items
       await getDB().bills.add(bill);
       if (mappedLineItems.length > 0) {
@@ -2095,7 +2524,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // 2. Create journal entries directly (double-entry bookkeeping)
         // ✅ IMPORTANT: Each entry must have ONLY debit OR credit, not both (database constraint)
         // ✅ FIX: Use transactionId (not a separate journalTransactionId) so account statements can find the transaction
-        const postedDate = now.split('T')[0];
+        const postedDate = getLocalDateString(now);
         const fiscalPeriod = getFiscalPeriodForDate(now).period; // Extract the period string
         
         // For credit sales:
@@ -2157,51 +2586,32 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Balances are now calculated from journal entries - no need to update
         // The journal entries created above will automatically reflect the correct balance
       }
-    });
 
-    // Process cash drawer transaction for cash sales using the general utility
-    // Note: payment_method is on the bill, not on individual line items
-    let cashDrawerResult = null;
-    if (bill.payment_method === 'cash') {
-      try {
-        const totalCashAmount = bill.amount_paid || bill.total_amount || 0;
-        debug('💰 Processing cash sale transaction:', { totalCashAmount, billNumber: bill.bill_number });
+      // ✅ Process cash drawer transaction for cash sales INSIDE the main transaction
+      // This ensures atomicity - if cash drawer transaction fails, everything rolls back
+      if (bill.payment_method === 'cash') {
+        try {
+          const totalCashAmount = bill.amount_paid || bill.total_amount || 0;
+          debug('💰 Processing cash sale transaction atomically:', { totalCashAmount, billNumber: bill.bill_number });
 
-        cashDrawerResult = await processCashDrawerTransaction({
-          type: 'sale',
-          amount: totalCashAmount,
-          currency: 'LBP', // Assuming LBP for now, could be made dynamic
-          description: `Cash sale - Bill ${bill.bill_number}`,
-          reference: bill.bill_number,
-          customerId: bill.customer_id || undefined
-        });
+          cashDrawerResult = await createCashDrawerTransactionAtomic(
+            totalCashAmount,
+            'LBP', // Assuming LBP for now, could be made dynamic
+            `Cash sale - Bill ${bill.bill_number}`,
+            bill.bill_number,
+            bill.customer_id || undefined,
+            bill.bill_number
+          );
 
-        // // Record cash sale transaction for financial tracking
-        // await getDB().transaction('rw', [getDB().transactions], async () => {
-        //   const cashTransaction = {
-        //     id: createId(),
-        //     store_id: storeId,
-        //     created_at: now,
-        //     updated_at: now,
-        //     _synced: false,
-        //     type: 'income', // Cash sale is income
-        //     amount: totalCashAmount,
-        //     currency: 'LBP',
-        //     description: `Cash sale - Bill ${bill.bill_number}`,
-        //     reference: bill.bill_number,
-        //     customer_id: cashSaleItems[0]?.customer_id || null,
-        //     supplier_id: null,
-        //     category: "sale",
-        //     created_by: currentUserId,
-        //   };
-        //   await getDB().transactions.add(cashTransaction as any);
-        // });
-
-        debug(`✅ Cash drawer updated: $${cashDrawerResult.previousBalance?.toFixed(2)} → $${cashDrawerResult.newBalance?.toFixed(2)}`);
-      } catch (error) {
-        console.error('❌ Error updating cash drawer for sales:', error);
+          cashDrawerTransactionId = cashDrawerResult.transactionId;
+          debug(`✅ Cash drawer transaction created atomically: ${cashDrawerTransactionId}`);
+        } catch (error) {
+          console.error('❌ Error creating cash drawer transaction:', error);
+          // Re-throw to trigger transaction rollback
+          throw error;
+        }
       }
-    }
+    });
 
     // Store undo data for the complete checkout action
     const baseUndoData = {
@@ -2212,6 +2622,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         ...(customerBalanceUpdate && creditSaleTransactionId ? [
           { table: 'entities', id: customerBalanceUpdate.customerId },
           { table: 'transactions', id: creditSaleTransactionId }
+        ] : []),
+        ...(cashDrawerTransactionId ? [
+          { table: 'transactions', id: cashDrawerTransactionId },
+          { table: 'cash_drawer_accounts', id: cashDrawerResult?.accountId || '' }
         ] : [])
       ],
       steps: [
@@ -2240,7 +2654,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             table: 'journal_entries',
             // Special field: transaction_id to delete all journal entries for this transaction
             transaction_id: creditSaleTransactionId,
-            id: `journal-entries-${billId}` // Placeholder ID for undo handler
+            id: `journal-entries-credit-${billId}` // Placeholder ID for undo handler
+          }
+        ] : []),
+        // Delete cash drawer transaction and journal entries if applicable
+        ...(cashDrawerTransactionId ? [
+          {
+            op: 'delete',
+            table: 'transactions',
+            id: cashDrawerTransactionId
+          },
+          {
+            op: 'delete',
+            table: 'journal_entries',
+            // Special field: transaction_id to delete all journal entries for this transaction
+            transaction_id: cashDrawerTransactionId,
+            id: `journal-entries-cash-${billId}` // Placeholder ID for undo handler
           }
         ] : [])
       ]
@@ -2252,6 +2681,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       : { type: 'complete_checkout', ...baseUndoData };
 
     pushUndo(undoData);
+
+    // Notify UI of cash drawer update if cash drawer transaction was created
+    if (cashDrawerResult && cashDrawerTransactionId) {
+      try {
+        const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+        cashDrawerUpdateService.notifyCashDrawerUpdate(
+          storeId,
+          cashDrawerResult.newBalance,
+          cashDrawerTransactionId
+        );
+      } catch (error) {
+        console.warn('⚠️ Failed to notify cash drawer update:', error);
+        // Non-critical - continue with refresh
+      }
+    }
 
     await refreshData();
     await refreshCashDrawerStatus(); // Refresh cash drawer to show updated balance
@@ -2533,8 +2977,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           if (!bill.bill_date) return false;
           // Extract date portion from bill_date (handles both ISO strings and date-only formats)
           const billDateStr = typeof bill.bill_date === 'string' 
-            ? bill.bill_date.split('T')[0] 
-            : new Date(bill.bill_date).toISOString().split('T')[0];
+            ? getLocalDateString(bill.bill_date)
+            : getLocalDateString(new Date(bill.bill_date).toISOString());
           return billDateStr >= dateFrom;
         });
       }
@@ -2543,8 +2987,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           if (!bill.bill_date) return false;
           // Extract date portion from bill_date (handles both ISO strings and date-only formats)
           const billDateStr = typeof bill.bill_date === 'string' 
-            ? bill.bill_date.split('T')[0] 
-            : new Date(bill.bill_date).toISOString().split('T')[0];
+            ? getLocalDateString(bill.bill_date)
+            : getLocalDateString(new Date(bill.bill_date).toISOString());
           return billDateStr <= dateTo;
         });
       }
@@ -3867,7 +4311,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             
             // 2. Create journal entries (double-entry bookkeeping)
             // ✅ FIX: Use transactionId (not a separate journalTransactionId) so account statements can find the transaction
-            const postedDate = now.split('T')[0];
+            const postedDate = getLocalDateString(now);
             const fiscalPeriod = getFiscalPeriodForDate(now).period;
             
             const debitAccountCode = entityType === 'customer' ? '1200' : '2100';
@@ -3978,16 +4422,46 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const saleItem = await getDB().bill_line_items.get(id);
     if (!saleItem) throw new Error('Sale item not found');
 
-    // Use transaction to ensure atomicity for the sale deletion only
-    await getDB().transaction('rw', [getDB().bill_line_items], async () => {
+    // ✅ Use transaction to ensure atomicity for sale deletion AND inventory restoration
+    await getDB().transaction('rw', [getDB().bill_line_items, getDB().inventory_items], async () => {
       // Delete the sale item
       await getDB().bill_line_items.delete(id);
-    });
 
-    // Restore inventory quantities outside the transaction
-    if (saleItem.quantity && saleItem.quantity > 0) {
-      await restoreInventoryQuantity(saleItem.product_id, saleItem.quantity);
-    }
+      // Restore inventory quantities INSIDE the transaction
+      if (saleItem.quantity && saleItem.quantity > 0) {
+        // Find existing inventory items for this product
+        const existingInventory = await getDB().inventory_items
+          .where('product_id')
+          .equals(saleItem.product_id)
+          .sortBy('received_at');
+
+        if (existingInventory.length > 0) {
+          // Add to the most recent inventory item (LIFO for restoration)
+          const mostRecent = existingInventory[existingInventory.length - 1];
+          const newQuantity = mostRecent.quantity + saleItem.quantity;
+
+          await getDB().inventory_items.update(mostRecent.id, {
+            quantity: newQuantity,
+            _synced: false
+          });
+        } else {
+          // Create new inventory item if none exists
+          // Note: This is a simplified restoration - ideally we'd track original inventory_item_id
+          await getDB().inventory_items.add({
+            id: createId(),
+            store_id: storeId,
+            branch_id: saleItem.branch_id || currentBranchId || '',
+            product_id: saleItem.product_id,
+            quantity: saleItem.quantity,
+            received_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            _synced: false,
+            _deleted: false
+          } as any);
+        }
+      }
+    });
 
     // Store undo data - restore the deleted sale item
     pushUndo({
@@ -5069,44 +5543,123 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const previousAdvanceLBP = currentAdvanceLBP;
       const previousAdvanceUSD = currentAdvanceUSD;
 
-      // Update supplier advance balance
-      await updateSupplier(supplierId, updateData);
+      // Pre-validate cash drawer balance if giving advance
+      let amountInLBP = 0;
+      let previousCashDrawerBalance: number | undefined = undefined;
+      if (type === 'give') {
+        amountInLBP = currency === 'USD' ? amount * exchangeRate : amount;
+        const currentBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
+        previousCashDrawerBalance = currentBalance;
+        
+        if (amountInLBP > currentBalance) {
+          throw new Error(`Insufficient cash drawer balance. Advance: ${currency === 'USD' ? `$${amount.toFixed(2)}` : `${Math.round(amount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP`);
+        }
+      }
 
-      // Create transaction record using unified service
       const reviewDateNote = reviewDate ? ` [Review: ${new Date(reviewDate).toLocaleDateString()}]` : '';
-      
-      const transactionResult = await transactionService.createTransaction({
-        category: type === 'give' 
-          ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
-          : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
-        amount: amount,
-        currency: currency,
-        description: `${description || `Supplier advance ${type === 'give' ? 'payment' : 'deduction'} - ${supplier.name}`}${reviewDateNote}`,
-        reference: generateAdvanceReference(),
-        supplierId: supplierId,
-        context: {
-          userId: userProfile?.id || '',
-          storeId: userProfile?.store_id || '',
-          module: 'supplier_management',
-          branchId: currentBranchId || '',
-          source: 'offline'
-        },
-        updateBalances: false, // Balance already updated above (lines 3365)
-        updateCashDrawer: false, // No cash drawer update for advances
-        createAuditLog: true,
-        _synced: false,
-        metadata: {
-          advanceType: type,
-          reviewDate: reviewDate,
-          previousAdvanceLBP,
-          previousAdvanceUSD,
-          newAdvanceBalance
+      const transactionId = createId();
+      const now = new Date().toISOString();
+      let cashDrawerResult: { transactionId: string; previousBalance: number; newBalance: number; accountId: string | null } | null = null;
+      let cashDrawerAccountId: string | undefined = undefined;
+
+      // ✅ Wrap all operations in a single transaction for atomicity
+      await getDB().transaction('rw', [
+        getDB().entities,
+        getDB().transactions,
+        getDB().journal_entries,
+        getDB().chart_of_accounts,
+        getDB().cash_drawer_sessions,
+        getDB().cash_drawer_accounts
+      ], async () => {
+        // Step 1: Update supplier advance balance
+        await getDB().entities.update(supplierId, updateData);
+
+        // Step 2: Create transaction record directly (avoiding nested transaction)
+        const transactionDescription: MultilingualString = createMultilingualFromString(
+          `${description || `Supplier advance ${type === 'give' ? 'payment' : 'deduction'} - ${supplier.name}`}${reviewDateNote}`
+        );
+
+        const advanceTransaction: Transaction = {
+          id: transactionId,
+          store_id: storeId,
+          branch_id: currentBranchId || '',
+          type: type === 'give' ? 'expense' : 'income',
+          category: type === 'give' 
+            ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
+            : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
+          amount: amount,
+          currency: currency,
+          description: transactionDescription,
+          reference: generateAdvanceReference(),
+          customer_id: null,
+          supplier_id: supplierId,
+          employee_id: null,
+          created_at: now,
+          created_by: userProfile?.id || '',
+          _synced: false,
+          _deleted: false,
+          metadata: {
+            correlationId: createId(),
+            source: 'offline',
+            module: 'supplier_management',
+            advanceType: type,
+            reviewDate: reviewDate,
+            previousAdvanceLBP,
+            previousAdvanceUSD,
+            newAdvanceBalance
+          }
+        };
+
+        await getDB().transactions.add(advanceTransaction);
+
+        // Step 3: Create journal entries for the advance transaction
+        const supplierEntity = await getDB().entities.get(supplierId);
+        if (!supplierEntity) {
+          throw new Error('Supplier entity not found');
+        }
+
+        const accountMapping = getAccountMapping(
+          type === 'give' 
+            ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
+            : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED
+        );
+
+        const journalDesc = getJournalDescription(
+          type === 'give' 
+            ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
+            : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
+          supplierEntity.name,
+          transactionDescription
+        );
+
+        const postedDate = getLocalDateString(now);
+        await journalService.createJournalEntry({
+          transactionId,
+          debitAccount: accountMapping.debitAccount,
+          creditAccount: accountMapping.creditAccount,
+          amount,
+          currency,
+          entityId: supplierId,
+          description: journalDesc,
+          postedDate,
+          createdBy: userProfile?.id || '',
+          branchId: currentBranchId || ''
+        });
+
+        // Step 4: Create cash drawer expense transaction if giving advance
+        if (type === 'give') {
+          cashDrawerResult = await createCashDrawerExpenseAtomic(
+            amountInLBP,
+            'LBP',
+            `Advance payment to ${supplier.name}${currency === 'USD' ? ` ($${amount.toFixed(2)} USD)` : ''}`,
+            generateAdvanceReference(),
+            supplierId
+          );
+          cashDrawerAccountId = cashDrawerResult.accountId || undefined;
         }
       });
 
-      const transactionId = transactionResult?.transactionId || createId();
-
-      // Create reminder if review date is provided
+      // Create reminder if review date is provided (outside transaction - non-critical)
       if (reviewDate && type === 'give' && transactionId) {
         try {
           await reminderMonitoringService.createReminder({
@@ -5141,37 +5694,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // If giving advance, withdraw from cash drawer
-      let cashDrawerResult: any = null;
-      let previousCashDrawerBalance: number | undefined = undefined;
-      let cashDrawerAccountId: string | undefined = undefined;
-      
-      if (type === 'give') {
-        const amountInLBP = currency === 'USD' ? amount * exchangeRate : amount;
-        
-        // Check cash drawer balance
-        const currentBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
-        previousCashDrawerBalance = currentBalance;
-        
-        if (amountInLBP > currentBalance) {
-          throw new Error(`Insufficient cash drawer balance. Advance: ${currency === 'USD' ? `$${amount.toFixed(2)}` : `${Math.round(amount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP`);
-        }
-
-        // Process cash drawer withdrawal
-        cashDrawerResult = await processCashDrawerTransaction({
-          type: 'expense',
-          amount: amountInLBP,
-          currency: 'LBP',
-          description: `Advance payment to ${supplier.name}${currency === 'USD' ? ` ($${amount.toFixed(2)} USD)` : ''}`,
-          reference: generateAdvanceReference(),
-          supplierId: supplierId,
-          storeId: userProfile?.store_id || '',
-          createdBy: userProfile?.id || '',
-        } as any);
-        
-        cashDrawerAccountId = cashDrawerResult.accountId;
-      }
-
       // Create undo data
       const baseUndoData = {
         affected: [
@@ -5204,7 +5726,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (type === 'give' && cashDrawerResult) {
         undoData = createCashDrawerUndoData(
           cashDrawerResult.transactionId,
-          previousCashDrawerBalance,
+          previousCashDrawerBalance!,
           cashDrawerAccountId,
           baseUndoData
         );
@@ -5293,36 +5815,49 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.log(`💰 Reversing USD advance: ${currentAdvanceUSD} → ${newBalance}`);
       }
 
-      // Update supplier balance
-      await updateSupplier(transaction.supplier_id, updateData);
-
-      // If it was a "give" advance, reverse the cash drawer withdrawal
-      let cashDrawerResult: any = null;
+      // Pre-calculate amount for cash drawer reversal if needed
+      let amountInLBP = 0;
       let previousCashDrawerBalance: number | undefined = undefined;
-      let cashDrawerAccountId: string | undefined = undefined;
-      
       if (wasGiveAdvance) {
-        const amountInLBP = transaction.currency === 'USD' 
+        amountInLBP = transaction.currency === 'USD' 
           ? transaction.amount * exchangeRate 
           : transaction.amount;
-
-        // Get cash drawer balance before reversal
         previousCashDrawerBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
-
-        // Reverse cash drawer transaction (add back the money)
-        cashDrawerResult = await processCashDrawerTransaction({
-          type: 'payment',
-          amount: amountInLBP,
-          currency: 'LBP',
-          description: `Reversal: Deleted advance payment to ${supplier.name}`,
-          reference: generateReversalReference(),
-          supplierId: transaction.supplier_id,
-          storeId: userProfile?.store_id || '',
-          createdBy: userProfile?.id || '',
-        } as any);
-        
-        cashDrawerAccountId = cashDrawerResult.accountId;
       }
+
+      let cashDrawerResult: { transactionId: string; previousBalance: number; newBalance: number; accountId: string | null } | null = null;
+      let cashDrawerAccountId: string | undefined = undefined;
+
+      // ✅ Wrap all operations in a single transaction for atomicity
+      await getDB().transaction('rw', [
+        getDB().entities,
+        getDB().transactions,
+        getDB().journal_entries,
+        getDB().chart_of_accounts,
+        getDB().cash_drawer_sessions,
+        getDB().cash_drawer_accounts
+      ], async () => {
+        // Step 1: Update supplier balance (reverse the advance)
+        await getDB().entities.update(transaction.supplier_id, updateData);
+
+        // Step 2: Soft delete the transaction
+        await getDB().transactions.update(transactionId, {
+          _deleted: true,
+          _synced: false
+        });
+
+        // Step 3: Reverse cash drawer transaction if it was a "give" advance
+        if (wasGiveAdvance) {
+          cashDrawerResult = await createCashDrawerPaymentAtomic(
+            amountInLBP,
+            'LBP',
+            `Reversal: Deleted advance payment to ${supplier.name}`,
+            generateReversalReference(),
+            transaction.supplier_id
+          );
+          cashDrawerAccountId = cashDrawerResult.accountId || undefined;
+        }
+      });
 
       // Create undo data - restore transaction and supplier balances
       const baseUndoData = {

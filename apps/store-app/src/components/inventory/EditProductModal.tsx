@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Package } from 'lucide-react';
+import { PRODUCT_PLACEHOLDER_IMAGE } from '../../constants/productImages';
 
 interface EditProductModalProps {
   open: boolean;
@@ -44,7 +45,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ open, onClose, onSu
         id: form.id,
         name: form.name,
         category: form.category,
-        image: form.capturedPhoto || form.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
+        image: form.capturedPhoto || form.image || PRODUCT_PLACEHOLDER_IMAGE,
       });
       setErrors({});
       onClose();

@@ -357,6 +357,71 @@ export class EventStreamService {
   }
 
   /**
+   * Deduplicate events by keeping only the latest version for each entity
+   * This optimizes processing when the same entity has multiple updates
+   * 
+   * Edge cases handled:
+   * - Bulk events: Not deduplicated (they're already optimized)
+   * - Reverse operations: Always kept (they're deletions)
+   * - Different operations: Keep latest version regardless of operation type
+   */
+  private deduplicateEvents(events: BranchEvent[]): BranchEvent[] {
+    // Separate events into groups: bulk events, reverse operations, and regular events
+    const bulkEvents: BranchEvent[] = [];
+    const reverseEvents: BranchEvent[] = [];
+    const regularEvents: BranchEvent[] = [];
+
+    for (const event of events) {
+      if (this.isBulkEvent(event.event_type)) {
+        // Bulk events are not deduplicated
+        bulkEvents.push(event);
+      } else if (event.operation === 'reverse') {
+        // Reverse operations are always kept (they're deletions)
+        reverseEvents.push(event);
+      } else {
+        // Regular events can be deduplicated
+        regularEvents.push(event);
+      }
+    }
+
+    // Deduplicate regular events by entity (entity_type + entity_id)
+    const entityMap = new Map<string, BranchEvent>();
+    
+    for (const event of regularEvents) {
+      const key = `${event.entity_type}:${event.entity_id}`;
+      const existing = entityMap.get(key);
+      
+      // Keep the event with the highest version for each entity
+      if (!existing || event.version > existing.version) {
+        entityMap.set(key, event);
+      }
+    }
+    
+    // Convert back to array, sorted by version
+    const deduplicatedRegular = Array.from(entityMap.values());
+    deduplicatedRegular.sort((a, b) => a.version - b.version);
+    
+    // Combine all events: bulk events, reverse events, and deduplicated regular events
+    const deduplicated = [
+      ...bulkEvents,
+      ...reverseEvents,
+      ...deduplicatedRegular
+    ].sort((a, b) => a.version - b.version);
+    
+    const originalCount = events.length;
+    const deduplicatedCount = deduplicated.length;
+    
+    if (originalCount > deduplicatedCount) {
+      console.log(
+        `[EventStream] Deduplicated ${originalCount} events → ${deduplicatedCount} events ` +
+        `(${originalCount - deduplicatedCount} duplicates removed)`
+      );
+    }
+    
+    return deduplicated;
+  }
+
+  /**
    * Process events sequentially
    * For each event, fetch the affected record and update IndexedDB
    */
@@ -377,15 +442,27 @@ export class EventStreamService {
       return { processed: 0, errors: [], last_version: 0 };
     }
 
-    for (let i = 0; i < events.length; i++) {
-      const event = events[i];
+    // OPTIMIZATION: Deduplicate events for same entity
+    // This reduces network calls when the same entity has multiple updates
+    const deduplicatedEvents = this.deduplicateEvents(events);
+
+    // Calculate lastVersion from original events array to ensure we don't skip versions
+    // This is important for sync state tracking
+    for (const event of events) {
+      if (event) {
+        lastVersion = Math.max(lastVersion, event.version);
+      }
+    }
+
+    for (let i = 0; i < deduplicatedEvents.length; i++) {
+      const event = deduplicatedEvents[i];
       if (!event) {
         console.warn(`[EventStream] Event at index ${i} is null or undefined`);
         continue;
       }
 
       try {
-        console.log(`[EventStream] Starting to process event ${event.id} (version ${event.version}, index ${i}/${events.length})`);
+        console.log(`[EventStream] Starting to process event ${event.id} (version ${event.version}, index ${i}/${deduplicatedEvents.length})`);
         console.log(`[EventStream] Event details:`, {
           id: event.id,
           event_type: event.event_type,
@@ -396,7 +473,6 @@ export class EventStreamService {
         });
         await this.processEvent(event, storeId);
         processed++;
-        lastVersion = Math.max(lastVersion, event.version);
         console.log(`[EventStream] Successfully processed event ${event.id} (version ${event.version})`);
       } catch (error) {
         const errorMsg = `Failed to process event ${event.id} (${event.event_type}): ${
@@ -411,7 +487,7 @@ export class EventStreamService {
       }
     }
 
-    console.log(`[EventStream] Processed ${processed}/${events.length} events, last version: ${lastVersion}`);
+    console.log(`[EventStream] Processed ${processed}/${deduplicatedEvents.length} deduplicated events (from ${events.length} original events), last version: ${lastVersion}`);
     if (errors.length > 0) {
       console.warn(`[EventStream] ${errors.length} errors during processing:`, errors);
     }

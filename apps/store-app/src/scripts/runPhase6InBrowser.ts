@@ -2,6 +2,7 @@
 // Run this in the browser console to test all phases
 
 import { getDB } from '../lib/db';
+import { getLocalDateString } from '../utils/dateUtils';
 
 // Get singleton database instance
 const db = getDB();
@@ -135,7 +136,7 @@ async function testJournalEntries(storeId: string): Promise<boolean> {
       debit_amount: 500,
       credit_amount: 0,
       currency: 'USD',
-      posted_date: new Date().toISOString().split('T')[0],
+      posted_date: getLocalDateString(new Date().toISOString()),
       fiscal_period: '2025-11',
       description: 'Browser test debit',
       is_posted: true,
@@ -154,7 +155,7 @@ async function testJournalEntries(storeId: string): Promise<boolean> {
       debit_amount: 0,
       credit_amount: 500,
       currency: 'USD',
-      posted_date: new Date().toISOString().split('T')[0],
+      posted_date: getLocalDateString(new Date().toISOString()),
       fiscal_period: '2025-11',
       description: 'Browser test credit',
       is_posted: true,

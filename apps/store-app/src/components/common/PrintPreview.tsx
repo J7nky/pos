@@ -483,7 +483,7 @@ export function PrintPreview({
                       if (Array.isArray(content)) {
                         // Show the page content at index pageNum - 1
                         const pageContent = content[pageNum - 1];
-                        return pageContent || <div className="text-center py-20 text-gray-400">t{".page"} {pageNum} t{"balanceReport.contentNotAvailable"}</div>;
+                        return pageContent || <div className="text-center py-20 text-gray-400">t{"balanceReport.page"} {pageNum} t{"balanceReport.contentNotAvailable"}</div>;
                       } else {
                         // Single content - show for all pages (useful for single page documents)
                         return content;

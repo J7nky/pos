@@ -20,6 +20,7 @@ import {
 import { getAccountMapping, getEntityCodeForTransaction, getJournalDescription } from '../utils/accountMapping';
 import { getSystemEntity } from '../constants/systemEntities';
 import type { MultilingualString } from '../utils/multilingual';
+import { createMultilingualFromString } from '../utils/multilingual';
 import { 
   generatePaymentReference, 
   generateExpenseReference, 
@@ -27,6 +28,7 @@ import {
   generateAPReference,
   generateReference 
 } from '../utils/referenceGenerator';
+import { getLocalDateString } from '../utils/dateUtils';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -403,15 +405,20 @@ export class TransactionService {
   public async createCashDrawerSale(
     amount: number,
     currency: 'USD' | 'LBP',
-    description: string,
+    description: string | MultilingualString,
     context: TransactionContext,
     options: { reference?: string; customerId?: string } = {}
   ): Promise<TransactionResult> {
+    // Convert string description to MultilingualString if needed
+    const multilingualDescription: MultilingualString = typeof description === 'string' 
+      ? createMultilingualFromString(description)
+      : description;
+    
     return this.createTransaction({
       category: TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
       amount,
       currency,
-      description,
+      description: multilingualDescription,
       context,
       customerId: options.customerId,
       reference: options.reference,
@@ -974,8 +981,19 @@ export class TransactionService {
     }
 
     // Validate description
-    if (!params.description || Object.values(params.description).some(value => value.trim().length === 0)) {
+    if (!params.description) {
       errors.push('Description is required');
+    } else if (typeof params.description === 'string') {
+      // String description - check it's not empty
+      if (params.description.trim().length === 0) {
+        errors.push('Description is required');
+      }
+    } else if (typeof params.description === 'object') {
+      // Multilingual object - check at least one language has content
+      const values = Object.values(params.description);
+      if (values.length === 0 || values.every(value => !value || (typeof value === 'string' && value.trim().length === 0))) {
+        errors.push('Description is required');
+      }
     }
 
     // Validate context
@@ -1253,7 +1271,7 @@ export class TransactionService {
         currency: transaction.currency,
         entityId, // Now using actual UUID entity ID
         description,
-        postedDate: transaction.created_at.split('T')[0], // Extract date part
+        postedDate: getLocalDateString(transaction.created_at), // Extract local date part
         createdBy: transaction.created_by, // Pass user ID from transaction
         branchId: transaction.branch_id  // ✅ Pass branch_id from transaction to journal entry (required)
       });

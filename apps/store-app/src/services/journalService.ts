@@ -9,6 +9,7 @@ import { accountingInitService } from './accountingInitService';
 import { journalValidationService } from './journalValidationService';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { createId } from '../lib/db';
+import { getLocalDateString } from '../utils/dateUtils';
 
 /**
  * Service for creating and managing journal entries
@@ -29,7 +30,7 @@ export class JournalService {
       amountLBP = 0,
       entityId,
       description,
-      postedDate = new Date().toISOString().split('T')[0],
+      postedDate = getLocalDateString(new Date().toISOString()),
       createdBy = null,  // Default to null for system-generated entries
       branchId,  // Branch ID from transaction - required
       // Legacy support

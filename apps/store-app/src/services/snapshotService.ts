@@ -8,6 +8,7 @@ import { getDB } from '../lib/db';
 import { BalanceSnapshot } from '../types/accounting';
 import { journalService } from './journalService';
 import { createId } from '../lib/db';
+import { getLocalDateString } from '../utils/dateUtils';
 
 export interface SnapshotResult {
   success: boolean;
@@ -66,7 +67,7 @@ export class SnapshotService {
       processingTime: 0
     };
     
-    const targetDate = snapshotDate || new Date().toISOString().split('T')[0];
+    const targetDate = snapshotDate || getLocalDateString(new Date().toISOString());
     
     try {
       console.log(`📊 Creating daily snapshots for store ${storeId} on ${targetDate}`);
@@ -515,7 +516,7 @@ export class SnapshotService {
   ): Promise<{ deletedCount: number; oldestRetained: string | null }> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
-    const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+    const cutoffDateStr = getLocalDateString(cutoffDate.toISOString());
     
     const oldSnapshots = await getDB().balance_snapshots
       .where('store_id')

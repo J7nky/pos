@@ -18,6 +18,7 @@ import { useModal } from '../../../hooks/useModal';
 import { ReceivedBillDetailsModal } from './receivedBills/ReceivedBillDetailsModal';
 import { ReceivedBillSalesLogsModal } from './receivedBills/ReceivedBillSalesLogsModal';
 import { ReceivedBill } from './receivedBills/types';
+import { getLocalDateString } from '../../../utils/dateUtils';
 
 type ReceivedBillsProps = {
   inventory: any[];
@@ -163,7 +164,7 @@ export default function ReceivedBills({
       empty_plastic: !!batch?.plastic_fee || !!group.batchPlasticFee,
       plastic_count: (group.batchPlasticCount ?? '').toString(),
       plastic_price: (group.batchPlasticPrice ?? '').toString(),
-      received_at: batch?.received_at || first?.received_at || new Date().toISOString().split('T')[0]
+      received_at: batch?.received_at || first?.received_at || getLocalDateString(new Date().toISOString())
     };
     console.log('[ReceivedBills] initializeBatchEdit - Setting form data:', formData);
     setBatchEditForm(formData);

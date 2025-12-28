@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
+import { getProductImageUrl, handleImageError } from '../../constants/productImages';
 
 interface StockTableProps {
   filteredStockLevels: any[];
@@ -96,10 +97,10 @@ const StockTable: React.FC<StockTableProps> = ({
                   <td className="px-6 py-4">
                     <div className="flex items-center">
                       <img
-                        src={product?.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`}
+                        src={getProductImageUrl(product?.image)}
                         alt={getProductName(product)}
                         className="w-10 h-10 rounded-lg object-cover mr-3"
-                        onError={(e) => (e.currentTarget.src = `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`)}
+                        onError={handleImageError}
                       />
                       <div>
                         <p className="font-medium text-gray-900 dark:text-slate-100">{item.product_name}</p>

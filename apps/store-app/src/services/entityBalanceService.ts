@@ -10,6 +10,7 @@
 import { getDB } from '../lib/db';
 import { calculateEntityBalance, calculateBothCurrencies } from '../utils/balanceCalculation';
 import { snapshotService } from './snapshotService';
+import { getLocalDateString } from '../utils/dateUtils';
 
 export interface EntityBalance {
   USD: number;
@@ -130,7 +131,7 @@ export class EntityBalanceService {
       throw new Error(`Entity not found: ${entityId}`);
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString(new Date().toISOString());
     
     // Try to get most recent snapshot
     const snapshot = await snapshotService.getHistoricalBalance(
@@ -193,7 +194,7 @@ export class EntityBalanceService {
       throw new Error(`Entity not found: ${entityId}`);
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString(new Date().toISOString());
     
     // Try to get most recent snapshot
     const snapshot = await snapshotService.getHistoricalBalance(

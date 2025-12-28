@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, X, Package, Camera, Upload } from 'lucide-react';
 import { useI18n } from '../../i18n';
+import { PRODUCT_PLACEHOLDER_IMAGE } from '../../constants/productImages';
 interface AddProductModalProps {
   open: boolean;
   onClose: () => void;
@@ -59,7 +60,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
       await onSuccess({
         name: form.name.trim(),
         category: form.category,
-        image: form.capturedPhoto || form.image || `https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg`,
+        image: form.capturedPhoto || form.image || PRODUCT_PLACEHOLDER_IMAGE,
       });
       setForm({ name: '', category: 'Fruits', image: '', capturedPhoto: '' });
       setErrors({});
