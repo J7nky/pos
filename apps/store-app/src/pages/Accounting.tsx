@@ -884,6 +884,7 @@ export default function Accounting() {
       console.log('bill', bill);
       // Persist closed flag onto the inventory batch by updating status
       // Also store the commission_amount and closed_at timestamp
+      // Calculate and store P&L values
       try {
         const existingStatus = bill.status || '';
         const closedStatus = existingStatus==='CLOSED' ? existingStatus : "CLOSED";
@@ -891,12 +892,29 @@ export default function Accounting() {
         if (!targetBatchId) {
           console.warn('No batch identifier available when attempting to close bill:', bill);
         } else {
+          // Calculate P&L before closing
+          const { profitLossService } = await import('../services/profitLossService');
+          const plData = await profitLossService.calculateBillPL(targetBatchId);
+          
+          // Store P&L values along with commission_amount and closed_at
           await handleUpdateBatch(targetBatchId, { 
             status: closedStatus,
             commission_amount: fees.commission, // Store calculated commission
-            closed_at: new Date().toISOString() // Store closure timestamp
+            closed_at: new Date().toISOString(), // Store closure timestamp
+            total_revenue: plData.revenue,
+            revenue_cash: plData.revenueCash,
+            revenue_card: plData.revenueCard,
+            revenue_credit: plData.revenueCredit,
+            total_cogs: plData.cogs,
+            gross_profit: plData.grossProfit,
+            gross_profit_margin: plData.grossProfitMargin
           });
+          
+          // Also store via storeBillPL to ensure immutability check
+          await profitLossService.storeBillPL(targetBatchId, plData);
+          
           console.log(`✅ Bill ${targetBatchId} closed with commission: ${fees.commission} ${fees.currency}`);
+          console.log(`✅ P&L calculated - Revenue: ${plData.revenue}, COGS: ${plData.cogs}, Gross Profit: ${plData.grossProfit}`);
         }
       } catch (e) {
         console.warn('Failed to persist closed flag on inventory batch:', e);
@@ -909,7 +927,7 @@ export default function Accounting() {
     }
   };
 
-  const handleUpdateBatch  = async (batchId: string, updates: Partial<{ porterage_fee?: number | null; transfer_fee?: number | null; notes?: string | null; plastic_fee?: string | null; plastic_count?: number | null; plastic_price?: number | null; commission_rate?: number | null; commission_amount?: number | null; closed_at?: string | null; received_at?: string | null; status?: string | null; type?: string | null; supplier_id?: string | null; }>) => {
+  const handleUpdateBatch  = async (batchId: string, updates: Partial<{ porterage_fee?: number | null; transfer_fee?: number | null; notes?: string | null; plastic_fee?: string | null; plastic_count?: number | null; plastic_price?: number | null; commission_rate?: number | null; commission_amount?: number | null; closed_at?: string | null; received_at?: string | null; status?: string | null; type?: string | null; supplier_id?: string | null; total_revenue?: number | null; revenue_cash?: number | null; revenue_card?: number | null; revenue_credit?: number | null; total_cogs?: number | null; gross_profit?: number | null; gross_profit_margin?: number | null; }>) => {
     console.log('[Accounting] handleUpdateBatch - Called with:', { batchId, updates });
     try {
       // Update batch information

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import SalesOverviewCard from '../components/cards/SalesOverviewCard';
 import { MissedProductsHistory } from '../components/MissedProductsHistory';
+import ProfitLossReport from '../components/reports/ProfitLossReport';
 
 export default function Reports() {
   const raw = useOfflineData();
@@ -380,6 +381,10 @@ export default function Reports() {
             </div>
           </div>
         </div>
+      )}
+
+      {reportType === 'profit' && (
+        <ProfitLossReport storeId={raw.storeId} branchId={raw.currentBranchId || undefined} />
       )}
 
       {reportType === 'missed-products' && (

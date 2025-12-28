@@ -258,6 +258,14 @@ export interface inventory_bills {
   _lastSyncedAt?: string;
   _deleted?: boolean;
   updated_at?: string;
+  // P&L fields (calculated once at bill closure, immutable)
+  total_revenue?: number | null; // Revenue for the bill
+  revenue_cash?: number | null; // Revenue from cash sales (sale payment method)
+  revenue_card?: number | null; // Revenue from card sales (sale payment method)
+  revenue_credit?: number | null; // Revenue from credit sales (sale payment method)
+  total_cogs?: number | null; // Total cost of goods sold (0 for commission bills)
+  gross_profit?: number | null; // Gross profit (revenue - COGS)
+  gross_profit_margin?: number | null; // Profit margin percentage
 }
 
 // Bill interface - maps directly to bills table (snake_case for db compatibility)
