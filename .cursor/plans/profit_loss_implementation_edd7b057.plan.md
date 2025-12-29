@@ -421,4 +421,3 @@ export interface PLReportSummary {
 
 - Missing inventory items
 - Deleted bills
-- Zero-cost items

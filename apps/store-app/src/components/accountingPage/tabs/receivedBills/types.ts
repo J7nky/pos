@@ -113,5 +113,6 @@ export interface CloseBillFees {
   commission: number;
   porterage: number;
   transfer: number;
+  plastic?: number; // Plastic fee (optional for backward compatibility)
   supplierAmount: number;
 }

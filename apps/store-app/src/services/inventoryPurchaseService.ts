@@ -126,11 +126,29 @@ export class InventoryPurchaseService {
   ): Promise<PurchaseTransactionResult> {
     const transactionId = createId();
     
+    console.log(`[CASH_PURCHASE] Starting cash purchase processing:`, {
+      transactionId,
+      storeId: data.store_id,
+      branchId: data.branch_id,
+      totalAmount,
+      fees,
+      itemsCount: items.length,
+      createdBy: data.created_by
+    });
+    
     try {
       // For cash purchases, always use "Trade" as supplier
-      await this.getOrCreateTradeSupplier(data.store_id);
+      console.log(`[CASH_PURCHASE] Getting/creating Trade supplier for store: ${data.store_id}`);
+      const tradeSupplierId = await this.getOrCreateTradeSupplier(data.store_id);
+      console.log(`[CASH_PURCHASE] ✅ Trade supplier ID: ${tradeSupplierId}`);
       
       // Verify session is open
+      console.log(`[CASH_PURCHASE] Verifying cash drawer session:`, {
+        storeId: data.store_id,
+        branchId: data.branch_id,
+        allowAutoOpen: true
+      });
+      
       const session = await cashDrawerUpdateService.verifySessionOpen(
         data.store_id,
         data.branch_id,
@@ -140,10 +158,22 @@ export class InventoryPurchaseService {
       );
 
       if (!session) {
+        console.error(`[CASH_PURCHASE] ❌ No active cash drawer session found`);
         throw new Error('No active cash drawer session');
       }
+      
+      console.log(`[CASH_PURCHASE] ✅ Cash drawer session verified:`, {
+        sessionId: session.id,
+        status: session.status
+      });
 
       // Create cash drawer expense transaction atomically
+      console.log(`[CASH_PURCHASE] Creating cash drawer expense transaction:`, {
+        amount: totalAmount,
+        currency: 'USD',
+        reference: `INV-PURCH-${transactionId.substring(0, 8)}`
+      });
+      
       const result = await transactionService.createCashDrawerExpense(
         totalAmount,
         'USD',
@@ -161,29 +191,83 @@ export class InventoryPurchaseService {
         }
       );
 
+      console.log(`[CASH_PURCHASE] Transaction service result:`, {
+        success: result.success,
+        transactionId: result.transactionId,
+        cashDrawerImpact: result.cashDrawerImpact,
+        error: result.error
+      });
+
       if (!result.success) {
+        console.error(`[CASH_PURCHASE] ❌ Transaction creation failed:`, result.error);
         throw new Error(result.error || 'Failed to update cash drawer');
+      }
+
+      // Verify journal entries were created
+      if (result.transactionId) {
+        const { getDB } = await import('../lib/db');
+        const journalEntries = await getDB().journal_entries
+          .where('transaction_id')
+          .equals(result.transactionId)
+          .toArray();
+        
+        console.log(`[CASH_PURCHASE] Journal entries created:`, {
+          transactionId: result.transactionId,
+          entryCount: journalEntries.length,
+          entries: journalEntries.map(e => ({
+            account_code: e.account_code,
+            debit: e.debit,
+            credit: e.credit,
+            currency: e.currency,
+            is_posted: e.is_posted
+          }))
+        });
+        
+        // Check for cash account entries (1100)
+        const cashEntries = journalEntries.filter(e => e.account_code === '1100');
+        if (cashEntries.length === 0) {
+          console.warn(`[CASH_PURCHASE] ⚠️ No cash account (1100) journal entries found!`);
+        } else {
+          console.log(`[CASH_PURCHASE] ✅ Cash account entries found:`, cashEntries.length);
+        }
       }
 
       // Notify UI of cash drawer update
       if (result.cashDrawerImpact) {
+        console.log(`[CASH_PURCHASE] Notifying UI of cash drawer update:`, {
+          newBalance: result.cashDrawerImpact.newBalance,
+          previousBalance: result.cashDrawerImpact.previousBalance,
+          balanceChange: result.cashDrawerImpact.newBalance - result.cashDrawerImpact.previousBalance
+        });
+        
         cashDrawerUpdateService.notifyCashDrawerUpdate(
           data.store_id,
           result.cashDrawerImpact.newBalance,
           result.transactionId || ''
         );
+      } else {
+        console.warn(`[CASH_PURCHASE] ⚠️ No cash drawer impact returned from transaction service`);
       }
 
+      console.log(`[CASH_PURCHASE] ✅ Cash purchase processed successfully`);
+      
       return {
         success: true,
-        transactionId,
+        transactionId: result.transactionId || transactionId,
         totalAmount,
         cashDrawerImpact: -totalAmount, // Negative because we're deducting
         fees,
         items
       };
     } catch (error) {
-      console.error('Error processing cash purchase:', error);
+      console.error(`[CASH_PURCHASE] ❌ Error processing cash purchase:`, {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        transactionId,
+        totalAmount,
+        storeId: data.store_id,
+        branchId: data.branch_id
+      });
       throw new Error(`Failed to process cash purchase: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -347,6 +431,8 @@ export class InventoryPurchaseService {
    * Get or create the "Trade" supplier entity for cash purchases
    */
   public async getOrCreateTradeSupplier(storeId: string): Promise<string> {
+    console.log(`[TRADE_SUPPLIER] Getting/creating Trade supplier for store: ${storeId}`);
+    
     try {
       // Look for existing "Trade" supplier entity
       const existingSupplier = await getDB().entities
@@ -356,10 +442,12 @@ export class InventoryPurchaseService {
         .first();
 
       if (existingSupplier) {
+        console.log(`[TRADE_SUPPLIER] ✅ Found existing Trade supplier: ${existingSupplier.id}`);
         return existingSupplier.id;
       }
 
       // Create new "Trade" supplier entity
+      console.log(`[TRADE_SUPPLIER] Creating new Trade supplier entity`);
       const tradeSupplierId = createId();
       const now = new Date().toISOString();
       const tradeSupplier = {
@@ -370,8 +458,7 @@ export class InventoryPurchaseService {
         entity_code: `SUPP-TRADE-${tradeSupplierId.slice(0, 8).toUpperCase()}`,
         name: 'Trade',
         phone: null,
-        lb_balance: 0,
-        usd_balance: 0,
+        // Note: lb_balance and usd_balance are not in Supabase schema - balances are calculated from journal entries
         is_system_entity: false,
         is_active: true,
         customer_data: null,
@@ -387,9 +474,18 @@ export class InventoryPurchaseService {
       };
 
       await getDB().entities.add(tradeSupplier);
+      console.log(`[TRADE_SUPPLIER] ✅ Created new Trade supplier: ${tradeSupplierId}`, {
+        entityCode: tradeSupplier.entity_code,
+        storeId: tradeSupplier.store_id
+      });
+      
       return tradeSupplierId;
     } catch (error) {
-      console.error('Error getting/creating Trade supplier:', error);
+      console.error(`[TRADE_SUPPLIER] ❌ Error getting/creating Trade supplier:`, {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        storeId
+      });
       throw new Error('Failed to get or create Trade supplier');
     }
   }

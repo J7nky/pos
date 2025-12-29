@@ -139,8 +139,49 @@ export class JournalService {
       throw new Error(`Journal entry validation failed: ${errors.join(', ')}`);
     }
     
+    console.log(`[JOURNAL_SERVICE] Inserting journal entries:`, {
+      transactionId,
+      debitEntry: {
+        id: debitEntry.id,
+        account_code: debitEntry.account_code,
+        debit_usd: debitEntry.debit_usd,
+        debit_lbp: debitEntry.debit_lbp
+      },
+      creditEntry: {
+        id: creditEntry.id,
+        account_code: creditEntry.account_code,
+        credit_usd: creditEntry.credit_usd,
+        credit_lbp: creditEntry.credit_lbp
+      }
+    });
+    
     // Insert both entries atomically
+    // NOTE: This must be called within an IndexedDB transaction that includes journal_entries
     await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);
+    
+    console.log(`[JOURNAL_SERVICE] ✅ Journal entries inserted to database`);
+    
+    // Verify entries were actually saved by querying them back
+    const savedEntries = await getDB().journal_entries
+      .where('transaction_id')
+      .equals(transactionId)
+      .toArray();
+    
+    console.log(`[JOURNAL_SERVICE] Verification: Found ${savedEntries.length} journal entries for transaction ${transactionId}`, {
+      entries: savedEntries.map(e => ({
+        id: e.id,
+        account_code: e.account_code,
+        debit_usd: e.debit_usd,
+        credit_usd: e.credit_usd,
+        debit_lbp: e.debit_lbp,
+        credit_lbp: e.credit_lbp
+      }))
+    });
+    
+    if (savedEntries.length !== 2) {
+      console.error(`[JOURNAL_SERVICE] ❌ Expected 2 journal entries but found ${savedEntries.length}`);
+      throw new Error(`Journal entries not saved correctly. Expected 2 entries, found ${savedEntries.length}`);
+    }
     
     // Verify transaction balance after insertion
     const balanceCheck = await this.verifyTransactionBalance(transactionId);

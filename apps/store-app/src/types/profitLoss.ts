@@ -22,9 +22,10 @@ export interface PLReportLine {
   billId: string;
   billNumber?: string;
   billType: 'commission' | 'cash' | 'credit'; // Purchase type
+  currency: 'USD' | 'LBP'; // Original currency of the bill
   closedAt: string; // When bill was closed (used for date filtering)
   receivedAt: string; // When bill was received
-  revenue: number; // From stored total_revenue
+  revenue: number; // From stored total_revenue (in bill's original currency)
   revenueCash?: number; // From stored revenue_cash (sale payment method: cash)
   revenueCard?: number; // From stored revenue_card (sale payment method: card)
   revenueCredit?: number; // From stored revenue_credit (sale payment method: credit)
@@ -51,6 +52,7 @@ export interface PLReportSummary {
 }
 
 export interface BillPLData {
+  currency: 'USD' | 'LBP'; // Original currency of the bill
   revenue: number;
   revenueCash: number;
   revenueCard: number;

@@ -649,6 +649,16 @@ export class DataValidationService {
       // Remove fields that don't exist in the database schema
       delete cleanRecord.plastic_count;
       delete cleanRecord.plastic_price;
+      
+      // Remove P&L fields - these are calculated locally and don't need to be synced
+      // They can be recalculated on the server if needed
+      delete cleanRecord.total_revenue;
+      delete cleanRecord.revenue_cash;
+      delete cleanRecord.revenue_card;
+      delete cleanRecord.revenue_credit;
+      delete cleanRecord.total_cogs;
+      delete cleanRecord.gross_profit;
+      delete cleanRecord.gross_profit_margin;
     }
 
     if (tableName === 'inventory_items') {
@@ -661,6 +671,12 @@ export class DataValidationService {
     const tablesWithoutUpdatedAt = ['inventory_items', 'transactions', 'inventory_bills', 'bill_line_items', 'bill_audit_logs'];
     if (tablesWithoutUpdatedAt.includes(tableName)) {
       delete cleanRecord.updated_at;
+    }
+
+    // Remove lb_balance and usd_balance from entities table - these fields don't exist in Supabase schema
+    if (tableName === 'entities') {
+      delete cleanRecord.lb_balance;
+      delete cleanRecord.usd_balance;
     }
 
     // Ensure users table balance fields are properly handled

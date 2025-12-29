@@ -3824,12 +3824,33 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const batchId = createId();
 
     // Get the actual supplier ID before processing
-    const actualSupplierId = supplier_id === 'trade' ? await InventoryPurchaseService.getInstance().getOrCreateTradeSupplier(storeId) : supplier_id;
+    console.log(`[ADD_INVENTORY_BATCH] Processing inventory batch:`, {
+      batchId,
+      type,
+      supplier_id,
+      itemsCount: items.length,
+      porterage_fee,
+      transfer_fee,
+      plastic_fee,
+      storeId,
+      branchId: currentBranchId
+    });
+    
+    const actualSupplierId = supplier_id === 'trade' 
+      ? await InventoryPurchaseService.getInstance().getOrCreateTradeSupplier(storeId) 
+      : supplier_id;
+    
+    console.log(`[ADD_INVENTORY_BATCH] Supplier ID resolved:`, {
+      original: supplier_id,
+      actual: actualSupplierId
+    });
 
     // Process financial transactions for cash and credit purchases
     let financialResult = null;
     if (type === 'cash' || type === 'credit') {
       try {
+        console.log(`[ADD_INVENTORY_BATCH] Processing financial transaction for ${type} purchase`);
+        
         const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
 
         const purchaseData = {
@@ -3849,17 +3870,39 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           commission_rate: commission_rate || undefined,
           created_by,
           store_id: storeId,
-        branch_id: currentBranchId || '',
-
+          branch_id: currentBranchId || '',
           status: status || undefined
         };
 
+        console.log(`[ADD_INVENTORY_BATCH] Purchase data prepared:`, {
+          ...purchaseData,
+          items: purchaseData.items.map(i => ({ product_id: i.product_id, quantity: i.quantity, price: i.price }))
+        });
+
         financialResult = await inventoryPurchaseService.processInventoryPurchase(purchaseData);
+        
+        console.log(`[ADD_INVENTORY_BATCH] ✅ Financial transaction processed:`, {
+          success: financialResult.success,
+          transactionId: financialResult.transactionId,
+          totalAmount: financialResult.totalAmount,
+          cashDrawerImpact: financialResult.cashDrawerImpact,
+          fees: financialResult.fees
+        });
+        
         debug('Financial transaction processed:', financialResult);
       } catch (error) {
-        console.error('Error processing financial transaction:', error);
+        console.error(`[ADD_INVENTORY_BATCH] ❌ Error processing financial transaction:`, {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          stack: error instanceof Error ? error.stack : undefined,
+          type,
+          supplierId: actualSupplierId,
+          storeId,
+          branchId: currentBranchId
+        });
         throw new Error(`Failed to process financial transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
+    } else {
+      console.log(`[ADD_INVENTORY_BATCH] Skipping financial transaction (type: ${type})`);
     }
 
     const batchRecord = {

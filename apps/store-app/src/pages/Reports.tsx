@@ -5,10 +5,8 @@ import {
   BarChart3, 
   TrendingUp, 
   DollarSign, 
-  Download,
   Users,
   Package,
-  
 } from 'lucide-react';
 import SalesOverviewCard from '../components/cards/SalesOverviewCard';
 import { MissedProductsHistory } from '../components/MissedProductsHistory';
@@ -92,62 +90,77 @@ export default function Reports() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Reports & Analytics</h1>
-        <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center">
-          <Download className="w-5 h-5 mr-2" />
-          Export Report
-        </button>
-      </div>
-
-      {/* Date Range and Report Type */}
+      {/* Header */}
       <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Report Type
-            </label>
-            <select
-              value={reportType}
-              onChange={(e) => setReportType(e.target.value as any)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="sales">Sales Report</option>
-              <option value="inventory">Inventory Report</option>
-              <option value="customers">Customer Report</option>
-              <option value="profit">Profit Analysis</option>
-              <option value="missed-products">Missed Products Report</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Start Date
-            </label>
-            <input
-              type="date"
-              value={dateRange.startDate}
-              onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              End Date
-            </label>
-            <input
-              type="date"
-              value={dateRange.endDate}
-              onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-          <div className="flex items-end">
-            <button className="w-full bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors">
-              Generate Report
-            </button>
+            <h1 className="text-2xl font-bold text-gray-900">Reports & Analytics</h1>
+            <p className="text-sm text-gray-500 mt-1">Comprehensive insights into your business performance</p>
           </div>
         </div>
       </div>
+
+        {/* Report Type Selection */}
+        <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { value: 'sales', label: 'Sales Report', icon: DollarSign },
+              { value: 'inventory', label: 'Inventory', icon: Package },
+              { value: 'customers', label: 'Customers', icon: Users },
+              { value: 'profit', label: 'Profit Analysis', icon: TrendingUp },
+              { value: 'missed-products', label: 'Missed Products', icon: Package },
+            ].map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                onClick={() => setReportType(value as any)}
+                className={`flex items-center px-4 py-2 rounded-lg font-medium transition-all ${
+                  reportType === value
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <Icon className="w-4 h-4 mr-2" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Date Range Filter - Only show for non-profit reports */}
+        {reportType !== 'profit' && (
+          <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+            <h2 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Date Range</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={dateRange.startDate}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={dateRange.endDate}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div className="flex items-end">
+                <div className="w-full text-sm text-gray-500 bg-gray-50 px-4 py-2 rounded-lg">
+                  {new Date(dateRange.startDate).toLocaleDateString()} - {new Date(dateRange.endDate).toLocaleDateString()}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
       {reportType === 'sales' && (
         <div className="space-y-6">

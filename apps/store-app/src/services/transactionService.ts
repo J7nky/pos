@@ -216,6 +216,17 @@ export class TransactionService {
       let affectedRecords: string[] = [transactionId];
       let cashDrawerImpact: { previousBalance: number; newBalance: number } | undefined;
 
+      console.log(`[CREATE_TRANSACTION] Starting transaction creation:`, {
+        transactionId,
+        category: params.category,
+        amount: params.amount,
+        currency: params.currency,
+        updateCashDrawer: params.updateCashDrawer,
+        isCashDrawerCategory: this.isCashDrawerCategory(params.category),
+        storeId: params.context.storeId,
+        branchId: params.context.branchId
+      });
+
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
       // ALL database write operations happen atomically
       await getDB().transaction('rw', 
@@ -225,30 +236,100 @@ export class TransactionService {
           const timestamp = new Date().toISOString();
           transaction.created_at = timestamp;
           
-      console.log(timestamp,8383883)
-      // 5. CREATE TRANSACTION RECORD
+          console.log(`[CREATE_TRANSACTION] Adding transaction record:`, {
+            transactionId,
+            category: transaction.category,
+            amount: transaction.amount,
+            currency: transaction.currency
+          });
+          
+          // 5. CREATE TRANSACTION RECORD
           await getDB().transactions.add(transaction);
+          console.log(`[CREATE_TRANSACTION] ✅ Transaction record added`);
 
           // 6. CREATE JOURNAL ENTRIES (MANDATORY - ACCOUNTING RULE)
           // ✅ Journal entries are the source of truth for financial data
           // If journal entries fail, the entire transaction must be rolled back
+          console.log(`[CREATE_TRANSACTION] Creating journal entries for transaction: ${transactionId}`);
           await this.createJournalEntriesForTransaction(transaction);
+          
+          // Verify journal entries were created
+          const allJournalEntries = await getDB().journal_entries
+            .where('transaction_id')
+            .equals(transactionId)
+            .toArray();
+          
+          console.log(`[CREATE_TRANSACTION] ✅ Journal entries created:`, {
+            count: allJournalEntries.length,
+            entries: allJournalEntries.map(e => ({
+              account_code: e.account_code,
+              debit_usd: e.debit_usd,
+              credit_usd: e.credit_usd,
+              debit_lbp: e.debit_lbp,
+              credit_lbp: e.credit_lbp,
+              is_posted: e.is_posted
+            }))
+          });
 
           // 7. BALANCES ARE NOW CALCULATED FROM JOURNAL ENTRIES
           // No need to update entity balance fields - they are derived from journal entries
           // Use entityBalanceService.getEntityBalance() to get current balance
 
           // 8. UPDATE CASH DRAWER (if enabled and applicable)
-          if (params.updateCashDrawer !== false && this.isCashDrawerCategory(params.category)) {
+          const shouldUpdateCashDrawer = params.updateCashDrawer !== false && this.isCashDrawerCategory(params.category);
+          console.log(`[CREATE_TRANSACTION] Cash drawer update check:`, {
+            shouldUpdate: shouldUpdateCashDrawer,
+            updateCashDrawer: params.updateCashDrawer,
+            isCashDrawerCategory: this.isCashDrawerCategory(params.category)
+          });
+          
+          if (shouldUpdateCashDrawer) {
+            console.log(`[CREATE_TRANSACTION] Updating cash drawer for transaction: ${transactionId}`);
             cashDrawerImpact = await this.updateCashDrawerAtomic(
               transaction,
               params.context.storeId,
               params.context.branchId
             );
+            console.log(`[CREATE_TRANSACTION] Cash drawer update result:`, cashDrawerImpact);
+          } else {
+            console.log(`[CREATE_TRANSACTION] Skipping cash drawer update (not applicable for this transaction type)`);
           }
         }
       );
       // ⭐⭐⭐ END ATOMIC TRANSACTION ⭐⭐⭐
+      
+      // Verify journal entries are persisted after transaction commits
+      const persistedEntries = await getDB().journal_entries
+        .where('transaction_id')
+        .equals(transactionId)
+        .toArray();
+      
+      console.log(`[CREATE_TRANSACTION] Post-transaction verification:`, {
+        transactionId,
+        journalEntriesFound: persistedEntries.length,
+        entries: persistedEntries.map(e => ({
+          id: e.id,
+          account_code: e.account_code,
+          debit_usd: e.debit_usd,
+          credit_usd: e.credit_usd,
+          debit_lbp: e.debit_lbp,
+          credit_lbp: e.credit_lbp,
+          is_posted: e.is_posted
+        }))
+      });
+      
+      if (persistedEntries.length === 0) {
+        console.error(`[CREATE_TRANSACTION] ❌ CRITICAL: No journal entries found after transaction commit!`);
+      } else if (persistedEntries.length !== 2) {
+        console.warn(`[CREATE_TRANSACTION] ⚠️ Expected 2 journal entries but found ${persistedEntries.length}`);
+      }
+      
+      console.log(`[CREATE_TRANSACTION] ✅ Transaction created successfully:`, {
+        transactionId,
+        cashDrawerImpact,
+        journalEntriesCount: persistedEntries.length,
+        success: true
+      });
 
       // Trigger sync after transaction completes
       // This ensures hooks that might not fire during transactions still trigger sync
@@ -292,7 +373,15 @@ export class TransactionService {
       };
 
     } catch (error) {
-      console.error('❌ Transaction creation failed (all operations rolled back):', error);
+      console.error(`[CREATE_TRANSACTION] ❌ Transaction creation failed (all operations rolled back):`, {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        category: params.category,
+        amount: params.amount,
+        currency: params.currency,
+        storeId: params.context.storeId,
+        branchId: params.context.branchId
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -703,18 +792,21 @@ export class TransactionService {
                 .toArray();
               
               // Calculate original balance change: sum of (debit - credit) for cash account entries
+              // ✅ Journal entries use new schema: debit_usd, credit_usd, debit_lbp, credit_lbp
               let originalBalanceChange = 0;
               for (const entry of cashJournalEntries) {
-                const entryAmount = (entry.debit || 0) - (entry.credit || 0);
+                // Calculate net change for each currency
+                const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
+                const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
                 
-                // Convert to LBP if entry is in USD (cash drawer always stores in LBP)
-                if (entry.currency === 'USD') {
-                  const amountInLBP = currencyService.convertCurrency(entryAmount, 'USD', 'LBP');
-                  originalBalanceChange += amountInLBP;
-                } else {
-                  // Entry is already in LBP
-                  originalBalanceChange += entryAmount;
+                // Convert USD change to LBP and add to total
+                if (usdChange !== 0) {
+                  const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
+                  originalBalanceChange += usdInLbp;
                 }
+                
+                // Add LBP change directly
+                originalBalanceChange += lbpChange;
               }
               
               // Reverse the balance change (negate it)
@@ -1086,51 +1178,120 @@ export class TransactionService {
     storeId: string,
     branchId: string
   ): Promise<{ previousBalance: number; newBalance: number } | undefined> {
+    console.log(`[CASH_DRAWER_UPDATE] Starting cash drawer update:`, {
+      transactionId: transaction.id,
+      category: transaction.category,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      storeId,
+      branchId
+    });
+    
     try {
       // ✅ Get cash drawer ACCOUNT (not session) - this is what we update
       const account = await getDB().getCashDrawerAccount(storeId, branchId);
 
       if (!account) {
-        console.warn('⚠️ No cash drawer account found for store:', storeId, 'branch:', branchId);
+        console.error(`[CASH_DRAWER_UPDATE] ❌ No cash drawer account found:`, {
+          storeId,
+          branchId,
+          transactionId: transaction.id
+        });
         return undefined;
       }
 
+      console.log(`[CASH_DRAWER_UPDATE] Cash drawer account found:`, {
+        accountId: account.id,
+        accountCode: (account as any).account_code,
+        currentBalance: (account as any).current_balance
+      });
+
       const previousBalance = Number((account as any)?.current_balance || 0);
+      console.log(`[CASH_DRAWER_UPDATE] Previous balance: ${previousBalance.toLocaleString()} LBP`);
 
       // ✅ Calculate balance change from journal entries (account_code = 1100) for this transaction
       // Journal entries are the single source of truth
+      console.log(`[CASH_DRAWER_UPDATE] Fetching journal entries for transaction: ${transaction.id}`);
+      
       const cashJournalEntries = await getDB().journal_entries
         .where('transaction_id')
         .equals(transaction.id)
         .and(entry => entry.account_code === '1100' && entry.is_posted === true)
         .toArray();
 
+      console.log(`[CASH_DRAWER_UPDATE] Journal entries found:`, {
+        count: cashJournalEntries.length,
+        entries: cashJournalEntries.map(e => ({
+          id: e.id,
+          account_code: e.account_code,
+          debit_usd: e.debit_usd,
+          credit_usd: e.credit_usd,
+          debit_lbp: e.debit_lbp,
+          credit_lbp: e.credit_lbp,
+          is_posted: e.is_posted
+        }))
+      });
+
       // Calculate balance change: sum of (debit - credit) for cash account entries
       // ✅ IMPORTANT: Cash drawer balance is always in LBP, so convert USD entries to LBP
+      // ✅ Journal entries use new schema: debit_usd, credit_usd, debit_lbp, credit_lbp
       let balanceChange = 0;
       for (const entry of cashJournalEntries) {
-        const entryAmount = (entry.debit || 0) - (entry.credit || 0);
+        // Calculate net change for each currency
+        const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
+        const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
         
-        // Convert to LBP if entry is in USD (cash drawer always stores in LBP)
-        if (entry.currency === 'USD') {
-          const amountInLBP = currencyService.convertCurrency(entryAmount, 'USD', 'LBP');
-          balanceChange += amountInLBP;
-        } else {
-          // Entry is already in LBP
-          balanceChange += entryAmount;
+        console.log(`[CASH_DRAWER_UPDATE] Processing journal entry:`, {
+          entryId: entry.id,
+          debit_usd: entry.debit_usd,
+          credit_usd: entry.credit_usd,
+          debit_lbp: entry.debit_lbp,
+          credit_lbp: entry.credit_lbp,
+          usdChange,
+          lbpChange
+        });
+        
+        // Convert USD change to LBP and add to total
+        if (usdChange !== 0) {
+          const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
+          console.log(`[CASH_DRAWER_UPDATE] Converted USD to LBP: ${usdChange} USD = ${usdInLbp} LBP`);
+          balanceChange += usdInLbp;
         }
+        
+        // Add LBP change directly
+        balanceChange += lbpChange;
       }
 
       // If no cash journal entries found, this transaction doesn't affect cash drawer
       if (cashJournalEntries.length === 0) {
-        console.warn(`⚠️ No cash journal entries (account_code=1100) found for transaction ${transaction.id}. Cash drawer not updated.`);
+        console.warn(`[CASH_DRAWER_UPDATE] ⚠️ No cash journal entries (account_code=1100) found for transaction ${transaction.id}. Cash drawer not updated.`, {
+          transactionId: transaction.id,
+          category: transaction.category,
+          allJournalEntries: await getDB().journal_entries
+            .where('transaction_id')
+            .equals(transaction.id)
+            .toArray()
+            .then(entries => entries.map(e => ({
+              account_code: e.account_code,
+              is_posted: e.is_posted
+            })))
+        });
         return undefined;
       }
 
       const newBalance = previousBalance + balanceChange;
 
-      // ✅ Balance is computed from journal entries - no need to update current_balance field
+      console.log(`[CASH_DRAWER_UPDATE] ✅ Balance calculated:`, {
+        previousBalance: previousBalance.toLocaleString(),
+        balanceChange: balanceChange > 0 ? `+${balanceChange.toLocaleString()}` : balanceChange.toLocaleString(),
+        newBalance: newBalance.toLocaleString(),
+        transactionId: transaction.id
+      });
+
+      // ✅ Balance is computed from journal entries - DO NOT update current_balance field directly
       // Journal entries are the single source of truth
+      // The cash drawer balance should be calculated from journal entries when needed
+      // This method only calculates the impact for reporting/notification purposes
       console.log(`💰 Cash drawer balance impact: ${previousBalance.toLocaleString()} → ${newBalance.toLocaleString()} (change: ${balanceChange > 0 ? '+' : ''}${balanceChange.toLocaleString()})`);
 
       return {
@@ -1139,7 +1300,13 @@ export class TransactionService {
       };
 
     } catch (error) {
-      console.error('Error updating cash drawer atomically:', error);
+      console.error(`[CASH_DRAWER_UPDATE] ❌ Error updating cash drawer atomically:`, {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        transactionId: transaction.id,
+        storeId,
+        branchId
+      });
       throw error; // Re-throw to trigger transaction rollback
     }
   }
@@ -1216,11 +1383,25 @@ export class TransactionService {
    * Uses account mapping utilities for consistent double-entry bookkeeping
    */
   private async createJournalEntriesForTransaction(transaction: Transaction): Promise<void> {
+    console.log(`[CREATE_JOURNAL_ENTRIES] Starting journal entry creation:`, {
+      transactionId: transaction.id,
+      category: transaction.category,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      customer_id: transaction.customer_id,
+      supplier_id: transaction.supplier_id,
+      employee_id: transaction.employee_id,
+      branch_id: transaction.branch_id
+    });
+    
     try {
       // Get entity CODE using account mapping utilities
       // Note: getEntityCodeForTransaction returns an entity CODE (e.g., "CASH-CUST"), not an entity ID
       const providedEntityCode = transaction.customer_id || transaction.supplier_id || transaction.employee_id;
+      console.log(`[CREATE_JOURNAL_ENTRIES] Provided entity code: ${providedEntityCode}`);
+      
       const entityCode = getEntityCodeForTransaction(transaction.category, providedEntityCode);
+      console.log(`[CREATE_JOURNAL_ENTRIES] Resolved entity code: ${entityCode}`);
       
       // Convert entity CODE to entity ID by querying the entities table
       // If providedEntityCode is a UUID (customer_id, supplier_id, employee_id), use it directly
@@ -1232,23 +1413,33 @@ export class TransactionService {
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (providedEntityCode && uuidPattern.test(providedEntityCode)) {
         // It's already a UUID (customer/supplier/employee ID), use it directly
+        console.log(`[CREATE_JOURNAL_ENTRIES] Provided entity code is UUID, using directly: ${providedEntityCode}`);
         entityId = providedEntityCode;
         entity = await getDB().entities.get(entityId);
+        console.log(`[CREATE_JOURNAL_ENTRIES] Entity found by UUID:`, entity ? { id: entity.id, name: entity.name, type: entity.entity_type } : 'NOT FOUND');
       } else {
         // It's a system entity code (e.g., "CASH-CUST"), need to look it up
+        console.log(`[CREATE_JOURNAL_ENTRIES] Looking up system entity: ${entityCode} for store ${transaction.store_id}`);
         entity = await getSystemEntity(getDB(), transaction.store_id, entityCode);
         if (!entity) {
+          console.error(`[CREATE_JOURNAL_ENTRIES] ❌ System entity not found: ${entityCode} for store ${transaction.store_id}`);
           throw new Error(`System entity not found: ${entityCode} for store ${transaction.store_id}. Make sure system entities are initialized.`);
         }
         entityId = entity.id;
+        console.log(`[CREATE_JOURNAL_ENTRIES] System entity found:`, { id: entity.id, name: entity.name, type: entity.entity_type });
       }
       
       if (!entity) {
+        console.error(`[CREATE_JOURNAL_ENTRIES] ❌ Entity not found: ${entityCode} (code) or ${entityId} (id)`);
         throw new Error(`Entity not found: ${entityCode} (code) or ${entityId} (id)`);
       }
       
       // Get account mapping for this transaction category
       const accountMapping = getAccountMapping(transaction.category);
+      console.log(`[CREATE_JOURNAL_ENTRIES] Account mapping:`, {
+        debitAccount: accountMapping.debitAccount,
+        creditAccount: accountMapping.creditAccount
+      });
       
       // Get entity information for description
       const description = getJournalDescription(
@@ -1256,11 +1447,23 @@ export class TransactionService {
         entity.name,
         transaction.description
       );
+      console.log(`[CREATE_JOURNAL_ENTRIES] Journal description: ${description}`);
       
       // Validate branch_id is present
       if (!transaction.branch_id) {
+        console.error(`[CREATE_JOURNAL_ENTRIES] ❌ Transaction ${transaction.id} is missing branch_id`);
         throw new Error(`Transaction ${transaction.id} is missing branch_id. All transactions must have a branch_id for proper accounting.`);
       }
+
+      console.log(`[CREATE_JOURNAL_ENTRIES] Calling journalService.createJournalEntry with:`, {
+        transactionId: transaction.id,
+        debitAccount: accountMapping.debitAccount,
+        creditAccount: accountMapping.creditAccount,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        entityId,
+        branchId: transaction.branch_id
+      });
 
       // Create journal entry using the mapping
       await journalService.createJournalEntry({
@@ -1276,10 +1479,17 @@ export class TransactionService {
         branchId: transaction.branch_id  // ✅ Pass branch_id from transaction to journal entry (required)
       });
       
-      console.log(`✅ Journal entries created for ${transaction.category}: ${transaction.id} (entity: ${entity.name}, id: ${entityId})`);
+      console.log(`[CREATE_JOURNAL_ENTRIES] ✅ Journal entries created for ${transaction.category}: ${transaction.id} (entity: ${entity.name}, id: ${entityId})`);
       
     } catch (error) {
-      console.error('❌ Failed to create journal entries:', error);
+      console.error(`[CREATE_JOURNAL_ENTRIES] ❌ Failed to create journal entries:`, {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        transactionId: transaction.id,
+        category: transaction.category,
+        supplier_id: transaction.supplier_id,
+        customer_id: transaction.customer_id
+      });
       throw error;
     }
   }

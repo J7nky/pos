@@ -801,7 +801,7 @@ export default function Accounting() {
     nonPricedPage * NON_PRICED_PAGE_SIZE
   );
 
-  const handleCloseReceivedBill = async (bill: any, fees: { commission: number; porterage: number; transfer: number; supplierAmount: number, currency: 'USD' | 'LBP' }) => {
+  const handleCloseReceivedBill = async (bill: any, fees: { commission: number; porterage: number; transfer: number; plastic?: number; supplierAmount: number, currency: 'USD' | 'LBP' }) => {
     try {
       // Guard: do not allow closing an already closed bill
       if (bill?.status && typeof bill.status === 'string' && bill.status.includes('[CLOSED]')) {
@@ -809,8 +809,9 @@ export default function Accounting() {
         return;
       }
 
-      // Calculate total revenue from the bill
-      const totalRevenue = fees.commission + fees.porterage + fees.transfer + fees.supplierAmount;
+      // Calculate total revenue from the bill (includes commission, fees, and supplier amount)
+      const plasticFee = fees.plastic || 0;
+      const totalRevenue = fees.commission + fees.porterage + fees.transfer + plasticFee + fees.supplierAmount;
 
       // Add commission transaction (if applicable)
       if (fees.commission > 0) {
@@ -831,37 +832,10 @@ export default function Accounting() {
         // The transaction above will create journal entries which automatically update the balance
       }
 
-      // Add porterage transaction (if applicable)
-      if (fees.porterage > 0) {
-        const safePorterageAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.porterage, currency as 'USD' | 'LBP');
-        await addTransaction({
-          id: raw.createId?.() || crypto.randomUUID(),
-          type: 'income',
-          supplier_id: bill.supplier_id,
-          category: 'Porterage',
-          amount: safePorterageAmount.amount,
-          currency: safePorterageAmount.currency,
-          description: `Porterage fee for ${bill.productName} from ${bill.supplierName}${safePorterageAmount.wasConverted ? ` (Originally ${fees.porterage} ${currency})` : ''}`,
-          reference: generatePorterageReference(),
-          created_by: userProfile?.id || ''
-        });
-      }
-
-      // Add transfer fee transaction (if applicable)
-      if (fees.transfer > 0) {
-        const safeTransferAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.transfer, currency as 'USD' | 'LBP');
-        await addTransaction({
-          id: raw.createId?.() || crypto.randomUUID(),
-          type: 'income',
-          supplier_id: bill.supplier_id,
-          category: 'Transfer Fee',
-          amount: safeTransferAmount.amount,
-          currency: safeTransferAmount.currency,
-          description: `Transfer fee for ${bill.productName} from ${bill.supplierName}${safeTransferAmount.wasConverted ? ` (Originally ${fees.transfer} ${currency})` : ''}`,
-          reference: generateTransferReference(),
-          created_by: userProfile?.id || ''
-        });
-      }
+      // NOTE: Porterage, transfer, and plastic fees were already paid at purchase time and deducted from cash drawer.
+      // We do NOT create new transactions for these fees when closing the bill - they are only used in calculations.
+      // The fees are already recorded as expenses when the bill was received.
+      // We only record the commission (income) and supplier payment (expense) at bill closing.
 
       // Add supplier payment transaction
       if (fees.supplierAmount > 0) {
@@ -892,11 +866,112 @@ export default function Accounting() {
         if (!targetBatchId) {
           console.warn('No batch identifier available when attempting to close bill:', bill);
         } else {
+          // Get batch and database reference
+          const { getDB } = await import('../lib/db');
+          const batch = await getDB().inventory_bills.get(targetBatchId);
+          const billType = batch?.type || bill.type || (bill as any).batchType;
+          
           // Calculate P&L before closing
           const { profitLossService } = await import('../services/profitLossService');
-          const plData = await profitLossService.calculateBillPL(targetBatchId);
+          let plData;
+          try {
+            plData = await profitLossService.calculateBillPL(targetBatchId);
+          } catch (error) {
+            console.error(`❌ Failed to calculate P&L for bill ${targetBatchId}:`, error);
+            // For commission bills, we can still proceed with manually calculated values
+            if (billType === 'commission') {
+              console.warn(`⚠️ Falling back to manual P&L calculation for commission bill ${targetBatchId}`);
+              plData = {
+                revenue: 0,
+                revenueCash: 0,
+                revenueCard: 0,
+                revenueCredit: 0,
+                cogs: 0,
+                grossProfit: 0,
+                grossProfitMargin: 0,
+              };
+            } else {
+              throw new Error(`Failed to calculate P&L: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
+          }
+          
+          // CRITICAL: For commission bills, calculate revenue from batch's commission_rate
+          // This ensures revenue = commission amount, NOT total sales
+          if (billType === 'commission') {
+            // Get the commission rate directly from the batch (the source of truth)
+            const commissionRate = batch?.commission_rate;
+            
+            // If no commission rate, try to get it from the bill object
+            const effectiveCommissionRate = commissionRate ?? (bill as any).commissionRate ?? 10; // Default to 10% if missing
+            
+            console.log(`📊 Commission bill ${targetBatchId}: commission_rate from batch = ${commissionRate}, effective rate = ${effectiveCommissionRate}%`);
+            
+            // Calculate total sales from bill_line_items
+            const inventoryItems = await getDB().inventory_items
+              .where('batch_id')
+              .equals(targetBatchId)
+              .toArray();
+            
+            const inventoryItemIds = inventoryItems.map(item => item.id);
+            const billLineItems = inventoryItemIds.length > 0
+              ? await getDB().bill_line_items
+                  .where('inventory_item_id')
+                  .anyOf(inventoryItemIds)
+                  .toArray()
+              : [];
+            
+            const totalSales = billLineItems.reduce((sum, item) => sum + (item.line_total || 0), 0);
+            
+            // Calculate correct commission revenue
+            const commissionRevenue = (totalSales * effectiveCommissionRate) / 100;
+            
+            console.log(`📊 Commission bill ${targetBatchId}: Total sales = $${totalSales.toFixed(2)}, Commission revenue = $${commissionRevenue.toFixed(2)}`);
+            
+            // ALWAYS set revenue to commission amount for commission bills
+            plData.revenue = commissionRevenue;
+            
+            // Calculate revenue breakdown by payment method
+            const bills = await getDB().bills
+              .where('id')
+              .anyOf([...new Set(billLineItems.map(item => item.bill_id))])
+              .toArray();
+            const billMap = new Map(bills.map(b => [b.id, b]));
+            
+            let revenueCash = 0;
+            let revenueCard = 0;
+            let revenueCredit = 0;
+            
+            for (const lineItem of billLineItems) {
+              const parentBill = billMap.get(lineItem.bill_id);
+              const paymentMethod = parentBill?.payment_method || 'cash';
+              const lineTotal = lineItem.line_total || 0;
+              const commissionFromSale = (lineTotal * effectiveCommissionRate) / 100;
+              
+              if (paymentMethod === 'cash') {
+                revenueCash += commissionFromSale;
+              } else if (paymentMethod === 'card') {
+                revenueCard += commissionFromSale;
+              } else if (paymentMethod === 'credit') {
+                revenueCredit += commissionFromSale;
+              }
+            }
+            
+            plData.revenueCash = revenueCash;
+            plData.revenueCard = revenueCard;
+            plData.revenueCredit = revenueCredit;
+            
+            // COGS for commission bills is always 0
+            plData.cogs = 0;
+            
+            // Calculate gross profit and margin
+            plData.grossProfit = commissionRevenue;
+            plData.grossProfitMargin = 100; // 100% margin since COGS = 0
+            
+            console.log(`✅ Commission bill ${targetBatchId}: Final P&L - Revenue: $${plData.revenue.toFixed(2)}, COGS: $${plData.cogs.toFixed(2)}, Profit: $${plData.grossProfit.toFixed(2)}`);
+          }
           
           // Store P&L values along with commission_amount and closed_at
+          // Store everything in a single operation to ensure consistency
           await handleUpdateBatch(targetBatchId, { 
             status: closedStatus,
             commission_amount: fees.commission, // Store calculated commission
@@ -909,9 +984,6 @@ export default function Accounting() {
             gross_profit: plData.grossProfit,
             gross_profit_margin: plData.grossProfitMargin
           });
-          
-          // Also store via storeBillPL to ensure immutability check
-          await profitLossService.storeBillPL(targetBatchId, plData);
           
           console.log(`✅ Bill ${targetBatchId} closed with commission: ${fees.commission} ${fees.currency}`);
           console.log(`✅ P&L calculated - Revenue: ${plData.revenue}, COGS: ${plData.cogs}, Gross Profit: ${plData.grossProfit}`);

@@ -150,12 +150,13 @@ export function ReceivedBillSalesLogsModal({
         const commissionRate = bill.commissionRate || 0;
         commissionAmount = (totalRevenue * commissionRate) / 100;
 
-        // Porterage and transfer fees are fixed amounts
+        // Porterage, transfer, and plastic fees are fixed amounts
         porterageAmount = Number((bill as any).porterage ?? bill.batchPorterage ?? 0);
         transferAmount = Number((bill as any).transferFee ?? bill.batchTransferFee ?? 0);
+        const plasticAmount = Number((bill as any).plasticFee ?? bill.batchPlasticFee ?? (bill as any).plastic_fee ? parseFloat(String((bill as any).plastic_fee)) : 0);
 
-        // Supplier gets the remaining amount after deducting all fees
-        supplierAmount = totalRevenue - commissionAmount - porterageAmount - transferAmount;
+        // Supplier gets the remaining amount after deducting all fees (commission + porterage + transfer + plastic)
+        supplierAmount = totalRevenue - commissionAmount - porterageAmount - transferAmount - plasticAmount;
       } else {
         // For cash items, supplier gets the full amount
         supplierAmount = totalRevenue;
@@ -165,6 +166,7 @@ export function ReceivedBillSalesLogsModal({
         commission: commissionAmount,
         porterage: porterageAmount,
         transfer: transferAmount,
+        plastic: bill.type === 'commission' ? plasticAmount : undefined,
         supplierAmount: supplierAmount
       };
 
