@@ -8,8 +8,12 @@ export interface Database {
           store_id: string;
           account_code: string;
           name: string;
-          /** @deprecated Removed from database - balance is computed from journal entries */
+          /** @deprecated Use usd_balance and lbp_balance instead - kept for backward compatibility */
           current_balance?: number;
+          /** Performance cache: USD balance calculated from journal entries, updated atomically */
+          usd_balance?: number;
+          /** Performance cache: LBP balance calculated from journal entries, updated atomically */
+          lbp_balance?: number;
           currency: 'USD' | 'LBP';
           is_active: boolean;
           created_at: string;
@@ -20,8 +24,12 @@ export interface Database {
           store_id: string;
           account_code: string;
           name: string;
-          /** @deprecated Removed from database - balance is computed from journal entries */
+          /** @deprecated Use usd_balance and lbp_balance instead - kept for backward compatibility */
           current_balance?: number;
+          /** Performance cache: USD balance calculated from journal entries, updated atomically */
+          usd_balance?: number;
+          /** Performance cache: LBP balance calculated from journal entries, updated atomically */
+          lbp_balance?: number;
           currency?: 'USD' | 'LBP';
           is_active?: boolean;
           created_at?: string;
@@ -32,8 +40,12 @@ export interface Database {
           store_id?: string;
           account_code?: string;
           name?: string;
-          /** @deprecated Removed from database - balance is computed from journal entries */
+          /** @deprecated Use usd_balance and lbp_balance instead - kept for backward compatibility */
           current_balance?: number;
+          /** Performance cache: USD balance calculated from journal entries, updated atomically */
+          usd_balance?: number;
+          /** Performance cache: LBP balance calculated from journal entries, updated atomically */
+          lbp_balance?: number;
           currency?: 'USD' | 'LBP';
           is_active?: boolean;
           updated_at?: string;

@@ -26,10 +26,12 @@ import LowStockItem from '../components/LowStockItem';
 import CashDrawerOpeningModal from '../components/common/CashDrawerOpeningModal';
 
 interface CashDrawerStatus {
-  currentBalance: number;
+  currentBalance: number; // Keep for backward compatibility
+  usdBalance: number;      // NEW
+  lbpBalance: number;      // NEW
   lastUpdated: string;
   transactionCount: number;
-  openedAt:string
+  openedAt: string;
 }
 
 export default function Home() {
@@ -39,7 +41,9 @@ export default function Home() {
   const [isLoadingCashDrawer, setIsLoadingCashDrawer] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [lastCashDrawerValue, setLastCashDrawerValue] = useState<number | null>(null);
+  const [lastCashDrawerBalances, setLastCashDrawerBalances] = useState<{ USD: number; LBP: number } | null>(null);
   const [showOpeningModal, setShowOpeningModal] = useState(false);
+  const [showCombinedBalance, setShowCombinedBalance] = useState(false);
 
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
@@ -148,23 +152,35 @@ export default function Home() {
         return;
       }
       
-      // Get balance computed from journal entries (account_code = '1100')
-      const currentBalance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(
+      // Get balances for both currencies computed from journal entries (account_code = '1100')
+      const balances = await cashDrawerUpdateService.getCurrentCashDrawerBalances(
         raw.storeId,
         raw.currentBranchId
       );
       
+      // Calculate current balance in store's preferred currency for backward compatibility
+      const currentBalance = storePreferredCurrency === 'USD' 
+        ? balances.USD + (balances.LBP / exchangeRate)
+        : balances.LBP + (balances.USD * exchangeRate);
+      
       const localHistory = getLocalCashDrawerHistory();
       
-      // Smooth transition: only update if value actually changed
-      if (lastCashDrawerValue !== currentBalance) {
+      // Smooth transition: only update if balances actually changed
+      const balancesChanged = !lastCashDrawerBalances || 
+        lastCashDrawerBalances.USD !== balances.USD || 
+        lastCashDrawerBalances.LBP !== balances.LBP;
+      
+      if (balancesChanged || lastCashDrawerValue !== currentBalance) {
         setCashDrawerStatus({
-          currentBalance,
+          currentBalance, // Keep for backward compatibility
+          usdBalance: balances.USD,
+          lbpBalance: balances.LBP,
           lastUpdated: new Date().toISOString(),
           transactionCount: localHistory.length,
           openedAt: currentSession?.opened_at || currentSession?.lastUpdated || ''
         });
         setLastCashDrawerValue(currentBalance);
+        setLastCashDrawerBalances(balances);
       }
       
       setIsInitialLoad(false);
@@ -173,7 +189,7 @@ export default function Home() {
     } finally {
       setIsLoadingCashDrawer(false);
     }
-  }, [raw.storeId, raw.currentBranchId, getLocalCurrentSession, getLocalCashDrawerHistory, lastCashDrawerValue, isInitialLoad]);
+  }, [raw.storeId, raw.currentBranchId, getLocalCurrentSession, getLocalCashDrawerHistory, lastCashDrawerValue, lastCashDrawerBalances, storePreferredCurrency, exchangeRate, isInitialLoad]);
 
   // Debounced update function to prevent excessive reloading
   const debouncedLoadCashDrawerStatus = useCallback(() => {
@@ -187,17 +203,6 @@ export default function Home() {
       loadCashDrawerStatus();
     }, 300); // 300ms debounce
   }, [loadCashDrawerStatus]);
-
-  // Helper function to normalize cash drawer balance to store's preferred currency
-  // Database stores all balances in LBP, so we need to convert to USD if that's the preferred currency
-  const getNormalizedCashDrawerBalance = useCallback((balance: number): number => {
-    if (storePreferredCurrency === 'USD') {
-      // Convert LBP to USD by dividing by exchange rate
-      return balance / exchangeRate;
-    }
-    // LBP: return as-is
-    return balance;
-  }, [storePreferredCurrency, exchangeRate]);
 
   // Helper function to format currency based on store's preferred currency
   const formatCurrencyForStore = useCallback((amount: number): string => {
@@ -225,7 +230,7 @@ export default function Home() {
     };
     
     // Handle data synced events (from event stream) - refresh cash drawer when remote changes arrive
-    const handleDataSynced = (e: any) => {
+    const handleDataSynced = () => {
       console.log('🔄 [Home] Data synced event received, refreshing cash drawer status...');
       debouncedLoadCashDrawerStatus();
     };
@@ -385,14 +390,33 @@ export default function Home() {
     
     if (!cashDrawerStatus) {
       return t('common.closed');
-      }
-    
-    // Show last known value during updates to prevent flashing
-    if (isLoadingCashDrawer && lastCashDrawerValue !== null) {
-      return formatCurrencyForStore(getNormalizedCashDrawerBalance(lastCashDrawerValue));
     }
     
-    return formatCurrencyForStore(getNormalizedCashDrawerBalance(cashDrawerStatus.currentBalance));
+    // Show last known balances during updates to prevent flashing
+    const usdBalance = isLoadingCashDrawer && lastCashDrawerBalances 
+      ? lastCashDrawerBalances.USD 
+      : cashDrawerStatus.usdBalance;
+    const lbpBalance = isLoadingCashDrawer && lastCashDrawerBalances 
+      ? lastCashDrawerBalances.LBP 
+      : cashDrawerStatus.lbpBalance;
+    
+    // If showing combined balance, convert both to preferred currency and sum
+    if (showCombinedBalance) {
+      let combinedAmount: number;
+      if (storePreferredCurrency === 'USD') {
+        // Convert LBP to USD and add to USD balance
+        combinedAmount = usdBalance + (lbpBalance / exchangeRate);
+      } else {
+        // Convert USD to LBP and add to LBP balance
+        combinedAmount = lbpBalance + (usdBalance * exchangeRate);
+      }
+      return formatCurrencyForStore(combinedAmount);
+    }
+    
+    // Dual currency view: show both currencies
+    const usdFormatted = `$${usdBalance.toFixed(2)}`;
+    const lbpFormatted = `${Math.round(lbpBalance).toLocaleString()} ل.ل`;
+    return `${usdFormatted}\n${lbpFormatted}`;
   };
 
   const getCashDrawerDisplayChange = () => {
@@ -414,7 +438,10 @@ export default function Home() {
       icon: DollarSign,
       color: 'bg-green-500',
       change: getCashDrawerDisplayChange(),
-      isLoading: isLoadingCashDrawer && !isInitialLoad // Show subtle loading indicator
+      isLoading: isLoadingCashDrawer && !isInitialLoad, // Show subtle loading indicator
+      isCashDrawer: true,
+      showCombinedBalance,
+      onToggleCombined: () => setShowCombinedBalance(!showCombinedBalance),
     },
     {
       title: t('home.todaysExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) }), 

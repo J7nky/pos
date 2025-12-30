@@ -538,6 +538,28 @@ export class TransactionService {
   }
 
   /**
+   * Create inventory cash purchase transaction
+   * Creates journal entries: Debit Inventory (1300), Credit Cash (1100)
+   */
+  public async createInventoryCashPurchase(
+    amount: number,
+    currency: 'USD' | 'LBP',
+    description: string,
+    context: TransactionContext,
+    options: { reference?: string } = {}
+  ): Promise<TransactionResult> {
+    return this.createTransaction({
+      category: TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE,
+      amount,
+      currency,
+      description,
+      context,
+      reference: options.reference,
+      updateCashDrawer: true
+    });
+  }
+
+  /**
    * Create accounts receivable transaction
    */
   public async createAccountsReceivable(
@@ -1094,9 +1116,13 @@ export class TransactionService {
     }
 
     // Validate entity IDs (at least one should be provided for most categories)
+    // Categories that don't require entity IDs
     const requiresEntity = ![
       TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
-      TRANSACTION_CATEGORIES.CASH_DRAWER_SALE
+      TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
+      TRANSACTION_CATEGORIES.CASH_DRAWER_PAYMENT,
+      TRANSACTION_CATEGORIES.CASH_DRAWER_REFUND,
+      TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE
     ].includes(params.category);
 
     if (requiresEntity && !params.customerId && !params.supplierId && !params.employeeId) {
@@ -1202,12 +1228,8 @@ export class TransactionService {
 
       console.log(`[CASH_DRAWER_UPDATE] Cash drawer account found:`, {
         accountId: account.id,
-        accountCode: (account as any).account_code,
-        currentBalance: (account as any).current_balance
+        accountCode: (account as any).account_code
       });
-
-      const previousBalance = Number((account as any)?.current_balance || 0);
-      console.log(`[CASH_DRAWER_UPDATE] Previous balance: ${previousBalance.toLocaleString()} LBP`);
 
       // ✅ Calculate balance change from journal entries (account_code = 1100) for this transaction
       // Journal entries are the single source of truth
@@ -1232,10 +1254,11 @@ export class TransactionService {
         }))
       });
 
-      // Calculate balance change: sum of (debit - credit) for cash account entries
-      // ✅ IMPORTANT: Cash drawer balance is always in LBP, so convert USD entries to LBP
+      // Calculate balance change for each currency separately
       // ✅ Journal entries use new schema: debit_usd, credit_usd, debit_lbp, credit_lbp
-      let balanceChange = 0;
+      let usdBalanceChange = 0;
+      let lbpBalanceChange = 0;
+      
       for (const entry of cashJournalEntries) {
         // Calculate net change for each currency
         const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
@@ -1251,52 +1274,75 @@ export class TransactionService {
           lbpChange
         });
         
-        // Convert USD change to LBP and add to total
-        if (usdChange !== 0) {
-          const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
-          console.log(`[CASH_DRAWER_UPDATE] Converted USD to LBP: ${usdChange} USD = ${usdInLbp} LBP`);
-          balanceChange += usdInLbp;
-        }
-        
-        // Add LBP change directly
-        balanceChange += lbpChange;
+        usdBalanceChange += usdChange;
+        lbpBalanceChange += lbpChange;
       }
 
       // If no cash journal entries found, this transaction doesn't affect cash drawer
       if (cashJournalEntries.length === 0) {
         console.warn(`[CASH_DRAWER_UPDATE] ⚠️ No cash journal entries (account_code=1100) found for transaction ${transaction.id}. Cash drawer not updated.`, {
           transactionId: transaction.id,
-          category: transaction.category,
-          allJournalEntries: await getDB().journal_entries
-            .where('transaction_id')
-            .equals(transaction.id)
-            .toArray()
-            .then(entries => entries.map(e => ({
-              account_code: e.account_code,
-              is_posted: e.is_posted
-            })))
+          category: transaction.category
         });
         return undefined;
       }
 
-      const newBalance = previousBalance + balanceChange;
+      // Get all cash entries to calculate current balances
+      let allCashEntries;
+      try {
+        allCashEntries = await getDB().journal_entries
+          .where('[store_id+account_code]')
+          .equals([storeId, '1100'])
+          .and(e => e.is_posted === true && e.branch_id === branchId)
+          .toArray();
+      } catch (error) {
+        // Fallback if compound index doesn't exist
+        allCashEntries = await getDB().journal_entries
+          .where('[store_id+branch_id]')
+          .equals([storeId, branchId])
+          .and(e => e.account_code === '1100' && e.is_posted === true)
+          .toArray();
+      }
+      
+      // Calculate current balances for both currencies
+      const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
+      const currentBalances = calculateBothCurrencies(allCashEntries);
+      
+      // Calculate previous balances (before this transaction)
+      const previousUsdBalance = currentBalances.USD - usdBalanceChange;
+      const previousLbpBalance = currentBalances.LBP - lbpBalanceChange;
+      
+      // New balances (after this transaction)
+      const newUsdBalance = currentBalances.USD;
+      const newLbpBalance = currentBalances.LBP;
 
-      console.log(`[CASH_DRAWER_UPDATE] ✅ Balance calculated:`, {
-        previousBalance: previousBalance.toLocaleString(),
-        balanceChange: balanceChange > 0 ? `+${balanceChange.toLocaleString()}` : balanceChange.toLocaleString(),
-        newBalance: newBalance.toLocaleString(),
+      console.log(`[CASH_DRAWER_UPDATE] ✅ Balances calculated:`, {
+        previousUsdBalance: previousUsdBalance.toLocaleString(),
+        previousLbpBalance: previousLbpBalance.toLocaleString(),
+        usdBalanceChange: usdBalanceChange > 0 ? `+${usdBalanceChange.toLocaleString()}` : usdBalanceChange.toLocaleString(),
+        lbpBalanceChange: lbpBalanceChange > 0 ? `+${lbpBalanceChange.toLocaleString()}` : lbpBalanceChange.toLocaleString(),
+        newUsdBalance: newUsdBalance.toLocaleString(),
+        newLbpBalance: newLbpBalance.toLocaleString(),
         transactionId: transaction.id
       });
 
-      // ✅ Balance is computed from journal entries - DO NOT update current_balance field directly
-      // Journal entries are the single source of truth
-      // The cash drawer balance should be calculated from journal entries when needed
-      // This method only calculates the impact for reporting/notification purposes
-      console.log(`💰 Cash drawer balance impact: ${previousBalance.toLocaleString()} → ${newBalance.toLocaleString()} (change: ${balanceChange > 0 ? '+' : ''}${balanceChange.toLocaleString()})`);
+      // ✅ Update balance caches atomically with journal entries
+      // Journal entries are the source of truth, but usd_balance and lbp_balance are performance caches
+      // These caches are updated atomically to stay in sync with journal entries
+      await getDB().cash_drawer_accounts.update(account.id as string, {
+        usd_balance: newUsdBalance as any,
+        lbp_balance: newLbpBalance as any,
+        // Keep current_balance for backward compatibility (use LBP as default)
+        current_balance: newLbpBalance as any,
+        updated_at: new Date().toISOString(),
+        _synced: false
+      });
+
+      console.log(`💰 Cash drawer balances updated: USD ${previousUsdBalance.toLocaleString()} → ${newUsdBalance.toLocaleString()} (${usdBalanceChange > 0 ? '+' : ''}${usdBalanceChange.toLocaleString()}), LBP ${previousLbpBalance.toLocaleString()} → ${newLbpBalance.toLocaleString()} (${lbpBalanceChange > 0 ? '+' : ''}${lbpBalanceChange.toLocaleString()})`);
 
       return {
-        previousBalance,
-        newBalance
+        previousBalance: previousLbpBalance, // Keep for backward compatibility
+        newBalance: newLbpBalance // Keep for backward compatibility
       };
 
     } catch (error) {

@@ -167,14 +167,15 @@ export class InventoryPurchaseService {
         status: session.status
       });
 
-      // Create cash drawer expense transaction atomically
-      console.log(`[CASH_PURCHASE] Creating cash drawer expense transaction:`, {
+      // Create inventory cash purchase transaction atomically
+      // This creates journal entries: Debit Inventory (1300), Credit Cash (1100)
+      console.log(`[CASH_PURCHASE] Creating inventory cash purchase transaction:`, {
         amount: totalAmount,
         currency: 'USD',
         reference: `INV-PURCH-${transactionId.substring(0, 8)}`
       });
       
-      const result = await transactionService.createCashDrawerExpense(
+      const result = await transactionService.createInventoryCashPurchase(
         totalAmount,
         'USD',
         `Cash purchase - ${items.length} items from Trade`,
@@ -186,8 +187,7 @@ export class InventoryPurchaseService {
           source: 'web'
         },
         {
-          reference: `INV-PURCH-${transactionId.substring(0, 8)}`,
-          category: 'Inventory Purchase'
+          reference: `INV-PURCH-${transactionId.substring(0, 8)}`
         }
       );
 
@@ -203,7 +203,7 @@ export class InventoryPurchaseService {
         throw new Error(result.error || 'Failed to update cash drawer');
       }
 
-      // Verify journal entries were created
+      // Verify journal entries were created with correct accounts
       if (result.transactionId) {
         const { getDB } = await import('../lib/db');
         const journalEntries = await getDB().journal_entries
@@ -216,20 +216,42 @@ export class InventoryPurchaseService {
           entryCount: journalEntries.length,
           entries: journalEntries.map(e => ({
             account_code: e.account_code,
-            debit: e.debit,
-            credit: e.credit,
-            currency: e.currency,
+            account_name: e.account_name,
+            debit_usd: e.debit_usd,
+            credit_usd: e.credit_usd,
+            debit_lbp: e.debit_lbp,
+            credit_lbp: e.credit_lbp,
             is_posted: e.is_posted
           }))
         });
         
-        // Check for cash account entries (1100)
+        // Verify correct accounts: Inventory (1300) and Cash (1100)
+        const inventoryEntries = journalEntries.filter(e => e.account_code === '1300');
         const cashEntries = journalEntries.filter(e => e.account_code === '1100');
-        if (cashEntries.length === 0) {
-          console.warn(`[CASH_PURCHASE] ⚠️ No cash account (1100) journal entries found!`);
-        } else {
-          console.log(`[CASH_PURCHASE] ✅ Cash account entries found:`, cashEntries.length);
+        
+        if (journalEntries.length === 0) {
+          console.error(`[CASH_PURCHASE] ❌ CRITICAL: No journal entries found for transaction ${result.transactionId}`);
+          throw new Error('Journal entries were not created for cash purchase transaction');
         }
+        
+        if (inventoryEntries.length === 0) {
+          console.error(`[CASH_PURCHASE] ❌ CRITICAL: No inventory account (1300) journal entries found!`);
+          throw new Error('Inventory journal entries were not created correctly');
+        }
+        
+        if (cashEntries.length === 0) {
+          console.error(`[CASH_PURCHASE] ❌ CRITICAL: No cash account (1100) journal entries found!`);
+          throw new Error('Cash journal entries were not created correctly');
+        }
+        
+        console.log(`[CASH_PURCHASE] ✅ Journal entries verified:`, {
+          inventoryEntries: inventoryEntries.length,
+          cashEntries: cashEntries.length,
+          totalEntries: journalEntries.length
+        });
+      } else {
+        console.error(`[CASH_PURCHASE] ❌ CRITICAL: No transaction ID returned from transaction service`);
+        throw new Error('Transaction was not created successfully');
       }
 
       // Notify UI of cash drawer update

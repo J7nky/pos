@@ -611,8 +611,12 @@ export interface CashDrawerAccount {
   name: string;
   currency: string;
   is_active: boolean;
-  /** @deprecated Removed from database - balance is computed from journal entries */
+  /** @deprecated Use usd_balance and lbp_balance instead - kept for backward compatibility */
   current_balance?: number | null;
+  /** Performance cache: USD balance calculated from journal entries, updated atomically */
+  usd_balance?: number | null;
+  /** Performance cache: LBP balance calculated from journal entries, updated atomically */
+  lbp_balance?: number | null;
   created_at: string;
   updated_at: string;
   _synced: boolean;

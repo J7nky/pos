@@ -171,7 +171,7 @@ const en = {
     recordExpense: 'Record Expense', recordExpenseDesc: 'Log business expenses',
     todaySales: "Today's Sales", todaySalesDesc: 'View sales performance',
     checkStock: 'Check Stock', checkStockDesc: 'Monitor inventory levels',
-    cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled'
+    cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled', showBothCurrencies: 'Show both currencies', showCombined: 'Show combined balance'
   },
   inventory: {
     default: 'Default',

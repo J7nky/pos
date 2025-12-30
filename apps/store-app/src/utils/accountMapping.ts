@@ -148,6 +148,14 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     defaultEntityCode: SYSTEM_ENTITY_CODES.INTERNAL
   },
   
+  [TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE]: {
+    debitAccount: '1300', // Inventory (increases)
+    creditAccount: '1100', // Cash (decreases)
+    description: 'Cash inventory purchase',
+    requiresEntity: false,
+    defaultEntityCode: SYSTEM_ENTITY_CODES.INTERNAL
+  },
+  
   // Employee Transactions
   [TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT]: {
     debitAccount: '5200', // Salaries Expense (increases)

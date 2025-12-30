@@ -250,14 +250,88 @@ export class CashDrawerUpdateService {
                 return 0;
               }
 
-              // ✅ COMPUTED BALANCE: Calculate from journal entries (single source of truth)
-              // Journal entries are the only source of truth for cash drawer balance
-              const { calculateCashDrawerBalance } = await import('../utils/balanceCalculation');
-              const currency = (account as any)?.currency || 'USD';
-              return await calculateCashDrawerBalance(storeId, branchId, currency);
+              // ✅ Use cached balance for performance, but verify against journal entries
+              // Journal entries are the source of truth, but current_balance is a fast cache
+              // For performance, we use the cache; for accuracy, we can verify with reconcileCashDrawerBalance()
+              const cachedBalance = Number((account as any)?.current_balance || 0);
+              
+              // Return cached balance (updated atomically when journal entries are posted)
+              // If accuracy is critical, use reconcileCashDrawerBalance() to verify
+              return cachedBalance;
             } catch (error) {
               console.error('Error getting cash drawer balance:', error);
               return 0;
+            }
+          }
+        );
+      },
+      { storeId, branchId }
+    );
+  }
+
+  /**
+   * Get current cash drawer balances for both USD and LBP - PURE GETTER
+   * 
+   * ✅ Returns cached balances from journal entries (account_code = 1100)
+   * ✅ Uses calculateBothCurrencies() for efficient single-query calculation
+   * ✅ Zero side effects - never recalculates or reconciles
+   * ✅ Fast and safe - no database writes during reads
+   * 
+   * 🚀 CACHED for 5 seconds to improve performance
+   * 
+   * @param storeId - Store ID
+   * @param branchId - Branch ID
+   * @returns Object with USD and LBP balances
+   */
+  public async getCurrentCashDrawerBalances(storeId: string, branchId: string): Promise<{ USD: number; LBP: number }> {
+    return PerformanceMonitor.withTracking(
+      'cashDrawer:getBalances',
+      async () => {
+        const cacheKey = `${CacheKeys.balance(storeId, branchId)}_both`;
+        
+        return CacheManager.withCache(
+          cacheKey,
+          CacheManager.TTL.MEDIUM, // 5 seconds
+          async () => {
+            try {
+              // Get cash drawer account
+              const account = await this.getCashDrawerAccount(storeId, branchId);
+              if (!account) {
+                console.warn('No cash drawer account exists for store', storeId, 'branch', branchId);
+                return { USD: 0, LBP: 0 };
+              }
+
+              // ✅ Use cached balances for performance, but verify against journal entries if needed
+              // Journal entries are the source of truth, but usd_balance and lbp_balance are fast caches
+              // These caches are updated atomically when journal entries are posted
+              const cachedUsdBalance = Number((account as any)?.usd_balance ?? 0);
+              const cachedLbpBalance = Number((account as any)?.lbp_balance ?? 0);
+              
+              // Return cached balances (updated atomically when journal entries are posted)
+              // If accuracy is critical, use reconcileCashDrawerBalance() to verify
+              return {
+                USD: cachedUsdBalance,
+                LBP: cachedLbpBalance
+              };
+            } catch (error) {
+              console.error('Error getting cash drawer balances:', error);
+              // Fallback: If compound index doesn't exist, use simpler query
+              try {
+                const entries = await getDB().journal_entries
+                  .where('[store_id+branch_id]')
+                  .equals([storeId, branchId])
+                  .and(e => 
+                    e.account_code === '1100' &&
+                    e.is_posted === true
+                  )
+                  .toArray();
+
+                const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
+                return calculateBothCurrencies(entries);
+              } catch (fallbackError) {
+                console.error('Error in fallback query for cash drawer balances:', fallbackError);
+                return { USD: 0, LBP: 0 };
+              }
             }
           }
         );
@@ -306,34 +380,67 @@ export class CashDrawerUpdateService {
             };
           }
 
-          // ✅ Calculate TRUE balance from journal entries (account_code = 1100)
+          // ✅ Calculate TRUE balances from journal entries (account_code = 1100) for both currencies
           // This is the SINGLE SOURCE OF TRUTH
-          const { calculateCashDrawerBalance } = await import('../utils/balanceCalculation');
-          const currency = (account as any)?.currency || 'USD';
-          const trueBalance = await calculateCashDrawerBalance(storeId, branchId, currency);
+          const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
           
-          // Get old balance from field for comparison (informational only)
-          const oldBalance = Number((account as any)?.current_balance || 0);
-          const discrepancy = trueBalance - oldBalance;
+          // Get all cash journal entries
+          let entries;
+          try {
+            entries = await getDB().journal_entries
+              .where('[store_id+account_code]')
+              .equals([storeId, '1100'])
+              .and(e => e.is_posted === true && e.branch_id === branchId)
+              .toArray();
+          } catch (error) {
+            // Fallback if compound index doesn't exist
+            entries = await getDB().journal_entries
+              .where('[store_id+branch_id]')
+              .equals([storeId, branchId])
+              .and(e => e.account_code === '1100' && e.is_posted === true)
+              .toArray();
+          }
+          
+          const trueBalances = calculateBothCurrencies(entries);
+          
+          // Get old balances from cache fields for comparison
+          const oldUsdBalance = Number((account as any)?.usd_balance ?? 0);
+          const oldLbpBalance = Number((account as any)?.lbp_balance ?? 0);
+          const oldBalance = oldLbpBalance; // For backward compatibility
+          
+          const usdDiscrepancy = trueBalances.USD - oldUsdBalance;
+          const lbpDiscrepancy = trueBalances.LBP - oldLbpBalance;
+          const discrepancy = lbpDiscrepancy; // For backward compatibility
 
-          // Log reconciliation for auditability (informational only - balance is computed from journals)
-          if (Math.abs(discrepancy) > 0.01) {
+          // Update cache fields if there's a discrepancy
+          if (Math.abs(usdDiscrepancy) > 0.01 || Math.abs(lbpDiscrepancy) > 0.01) {
             console.log(`💰 Cash drawer balance reconciliation:`, {
               storeId,
               branchId,
-              oldBalance,
-              newBalance: trueBalance,
-              discrepancy,
+              oldUsdBalance,
+              newUsdBalance: trueBalances.USD,
+              usdDiscrepancy,
+              oldLbpBalance,
+              newLbpBalance: trueBalances.LBP,
+              lbpDiscrepancy,
               reason,
-              timestamp: new Date().toISOString(),
-              note: 'Balance is computed from journal entries - no field update needed'
+              timestamp: new Date().toISOString()
+            });
+            
+            // Update cache fields to match journal entries
+            await getDB().cash_drawer_accounts.update(account.id as string, {
+              usd_balance: trueBalances.USD as any,
+              lbp_balance: trueBalances.LBP as any,
+              current_balance: trueBalances.LBP as any, // For backward compatibility
+              updated_at: new Date().toISOString(),
+              _synced: false
             });
           }
 
           return {
             success: true,
             oldBalance,
-            newBalance: trueBalance,
+            newBalance: trueBalances.LBP, // For backward compatibility
             discrepancy
           };
         } catch (error) {

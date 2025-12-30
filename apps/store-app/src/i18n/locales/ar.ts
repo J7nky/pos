@@ -280,6 +280,8 @@ const ar = {
     openCashDrawer: 'فتح درج النقد',
     todaysExpenses: 'مصروفات اليوم ({{currency}})',
     lowStockItems: 'أصناف منخفضة المخزون',
+    showBothCurrencies: 'إظهار العملتين',
+    showCombined: 'إظهار الرصيد المجمع',
     needAttention: 'يتطلب الانتباه',
     alertsDisabled: 'التنبيهات معطلة',
     lowStockAlert: 'تنبيه انخفاض المخزون',

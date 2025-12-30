@@ -10,7 +10,7 @@
  */
 
 import { getDB } from '../lib/db';
-import type { JournalEntry } from '../types';
+import type { JournalEntry } from '../types/accounting';
 
 /**
  * The canonical balance calculation algorithm
@@ -21,12 +21,17 @@ import type { JournalEntry } from '../types';
  * @returns Balance (positive = entity owes you, negative = you owe entity)
  */
 export function calculateBalance(entries: JournalEntry[], currency: 'USD' | 'LBP'): number {
-
   return entries.reduce((sum, e) => {
-   
-      return sum + (e.debit_lbp - e.credit_lbp);
+    if (currency === 'USD') {
+
+      return sum + (e.debit_usd || 0) - (e.credit_usd || 0);
+    } else {
+      
+      return sum + (e.debit_lbp || 0) - (e.credit_lbp || 0);
+    }
     
   }, 0);
+  
 }
 
 /**
@@ -109,7 +114,6 @@ export async function calculateCashDrawerBalance(
   currency: 'USD' | 'LBP'
 ): Promise<number> {
   try {
-    console.log('0191019', storeId, branchId, currency);
     // Get all cash journal entries for this store and branch (both currencies in same entries)
     const entries = await getDB().journal_entries
       .where('[store_id+account_code]')

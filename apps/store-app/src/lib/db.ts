@@ -2528,7 +2528,9 @@ class POSDatabase extends Dexie {
         name: 'Main Cash Drawer',
         currency: store.preferred_currency || 'USD',
         is_active: true,
-        current_balance: 0,
+        current_balance: 0, // For backward compatibility
+        usd_balance: 0, // Performance cache: USD balance
+        lbp_balance: 0, // Performance cache: LBP balance
         created_at: now,
         updated_at: now,
         _synced: false // Mark as unsynced so it will be uploaded to Supabase

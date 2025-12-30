@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import { useI18n } from '../../i18n';
+import { Repeat } from 'lucide-react';
 
 type Stat = {
   title: string;
@@ -8,6 +9,9 @@ type Stat = {
   color: string; // Tailwind class e.g. "bg-green-500"
   icon: React.ElementType;
   isLoading?: boolean; // Optional loading state
+  isCashDrawer?: boolean; // NEW: Identify cash drawer card
+  showCombinedBalance?: boolean; // NEW: Toggle state
+  onToggleCombined?: () => void; // NEW: Toggle handler
 };
 
 interface StatCardProps {
@@ -31,17 +35,45 @@ const StatCard: React.FC<StatCardProps> = memo(({
     (!cashDrawerStatus || !cashDrawerStatus.openedAt) &&
     typeof handleOpenDrawer === "function";
   const { t } = useI18n();
+  
+  // Check if value is multi-line (dual currency view)
+  const isMultiLine = stat.isCashDrawer && !stat.showCombinedBalance && typeof stat.value === 'string' && stat.value.includes('\n');
+  const displayValue = isMultiLine && typeof stat.value === 'string' 
+    ? stat.value.split('\n') 
+    : [String(stat.value)];
+  
   return (
     <div className="bg-white rounded-lg shadow-sm p-6">
       <div className="flex items-center justify-between">
-        <div>
+        <div className="flex-1">
           <p className="text-sm text-gray-600">{stat.title}</p>
-          <div className="flex items-center mt-2">
-            <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+          <div className="flex items-center mt-2 gap-2">
+            {isMultiLine ? (
+              <div className="flex flex-col">
+                {displayValue.map((line: string, idx: number) => (
+                  <p key={idx} className={`${idx === 0 ? 'text-2xl font-bold' : 'text-lg font-semibold'} text-gray-900`}>
+                    {line}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+            )}
             {stat.isLoading && (
               <div className="ml-2">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400"></div>
               </div>
+            )}
+            {/* Toggle button for cash drawer card */}
+            {stat.isCashDrawer && stat.onToggleCombined && (
+              <button
+                onClick={stat.onToggleCombined}
+                className="ml-2 p-1.5 rounded-lg  border border-gray-200 border-color-blue-200 hover:bg-gray-100 transition-colors"
+                title={stat.showCombinedBalance ? t('home.showBothCurrencies') : t('home.showCombined')}
+                aria-label={stat.showCombinedBalance ? t('home.showBothCurrencies') : t('home.showCombined')}
+              >
+                <Repeat className="w-4 h-4 text-gray-600" />
+              </button>
             )}
           </div>
           {stat.change && (
