@@ -223,12 +223,11 @@ export class CashDrawerUpdateService {
   /**
    * Get current cash drawer balance - PURE GETTER
    * 
-   * ✅ Returns cached balance from cash_drawer_accounts table
-   * ✅ Zero side effects - never recalculates or reconciles
+   * ✅ Calculates balance from journal entries (account_code = 1100) - single source of truth
+   * ✅ Zero side effects - never writes to database
    * ✅ Fast and safe - no database writes during reads
    * 
-   * The balance is updated ONLY when posting journal entries (in transactionService).
-   * For explicit reconciliation, use reconcileCashDrawerBalance().
+   * Journal entries are the ONLY source of truth. Balance cache fields are never read or written.
    * 
    * 🚀 CACHED for 5 seconds to improve performance
    */
@@ -243,21 +242,18 @@ export class CashDrawerUpdateService {
           CacheManager.TTL.MEDIUM, // 5 seconds
           async () => {
             try {
-              // Get cash drawer account
+              // Verify cash drawer account exists
               const account = await this.getCashDrawerAccount(storeId, branchId);
               if (!account) {
                 console.warn('No cash drawer account exists for store', storeId, 'branch', branchId);
                 return 0;
               }
 
-              // ✅ Use cached balance for performance, but verify against journal entries
-              // Journal entries are the source of truth, but current_balance is a fast cache
-              // For performance, we use the cache; for accuracy, we can verify with reconcileCashDrawerBalance()
-              const cachedBalance = Number((account as any)?.current_balance || 0);
-              
-              // Return cached balance (updated atomically when journal entries are posted)
-              // If accuracy is critical, use reconcileCashDrawerBalance() to verify
-              return cachedBalance;
+              // ✅ Calculate balance from journal entries (single source of truth)
+              // Balance cache fields are never read - always calculate from journal entries
+              const { calculateCashDrawerBalance } = await import('../utils/balanceCalculation');
+              const currency = (account as any)?.currency || 'LBP';
+              return await calculateCashDrawerBalance(storeId, branchId, currency);
             } catch (error) {
               console.error('Error getting cash drawer balance:', error);
               return 0;
@@ -272,10 +268,12 @@ export class CashDrawerUpdateService {
   /**
    * Get current cash drawer balances for both USD and LBP - PURE GETTER
    * 
-   * ✅ Returns cached balances from journal entries (account_code = 1100)
+   * ✅ Calculates balances from journal entries (account_code = 1100) - single source of truth
    * ✅ Uses calculateBothCurrencies() for efficient single-query calculation
-   * ✅ Zero side effects - never recalculates or reconciles
+   * ✅ Zero side effects - never writes to database
    * ✅ Fast and safe - no database writes during reads
+   * 
+   * Journal entries are the ONLY source of truth. Balance cache fields are never read or written.
    * 
    * 🚀 CACHED for 5 seconds to improve performance
    * 
@@ -294,30 +292,25 @@ export class CashDrawerUpdateService {
           CacheManager.TTL.MEDIUM, // 5 seconds
           async () => {
             try {
-              // Get cash drawer account
+              // Verify cash drawer account exists
               const account = await this.getCashDrawerAccount(storeId, branchId);
               if (!account) {
                 console.warn('No cash drawer account exists for store', storeId, 'branch', branchId);
                 return { USD: 0, LBP: 0 };
               }
 
-              // ✅ Use cached balances for performance, but verify against journal entries if needed
-              // Journal entries are the source of truth, but usd_balance and lbp_balance are fast caches
-              // These caches are updated atomically when journal entries are posted
-              const cachedUsdBalance = Number((account as any)?.usd_balance ?? 0);
-              const cachedLbpBalance = Number((account as any)?.lbp_balance ?? 0);
-              
-              // Return cached balances (updated atomically when journal entries are posted)
-              // If accuracy is critical, use reconcileCashDrawerBalance() to verify
-              return {
-                USD: cachedUsdBalance,
-                LBP: cachedLbpBalance
-              };
-            } catch (error) {
-              console.error('Error getting cash drawer balances:', error);
-              // Fallback: If compound index doesn't exist, use simpler query
+              // ✅ Calculate balances from journal entries (single source of truth)
+              // Balance cache fields are never read - always calculate from journal entries
+              let entries;
               try {
-                const entries = await getDB().journal_entries
+                entries = await getDB().journal_entries
+                  .where('[store_id+account_code]')
+                  .equals([storeId, '1100'])
+                  .and(e => e.is_posted === true && e.branch_id === branchId)
+                  .toArray();
+              } catch (error) {
+                // Fallback if compound index doesn't exist
+                entries = await getDB().journal_entries
                   .where('[store_id+branch_id]')
                   .equals([storeId, branchId])
                   .and(e => 
@@ -325,13 +318,13 @@ export class CashDrawerUpdateService {
                     e.is_posted === true
                   )
                   .toArray();
-
-                const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
-                return calculateBothCurrencies(entries);
-              } catch (fallbackError) {
-                console.error('Error in fallback query for cash drawer balances:', fallbackError);
-                return { USD: 0, LBP: 0 };
               }
+
+              const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
+              return calculateBothCurrencies(entries);
+            } catch (error) {
+              console.error('Error getting cash drawer balances:', error);
+              return { USD: 0, LBP: 0 };
             }
           }
         );
@@ -341,17 +334,20 @@ export class CashDrawerUpdateService {
   }
 
   /**
-   * Reconcile cash drawer balance from journal entries - EXPLICIT RECONCILIATION
+   * Reconcile cash drawer balance from journal entries - READ-ONLY VERIFICATION
    * 
-   * ✅ Calculates TRUE balance from journal entries (account_code = 1100)
+   * ✅ Calculates TRUE balance from journal entries (account_code = 1100) - single source of truth
    * ✅ Returns reconciliation result for auditability (balance is computed, not stored)
    * ✅ Logs the reconciliation for auditability
+   * ✅ Read-only verification - never updates cache fields
    * ✅ Should be called explicitly: end-of-day, session close, admin reconcile, sync repair
+   * 
+   * Note: Balance cache fields are never updated. This method is for verification/audit only.
    * 
    * @param storeId - Store ID
    * @param branchId - Branch ID
    * @param reason - Reason for reconciliation (for audit log)
-   * @returns Reconciliation result with old and new balances
+   * @returns Reconciliation result with calculated balances (for audit purposes)
    */
   public async reconcileCashDrawerBalance(
     storeId: string,
@@ -368,7 +364,7 @@ export class CashDrawerUpdateService {
       'cashDrawer:reconcile',
       async () => {
         try {
-          // Get cash drawer account
+          // Verify cash drawer account exists
           const account = await this.getCashDrawerAccount(storeId, branchId);
           if (!account) {
             return {
@@ -381,7 +377,7 @@ export class CashDrawerUpdateService {
           }
 
           // ✅ Calculate TRUE balances from journal entries (account_code = 1100) for both currencies
-          // This is the SINGLE SOURCE OF TRUTH
+          // This is the SINGLE SOURCE OF TRUTH - balance cache fields are never read or written
           const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
           
           // Get all cash journal entries
@@ -403,44 +399,26 @@ export class CashDrawerUpdateService {
           
           const trueBalances = calculateBothCurrencies(entries);
           
-          // Get old balances from cache fields for comparison
-          const oldUsdBalance = Number((account as any)?.usd_balance ?? 0);
-          const oldLbpBalance = Number((account as any)?.lbp_balance ?? 0);
-          const oldBalance = oldLbpBalance; // For backward compatibility
-          
-          const usdDiscrepancy = trueBalances.USD - oldUsdBalance;
-          const lbpDiscrepancy = trueBalances.LBP - oldLbpBalance;
-          const discrepancy = lbpDiscrepancy; // For backward compatibility
+          // For backward compatibility, return LBP balance as the primary balance
+          const newBalance = trueBalances.LBP;
+          const oldBalance = 0; // No cached balance to compare against
+          const discrepancy = 0; // No discrepancy since we don't compare with cache
 
-          // Update cache fields if there's a discrepancy
-          if (Math.abs(usdDiscrepancy) > 0.01 || Math.abs(lbpDiscrepancy) > 0.01) {
-            console.log(`💰 Cash drawer balance reconciliation:`, {
-              storeId,
-              branchId,
-              oldUsdBalance,
-              newUsdBalance: trueBalances.USD,
-              usdDiscrepancy,
-              oldLbpBalance,
-              newLbpBalance: trueBalances.LBP,
-              lbpDiscrepancy,
-              reason,
-              timestamp: new Date().toISOString()
-            });
-            
-            // Update cache fields to match journal entries
-            await getDB().cash_drawer_accounts.update(account.id as string, {
-              usd_balance: trueBalances.USD as any,
-              lbp_balance: trueBalances.LBP as any,
-              current_balance: trueBalances.LBP as any, // For backward compatibility
-              updated_at: new Date().toISOString(),
-              _synced: false
-            });
-          }
+          // Log reconciliation for audit purposes
+          console.log(`💰 Cash drawer balance reconciliation (read-only):`, {
+            storeId,
+            branchId,
+            usdBalance: trueBalances.USD,
+            lbpBalance: trueBalances.LBP,
+            reason,
+            timestamp: new Date().toISOString(),
+            note: 'Balance calculated from journal entries - cache fields are never updated'
+          });
 
           return {
             success: true,
             oldBalance,
-            newBalance: trueBalances.LBP, // For backward compatibility
+            newBalance,
             discrepancy
           };
         } catch (error) {

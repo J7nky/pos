@@ -611,11 +611,23 @@ export interface CashDrawerAccount {
   name: string;
   currency: string;
   is_active: boolean;
-  /** @deprecated Use usd_balance and lbp_balance instead - kept for backward compatibility */
+  /** 
+   * @deprecated COMPUTED-ONLY: Never read or write this field. 
+   * Balance is calculated from journal entries (account_code = 1100) using calculateCashDrawerBalance().
+   * Kept in schema for backward compatibility only.
+   */
   current_balance?: number | null;
-  /** Performance cache: USD balance calculated from journal entries, updated atomically */
+  /** 
+   * @deprecated COMPUTED-ONLY: Never read or write this field.
+   * Balance is calculated from journal entries (account_code = 1100) using calculateBothCurrencies().
+   * Kept in schema for backward compatibility only.
+   */
   usd_balance?: number | null;
-  /** Performance cache: LBP balance calculated from journal entries, updated atomically */
+  /** 
+   * @deprecated COMPUTED-ONLY: Never read or write this field.
+   * Balance is calculated from journal entries (account_code = 1100) using calculateBothCurrencies().
+   * Kept in schema for backward compatibility only.
+   */
   lbp_balance?: number | null;
   created_at: string;
   updated_at: string;

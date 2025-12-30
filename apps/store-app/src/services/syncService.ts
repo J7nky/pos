@@ -1985,6 +1985,7 @@ export class SyncService {
       // Use remote record for non-balance fields (balance is computed from journals, not synced)
       try {
         // Update non-balance fields only
+        // Balance fields (current_balance, usd_balance, lbp_balance) are NEVER synced - computed from journal entries only
         const updateData: any = {
           name: remoteRecord.name,
           currency: remoteRecord.currency,
@@ -1994,7 +1995,7 @@ export class SyncService {
           _synced: true,
           _lastSyncedAt: new Date().toISOString()
         };
-        // Note: current_balance is not updated - it's computed from journal entries
+        // Note: current_balance, usd_balance, lbp_balance are not updated - computed from journal entries only
 
         await getDB().cash_drawer_accounts.update(localRecord.id, updateData);
 
@@ -2013,8 +2014,10 @@ export class SyncService {
             _synced: true,
             _lastSyncedAt: new Date().toISOString()
           };
-          // Remove current_balance from update - it's computed, not synced
+          // Remove all balance fields from update - they're computed from journal entries, not synced
           delete updateData.current_balance;
+          delete updateData.usd_balance;
+          delete updateData.lbp_balance;
           await getDB().cash_drawer_accounts.put(updateData);
         } else {
           await getDB().cash_drawer_accounts.update(localRecord.id, {
@@ -2031,11 +2034,17 @@ export class SyncService {
     const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
 
     if (remoteTimestamp >= localTimestamp) {
-      await getDB().cash_drawer_accounts.put({
+      // Exclude balance fields from sync - they're computed from journal entries, not synced
+      const syncData: any = {
         ...remoteRecord,
         _synced: true,
         _lastSyncedAt: new Date().toISOString()
-      });
+      };
+      // Remove all balance fields - computed from journal entries only
+      delete syncData.current_balance;
+      delete syncData.usd_balance;
+      delete syncData.lbp_balance;
+      await getDB().cash_drawer_accounts.put(syncData);
     } else {
       await getDB().cash_drawer_accounts.update(localRecord.id, {
         _synced: true,

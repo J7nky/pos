@@ -8,11 +8,23 @@ export interface Database {
           store_id: string;
           account_code: string;
           name: string;
-          /** @deprecated Use usd_balance and lbp_balance instead - kept for backward compatibility */
+          /** 
+           * @deprecated COMPUTED-ONLY: Never read or write this field.
+           * Balance is calculated from journal entries (account_code = 1100).
+           * Kept in schema for backward compatibility only.
+           */
           current_balance?: number;
-          /** Performance cache: USD balance calculated from journal entries, updated atomically */
+          /** 
+           * @deprecated COMPUTED-ONLY: Never read or write this field.
+           * Balance is calculated from journal entries (account_code = 1100).
+           * Kept in schema for backward compatibility only.
+           */
           usd_balance?: number;
-          /** Performance cache: LBP balance calculated from journal entries, updated atomically */
+          /** 
+           * @deprecated COMPUTED-ONLY: Never read or write this field.
+           * Balance is calculated from journal entries (account_code = 1100).
+           * Kept in schema for backward compatibility only.
+           */
           lbp_balance?: number;
           currency: 'USD' | 'LBP';
           is_active: boolean;
@@ -24,11 +36,23 @@ export interface Database {
           store_id: string;
           account_code: string;
           name: string;
-          /** @deprecated Use usd_balance and lbp_balance instead - kept for backward compatibility */
+          /** 
+           * @deprecated COMPUTED-ONLY: Never read or write this field.
+           * Balance is calculated from journal entries (account_code = 1100).
+           * Kept in schema for backward compatibility only.
+           */
           current_balance?: number;
-          /** Performance cache: USD balance calculated from journal entries, updated atomically */
+          /** 
+           * @deprecated COMPUTED-ONLY: Never read or write this field.
+           * Balance is calculated from journal entries (account_code = 1100).
+           * Kept in schema for backward compatibility only.
+           */
           usd_balance?: number;
-          /** Performance cache: LBP balance calculated from journal entries, updated atomically */
+          /** 
+           * @deprecated COMPUTED-ONLY: Never read or write this field.
+           * Balance is calculated from journal entries (account_code = 1100).
+           * Kept in schema for backward compatibility only.
+           */
           lbp_balance?: number;
           currency?: 'USD' | 'LBP';
           is_active?: boolean;
@@ -40,11 +64,23 @@ export interface Database {
           store_id?: string;
           account_code?: string;
           name?: string;
-          /** @deprecated Use usd_balance and lbp_balance instead - kept for backward compatibility */
+          /** 
+           * @deprecated COMPUTED-ONLY: Never read or write this field.
+           * Balance is calculated from journal entries (account_code = 1100).
+           * Kept in schema for backward compatibility only.
+           */
           current_balance?: number;
-          /** Performance cache: USD balance calculated from journal entries, updated atomically */
+          /** 
+           * @deprecated COMPUTED-ONLY: Never read or write this field.
+           * Balance is calculated from journal entries (account_code = 1100).
+           * Kept in schema for backward compatibility only.
+           */
           usd_balance?: number;
-          /** Performance cache: LBP balance calculated from journal entries, updated atomically */
+          /** 
+           * @deprecated COMPUTED-ONLY: Never read or write this field.
+           * Balance is calculated from journal entries (account_code = 1100).
+           * Kept in schema for backward compatibility only.
+           */
           lbp_balance?: number;
           currency?: 'USD' | 'LBP';
           is_active?: boolean;

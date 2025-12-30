@@ -1326,19 +1326,10 @@ export class TransactionService {
         transactionId: transaction.id
       });
 
-      // ✅ Update balance caches atomically with journal entries
-      // Journal entries are the source of truth, but usd_balance and lbp_balance are performance caches
-      // These caches are updated atomically to stay in sync with journal entries
-      await getDB().cash_drawer_accounts.update(account.id as string, {
-        usd_balance: newUsdBalance as any,
-        lbp_balance: newLbpBalance as any,
-        // Keep current_balance for backward compatibility (use LBP as default)
-        current_balance: newLbpBalance as any,
-        updated_at: new Date().toISOString(),
-        _synced: false
-      });
-
-      console.log(`💰 Cash drawer balances updated: USD ${previousUsdBalance.toLocaleString()} → ${newUsdBalance.toLocaleString()} (${usdBalanceChange > 0 ? '+' : ''}${usdBalanceChange.toLocaleString()}), LBP ${previousLbpBalance.toLocaleString()} → ${newLbpBalance.toLocaleString()} (${lbpBalanceChange > 0 ? '+' : ''}${lbpBalanceChange.toLocaleString()})`);
+      // ✅ Journal entries are the single source of truth - balances are computed, not stored
+      // Balance cache fields (usd_balance, lbp_balance, current_balance) are never updated
+      // All balance reads calculate from journal entries using calculateBothCurrencies()
+      console.log(`💰 Cash drawer balances (from journal entries): USD ${previousUsdBalance.toLocaleString()} → ${newUsdBalance.toLocaleString()} (${usdBalanceChange > 0 ? '+' : ''}${usdBalanceChange.toLocaleString()}), LBP ${previousLbpBalance.toLocaleString()} → ${newLbpBalance.toLocaleString()} (${lbpBalanceChange > 0 ? '+' : ''}${lbpBalanceChange.toLocaleString()})`);
 
       return {
         previousBalance: previousLbpBalance, // Keep for backward compatibility
