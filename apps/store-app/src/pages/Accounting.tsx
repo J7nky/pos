@@ -130,6 +130,7 @@ export default function Accounting() {
   const [dashboardPeriod] = useLocalStorage<'today' | 'week' | 'month' | 'quarter' | 'year'>('accounting_dashboard_period', 'today');
   const [flashingItemId, setFlashingItemId] = useState<string | null>(null);
   const [autoExpandGroupId, setAutoExpandGroupId] = useState<string | null>(null);
+  const [highlightBillNumber, setHighlightBillNumber] = useState<string | null>(null);
   const [currentCashDrawerSession, setCurrentCashDrawerSession] = useState<any>(null);
 
   // Add loading state to prevent rendering before data is ready
@@ -142,23 +143,143 @@ export default function Accounting() {
     }
   }, [raw, transactions, customers, suppliers, products]);
 
-  // Handle navigation from missed products history
+  // Handle navigation from missed products history and transaction clicks
   useEffect(() => {
-    const highlightItemId = sessionStorage.getItem('highlightReceivedBillItem');
-    const targetTab = sessionStorage.getItem('activeAccountingTab');
+    // Small delay to ensure components are ready
+    const timer = setTimeout(() => {
+      const highlightItemId = sessionStorage.getItem('highlightReceivedBillItem');
+      const targetTab = sessionStorage.getItem('activeAccountingTab');
+      const highlightPaymentTransactionId = sessionStorage.getItem('highlightPaymentTransactionId');
+      const highlightDashboardTransactionId = sessionStorage.getItem('highlightDashboardTransactionId');
+      
+      // Handle missed products navigation (existing)
+      if (highlightItemId && targetTab === 'received-bills') {
+        // Switch to received bills tab
+        setActiveTab('received-bills');
+        
+        // Set the item to flash immediately
+        setFlashingItemId(highlightItemId);
+        
+        // Clear the sessionStorage immediately to prevent re-triggering
+        sessionStorage.removeItem('highlightReceivedBillItem');
+        sessionStorage.removeItem('activeAccountingTab');
+      }
+      
+      // Handle payment transaction highlighting (can run immediately)
+      if (highlightPaymentTransactionId) {
+        setActiveTab('payments');
+        // Store for RecentPayments component to use (don't remove yet, let component handle it)
+        sessionStorage.setItem('highlightPaymentId', highlightPaymentTransactionId);
+        sessionStorage.removeItem('highlightPaymentTransactionId');
+      }
+      
+      // Handle dashboard transaction highlighting (can run immediately)
+      if (highlightDashboardTransactionId) {
+        setActiveTab('dashboard');
+        // Store for DashboardOverview component to use (don't remove yet, let component handle it)
+        // Note: We're keeping the same key name so component can read it
+        // Component will remove it after reading
+      }
+
+      // Handle inventory bill transaction - switch tab immediately (item matching happens in separate useEffect)
+      const highlightTransactionId = sessionStorage.getItem('highlightTransactionId');
+      if (highlightTransactionId) {
+        setActiveTab('received-bills');
+        // Don't remove highlightTransactionId here - let the inventory bills useEffect handle it
+      }
+
+      // Handle cash drawer sale transaction - switch to bills-management tab
+      const billNumberToHighlight = sessionStorage.getItem('highlightBillNumber');
+      if (billNumberToHighlight) {
+        setActiveTab('bills-management');
+        setHighlightBillNumber(billNumberToHighlight);
+        // Don't remove highlightBillNumber here - let SoldBills component handle it
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, []); // Run once on mount
+
+  // Handle transaction-based navigation for inventory bills (needs data to be ready)
+  useEffect(() => {
+    if (!isDataReady) return; // Wait for data to be ready
     
-    if (highlightItemId && targetTab === 'received-bills') {
-      // Switch to received bills tab
-      setActiveTab('received-bills');
-      
-      // Set the item to flash immediately
-      setFlashingItemId(highlightItemId);
-      
-      // Clear the sessionStorage immediately to prevent re-triggering
-      sessionStorage.removeItem('highlightReceivedBillItem');
-      sessionStorage.removeItem('activeAccountingTab');
+    const highlightTransactionId = sessionStorage.getItem('highlightTransactionId');
+    
+    if (highlightTransactionId) {
+      // Find the inventory item related to this transaction
+      const transaction = transactions.find(t => t.id === highlightTransactionId);
+      if (transaction) {
+        const transactionDate = new Date(transaction.createdAt || transaction.created_at || '').toISOString().split('T')[0];
+        const transactionTime = new Date(transaction.createdAt || transaction.created_at || '').getTime();
+        
+        // Strategy 1: Match by metadata (if batch_id or inventory_bill_id is stored)
+        let matchingItem = null;
+        const transactionMetadata = (transaction as any).metadata;
+        if (transactionMetadata) {
+          const batchId = transactionMetadata.batch_id || transactionMetadata.inventory_bill_id;
+          if (batchId) {
+            matchingItem = inventory.find(item => item.batch_id === batchId);
+          }
+        }
+
+        // Strategy 2: Match by supplier_id and date (for credit purchases)
+        if (!matchingItem && transaction.supplier_id) {
+          matchingItem = inventory.find(item => {
+            if (!item.batch_id) return false;
+            const batch = inventoryBills.find(b => b.id === item.batch_id);
+            if (!batch) return false;
+            const batchDate = new Date(batch.received_at || batch.created_at || '').toISOString().split('T')[0];
+            return batch.supplier_id === transaction.supplier_id && batchDate === transactionDate;
+          });
+        }
+
+        // Strategy 3: For cash purchases (supplier_id is null), match by date and amount
+        // Cash purchases are typically created on the same day as the inventory batch
+        if (!matchingItem && !transaction.supplier_id && transaction.category === 'Inventory Cash Purchase') {
+          // Find items from batches created within 1 hour of the transaction
+          const oneHourMs = 60 * 60 * 1000;
+          matchingItem = inventory.find(item => {
+            if (!item.batch_id) return false;
+            const batch = inventoryBills.find(b => b.id === item.batch_id);
+            if (!batch) return false;
+            const batchTime = new Date(batch.received_at || batch.created_at || 0).getTime();
+            const timeDiff = Math.abs(transactionTime - batchTime);
+            // Match if within 1 hour and same date
+            const batchDate = new Date(batch.received_at || batch.created_at || '').toISOString().split('T')[0];
+            return batchDate === transactionDate && timeDiff < oneHourMs;
+          });
+        }
+
+        // Strategy 4: Fallback - match any item from the same day (last resort)
+        if (!matchingItem) {
+          matchingItem = inventory.find(item => {
+            if (!item.batch_id) return false;
+            const batch = inventoryBills.find(b => b.id === item.batch_id);
+            if (!batch) return false;
+            const batchDate = new Date(batch.received_at || batch.created_at || '').toISOString().split('T')[0];
+            return batchDate === transactionDate;
+          });
+        }
+        
+        if (matchingItem) {
+          setActiveTab('received-bills');
+          setFlashingItemId(matchingItem.id);
+          // Also set auto-expand for the batch
+          if (matchingItem.batch_id) {
+            setAutoExpandGroupId(matchingItem.batch_id);
+          }
+        } else {
+          // Still switch to received-bills tab even if we can't find the item
+          setActiveTab('received-bills');
+        }
+        sessionStorage.removeItem('highlightTransactionId');
+      } else {
+        // Transaction not found, clear anyway
+        sessionStorage.removeItem('highlightTransactionId');
+      }
     }
-  }, []); // Run only once on mount
+  }, [isDataReady, transactions, inventory, inventoryBills]); // Run when data is ready
 
   // Handle auto-expand when data is ready
   useEffect(() => {
@@ -180,7 +301,6 @@ export default function Accounting() {
       const timer = setTimeout(() => {
         setFlashingItemId(null);
         setAutoExpandGroupId(null);
-        console.log('Stopping flash and expand effects');
       }, 1700);
       
       return () => clearTimeout(timer);
@@ -1181,7 +1301,7 @@ export default function Accounting() {
    
 
       {activeTab === 'bills-management' && (
-        <SoldBills />
+        <SoldBills highlightBillNumber={highlightBillNumber} />
       )}
 
       {activeTab === 'received-bills' && (

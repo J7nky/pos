@@ -24,6 +24,7 @@ import FastActionCard from '../components/cards/FastActionCard';
 import StatCard from '../components/cards/StatCard';
 import LowStockItem from '../components/LowStockItem';
 import CashDrawerOpeningModal from '../components/common/CashDrawerOpeningModal';
+import TransactionListModal from '../components/common/TransactionListModal';
 
 interface CashDrawerStatus {
   currentBalance: number; // Keep for backward compatibility
@@ -44,6 +45,8 @@ export default function Home() {
   const [lastCashDrawerBalances, setLastCashDrawerBalances] = useState<{ USD: number; LBP: number } | null>(null);
   const [showOpeningModal, setShowOpeningModal] = useState(false);
   const [showCombinedBalance, setShowCombinedBalance] = useState(false);
+  const [showExpensesModal, setShowExpensesModal] = useState(false);
+  const [showIncomeModal, setShowIncomeModal] = useState(false);
 
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
@@ -98,6 +101,12 @@ export default function Home() {
     ), [transactions, today]
   );
 
+  const todayIncome = useMemo(() => 
+    transactions.filter(t => 
+      t.type === 'income' && t.createdAt && t.createdAt.split('T')[0] === today
+    ), [transactions, today]
+  );
+
   // Helper function to convert expense amounts to preferred currency
   const convertExpenseAmount = useCallback((expense: any): number => {
     // Expenses are stored in LBP in the database
@@ -105,6 +114,26 @@ export default function Home() {
     if (storePreferredCurrency === 'USD') {
       return amount / exchangeRate;
     }
+    return amount;
+  }, [storePreferredCurrency, exchangeRate]);
+
+  // Helper function to convert income amounts to preferred currency
+  const convertIncomeAmount = useCallback((income: any): number => {
+    const amount = income.amount || 0;
+    const transactionCurrency = income.currency || 'LBP';
+    
+    // If transaction currency matches store preferred currency, return as-is
+    if (transactionCurrency === storePreferredCurrency) {
+      return amount;
+    }
+    
+    // Convert between currencies
+    if (transactionCurrency === 'USD' && storePreferredCurrency === 'LBP') {
+      return amount * exchangeRate;
+    } else if (transactionCurrency === 'LBP' && storePreferredCurrency === 'USD') {
+      return amount / exchangeRate;
+    }
+    
     return amount;
   }, [storePreferredCurrency, exchangeRate]);
 
@@ -448,7 +477,16 @@ export default function Home() {
       value: formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + convertExpenseAmount(expense), 0)),
       icon: Receipt,
       color: 'bg-red-500',
-      change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today).length} ${t('common.transactions')}`
+      change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today).length} ${t('common.transactions')}`,
+      onClick: () => setShowExpensesModal(true)
+    },
+    {
+      title: t('home.todaysIncome', { currency: t(`common.currency.${storePreferredCurrency}`) }), 
+      value: formatCurrencyForStore(todayIncome.reduce((sum, income) => sum + convertIncomeAmount(income), 0)),
+      icon: Receipt,
+      color: 'bg-green-500',
+      change: `${transactions.filter(t => t.type === 'income' && t.createdAt && t.createdAt.split('T')[0] === today).length} ${t('common.transactions')}`,
+      onClick: () => setShowIncomeModal(true)
     },
     {
       title: t('home.lowStockItems'),
@@ -551,6 +589,25 @@ export default function Home() {
         )}
   
       </div>
+
+      {/* Transaction List Modals */}
+      <TransactionListModal
+        isOpen={showExpensesModal}
+        onClose={() => setShowExpensesModal(false)}
+        transactions={todayExpenses as any}
+        title={t('home.todaysExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) })}
+        formatCurrency={formatCurrencyForStore}
+        convertAmount={convertExpenseAmount}
+      />
+
+      <TransactionListModal
+        isOpen={showIncomeModal}
+        onClose={() => setShowIncomeModal(false)}
+        transactions={todayIncome as any}
+        title={t('home.todaysIncome', { currency: t(`common.currency.${storePreferredCurrency}`) })}
+        formatCurrency={formatCurrencyForStore}
+        convertAmount={convertIncomeAmount}
+      />
 
       {/* Cash Drawer Opening Modal */}
       <CashDrawerOpeningModal

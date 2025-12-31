@@ -41,6 +41,7 @@ type ReceivedBillsProps = {
   addSupplier?: (supplier: any) => Promise<void>;
   flashingItemId?: string | null;
   autoExpandGroupId?: string | null;
+  preferredCurrency: 'USD' | 'LBP';
 };
 
 export default function ReceivedBills({
@@ -62,7 +63,8 @@ export default function ReceivedBills({
   setRecentSuppliers,
   addSupplier,
   flashingItemId,
-  autoExpandGroupId
+  autoExpandGroupId,
+  preferredCurrency
 }: ReceivedBillsProps) {
   const { t } = useI18n();
   const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
@@ -1036,14 +1038,11 @@ export default function ReceivedBills({
                                     <tr 
                                       key={bill.id} 
                                       id={shouldFlash ? `flashing-item-${bill.id}` : undefined}
-                                      className={`hover:${shouldFlash ? 'bg-blue-500' : 'bg-gray-50'} transition-all duration-500 ${
-                                        shouldFlash ? ' border-2 border-blue-400 shadow-xl animate-pulse' : ''
+                                      className={`${
+                                        shouldFlash ? 'border-2 border-blue-400' : ''
                                       }`}
-                                      style={shouldFlash ? { transform: 'scale(1)' } : {}}
                                     >
-                                    <td className={`px-6 py-3 whitespace-nowrap text-sm font-medium rtl:text-right ${
-                                      shouldFlash ? 'text-blue-900 font-bold' : 'text-gray-900'
-                                    }`}>{bill.productName}</td>
+                                    <td className="px-6 py-3 whitespace-nowrap text-sm font-medium rtl:text-right text-gray-900">{bill.productName}</td>
                                     <td className="px-6 py-3 whitespace-nowrap">
                                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bill.type === 'commission' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
                                         {t(`receivedBills.${bill.type}`)}
@@ -1133,6 +1132,7 @@ export default function ReceivedBills({
         products={products}
         suppliers={suppliers}
         defaultCommissionRate={defaultCommissionRate}
+        preferredCurrency={preferredCurrency}
         recentSuppliers={recentSuppliers}
         setRecentSuppliers={setRecentSuppliers}
         form={batchEditForm}

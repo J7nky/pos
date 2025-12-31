@@ -16,6 +16,7 @@ export interface InventoryPurchaseItem {
 export interface InventoryPurchaseData {
   supplier_id: string;
   type: 'cash' | 'credit' | 'commission';
+  currency: 'USD' | 'LBP';
   items: InventoryPurchaseItem[];
   porterage_fee?: number;
   transfer_fee?: number;
@@ -171,13 +172,13 @@ export class InventoryPurchaseService {
       // This creates journal entries: Debit Inventory (1300), Credit Cash (1100)
       console.log(`[CASH_PURCHASE] Creating inventory cash purchase transaction:`, {
         amount: totalAmount,
-        currency: 'USD',
+        currency: data.currency,
         reference: `INV-PURCH-${transactionId.substring(0, 8)}`
       });
       
       const result = await transactionService.createInventoryCashPurchase(
         totalAmount,
-        'USD',
+        data.currency,
         `Cash purchase - ${items.length} items from Trade`,
         {
           userId: data.created_by,
@@ -315,7 +316,7 @@ export class InventoryPurchaseService {
       const creditPurchaseResult = await transactionService.createSupplierPayment(
         data.supplier_id,
         totalAmount,
-        'LBP',
+        data.currency,
         `Credit purchase - ${items.length} items from ${supplierName}`,
         {
           userId: data.created_by,
@@ -344,7 +345,7 @@ export class InventoryPurchaseService {
         if (session) {
           const feeResult = await transactionService.createCashDrawerExpense(
             fees.total,
-            'USD',
+            data.currency,
             `Fees for credit purchase from supplier`,
             {
               userId: data.created_by,
@@ -410,7 +411,7 @@ export class InventoryPurchaseService {
         if (session) {
           const feeResult = await transactionService.createCashDrawerExpense(
             fees.total,
-            'USD',
+            data.currency,
             `Fees for commission purchase`,
             {
               userId: data.created_by,

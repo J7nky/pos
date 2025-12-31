@@ -3853,9 +3853,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         
         const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
 
+        // Use batch currency if provided, otherwise use store preferred currency
+        const purchaseCurrency = batchCurrency || currency;
+        
         const purchaseData = {
           supplier_id: actualSupplierId,
           type: type as 'cash' | 'credit' | 'commission',
+          currency: purchaseCurrency,
           items: items.map(item => ({
             product_id: item.product_id || '',
             quantity: item.quantity || 0,
@@ -3937,6 +3941,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const now = new Date().toISOString();
       const allowedUnits = ["box", "kg", "piece", "bag","bundle"] as const;
 
+      // Use batch currency if provided, otherwise use store preferred currency
+      const itemCurrencyDefault = batchCurrency || currency;
+      
       const mappedItems = items.map((it) => ({
         id: createId(),
         product_id: it.product_id ?? '',
@@ -3950,7 +3957,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // supplier_id REMOVED: accessed via inventory_bills -> batch_id
         weight: it.weight ?? null,
         price: it.price ?? null,
-        currency: (it as any).currency ?? currency,
+        currency: (it as any).currency ?? itemCurrencyDefault,
         selling_price: it.selling_price ?? null,
         received_quantity: it.received_quantity ?? 0,
         batch_id: batchId as string | null,

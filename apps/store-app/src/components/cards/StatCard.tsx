@@ -12,6 +12,7 @@ type Stat = {
   isCashDrawer?: boolean; // NEW: Identify cash drawer card
   showCombinedBalance?: boolean; // NEW: Toggle state
   onToggleCombined?: () => void; // NEW: Toggle handler
+  onClick?: () => void; // NEW: Click handler for card
 };
 
 interface StatCardProps {
@@ -42,8 +43,23 @@ const StatCard: React.FC<StatCardProps> = memo(({
     ? stat.value.split('\n') 
     : [String(stat.value)];
   
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't trigger card click if clicking on a button or interactive element
+    if ((e.target as HTMLElement).closest('button')) {
+      return;
+    }
+    if (stat.onClick && !shouldShowButton) {
+      stat.onClick();
+    }
+  };
+
+  const isClickable = stat.onClick && !shouldShowButton;
+
   return (
-    <div className="bg-white rounded-lg shadow-sm p-6">
+    <div 
+      className={`bg-white rounded-lg shadow-sm p-6 ${isClickable ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+      onClick={handleCardClick}
+    >
       <div className="flex items-center justify-between">
         <div className="flex-1">
           <p className="text-sm text-gray-600">{stat.title}</p>

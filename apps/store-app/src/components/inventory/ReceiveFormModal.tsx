@@ -14,7 +14,7 @@ interface ReceiveFormModalProps {
   products: any[];
   suppliers: any[];
   defaultCommissionRate: number;
-  preferredCurrency?: 'USD' | 'LBP';
+  preferredCurrency: 'USD' | 'LBP';
   recentSuppliers: string[];
   setRecentSuppliers: (suppliers: string[]) => void;
   form: any;
@@ -35,7 +35,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   products,
   suppliers,
   defaultCommissionRate,
-  preferredCurrency = 'USD',
+  preferredCurrency,
   recentSuppliers,
   setRecentSuppliers,
   form,
@@ -117,6 +117,14 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         const tradeSupplier = suppliers.find((s: any) => s.name === t('inventory.trade'));
         if (tradeSupplier && form.supplier_id !== tradeSupplier.id) {
           updates.supplier_id = tradeSupplier.id;
+        }
+      }
+      
+      // Clear Trade supplier if type is commission (Trade cannot be used for commission)
+      if (form.type === 'commission') {
+        const tradeSupplier = suppliers.find((s: any) => s.name === t('inventory.trade'));
+        if (tradeSupplier && (form.supplier_id === tradeSupplier.id || form.supplier_id === 'trade')) {
+          updates.supplier_id = '';
         }
       }
       
@@ -342,9 +350,22 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   const validate = () => {
     const errors: any = {};
 
-    // Supplier validation - only required for credit and commission purchases
-    if (form.type !== 'cash' && !form.supplier_id) {
-      errors.supplier_id = 'Supplier is required for credit and commission purchases.';
+    // Supplier validation - required for credit and commission purchases
+    if (form.type === 'commission') {
+      if (!form.supplier_id) {
+        errors.supplier_id = `${t('inventory.supplierRequiredForCommissionPurchases')}`;
+      } else {
+        // Check if Trade supplier is being used for commission (not allowed)
+        const tradeSupplier = suppliers.find((s: any) => s.name === t('inventory.trade'));
+        if (tradeSupplier && form.supplier_id === tradeSupplier.id) {
+          errors.supplier_id = `${t('inventory.pleaseSelectADifferentSupplier')}`;
+        } else if (form.supplier_id === 'trade') {
+          errors.supplier_id = `${t('inventory.pleaseSelectADifferentSupplier')}`;
+        }
+      }
+    }
+    if (form.type === 'credit' && !form.supplier_id) {
+      errors.supplier_id = `${t('inventory.supplierRequiredForCreditPurchases')}`;
     }
     
     if (!bulkProducts || bulkProducts.length === 0) {
@@ -353,27 +374,27 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       for (const pid of bulkProducts) {
         const item = bulkItems[pid];
         if (!item || !item.product_id) {
-          errors[`product_${pid}`] = 'Select a product.';
+          errors[`product_${pid}`] = `${t('inventory.selectProduct')}`;
         }
         if (!item || !item.quantity || isNaN(Number(item.quantity)) || Number(item.quantity) < 1) {
-          errors[`quantity_${pid}`] = 'Quantity must be at least 1.';
+          errors[`quantity_${pid}`] = `${t('inventory.quantityMustBeAtLeast1')}`;
         }
         
         // Cash purchase validation - requires price and either weight or unit quantity
         if (form.type === 'cash') {
           if (!item || !item.price || isNaN(Number(item.price)) || Number(item.price) <= 0) {
-            errors[`price_${pid}`] = 'Price is required and must be greater than 0 for cash purchases.';
+            errors[`price_${pid}`] = `${t('inventory.priceRequiredForCashPurchases')}`;
           }
           // For cash purchases, we need either weight or unit quantity to calculate total value
           if (!item.weight && !item.quantity) {
-            errors[`quantity_${pid}`] = 'Either weight or quantity is required for cash purchases.';
+            errors[`quantity_${pid}`] = `${t('inventory.bothWeightOrQuantityIsRequiredForCashPurchases')}`;
           }
         }
         
         // Credit purchase validation - requires valid supplier and price
         if (form.type === 'credit') {
           if (!form.supplier_id) {
-            errors.supplier_id = 'Supplier is required for credit purchases.';
+            errors.supplier_id = `${t('inventory.supplierRequiredForCreditPurchases')}`;
           }
          
         }
@@ -382,10 +403,10 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     
     if (form.empty_plastic) {
       if (form.plastic_price <= 0 || form.plastic_price === undefined || isNaN(Number(form.plastic_price))) {
-        errors.plastic_price = 'Plastic price is required when plastic mortgage is checked.';
+        errors.plastic_price = `${t('inventory.plasticPriceRequiredWhenPlasticMortgageIsChecked')}`;
       }
       else    if (form.plastic_count <= 0 || form.plastic_count === undefined || isNaN(Number(form.plastic_count))) {
-        errors.plastic_count = 'Plastic count is required when plastic mortgage is checked.';
+        errors.plastic_count = `${t('inventory.plasticCountRequiredWhenPlasticMortgageIsChecked')}`;
       }
     }
     if (form.empty_plastic) {
@@ -394,21 +415,21 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     
     // Received date validation
     if (!form.received_at) {
-      errors.received_at = 'Received date is required.';
+      errors.received_at = `${t('inventory.receivedDateRequired')}`;
     } else {
       const receivedDate = new Date(form.received_at);
       const today = new Date();
       today.setHours(23, 59, 59, 999); // Set to end of today
       if (receivedDate > today) {
-        errors.received_at = 'Received date cannot be in the future.';
+        errors.received_at = `${t('inventory.receivedDateCannotBeInTheFuture')}`;
       }
     }
     
     // Fees validation applies once per batch
-    if (form.porterage_fee && (isNaN(Number(form.porterage_fee)) || Number(form.porterage_fee) < 0)) errors.porterage_fee = 'Porterage fee must be a valid positive number.';
-    if (form.transfer_fee && (isNaN(Number(form.transfer_fee)) || Number(form.transfer_fee) < 0)) errors.transfer_fee = 'Transfer fee must be a valid positive number.';
+    if (form.porterage_fee && (isNaN(Number(form.porterage_fee)) || Number(form.porterage_fee) < 0)) errors.porterage_fee = `${t('inventory.porterageFeeMustBeAPositiveNumber')}`;
+    if (form.transfer_fee && (isNaN(Number(form.transfer_fee)) || Number(form.transfer_fee) < 0)) errors.transfer_fee = `${t('inventory.transferFeeMustBeAPositiveNumber')}`;
     if (form.type === 'commission') {
-      if (!form.commission_rate || isNaN(Number(form.commission_rate)) || Number(form.commission_rate) < 0) errors.commission_rate = 'Commission rate must be a valid percentage.';
+      if (!form.commission_rate || isNaN(Number(form.commission_rate)) || Number(form.commission_rate) < 0) errors.commission_rate = `${t('inventory.commissionRateMustBeAPercentage')}`;
     }
     return errors;
   };
@@ -422,8 +443,11 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     setLoading(true);
     try {
       // Always use bulk mode now
+      const batchCurrency = form.porterage_currency || preferredCurrency;
       const items = bulkProducts.map(pid => {
         const bi = bulkItems[pid];
+        // Use item currency if set, otherwise use batch currency, otherwise use preferred currency
+        const itemCurrency = bi.price_currency || bi.selling_price_currency || batchCurrency || preferredCurrency;
         return {
           product_id: bi.product_id as string,
           supplier_id: form.type === 'cash' ? 'trade' : form.supplier_id,
@@ -434,6 +458,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           weight: bi.weight ? parseFloat(bi.weight) : undefined,
           price: (form.type === 'cash' || form.type === 'credit') && bi.price ? parseFloat(bi.price) : undefined,
           selling_price: bi.selling_price ? parseFloat(bi.selling_price) : undefined,
+          currency: itemCurrency,
           status: form.status || undefined,
           sku: bi.sku?.trim() || undefined,
         };
@@ -500,7 +525,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       setShowSuggestions(false);
       onClose();
     } catch (e) {
-      setErrors({ form: 'Failed to receive inventory.' });
+      setErrors({ form: `${t('inventory.failedToReceiveInventory')}` });
     }
     setLoading(false);
   };
@@ -739,11 +764,18 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                       onChange={(e) => {
                         const newType = e.target.value;
                         const tradeSupplier = suppliers.find((s: any) => s.name === t('inventory.trade'));
+                        const currentSupplierId = form.supplier_id;
+                        const isTradeSupplier = tradeSupplier && (currentSupplierId === tradeSupplier.id || currentSupplierId === 'trade');
+                        
                         setForm({ 
                           ...form, 
                           type: newType,
                           // Set supplier_id based on type
-                          supplier_id: newType === 'cash' ? (tradeSupplier?.id || 'trade') : form.supplier_id
+                          // For cash: set to Trade
+                          // For commission/credit: clear if it's Trade, otherwise keep current
+                          supplier_id: newType === 'cash' 
+                            ? (tradeSupplier?.id || 'trade')
+                            : (newType === 'commission' && isTradeSupplier ? '' : currentSupplierId)
                         });
                       }}
                       className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"

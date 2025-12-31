@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useI18n } from "../../../i18n";
 import { getTranslatedString, parseMultilingualString } from "../../../utils/multilingual";
+import TransactionListItem from "../../common/TransactionListItem";
 import {
   RefreshCw,
   Wallet,
@@ -358,6 +359,44 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   suppliers,
 }) => {
   const { t, language } = useI18n();
+  const [highlightedTransactionId, setHighlightedTransactionId] = useState<string | null>(null);
+
+  // Check for transaction to highlight from sessionStorage
+  // Use a delay to ensure sessionStorage is set after navigation
+  useEffect(() => {
+    const checkHighlight = () => {
+      const highlightId = sessionStorage.getItem('highlightDashboardTransactionId');
+      if (highlightId) {
+        setHighlightedTransactionId(highlightId);
+        // Scroll to the transaction
+        setTimeout(() => {
+          const element = document.getElementById(`transaction-${highlightId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 300);
+        // Clear after highlighting
+        sessionStorage.removeItem('highlightDashboardTransactionId');
+        // Stop highlighting after 3 seconds
+        setTimeout(() => {
+          setHighlightedTransactionId(null);
+        }, 3000);
+        return true;
+      }
+      return false;
+    };
+
+    // Check immediately
+    if (checkHighlight()) return;
+
+    // Also check after a short delay to account for navigation timing
+    const timeout = setTimeout(() => {
+      checkHighlight();
+    }, 200);
+
+    return () => clearTimeout(timeout);
+  }, []);
+
   // Enhanced filter state
   const [showFilters, setShowFilters] = useState(true);
   const [filters, setFilters] = useState<FilterState>({
@@ -670,58 +709,30 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 )}
               </div>
             ) : (
-              filteredTransactions.map((transaction) => (
-                <div
-                  key={transaction.id}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200 border border-transparent hover:border-gray-200"
-                >
-                  <div className="flex items-center flex-1 min-w-0">
-                    <div
-                      className={`p-2 rounded-full mr-3 flex-shrink-0 ${
-                        transaction.type === "income" ? "bg-green-100" : "bg-red-100"
-                      }`}
-                    >
-                      {transaction.type === "income" ? (
-                        <ArrowDownRight className="w-4 h-4 text-green-600" />
-                      ) : (
-                        <ArrowUpRight className="w-4 h-4 text-red-600" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 truncate">
-                        {getTranslatedString(parseMultilingualString(transaction.category as any), language as any)}
-                      </div>
-                      <div className="text-xs text-gray-500 truncate">
-                        {getTranslatedString(parseMultilingualString(transaction.description as any), language as any)}
-                      </div>
-                      <div className="flex items-center space-x-2 mt-1">
-                        <span className="text-xs text-gray-400">
-                          {new Date(transaction.createdAt).toLocaleDateString()}
-                        </span>
-                        <span className="text-xs text-gray-400">•</span>
-                        <span className="text-xs text-gray-400">
-                          {transaction.currency}
-                        </span>
-                      </div>
-                    </div>
+              filteredTransactions.map((transaction) => {
+                // Create a formatCurrency function that uses formatCurrencyWithSymbol
+                const formatCurrencyForItem = (amount: number): string => {
+                  return formatCurrencyWithSymbol(amount, transaction.currency || "USD");
+                };
+                
+                const isHighlighted = highlightedTransactionId === transaction.id;
+                
+                return (
+                  <div
+                    key={transaction.id}
+                    id={`transaction-${transaction.id}`}
+                    className={isHighlighted ? 'border-2 border-blue-400 shadow-xl animate-pulse rounded-lg' : ''}
+                  >
+                    <TransactionListItem
+                      transaction={transaction}
+                      formatCurrency={formatCurrencyForItem}
+                      showDate={true}
+                      showCurrency={true}
+                      showReference={false}
+                    />
                   </div>
-                  <div className="text-right flex-shrink-0 ml-4">
-                    <div
-                      className={`text-sm font-semibold ${
-                        transaction.type === "income"
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }`}
-                    >
-                      {transaction.type === "income" ? "+" : "-"}
-                      {formatCurrencyWithSymbol(
-                        transaction.amount,
-                        transaction.currency || "USD"
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

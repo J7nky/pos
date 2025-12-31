@@ -171,9 +171,10 @@ const en = {
     recordExpense: 'Record Expense', recordExpenseDesc: 'Log business expenses',
     todaySales: "Today's Sales", todaySalesDesc: 'View sales performance',
     checkStock: 'Check Stock', checkStockDesc: 'Monitor inventory levels',
-    cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled', showBothCurrencies: 'Show both currencies', showCombined: 'Show combined balance'
+    cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", todaysIncome: "Today's Income ({{currency}})", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled', showBothCurrencies: 'Show both currencies', showCombined: 'Show combined balance'
   },
   inventory: {
+    failedToReceiveInventory: 'Failed to receive inventory.',
     default: 'Default',
     skuBarcode: 'SKU/Barcode',
     trade: 'Trade',
@@ -186,7 +187,16 @@ const en = {
     selectProduct: 'Select Product',
     notes: 'Notes',
     addAnyAdditionalStatusOrComments: 'Add any additional status or comments',
-    
+    pleaseSelectADifferentSupplier: 'Please select a different supplier.',
+    supplierRequiredForCommissionPurchases: 'Supplier is required for commission purchases.',
+    quantityMustBeAtLeast1: 'Quantity must be at least 1.',
+    priceRequiredForCashPurchases: 'Price is required and must be greater than 0 for cash purchases.',
+    bothWeightOrQuantityIsRequiredForCashPurchases: 'Either weight or quantity is required for cash purchases.',
+    supplierRequiredForCreditPurchases: 'Supplier is required for credit purchases.',
+    plasticPriceRequiredWhenPlasticMortgageIsChecked: 'Plastic price is required when plastic mortgage is checked.',
+    plasticCountRequiredWhenPlasticMortgageIsChecked: 'Plastic count is required when plastic mortgage is checked.',
+    receivedDateRequired: 'Received date is required.',
+    receivedDateCannotBeInTheFuture: 'Received date cannot be in the future.',
     editBatch: 'Edit Batch',
     updateBatchInformationAndInventoryItems: 'Update batch information and inventory items',
     addNewInventoryItemsToYourStock: 'Add new inventory items to your stock',

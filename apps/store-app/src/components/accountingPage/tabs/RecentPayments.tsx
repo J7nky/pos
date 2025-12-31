@@ -98,6 +98,43 @@ export default function RecentPayments({
   const [deletingPayment, setDeletingPayment] = useState<PaymentRow | null>(null);
   const [deletionDetails, setDeletionDetails] = useState<DeletionDetails | null>(null);
   const [loadingDeletionDetails, setLoadingDeletionDetails] = useState(false);
+  const [highlightedPaymentId, setHighlightedPaymentId] = useState<string | null>(null);
+
+  // Check for payment to highlight from sessionStorage
+  // Use a delay to ensure sessionStorage is set after navigation
+  useEffect(() => {
+    const checkHighlight = () => {
+      const highlightId = sessionStorage.getItem('highlightPaymentId');
+      if (highlightId) {
+        setHighlightedPaymentId(highlightId);
+        // Scroll to the payment
+        setTimeout(() => {
+          const element = document.getElementById(`payment-${highlightId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 300);
+        // Clear after highlighting
+        sessionStorage.removeItem('highlightPaymentId');
+        // Stop highlighting after 3 seconds
+        setTimeout(() => {
+          setHighlightedPaymentId(null);
+        }, 1000);
+        return true;
+      }
+      return false;
+    };
+
+    // Check immediately
+    if (checkHighlight()) return;
+
+    // Also check after a short delay to account for navigation timing
+    const timeout = setTimeout(() => {
+      checkHighlight();
+    }, 200);
+
+    return () => clearTimeout(timeout);
+  }, []);
   const [editForm, setEditForm] = useState({
     amount: '',
     currency: 'USD' as 'USD' | 'LBP',
@@ -919,10 +956,17 @@ export default function RecentPayments({
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {paginatedRows.map((row) => (
+                  {paginatedRows.map((row) => {
+                    const isHighlighted = highlightedPaymentId === row.id;
+                    return (
                     <React.Fragment key={row.id}>
                       {/* Main transaction row */}
-                      <tr className="hover:bg-gray-50">
+                      <tr 
+                        id={`payment-${row.id}`}
+                        className={`${
+                          isHighlighted ? 'border-2 border-blue-400' : ''
+                        }`}
+                      >
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {new Date(row.date).toLocaleDateString()} {new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </td>
@@ -1010,8 +1054,16 @@ export default function RecentPayments({
                         </td>
                       </tr>
                       {/* Reversal transactions nested under original */}
-                      {row.reversalTransactions && row.reversalTransactions.length > 0 && row.reversalTransactions.map((reversal) => (
-                        <tr key={reversal.id} className="hover:bg-gray-50 bg-gray-50 border-l-4 border-orange-400">
+                      {row.reversalTransactions && row.reversalTransactions.length > 0 && row.reversalTransactions.map((reversal) => {
+                        const isReversalHighlighted = highlightedPaymentId === reversal.id;
+                        return (
+                        <tr 
+                          key={reversal.id} 
+                          id={`payment-${reversal.id}`}
+                          className={`hover:bg-gray-50 bg-gray-50 border-l-4 border-orange-400 transition-all duration-500 ${
+                            isReversalHighlighted ? 'border-2 border-blue-400 shadow-xl animate-pulse bg-blue-50' : ''
+                          }`}
+                        >
                           <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600 pl-12">
                             {new Date(reversal.date).toLocaleDateString()} {new Date(reversal.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </td>
@@ -1054,9 +1106,11 @@ export default function RecentPayments({
                             {/* Reversals typically don't have actions */}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </React.Fragment>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

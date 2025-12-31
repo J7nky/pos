@@ -92,12 +92,52 @@ interface BillDetails extends BillWithTotals {
   _synced?: boolean;
 }
 
-export default function InventoryLogs() {
+interface SoldBillsProps {
+  highlightBillNumber?: string | null;
+}
+
+export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = {}) {
   const { userProfile } = useSupabaseAuth();
   const raw = useOfflineData();
   const { formatCurrency } = useCurrency();
   const { t } = useI18n();
   const storeId = userProfile?.store_id;
+  const [highlightedBillNumber, setHighlightedBillNumber] = useState<string | null>(null);
+
+  // Check for bill to highlight from sessionStorage
+  useEffect(() => {
+    const checkHighlight = () => {
+      const billNumber = highlightBillNumber || sessionStorage.getItem('highlightBillNumber');
+      if (billNumber) {
+        setHighlightedBillNumber(billNumber);
+        // Scroll to the bill
+        setTimeout(() => {
+          const element = document.getElementById(`bill-${billNumber}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 300);
+        // Clear after highlighting
+        sessionStorage.removeItem('highlightBillNumber');
+        // Stop highlighting after 3 seconds
+        setTimeout(() => {
+          setHighlightedBillNumber(null);
+        }, 1000);
+        return true;
+      }
+      return false;
+    };
+
+    // Check immediately
+    if (checkHighlight()) return;
+
+    // Also check after a short delay to account for navigation timing
+    const timeout = setTimeout(() => {
+      checkHighlight();
+    }, 200);
+
+    return () => clearTimeout(timeout);
+  }, [highlightBillNumber]);
 
   // Get data from offline context
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0}));
@@ -1382,8 +1422,16 @@ export default function InventoryLogs() {
                     const sortedBills = [...bills].sort((a, b) => new Date(b.bill_date).getTime() - new Date(a.bill_date).getTime());
                     const startIndex = (currentPage - 1) * itemsPerPage;
                     const paginatedBills = sortedBills.slice(startIndex, startIndex + itemsPerPage);
-                    return paginatedBills.map((bill) => (
-                    <tr key={bill.id} className="hover:bg-gray-50">
+                    return paginatedBills.map((bill) => {
+                      const isHighlighted = highlightedBillNumber === bill.bill_number;
+                      return (
+                    <tr 
+                      key={bill.id} 
+                      id={`bill-${bill.bill_number}`}
+                      className={`hover:bg-gray-50 ${
+                        isHighlighted ? 'border-2 border-blue-400 shadow-xl bg-blue-50' : ''
+                      }`}
+                    >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="rtl:text-right">
                           <div className="text-sm font-medium text-gray-900">{bill.bill_number}</div>
@@ -1482,7 +1530,8 @@ export default function InventoryLogs() {
                         </div>
                       </td>
                     </tr>
-                  ));
+                    );
+                  })
                   })()
                 )}
               </tbody>

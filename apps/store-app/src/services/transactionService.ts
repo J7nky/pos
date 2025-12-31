@@ -29,6 +29,7 @@ import {
   generateReference 
 } from '../utils/referenceGenerator';
 import { getLocalDateString } from '../utils/dateUtils';
+import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -161,6 +162,57 @@ export class TransactionService {
         };
       }
 
+      // 1.5. VALIDATE CASH DRAWER BALANCE FOR EXPENSE TRANSACTIONS
+      // Check if this is a cash expense transaction that would result in negative balance
+      const isCashExpense = params.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE || 
+                           params.category === TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE;
+      
+      if (isCashExpense) {
+        try {
+          // Get cash drawer account to verify it exists
+          const account = await getDB().getCashDrawerAccount(params.context.storeId, params.context.branchId);
+          if (!account) {
+            return {
+              success: false,
+              error: 'No cash drawer account found. Please create one before processing expenses.',
+              balanceBefore: 0,
+              balanceAfter: 0,
+              affectedRecords: []
+            };
+          }
+
+          // Calculate current cash drawer balance in the transaction currency
+          // Cash drawer balances are stored separately for USD and LBP in journal entries
+          const currentBalance = await calculateCashDrawerBalance(
+            params.context.storeId,
+            params.context.branchId,
+            params.currency
+          );
+
+          // Check if expense would result in negative balance
+          if (params.amount > currentBalance) {
+            const formattedBalance = currencyService.formatCurrency(currentBalance, params.currency);
+            const formattedAmount = currencyService.formatCurrency(params.amount, params.currency);
+            return {
+              success: false,
+              error: `Insufficient cash drawer balance. Current balance: ${formattedBalance}, Required: ${formattedAmount}`,
+              balanceBefore: currentBalance,
+              balanceAfter: currentBalance - params.amount,
+              affectedRecords: []
+            };
+          }
+        } catch (error) {
+          console.error('[CREATE_TRANSACTION] Error validating cash drawer balance:', error);
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to validate cash drawer balance',
+            balanceBefore: 0,
+            balanceAfter: 0,
+            affectedRecords: []
+          };
+        }
+      }
+
       // 2. PREPARE TRANSACTION DATA (outside transaction)
       const transactionId = this.generateTransactionId();
       const correlationId = params.context.correlationId || this.generateCorrelationId();
@@ -226,6 +278,68 @@ export class TransactionService {
         storeId: params.context.storeId,
         branchId: params.context.branchId
       });
+
+      // 2.5. AUTO-OPEN CASH DRAWER SESSION IF CLOSED
+      // If this transaction affects cash drawer, ensure session is open
+      const shouldUpdateCashDrawer = params.updateCashDrawer !== false && this.isCashDrawerCategory(params.category);
+      if (shouldUpdateCashDrawer) {
+        try {
+          const { cashDrawerUpdateService } = await import('./cashDrawerUpdateService');
+          
+          // Check if session is open (without auto-open to check status)
+          const session = await cashDrawerUpdateService.verifySessionOpen(
+            params.context.storeId,
+            params.context.branchId,
+            false, // Don't auto-open yet - we'll do it manually with proper amount
+            params.context.userId,
+            type
+          );
+
+          if (!session || session.status !== 'open') {
+            // Session is closed - auto-open it
+            console.log(`[CREATE_TRANSACTION] Cash drawer session is closed, auto-opening with transaction amount`);
+            
+            // Determine opening amount based on transaction type
+            // For transactions that DEBIT cash (sales, customer payments): use transaction amount
+            // For transactions that CREDIT cash (expenses, supplier payments): use 0
+            const accountMapping = getAccountMapping(params.category);
+            const isDebitCash = accountMapping.debitAccount === '1100';
+            const openingAmount = isDebitCash ? params.amount : 0;
+
+            const openResult = await cashDrawerUpdateService.openCashDrawerSession(
+              params.context.storeId,
+              params.context.branchId,
+              openingAmount,
+              params.context.userId,
+              `Auto-opened for ${params.category} transaction`
+            );
+
+            if (!openResult.success) {
+              console.error(`[CREATE_TRANSACTION] Failed to auto-open cash drawer session:`, openResult.error);
+              return {
+                success: false,
+                error: openResult.error || 'Failed to open cash drawer session',
+                balanceBefore: 0,
+                balanceAfter: 0,
+                affectedRecords: []
+              };
+            }
+
+            console.log(`[CREATE_TRANSACTION] ✅ Cash drawer session auto-opened: ${openResult.sessionId} with opening amount: ${openingAmount}`);
+          } else {
+            console.log(`[CREATE_TRANSACTION] ✅ Cash drawer session is already open: ${session.id}`);
+          }
+        } catch (error) {
+          console.error('[CREATE_TRANSACTION] Error checking/opening cash drawer session:', error);
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to verify cash drawer session',
+            balanceBefore: 0,
+            balanceAfter: 0,
+            affectedRecords: []
+          };
+        }
+      }
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
       // ALL database write operations happen atomically

@@ -182,17 +182,27 @@ export class ProfitLossService {
         // Commission bills: COGS = 0 (goods not owned, fees recoverable)
         cogs = 0;
       } else {
-        // Cash/Credit bills: COGS = sum(inventory_item.price × sold_quantity) + fees
+        // Cash/Credit bills: COGS = sum(inventory_item.price × sold_weight_or_quantity) + fees
         let inventoryCost = 0;
         for (const inventoryItem of inventoryItems) {
-          // Get sold quantity for this inventory item
-          const soldQuantity = billLineItems
-            .filter(item => item.inventory_item_id === inventoryItem.id)
-            .reduce((sum, item) => sum + (item.quantity || 0), 0);
+          // Get bill line items for this inventory item
+          const itemsForInventory = billLineItems.filter(item => item.inventory_item_id === inventoryItem.id);
+          
+          // Check if inventory item has weight - if so, use weight for COGS calculation
+          const hasWeight = inventoryItem.weight !== null && inventoryItem.weight !== undefined;
+          
+          let soldAmount = 0;
+          if (hasWeight) {
+            // Use weight if available
+            soldAmount = itemsForInventory.reduce((sum, item) => sum + (item.weight || 0), 0);
+          } else {
+            // Fall back to quantity if no weight
+            soldAmount = itemsForInventory.reduce((sum, item) => sum + (item.quantity || 0), 0);
+          }
 
-          // Calculate cost: price × sold_quantity
+          // Calculate cost: price × sold_weight (or sold_quantity if no weight)
           const itemPrice = inventoryItem.price || 0;
-          inventoryCost += itemPrice * soldQuantity;
+          inventoryCost += itemPrice * soldAmount;
         }
 
         // Add fees
