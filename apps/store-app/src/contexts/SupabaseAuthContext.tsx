@@ -51,12 +51,15 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   // Load user profile function with timeout handling and error recovery
-  const loadUserProfile = async (userId: string) => {
+  const loadUserProfile = async (userId: string, retryCount = 0): Promise<any> => {
+    const maxRetries = 2;
+    const timeoutMs = 10000; // Increased from 5s to 10s
+    
     try {
       // Try to get profile from Supabase first with a timeout
       const profilePromise = SupabaseService.getUserProfile(userId);
       const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Profile load timeout')), 5000)
+        setTimeout(() => reject(new Error('Profile load timeout')), timeoutMs)
       );
       
       const profile = await Promise.race([profilePromise, timeoutPromise]) as any;
@@ -67,13 +70,49 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       } else {
         // Fallback to cached profile
         const cachedProfile = SupabaseService.getCachedUserProfile(userId);
+        if (cachedProfile) {
+          setUserProfile(cachedProfile);
+          return cachedProfile;
+        }
+        return null;
+      }
+    } catch (error: any) {
+      // Check if it's a timeout error
+      const isTimeout = error?.message === 'Profile load timeout';
+      
+      if (isTimeout) {
+        console.warn(`⏱️ Profile load timeout for user ${userId} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+      } else {
+        console.error('Error loading user profile:', error);
+      }
+      
+      // Try cached profile as fallback (before retrying)
+      const cachedProfile = SupabaseService.getCachedUserProfile(userId);
+      if (cachedProfile) {
+        console.log('✅ Using cached profile as fallback');
         setUserProfile(cachedProfile);
+        // Still try to refresh in background if we have cached profile
+        if (retryCount < maxRetries && navigator.onLine) {
+          // Retry in background with exponential backoff
+          const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000);
+          setTimeout(() => {
+            loadUserProfile(userId, retryCount + 1).catch(err => {
+              console.warn('Background profile refresh failed:', err);
+            });
+          }, retryDelay);
+        }
         return cachedProfile;
       }
-    } catch (error) {
-      console.error('Error loading user profile:', error);
       
-      // If there's an error, try to clear potentially corrupted cache
+      // If no cached profile and we haven't exceeded retries, retry with exponential backoff
+      if (retryCount < maxRetries && navigator.onLine) {
+        const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000);
+        console.log(`🔄 Retrying profile load in ${retryDelay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        return loadUserProfile(userId, retryCount + 1);
+      }
+      
+      // If there's an error and no cached profile, try to clear potentially corrupted cache
       try {
         const profileKey = `user_profile_${userId}`;
         const cached = localStorage.getItem(profileKey);
@@ -91,10 +130,9 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         console.warn('Failed to clear cached profile:', clearError);
       }
       
-      // Try cached profile as fallback
-      const cachedProfile = SupabaseService.getCachedUserProfile(userId);
-      setUserProfile(cachedProfile);
-      return cachedProfile;
+      // Final fallback: return null (caller should handle this)
+      console.warn('⚠️ Could not load user profile after all retries');
+      return null;
     }
   };
 

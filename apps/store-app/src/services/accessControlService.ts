@@ -25,6 +25,139 @@ import {
 
 export class AccessControlService {
   /**
+   * Get hardcoded role defaults (fallback when role_permissions haven't synced yet)
+   * This ensures admins get proper permissions even before sync completes
+   */
+  private static getHardcodedRoleDefaults(role: 'admin' | 'manager' | 'cashier' | 'super_admin'): Record<OperationName, boolean> {
+    const defaults: Record<OperationName, boolean> = {
+      // Module access
+      access_pos: false,
+      access_inventory: false,
+      access_accounting: false,
+      access_reports: false,
+      access_settings: false,
+      access_users: false,
+      // POS operations
+      create_sale: false,
+      edit_sale: false,
+      delete_sale: false,
+      void_sale: false,
+      refund_sale: false,
+      apply_discount: false,
+      override_price: false,
+      access_cash_drawer: false,
+      // Inventory operations
+      create_product: false,
+      edit_product: false,
+      delete_product: false,
+      receive_inventory: false,
+      adjust_inventory: false,
+      view_products: false,
+      // Accounting operations
+      create_transaction: false,
+      edit_transaction: false,
+      delete_transaction: false,
+      view_reports: false,
+      // User management operations
+      create_user: false,
+      edit_user: false,
+      delete_user: false,
+      view_users: false,
+      manage_users: false
+    };
+
+    // Super admin: All permissions
+    if (role === 'super_admin') {
+      Object.keys(defaults).forEach(key => {
+        defaults[key as OperationName] = true;
+      });
+      return defaults;
+    }
+
+    // Admin: Most permissions (all module access + most operations)
+    if (role === 'admin') {
+      // Module access
+      defaults.access_pos = true;
+      defaults.access_inventory = true;
+      defaults.access_accounting = true;
+      defaults.access_reports = true;
+      defaults.access_settings = true;
+      defaults.access_users = true;
+      // POS operations
+      defaults.create_sale = true;
+      defaults.edit_sale = true;
+      defaults.delete_sale = true;
+      defaults.void_sale = true;
+      defaults.refund_sale = true;
+      defaults.apply_discount = true;
+      defaults.override_price = true;
+      defaults.access_cash_drawer = true;
+      // Inventory operations
+      defaults.create_product = true;
+      defaults.edit_product = true;
+      defaults.delete_product = true;
+      defaults.receive_inventory = true;
+      defaults.adjust_inventory = true;
+      defaults.view_products = true;
+      // Accounting operations
+      defaults.create_transaction = true;
+      defaults.edit_transaction = true;
+      defaults.delete_transaction = true;
+      defaults.view_reports = true;
+      // User management
+      defaults.create_user = true;
+      defaults.edit_user = true;
+      defaults.delete_user = true;
+      defaults.view_users = true;
+      defaults.manage_users = true;
+      return defaults;
+    }
+
+    // Manager: Limited permissions
+    if (role === 'manager') {
+      // Module access
+      defaults.access_pos = true;
+      defaults.access_inventory = true;
+      defaults.access_accounting = true;
+      defaults.access_reports = true;
+      // POS operations
+      defaults.create_sale = true;
+      defaults.edit_sale = true;
+      defaults.void_sale = true;
+      defaults.refund_sale = true;
+      defaults.apply_discount = true;
+      defaults.access_cash_drawer = true;
+      // Inventory operations
+      defaults.create_product = true;
+      defaults.edit_product = true;
+      defaults.receive_inventory = true;
+      defaults.view_products = true;
+      // Accounting operations
+      defaults.create_transaction = true;
+      defaults.view_reports = true;
+      // User management (view only)
+      defaults.view_users = true;
+      return defaults;
+    }
+
+    // Cashier: Minimal permissions
+    if (role === 'cashier') {
+      // Module access
+      defaults.access_pos = true;
+      defaults.access_inventory = true;
+      // POS operations
+      defaults.create_sale = true;
+      defaults.apply_discount = true;
+      defaults.access_cash_drawer = true;
+      // Inventory (view only)
+      defaults.view_products = true;
+      return defaults;
+    }
+
+    return defaults;
+  }
+
+  /**
    * Load all permissions for a user (for caching)
    * This is called once on login or when cache is invalidated
    */
@@ -88,11 +221,19 @@ export class AccessControlService {
     const operations: Record<OperationName, boolean> = {} as any;
     
     // First, apply role defaults
-    rolePermissions.forEach(rp => {
-      if (!rp._deleted) {
-        operations[rp.operation as OperationName] = rp.allowed;
-      }
-    });
+    if (rolePermissions.length > 0) {
+      // Use database role permissions if available
+      rolePermissions.forEach(rp => {
+        if (!rp._deleted) {
+          operations[rp.operation as OperationName] = rp.allowed;
+        }
+      });
+    } else {
+      // Fallback to hardcoded defaults if role_permissions haven't synced yet
+      const hardcodedDefaults = this.getHardcodedRoleDefaults(user.role);
+      Object.assign(operations, hardcodedDefaults);
+      console.log(`⚠️ Role permissions not synced yet for role "${user.role}", using hardcoded defaults`);
+    }
 
     // Then, apply user overrides
     userPermissions.forEach(up => {
@@ -223,6 +364,14 @@ export class AccessControlService {
         );
       }
       return; // ✅ Permission granted via role default
+    }
+
+    // If role_permissions not found in DB, fallback to hardcoded defaults
+    // This handles the case where role_permissions haven't synced yet
+    const hardcodedDefaults = this.getHardcodedRoleDefaults(user.role);
+    if (hardcodedDefaults[operation] === true) {
+      console.log(`⚠️ Using hardcoded default for ${operation} (role_permissions not synced yet)`);
+      return; // ✅ Permission granted via hardcoded default
     }
 
     // Super admin wildcard check (if role is super_admin, allow all)

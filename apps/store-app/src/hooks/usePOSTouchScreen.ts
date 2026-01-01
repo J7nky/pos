@@ -17,16 +17,60 @@ export function usePOSTouchScreen() {
       return;
     }
 
-    // Check for touch support
+    // Check for actual touch support (not just API presence)
+    // Some browsers report maxTouchPoints > 0 even on non-touch devices
+    // Require BOTH ontouchstart AND maxTouchPoints to reduce false positives
     const hasTouchSupport = 
-      'ontouchstart' in window ||
-      navigator.maxTouchPoints > 0 ||
-      (navigator as any).msMaxTouchPoints > 0;
+      'ontouchstart' in window &&
+      navigator.maxTouchPoints > 0;
 
-    // Check pointer capabilities
-    const hasPointerSupport = 
-      window.matchMedia('(pointer: coarse)').matches ||
-      window.matchMedia('(pointer: fine)').matches;
+    // Check pointer type - coarse pointer indicates touch, fine indicates mouse
+    const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+    const hasFinePointer = window.matchMedia('(pointer: fine)').matches;
+    
+    // If only fine pointer (mouse) and no actual touch, it's a regular desktop/laptop
+    if (hasFinePointer && !hasCoarsePointer && !hasTouchSupport) {
+      setIsPOSTouchScreen(false);
+      return;
+    }
+
+    // Check user agent to exclude regular laptops/desktops and mobile devices
+    const userAgent = navigator.userAgent.toLowerCase();
+    
+    // Exclude mobile devices (phones/tablets) - they have native keyboards
+    const isMobileDevice = 
+      /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent) ||
+      (window.screen.width < 768 || window.screen.height < 768); // Small screens are mobile
+    
+    if (isMobileDevice) {
+      setIsPOSTouchScreen(false);
+      return;
+    }
+
+    // Check user agent for POS hardware indicators FIRST
+    const hasPOSIndicators = 
+      userAgent.includes('pos') ||
+      userAgent.includes('terminal') ||
+      userAgent.includes('kiosk') ||
+      userAgent.includes('touchscreen');
+
+    // Check if running in Electron (common for POS systems)
+    const isElectron = !!(window as any).electronAPI;
+
+    // Exclude regular laptops/desktops (unless they have POS indicators or are Electron apps)
+    // Check for common laptop/desktop indicators in user agent
+    const isRegularDesktop = 
+      /windows|macintosh|linux/i.test(userAgent) &&
+      !hasPOSIndicators &&
+      !isElectron; // Electron apps might be POS systems
+
+    // Early return: If it's a regular desktop/laptop without POS indicators or Electron, exclude it
+    // Even if it reports touch support (some browsers do this incorrectly)
+    // Only exclude if it doesn't have coarse pointer (actual touch input)
+    if (isRegularDesktop && !hasCoarsePointer) {
+      setIsPOSTouchScreen(false);
+      return;
+    }
 
     // Check screen size (POS systems typically have specific sizes)
     const screenWidth = window.screen.width;
@@ -42,25 +86,19 @@ export function usePOSTouchScreen() {
         (screenHeight >= 600 && screenHeight <= 1080)
       );
 
-    // Check if running in Electron (common for POS systems)
-    const isElectron = !!(window as any).electronAPI;
-
-    // Check user agent for POS hardware indicators
-    const userAgent = navigator.userAgent.toLowerCase();
-    const hasPOSIndicators = 
-      userAgent.includes('pos') ||
-      userAgent.includes('terminal') ||
-      userAgent.includes('kiosk') ||
-      userAgent.includes('touchscreen');
-
-    // Combine multiple signals for better detection
-    // Primary: Touch support + appropriate screen size
-    // Secondary: Electron app or POS indicators in user agent
+    // STRICT detection: Must have actual touch support AND be a POS device
+    // Exclude regular desktops/laptops even if they somehow report touch support
+    // Require coarse pointer (touch input) to be present
     const detected = 
-      (hasTouchSupport && isPOSScreenSize) ||
-      (hasTouchSupport && isElectron) ||
-      (hasTouchSupport && hasPOSIndicators) ||
-      (hasPointerSupport && isPOSScreenSize && isElectron);
+      hasTouchSupport && // Must have actual touch (both ontouchstart AND maxTouchPoints)
+      hasCoarsePointer && // Must have coarse pointer (indicates touch input, not mouse)
+      !isRegularDesktop && // Must NOT be a regular desktop/laptop
+      !isMobileDevice && // Must NOT be a mobile device
+      (
+        isPOSScreenSize || // POS screen size
+        isElectron || // Electron app (common for POS)
+        hasPOSIndicators // POS indicators in user agent
+      );
 
     setIsPOSTouchScreen(detected);
   }, []);
@@ -77,10 +115,40 @@ export function isPOSTouchScreenDevice(): boolean {
     return false;
   }
 
+  // Check for actual touch support
+  // Require BOTH ontouchstart AND maxTouchPoints to reduce false positives
   const hasTouchSupport = 
-    'ontouchstart' in window ||
-    navigator.maxTouchPoints > 0 ||
-    (navigator as any).msMaxTouchPoints > 0;
+    'ontouchstart' in window &&
+    navigator.maxTouchPoints > 0;
+
+  // Check pointer type
+  const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const hasFinePointer = window.matchMedia('(pointer: fine)').matches;
+  
+  // If only fine pointer (mouse) and no actual touch, it's a regular desktop/laptop
+  if (hasFinePointer && !hasCoarsePointer && !hasTouchSupport) {
+    return false;
+  }
+
+  // Check user agent to exclude regular laptops/desktops and mobile devices
+  const userAgent = navigator.userAgent.toLowerCase();
+  
+  // Exclude mobile devices
+  const isMobileDevice = 
+    /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent) ||
+    (window.screen.width < 768 || window.screen.height < 768);
+  
+  if (isMobileDevice) {
+    return false;
+  }
+
+  // Exclude regular laptops/desktops
+  const isRegularDesktop = 
+    /windows|macintosh|linux/i.test(userAgent) &&
+    !userAgent.includes('pos') &&
+    !userAgent.includes('terminal') &&
+    !userAgent.includes('kiosk') &&
+    !userAgent.includes('touchscreen');
 
   const screenWidth = window.screen.width;
   const screenHeight = window.screen.height;
@@ -95,17 +163,24 @@ export function isPOSTouchScreenDevice(): boolean {
 
   const isElectron = !!(window as any).electronAPI;
 
-  const userAgent = navigator.userAgent.toLowerCase();
   const hasPOSIndicators = 
     userAgent.includes('pos') ||
     userAgent.includes('terminal') ||
     userAgent.includes('kiosk') ||
     userAgent.includes('touchscreen');
 
+  // STRICT detection: Must have actual touch support AND be a POS device
+  // Require coarse pointer (touch input) to be present
   return (
-    (hasTouchSupport && isPOSScreenSize) ||
-    (hasTouchSupport && isElectron) ||
-    (hasTouchSupport && hasPOSIndicators)
+    hasTouchSupport &&
+    hasCoarsePointer &&
+    !isRegularDesktop &&
+    !isMobileDevice &&
+    (
+      isPOSScreenSize ||
+      isElectron ||
+      hasPOSIndicators
+    )
   );
 }
 

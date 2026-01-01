@@ -628,11 +628,61 @@ export default function Accounting() {
   const [selectedNonPriced, setSelectedNonPriced] = useState<string[]>([]);
   const NON_PRICED_PAGE_SIZE = 10;
 
-  // Load non-priced items from sales data
+  // Load non-priced items from sales data and inventory items
   useEffect(() => {
-    const nonPricedItems = sales.filter(sale => sale.unit_price === 0);
-    setNonPricedItems(nonPricedItems);
-  }, [sales, activeTab]);
+    const loadNonPricedItems = async () => {
+      // Load non-priced sales items
+      const nonPricedSales = sales.filter(sale => sale.unit_price === 0).map(sale => ({
+        ...sale,
+        itemType: 'sale' as const,
+        unit_price: sale.unit_price || 0
+      }));
+
+      // Load non-priced inventory items (from credit/cash bills only)
+      const { getDB } = await import('../lib/db');
+      const allInventoryItems = await getDB().inventory_items.toArray();
+      const allBatches = await getDB().inventory_bills.toArray();
+      const batchMap = new Map(allBatches.map(b => [b.id, b]));
+      
+      const nonPricedInventory = allInventoryItems
+        .filter(item => {
+          if (!item.batch_id) return false;
+          const batch = batchMap.get(item.batch_id);
+          // Only include credit/cash bills (commission bills don't need prices)
+          if (!batch || (batch.type !== 'credit' && batch.type !== 'cash')) return false;
+          // Check if price is missing or zero
+          return !item.price || item.price === 0 || isNaN(Number(item.price));
+        })
+        .map(item => {
+          const batch = batchMap.get(item.batch_id!);
+          const product = products.find(p => p.id === item.product_id);
+          const supplier = suppliers.find(s => s.id === batch?.supplier_id);
+          
+          return {
+            id: item.id,
+            itemType: 'inventory' as const,
+            product_id: item.product_id,
+            productName: product?.name || 'Unknown Product',
+            supplierName: supplier?.name || 'Unknown Supplier',
+            customerName: '', // Inventory items don't have customers
+            quantity: item.quantity,
+            weight: item.weight || 0,
+            unit_price: item.price || 0,
+            unit: item.unit,
+            batch_id: item.batch_id,
+            batch_type: batch?.type,
+            created_at: item.created_at,
+            date: item.created_at
+          };
+        });
+
+      setNonPricedItems([...nonPricedSales, ...nonPricedInventory]);
+    };
+
+    if (activeTab === 'nonpriced') {
+      loadNonPricedItems();
+    }
+  }, [sales, inventory, products, suppliers, activeTab]);
 
   // Helper function to get current value including staged changes
   const getCurrentValue = (item: any, field: string) => {
@@ -662,24 +712,34 @@ export default function Accounting() {
     }
 
     try {
-      // Update the sale record directly
-      await updateSale(updated.id, {
-        unit_price: updated.unitPrice,
-        quantity: updated.quantity,
-        weight: updated.weight || null,
-        received_value: updated.unitPrice * updated.quantity
-      });
+      if (updated.itemType === 'inventory') {
+        // Update inventory item price
+        await raw.updateInventoryItem(updated.id, {
+          price: updated.unitPrice,
+          quantity: updated.quantity,
+          weight: updated.weight || null
+        });
+        showToast(t('accounting.itemUpdatedSuccessfully'), 'success');
+      } else {
+        // Update the sale record directly
+        await updateSale(updated.id, {
+          unit_price: updated.unitPrice,
+          quantity: updated.quantity,
+          weight: updated.weight || null,
+          received_value: updated.unitPrice * updated.quantity
+        });
 
-      // The updateSale function now automatically handles bill updates
-      // But we can also explicitly trigger it here for immediate feedback
-      try {
-        await raw.updateBillsForSaleItem?.(updated.id);
-      } catch (billError) {
-        console.warn('Failed to update bills immediately:', billError);
-        // Don't show error to user as the sale was updated successfully
+        // The updateSale function now automatically handles bill updates
+        // But we can also explicitly trigger it here for immediate feedback
+        try {
+          await raw.updateBillsForSaleItem?.(updated.id);
+        } catch (billError) {
+          console.warn('Failed to update bills immediately:', billError);
+          // Don't show error to user as the sale was updated successfully
+        }
+
+        showToast(t('accounting.itemUpdatedSuccessfully'), 'success');
       }
-
-      showToast(t('accounting.itemUpdatedSuccessfully'), 'success');
     } catch (error) {
       console.error('Error updating non-priced item:', error);
       showToast(t('accounting.errorUpdatingItem'), 'error');
@@ -701,14 +761,22 @@ export default function Accounting() {
     }
 
     try {
-      // Update the sale record to mark it as priced
-      await updateSale(item.id, {
-        unit_price: updatedItem.unit_price,
-        
-        quantity: updatedItem.quantity,
-        weight: updatedItem.weight || null,
-        received_value: updatedItem.unit_price * updatedItem.quantity
-      });
+      if (item.itemType === 'inventory') {
+        // Update inventory item price
+        await raw.updateInventoryItem(item.id, {
+          price: updatedItem.unit_price,
+          quantity: updatedItem.quantity,
+          weight: updatedItem.weight || null
+        });
+      } else {
+        // Update the sale record to mark it as priced
+        await updateSale(item.id, {
+          unit_price: updatedItem.unit_price,
+          quantity: updatedItem.quantity,
+          weight: updatedItem.weight || null,
+          received_value: updatedItem.unit_price * updatedItem.quantity
+        });
+      }
 
       // Clear staged changes for this item
       setStagedNonPricedChanges(prev => {
@@ -745,10 +813,17 @@ export default function Accounting() {
 
     try {
       for (const item of validItems) {
-        await updateSale(item.id, {
-          unit_price: item.unit_price,
-          quantity: item.quantity,
-          weight: item.weight || null,
+        if (item.itemType === 'inventory') {
+          await raw.updateInventoryItem(item.id, {
+            price: item.unit_price,
+            quantity: item.quantity,
+            weight: item.weight || null
+          });
+        } else {
+          await updateSale(item.id, {
+            unit_price: item.unit_price,
+            quantity: item.quantity,
+            weight: item.weight || null,
           received_value: item.unit_price * item.quantity
         });
       }
@@ -765,13 +840,19 @@ export default function Accounting() {
       setSelectedNonPriced([]);
       setShowBulkActions(false);
       showToast(t('accounting.itemsMarkedAsPriced', { count: validItems.length }), 'success');
-    } catch (error) {
+    }} catch (error) {
       console.error('Error bulk marking items as priced:', error);
       showToast(t('accounting.errorMarkingItemsAsPriced'), 'error');
     }
   };
 
   const handleDeleteNonPriced = async (item: any) => {
+    // Only allow deletion of sales items, not inventory items
+    if (item.itemType === 'inventory') {
+      showToast('Inventory items cannot be deleted. Please set a price instead.', 'error');
+      return;
+    }
+    
     if (window.confirm('Are you sure you want to delete this item?')) {
       try {
         await deleteSale(item.id);
@@ -784,10 +865,20 @@ export default function Accounting() {
   };
 
   const handleBulkDelete = async () => {
-    if (window.confirm(`Are you sure you want to delete ${selectedNonPriced.length} items?`)) {
+    // Filter to only sales items (inventory items cannot be deleted)
+    const salesItems = selectedNonPriced
+      .map(id => nonPricedItems.find(item => item.id === id))
+      .filter(item => item && item.itemType !== 'inventory');
+    
+    if (salesItems.length === 0) {
+      showToast('Inventory items cannot be deleted. Please set prices instead.', 'error');
+      return;
+    }
+    
+    if (window.confirm(`Are you sure you want to delete ${salesItems.length} item(s)?`)) {
       try {
-        for (const id of selectedNonPriced) {
-          await deleteSale(id);
+        for (const item of salesItems) {
+          await deleteSale(item!.id);
         }
 
         setSelectedNonPriced([]);
@@ -922,11 +1013,84 @@ export default function Accounting() {
   );
 
   const handleCloseReceivedBill = async (bill: any, fees: { commission: number; porterage: number; transfer: number; plastic?: number; supplierAmount: number, currency: 'USD' | 'LBP' }) => {
+
     try {
       // Guard: do not allow closing an already closed bill
       if (bill?.status && typeof bill.status === 'string' && bill.status.includes('[CLOSED]')) {
         showToast(t('accounting.billAlreadyClosed'), 'error');
         return;
+      }
+
+      // Check for non-priced items in credit/cash bills - cannot close if items have no price
+      const targetBatchId = bill.batchId || bill.batch_id;
+      if (!targetBatchId) {
+        console.warn('⚠️ No batch ID found for bill:', bill);
+        throw new Error('Cannot close bill: Missing batch identifier');
+      }
+
+      const { getDB } = await import('../lib/db');
+      const batch = await getDB().inventory_bills.get(targetBatchId);
+      if (!batch) {
+        console.warn('⚠️ Batch not found for ID:', targetBatchId);
+        throw new Error('Cannot close bill: Batch not found');
+      }
+
+      const billType = batch.type || bill.type || (bill as any).batchType;
+      console.log(`🔍 Checking bill closure for batch ${targetBatchId}, type: ${billType}`);
+      
+      // Only check for cash/credit bills (commission bills don't need prices)
+      if (billType === 'cash' || billType === 'credit') {
+        const inventoryItems = await getDB().inventory_items
+          .where('batch_id')
+          .equals(targetBatchId)
+          .toArray();
+        
+        console.log(`🔍 Found ${inventoryItems.length} inventory items for batch ${targetBatchId}`);
+        
+        // Filter items that don't have a valid price
+        const nonPricedItems = inventoryItems.filter(item => {
+          const price = item.price;
+          const isValid = price === null || price === undefined || price === 0 || isNaN(Number(price)) || Number(price) <= 0;
+          if (isValid) {
+            console.log(`⚠️ Non-priced item found: ${item.id}, price: ${price}`);
+          }
+          return isValid;
+        });
+        
+        if (nonPricedItems.length > 0) {
+          console.error('cannotCloseBillWithNonPricedItems');
+          
+          // Get product names for error message
+          const productIds = [...new Set(nonPricedItems.map(item => item.product_id))];
+          const products = await getDB().products
+            .where('id')
+            .anyOf(productIds)
+            .toArray();
+          
+          const productMap = new Map(products.map(p => [p.id, p]));
+          const productNames = nonPricedItems
+            .map(item => {
+              const product = productMap.get(item.product_id);
+              return product?.name || `Product ${item.product_id.substring(0, 8)}`;
+            })
+            .filter((name, index, arr) => arr.indexOf(name) === index) // Remove duplicates
+            .slice(0, 5); // Limit to first 5 products to avoid overly long messages
+          
+          const remainingCount = nonPricedItems.length - productNames.length;
+          const productsList = productNames.join(', ');
+          const productsText = remainingCount > 0 
+            ? `${productsList} and ${remainingCount} more item(s)`
+            : productsList;
+          
+          const errorMessage = t('accounting.cannotCloseBillWithNonPricedItems', { 
+            count: nonPricedItems.length, 
+            products: productsText 
+          });
+          showToast(errorMessage, 'error');
+          throw new Error(errorMessage);
+        }
+        
+        console.log(`✅ All items have valid prices for batch ${targetBatchId}`);
       }
 
       // Calculate total revenue from the bill (includes commission, fees, and supplier amount)
@@ -1115,7 +1279,11 @@ export default function Accounting() {
       showToast(t('accounting.billClosedSuccessfully'), 'success');
     } catch (error) {
       console.error('Error closing received bill:', error);
-      throw new Error('Failed to close bill. Please try again.');
+      // Preserve the original error message if it's a validation error
+      if (error instanceof Error && error.message.includes('Cannot close bill')) {
+        throw error; // Re-throw the original validation error
+      }
+      throw new Error(error instanceof Error ? error.message : 'Failed to close bill.'+error);
     }
   };
 

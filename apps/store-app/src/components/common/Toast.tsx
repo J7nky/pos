@@ -24,7 +24,7 @@ const Toast: React.FC<ToastProps> = ({ message, type, visible, onClose, onAction
 
   return (
     <div
-      className={`fixed top-6 right-6 z-50 px-6 py-3 rounded shadow-lg text-white transition-all duration-300 flex flex-col gap-2 ${
+      className={`fixed top-6 right-6 z-[100] px-6 py-3 rounded shadow-lg text-white transition-all duration-300 flex flex-col gap-2 ${
         type === 'success' ? 'bg-green-600' : 'bg-red-600'
       }`}
       role="alert"

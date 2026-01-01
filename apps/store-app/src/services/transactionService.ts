@@ -30,7 +30,7 @@ import {
 } from '../utils/referenceGenerator';
 import { getLocalDateString } from '../utils/dateUtils';
 import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
-
+import { useI18n } from '../i18n';
 // ============================================================================
 // TYPES & INTERFACES
 // ============================================================================
@@ -193,9 +193,10 @@ export class TransactionService {
           if (params.amount > currentBalance) {
             const formattedBalance = currencyService.formatCurrency(currentBalance, params.currency);
             const formattedAmount = currencyService.formatCurrency(params.amount, params.currency);
+            const { t } = useI18n();
             return {
               success: false,
-              error: `Insufficient cash drawer balance. Current balance: ${formattedBalance}, Required: ${formattedAmount}`,
+              error: t('inventory.insufficientCashDrawerBalance', { currentBalance: formattedBalance, requiredAmount: formattedAmount }),
               balanceBefore: currentBalance,
               balanceAfter: currentBalance - params.amount,
               affectedRecords: []

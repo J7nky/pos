@@ -7,6 +7,9 @@ import MoneyInput from '../common/MoneyInput';
 import { useI18n } from '../../i18n';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
 import { saveProductTag, saveNote, getLastThreeNotes, getMatchingNotes, getAllNotes } from '../../utils/productTags';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
+import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
+import { inventoryPurchaseService } from '../../services/inventoryPurchaseService';
 interface ReceiveFormModalProps {
   open: boolean;
   onClose: () => void;
@@ -340,6 +343,8 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
 
   const { t } = useI18n();
   const { getProductName } = useProductMultilingual();
+  const raw = useOfflineData();
+  const { userProfile } = useSupabaseAuth();
 
   // Get selected supplier for context display
   const selectedSupplier = form.type === 'cash' 
@@ -391,12 +396,12 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           }
         }
         
-        // Credit purchase validation - requires valid supplier and price
+        // Credit purchase validation - requires valid supplier, price is optional (can be set later)
         if (form.type === 'credit') {
           if (!form.supplier_id) {
             errors.supplier_id = `${t('inventory.supplierRequiredForCreditPurchases')}`;
           }
-         
+          // Price is optional for credit purchases - can be set later in non-priced items page
         }
       }
     }
@@ -466,6 +471,47 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       const plasticFee = form.empty_plastic
         ? Number(form.plastic_count || 0) * Number(form.plastic_price || 0)
         : undefined;
+
+      // Validate cash drawer balance for cash purchases BEFORE submitting
+      if (form.type === 'cash' && raw.storeId && raw.currentBranchId) {
+        const purchaseData = {
+          supplier_id: 'trade',
+          type: 'cash' as const,
+          currency: batchCurrency,
+          items: items.map(item => ({
+            product_id: item.product_id,
+            quantity: item.quantity,
+            unit: item.unit,
+            weight: item.weight,
+            price: item.price,
+            selling_price: item.selling_price,
+          })),
+          porterage_fee: form.porterage_fee ? parseFloat(form.porterage_fee) : undefined,
+          transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
+          plastic_fee: plasticFee,
+          created_by: userProfile?.id || '',
+          store_id: raw.storeId,
+          branch_id: raw.currentBranchId,
+        };
+
+        const balanceValidation = await inventoryPurchaseService.validateCashDrawerBalance(purchaseData);
+        
+        if (!balanceValidation.isValid) {
+          // Use translation with balance parameters if available
+          if (balanceValidation.formattedBalance && balanceValidation.formattedAmount) {
+            setErrors({ 
+              form: t('inventory.insufficientCashDrawerBalance', { 
+                currentBalance: balanceValidation.formattedBalance, 
+                requiredAmount: balanceValidation.formattedAmount 
+              }) 
+            });
+          } else {
+            setErrors({ form: balanceValidation.error || t('inventory.insufficientCashDrawerBalance', { currentBalance: '', requiredAmount: '' }) });
+          }
+          setLoading(false);
+          return;
+        }
+      }
         
       await onSuccess({
         mode: 'batch',
@@ -525,7 +571,28 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       setShowSuggestions(false);
       onClose();
     } catch (e) {
-      setErrors({ form: `${t('inventory.failedToReceiveInventory')}` });
+      // Check if error is related to insufficient balance
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      if (errorMessage.includes('Insufficient cash drawer balance') || errorMessage.includes('insufficient')) {
+        // Try to extract balance info from error message
+        // Error format: "Insufficient cash drawer balance. Current balance: X, Required: Y"
+        const balanceMatch = errorMessage.match(/Current balance:\s*([^,]+),\s*Required:\s*(.+)/);
+        if (balanceMatch && balanceMatch.length >= 3) {
+          const currentBalance = balanceMatch[1].trim();
+          const requiredAmount = balanceMatch[2].trim();
+          setErrors({ 
+            form: t('inventory.insufficientCashDrawerBalance', { 
+              currentBalance, 
+              requiredAmount 
+            }) 
+          });
+        } else {
+          // Fallback: use error message as-is or generic message
+          setErrors({ form: errorMessage || t('inventory.insufficientCashDrawerBalance', { currentBalance: '', requiredAmount: '' }) });
+        }
+      } else {
+        setErrors({ form: `${t('inventory.failedToReceiveInventory')}` });
+      }
     }
     setLoading(false);
   };

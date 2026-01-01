@@ -188,19 +188,29 @@ export class ProfitLossService {
           // Get bill line items for this inventory item
           const itemsForInventory = billLineItems.filter(item => item.inventory_item_id === inventoryItem.id);
           
-          // Check if inventory item has weight - if so, use weight for COGS calculation
+          // Check if inventory item has weight - if so, use inventory weight for COGS calculation
           const hasWeight = inventoryItem.weight !== null && inventoryItem.weight !== undefined;
           
           let soldAmount = 0;
           if (hasWeight) {
-            // Use weight if available
-            soldAmount = itemsForInventory.reduce((sum, item) => sum + (item.weight || 0), 0);
+            // Use inventory bill weight, not sale bill weight
+            // Calculate proportion of inventory sold based on quantity
+            const totalSoldQuantity = itemsForInventory.reduce((sum, item) => sum + (item.quantity || 0), 0);
+            const receivedQuantity = inventoryItem.received_quantity || inventoryItem.quantity || 1;
+            
+            // Calculate sold weight from inventory item's weight proportionally
+            if (receivedQuantity > 0) {
+              const proportionSold = totalSoldQuantity / receivedQuantity;
+              soldAmount = inventoryItem.weight * proportionSold;
+            } else {
+              soldAmount = 0;
+            }
           } else {
             // Fall back to quantity if no weight
             soldAmount = itemsForInventory.reduce((sum, item) => sum + (item.quantity || 0), 0);
           }
 
-          // Calculate cost: price × sold_weight (or sold_quantity if no weight)
+          // Calculate cost: price × sold_weight_from_inventory (or sold_quantity if no weight)
           const itemPrice = inventoryItem.price || 0;
           inventoryCost += itemPrice * soldAmount;
         }

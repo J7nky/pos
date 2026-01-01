@@ -61,7 +61,7 @@ const ar = {
       weight: 'الوزن',
       quantity: 'الكمية',
       received: 'الاستلام',
-      credit: 'آجل',
+      credit: 'دين',
       amountReceived: 'المبلغ المستلم',
       addNewProduct: 'إضافة منتج جديد', createNewProductForInventory: 'إنشاء منتج جديد لمخزونك', productInformation: 'معلومات المنتج', enterProductName: 'أدخل اسم المنتج', category: 'الفئة', fruits: 'الفواكه', vegetables: 'الخضروات', leafy: 'الحشائش', nuts: 'البقوليات', others: 'الأخرى', productImage: 'صورة المنتج', productPhoto: 'صورة المنتج', clickToUploadImage: 'انقر لتحميل الصورة', pngJpgUpTo5Mb: 'PNG, JPG حتى 5MB', cancel: 'إلغاء', adding: 'جاري الإضافة...', addProduct: 'إضافة المنتج',
       units: 'وحدات',
@@ -92,7 +92,18 @@ const ar = {
     showing: 'عرض',
     to: 'إلى',
     of: 'من',
-    results: 'نتائج'
+    results: 'نتائج',
+    keyboard: {
+      hide: 'إخفاء',
+      clear: 'مسح',
+      space: 'مسافة',
+      numericKeyboard: 'لوحة المفاتيح الرقمية',
+      textKeyboard: 'لوحة المفاتيح النصية',
+      desktopTesting: '(اختبار سطح المكتب)',
+      switchLanguage: 'تبديل اللغة',
+      english: 'English',
+      arabic: 'العربية'
+    }
   },
   employees: {
     cashiers: 'المحاسبين',
@@ -291,7 +302,7 @@ const ar = {
     noRecentSales: 'لا توجد إجراءات حديثة'
   },
   inventory: {
-    selectProduct: 'اختر المنتج',
+    insufficientCashDrawerBalance: 'رصيد الدرج غير كافي. الرصيد الحالي: {{currentBalance}}, المطلوب: {{requiredAmount}}',
     failedToReceiveInventory: 'فشل في استلام المخزون.',
     supplierRequiredForCommissionPurchases: 'يتطلب المورد لشراء بالعمولة.',
     pleaseSelectADifferentSupplier: 'يرجى اختيار مورد آخر.',
@@ -319,7 +330,7 @@ const ar = {
     updateBatchInformationAndInventoryItems: 'تحديث معلومات الدفعة والمنتجات',
     addNewInventoryItemsToYourStock: 'إضافة منتجات جديدة للمخزون',
     cashPurchase: 'شراء نقدي',
-    creditPurchase: 'شراء آجل',
+    creditPurchase: 'شراء بالدين',
     commission: 'عمولة',
     supplierInformation: 'معلومات المورد',
     supplyType: 'نوع التوريد',
@@ -401,7 +412,7 @@ const ar = {
     paymentMethod: 'طريقة الدفع',
     cash: 'نقدًا',
     card: 'بطاقة',
-    credit: 'آجل',
+    credit: 'دين',
     amountReceived: 'المبلغ المستلم',
     change: 'الباقي',
     notesOptional: 'ملاحظات (اختياري)',
@@ -820,7 +831,7 @@ const ar = {
     cashDrawerUpdated: 'درج النقود: {{previous}} → {{new}}',
     entityBalanceUpdated: 'تم تحديث رصيد {{entityType}}',
     // Payment Categories
-    customerCreditSale: 'بيع آجل للعميل',
+    customerCreditSale: 'بيع بالدين للعميل',
     creditSaleDescription: 'فاتورة بيع دين - {{billNumber}}',
     creditSaleDescriptionCustomer: 'فاتورة بيع دين - {{billNumber}}',
     creditSaleDescriptionSupplier: 'فاتورة بيع دين - {{billNumber}}',
@@ -943,7 +954,7 @@ const ar = {
     walkInCustomer: 'زبون عابر',
     cash: 'نقدي',
     card: 'بطاقة',
-    credit: 'آجل',
+    credit: 'دين',
     addNotesPlaceholder: 'إضافة ملاحظات حول هذه الفاتورة...',
     cancel: 'إلغاء',
     saving: 'جاري الحفظ...',
@@ -958,7 +969,7 @@ const ar = {
     noAuditTrailAvailable: 'لا يوجد سجل تدقيق متاح لهذه الفاتورة'
   },
   receivedBills: {
-    credit: 'آجل',
+    credit: 'دين',
     title: 'الفواتير المستلمة',
     exportCSV: 'تصدير CSV',
     problematicItemsWarning: '{{count}} عنصر مخزون لا يحتوي على received_quantity. انقر على "إصلاح البيانات" للتحقق، أو أضف عناصر مخزون جديدة لتتبع التقدم بشكل صحيح.',
@@ -1047,6 +1058,7 @@ const ar = {
     exportOnlyAfterClosing: 'التصدير متاح فقط بعد إغلاق الفاتورة',
     billAlreadyClosed: 'الفاتورة مغلقة بالفعل',
     cannotCloseBill: 'لا يمكن إغلاق الفاتورة: كمية مفقودة أو عنصر غير مسعر موجود',
+    cannotCloseBillWithNonPricedItems: 'لا يمكن إغلاق الفاتورة: {count} عنصر بدون سعر. يرجى تعيين الأسعار لـ: {products}',
     closeBillConfirmation: 'تأكيد إغلاق الفاتورة',
     billSummary: 'ملخص الفاتورة',
     feeBreakdown: 'تفصيل الرسوم',

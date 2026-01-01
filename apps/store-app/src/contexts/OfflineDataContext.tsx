@@ -1939,6 +1939,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       created_by: userProfile.id,
       _synced: false,
       _deleted: false,
+      is_reversal: false,
+      reversal_of_transaction_id: null,
       metadata: {
         correlationId: createId(),
         source: 'offline',
@@ -2069,6 +2071,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       created_by: userProfile.id,
       _synced: false,
       _deleted: false,
+      is_reversal: false,
+      reversal_of_transaction_id: null,
       metadata: {
         correlationId: createId(),
         source: 'offline',
@@ -2191,6 +2195,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       created_by: userProfile.id,
       _synced: false,
       _deleted: false,
+      is_reversal: false,
+      reversal_of_transaction_id: null,
       metadata: {
         correlationId: createId(),
         source: 'offline',
@@ -2512,6 +2518,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           created_by: currentUserId,
           _synced: false,
           _deleted: false,
+          is_reversal: false,
+          reversal_of_transaction_id: null,
           metadata: {
             correlationId: createId(),
             source: 'offline',
@@ -4350,6 +4358,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               created_by: currentUserId,
               _synced: false,
               _deleted: false,
+              is_reversal: false,
+              reversal_of_transaction_id: null,
               metadata: {
                 correlationId: createId(),
                 source: 'offline',
@@ -5466,7 +5476,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             employee_id: employeeId,
             created_by: createdBy,
         branch_id: currentBranchId || '',
-
+            is_reversal: false,
+            reversal_of_transaction_id: null,
             metadata: {
               payment_type: 'employee_salary',
               original_currency: currency,
@@ -5648,6 +5659,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           created_by: userProfile?.id || '',
           _synced: false,
           _deleted: false,
+          is_reversal: false,
+          reversal_of_transaction_id: null,
           metadata: {
             correlationId: createId(),
             source: 'offline',

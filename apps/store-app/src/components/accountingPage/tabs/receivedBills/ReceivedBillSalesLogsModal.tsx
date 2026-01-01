@@ -36,6 +36,7 @@ export function ReceivedBillSalesLogsModal({
 }: ReceivedBillSalesLogsModalProps) {
   const [showCloseBillModal, setShowCloseBillModal] = useState(false);
   const [closeBillFees, setCloseBillFees] = useState<CloseBillFees | null>(null);
+  const [actualBillType, setActualBillType] = useState<'commission' | 'cash' | 'credit' | null>(null);
 
   const processedSalesData = useMemo(() => {
     if (!bill) return [];
@@ -133,41 +134,94 @@ export function ReceivedBillSalesLogsModal({
         showToast('Bill is already closed.', 'error');
         return;
       }
-      
+      console.log(bill,12321312)
       // Calculate total revenue from sales when the bill summary is missing it
       const totalRevenue = typeof bill.totalRevenue === 'number' && bill.totalRevenue > 0
         ? bill.totalRevenue
         : derivedBillMetrics.revenue;
 
+      // Get batch ID and calculate P&L using profitLossService
+      const { getDB } = await import('../../../../lib/db');
+      const batchId = bill.batchId;
+      let cogs = 0;
+      let currency: 'USD' | 'LBP' = 'USD';
+
       // Calculate fees based on bill type
       let commissionAmount = 0;
       let porterageAmount = 0;
       let transferAmount = 0;
+      let plasticAmount = 0;
       let supplierAmount = 0;
 
-      if (bill.type === 'commission') {
-        // For commission items, calculate commission percentage
-        const commissionRate = bill.commissionRate || 0;
-        commissionAmount = (totalRevenue * commissionRate) / 100;
+      if (batchId) {
+        const batch = await getDB().inventory_bills.get(batchId);
+        currency = batch?.currency || 'USD';
+        const billType = (batch?.type || (bill as any).batchType || 'commission') as 'commission' | 'cash' | 'credit';
+        setActualBillType(billType);
 
-        // Porterage, transfer, and plastic fees are fixed amounts
+        // Calculate COGS using profitLossService (same as Accounting.tsx)
+        const { profitLossService } = await import('../../../../services/profitLossService');
+        let plData;
+        try {
+          plData = await profitLossService.calculateBillPL(batchId);
+          cogs = plData.cogs;
+        } catch (error) {
+          console.error(`❌ Failed to calculate P&L for bill ${batchId}:`, error);
+          // Fallback: For commission bills, COGS = 0
+          if (billType === 'commission') {
+            cogs = 0;
+          } else {
+            // For cash/credit bills, try to calculate manually as fallback
+            const porterageFee = batch?.porterage_fee || 0;
+            const transferFee = batch?.transfer_fee || 0;
+            const plasticFee = batch?.plastic_fee ? parseFloat(String(batch.plastic_fee)) : 0;
+            cogs = (bill.totalCost || 0) + porterageFee + transferFee + plasticFee;
+          }
+        }
+
+        // Get fees from batch
+        porterageAmount = batch?.porterage_fee || 0;
+        transferAmount = batch?.transfer_fee || 0;
+        plasticAmount = batch?.plastic_fee ? parseFloat(String(batch.plastic_fee)) : 0;
+
+        if (billType === 'commission') {
+          // For commission items, calculate commission percentage
+          const commissionRate = bill.commissionRate || batch?.commission_rate || 0;
+          commissionAmount = (totalRevenue * commissionRate) / 100;
+
+          // Supplier gets the remaining amount after deducting all fees (commission + porterage + transfer + plastic)
+          supplierAmount = totalRevenue - commissionAmount - porterageAmount - transferAmount - plasticAmount;
+        } else {
+          // For cash/credit bills, supplier amount is the purchase cost (COGS - fees)
+          // This is what we owe them for the purchase
+          supplierAmount = cogs - porterageAmount - transferAmount - plasticAmount;
+        }
+      } else {
+        // Fallback if no batch ID
+        setActualBillType(bill.type === 'commission' ? 'commission' : 'cash');
         porterageAmount = Number((bill as any).porterage ?? bill.batchPorterage ?? 0);
         transferAmount = Number((bill as any).transferFee ?? bill.batchTransferFee ?? 0);
-        const plasticAmount = Number((bill as any).plasticFee ?? bill.batchPlasticFee ?? (bill as any).plastic_fee ? parseFloat(String((bill as any).plastic_fee)) : 0);
-
-        // Supplier gets the remaining amount after deducting all fees (commission + porterage + transfer + plastic)
-        supplierAmount = totalRevenue - commissionAmount - porterageAmount - transferAmount - plasticAmount;
-      } else {
-        // For cash items, supplier gets the full amount
-        supplierAmount = totalRevenue;
+        plasticAmount = Number((bill as any).plasticFee ?? (bill as any).plastic_fee ? parseFloat(String((bill as any).plastic_fee)) : 0);
+        
+        if (bill.type === 'commission') {
+          const commissionRate = bill.commissionRate || 0;
+          commissionAmount = (totalRevenue * commissionRate) / 100;
+          cogs = 0;
+          supplierAmount = totalRevenue - commissionAmount - porterageAmount - transferAmount - plasticAmount;
+        } else {
+          cogs = (bill.totalCost || 0) + porterageAmount + transferAmount + plasticAmount;
+          supplierAmount = bill.totalCost || 0;
+        }
       }
 
       const fees: CloseBillFees = {
         commission: commissionAmount,
         porterage: porterageAmount,
         transfer: transferAmount,
-        plastic: bill.type === 'commission' ? plasticAmount : undefined,
-        supplierAmount: supplierAmount
+        plastic: plasticAmount > 0 ? plasticAmount : undefined,
+        supplierAmount: supplierAmount,
+        cogs: cogs,
+        currency: currency
       };
 
       // Set fees and show confirmation modal
@@ -460,7 +514,7 @@ export function ReceivedBillSalesLogsModal({
               <div className="bg-yellow-50 p-4 rounded-lg">
                 <h3 className="text-sm font-medium text-yellow-700 mb-3">Fee Breakdown</h3>
                 <div className="space-y-2 text-sm">
-                  {bill.type === 'commission' && (
+                  {actualBillType === 'commission' && (
                     <>
                       <div className="flex justify-between">
                         <span>Commission ({bill.commissionRate || 0}%):</span>
@@ -480,12 +534,57 @@ export function ReceivedBillSalesLogsModal({
                           {closeBillFees.transfer > 0 ? '-' : ''}{formatCurrency(closeBillFees.transfer)}
                         </span>
                       </div>
+                      {closeBillFees.plastic && closeBillFees.plastic > 0 && (
+                        <div className="flex justify-between">
+                          <span>Plastic Fee:</span>
+                          <span className="font-medium text-red-600">
+                            -{formatCurrency(closeBillFees.plastic)}
+                          </span>
+                        </div>
+                      )}
                     </>
                   )}
+                  {(actualBillType === 'cash' || actualBillType === 'credit') && (
+                    <>
+                      <div className="flex justify-between">
+                        <span>Porterage:</span>
+                        <span className="font-medium text-red-600">
+                          {closeBillFees.porterage > 0 ? '-' : ''}{formatCurrency(closeBillFees.porterage)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Transfer Fee:</span>
+                        <span className="font-medium text-red-600">
+                          {closeBillFees.transfer > 0 ? '-' : ''}{formatCurrency(closeBillFees.transfer)}
+                        </span>
+                      </div>
+                      {closeBillFees.plastic && closeBillFees.plastic > 0 && (
+                        <div className="flex justify-between">
+                          <span>Plastic Fee:</span>
+                          <span className="font-medium text-red-600">
+                            -{formatCurrency(closeBillFees.plastic)}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div className="border-t pt-2 mt-2">
+                    <div className="flex justify-between">
+                      <span>COGS (Cost of Goods Sold):</span>
+                      <span className="font-medium text-orange-600">
+                        {formatCurrency(closeBillFees.cogs || 0)}
+                      </span>
+                    </div>
+                  </div>
                   <div className="border-t pt-2 mt-2">
                     <div className="flex justify-between font-medium">
                       <span>Supplier Amount:</span>
                       <span className="text-green-600">{formatCurrency(closeBillFees.supplierAmount)}</span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {actualBillType === 'commission' 
+                        ? 'Amount to pay supplier after deducting fees'
+                        : 'Purchase cost owed to supplier'}
                     </div>
                   </div>
                 </div>
@@ -505,6 +604,7 @@ export function ReceivedBillSalesLogsModal({
                       await onCloseBill(bill, closeBillFees);
                       setShowCloseBillModal(false);
                       setCloseBillFees(null);
+                      setActualBillType(null);
                       onClose();
                       showToast('Bill closed successfully! Commission, porterage, and transfer fees deducted. Supplier balance updated.', 'success');
                       onMarkBillClosed(String(bill.id));

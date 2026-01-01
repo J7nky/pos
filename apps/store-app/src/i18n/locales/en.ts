@@ -50,7 +50,18 @@ const en = {
     showing: 'Showing',
     to: 'to',
     of: 'of',
-    results: 'results'
+    results: 'results',
+    keyboard: {
+      hide: 'Hide',
+      clear: 'Clear',
+      space: 'Space',
+      numericKeyboard: 'Numeric Keyboard',
+      textKeyboard: 'Text Keyboard',
+      desktopTesting: '(Desktop Testing)',
+      switchLanguage: 'Switch Language',
+      english: 'English',
+      arabic: 'العربية'
+    }
   },
   nav: { home: 'Home', inventory: 'Inventory', pos: 'Point of Sale', accounts: 'Accounts', accounting: 'Accounting', reports: 'Reports', unsynced: 'Unsynced Items', settings: 'Settings', employees: 'Employees' },
   layout: { title: 'ProducePOS', connection: { online: 'Online', offline: 'Offline' }, unsynced: 'unsynced', signOut: 'Sign out' },
@@ -174,6 +185,7 @@ const en = {
     cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", todaysIncome: "Today's Income ({{currency}})", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled', showBothCurrencies: 'Show both currencies', showCombined: 'Show combined balance'
   },
   inventory: {
+    insufficientCashDrawerBalance: 'Insufficient cash drawer balance. Current balance: {{currentBalance}}, Required: {{requiredAmount}}',
     failedToReceiveInventory: 'Failed to receive inventory.',
     default: 'Default',
     skuBarcode: 'SKU/Barcode',
@@ -461,6 +473,7 @@ const en = {
     duplicateSupplierNameError: 'A supplier with this name already exists.'
   },
   accounting: {
+    failedToCloseTheBillWithNonPricedItems:"Failed to close bill. There are non-priced items",
     errorLoadingData: 'Error Loading Data',
     unableToLoadData: 'Unable to load accounting data. Please refresh the page or check your connection.',
     loadingData: 'Loading accounting data...',
@@ -915,6 +928,7 @@ const en = {
     exportOnlyAfterClosing: 'Export is only available after closing the bill',
     billAlreadyClosed: 'Bill already closed',
     cannotCloseBill: 'Cannot close bill: missing quantity or non-priced item(s) present',
+    cannotCloseBillWithNonPricedItems: 'Cannot close bill: {count} item(s) without price. Please set prices for: {products}',
     closeBillConfirmation: 'Close Bill Confirmation',
     billSummary: 'Bill Summary',
     feeBreakdown: 'Fee Breakdown',

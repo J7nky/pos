@@ -1,9 +1,9 @@
 import { createId, getDB } from '../lib/db';
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
 import { TransactionService } from './transactionService';
-
+import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
+import { currencyService } from './currencyService';
 const transactionService = TransactionService.getInstance();
-
 export interface InventoryPurchaseItem {
   product_id: string;
   quantity: number;
@@ -546,6 +546,55 @@ export class InventoryPurchaseService {
       isValid: errors.length === 0,
       errors
     };
+  }
+  
+  /**
+   * Validate cash drawer balance for cash purchases
+   * This should be called before processing to prevent insufficient balance errors
+   */
+  public async validateCashDrawerBalance(
+    data: InventoryPurchaseData
+  ): Promise<{ isValid: boolean; error?: string; currentBalance?: number; requiredAmount?: number; formattedBalance?: string; formattedAmount?: string }> {
+    // Only validate for cash purchases
+    if (data.type !== 'cash') {
+      return { isValid: true };
+    }
+
+    try {
+      // Calculate total amount that will be deducted
+      const { totalAmount } = this.calculatePurchaseAmounts(data);
+
+      // Get current cash drawer balance in the transaction currency
+      const currentBalance = await calculateCashDrawerBalance(
+        data.store_id,
+        data.branch_id,
+        data.currency
+      );
+
+      // Format currency for error message
+      const formattedBalance = currencyService.formatCurrency(currentBalance, data.currency);
+      const formattedAmount = currencyService.formatCurrency(totalAmount, data.currency);
+
+      // Check if balance is sufficient
+      if (totalAmount > currentBalance) {
+        return {
+          isValid: false,
+          error: `Insufficient cash drawer balance. Current balance: ${formattedBalance}, Required: ${formattedAmount}`,
+          currentBalance,
+          requiredAmount: totalAmount,
+          formattedBalance,
+          formattedAmount
+        };
+      }
+
+      return { isValid: true, currentBalance, requiredAmount: totalAmount, formattedBalance, formattedAmount };
+    } catch (error) {
+      console.error('[CASH_BALANCE_VALIDATION] Error validating cash drawer balance:', error);
+      return {
+        isValid: false,
+        error: error instanceof Error ? error.message : 'Failed to validate cash drawer balance'
+      };
+    }
   }
 }
 

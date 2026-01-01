@@ -6,7 +6,7 @@ import { CustomerFormProvider } from './contexts/CustomerFormContext';
 import SupabaseLogin from './components/SupabaseLogin';
 import BranchSelectionScreen from './components/BranchSelectionScreen';
 import { I18nProvider, useI18n } from './i18n';
-import OnScreenKeyboard from './components/common/OnScreenKeyboard';
+import NativeKeyboardHandler from './components/common/NativeKeyboardHandler';
 import ErrorBoundary from './components/ErrorBoundary';
 import I18nErrorBoundary from './components/I18nErrorBoundary';
 import UpdateNotification from './components/UpdateNotification';
@@ -50,7 +50,7 @@ function AppContent() {
   return (
     <>
       <Outlet />
-      <OnScreenKeyboard />
+      <NativeKeyboardHandler />
       <UpdateNotification />
     </>
   );

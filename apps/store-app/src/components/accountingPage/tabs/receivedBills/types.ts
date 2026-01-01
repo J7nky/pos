@@ -115,4 +115,6 @@ export interface CloseBillFees {
   transfer: number;
   plastic?: number; // Plastic fee (optional for backward compatibility)
   supplierAmount: number;
+  cogs?: number; // Cost of Goods Sold
+  currency?: 'USD' | 'LBP'; // Currency for the fees
 }
