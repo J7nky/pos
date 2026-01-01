@@ -117,7 +117,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       
       // Ensure Trade supplier is set for cash purchases
       if (form.type === 'cash') {
-        const tradeSupplier = suppliers.find((s: any) => s.name === t('inventory.trade'));
+        const tradeSupplier = suppliers.find((s: any) => s.name === 'Trade');
         if (tradeSupplier && form.supplier_id !== tradeSupplier.id) {
           updates.supplier_id = tradeSupplier.id;
         }
@@ -125,7 +125,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       
       // Clear Trade supplier if type is commission (Trade cannot be used for commission)
       if (form.type === 'commission') {
-        const tradeSupplier = suppliers.find((s: any) => s.name === t('inventory.trade'));
+        const tradeSupplier = suppliers.find((s: any) => s.name === 'Trade');
         if (tradeSupplier && (form.supplier_id === tradeSupplier.id || form.supplier_id === 'trade')) {
           updates.supplier_id = '';
         }
@@ -348,7 +348,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
 
   // Get selected supplier for context display
   const selectedSupplier = form.type === 'cash' 
-    ? suppliers.find((s: any) => s.name === `${t('inventory.trade')}`) || { name: `${t('inventory.trade')}`, id: 'trade' }
+    ? suppliers.find((s: any) => s.name === 'Trade') || { name: t('inventory.trade'), id: 'trade' }
     : suppliers.find((s: any) => s.id === form.supplier_id) || null;
   
   // Enhanced validation with comprehensive field checking
@@ -356,12 +356,12 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     const errors: any = {};
 
     // Supplier validation - required for credit and commission purchases
-    if (form.type === 'commission') {
+    if (form.type === 'commission' || form.type === 'credit') {
       if (!form.supplier_id) {
         errors.supplier_id = `${t('inventory.supplierRequiredForCommissionPurchases')}`;
       } else {
-        // Check if Trade supplier is being used for commission (not allowed)
-        const tradeSupplier = suppliers.find((s: any) => s.name === t('inventory.trade'));
+        // Check if Trade supplier is being used for commission/credit (not allowed)
+        const tradeSupplier = suppliers.find((s: any) => s.name === 'Trade');
         if (tradeSupplier && form.supplier_id === tradeSupplier.id) {
           errors.supplier_id = `${t('inventory.pleaseSelectADifferentSupplier')}`;
         } else if (form.supplier_id === 'trade') {
@@ -803,11 +803,13 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                       </div>
                     ) : (
                       <SearchableSelect
-                        options={suppliers.map((supplier: any) => ({
-                          id: supplier.id,
-                          label: supplier.name,
-                          value: supplier.id,
-                        }))}
+                        options={suppliers
+                          .filter((supplier: any) => supplier.name !== 'Trade')
+                          .map((supplier: any) => ({
+                            id: supplier.id,
+                            label: supplier.name,
+                            value: supplier.id,
+                          }))}
                         value={form.supplier_id}
                         onChange={(value: any) => setForm({ ...form, supplier_id: value })}
                         placeholder={t('customers.selectSupplier')}
@@ -830,7 +832,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                       value={form.type}
                       onChange={(e) => {
                         const newType = e.target.value;
-                        const tradeSupplier = suppliers.find((s: any) => s.name === t('inventory.trade'));
+                        const tradeSupplier = suppliers.find((s: any) => s.name === 'Trade');
                         const currentSupplierId = form.supplier_id;
                         const isTradeSupplier = tradeSupplier && (currentSupplierId === tradeSupplier.id || currentSupplierId === 'trade');
                         
@@ -842,7 +844,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                           // For commission/credit: clear if it's Trade, otherwise keep current
                           supplier_id: newType === 'cash' 
                             ? (tradeSupplier?.id || 'trade')
-                            : (newType === 'commission' && isTradeSupplier ? '' : currentSupplierId)
+                            : (isTradeSupplier ? '' : currentSupplierId)
                         });
                       }}
                       className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"

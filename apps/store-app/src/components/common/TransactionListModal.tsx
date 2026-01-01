@@ -48,7 +48,7 @@ export default function TransactionListModal({
         <div className="mb-6 p-4 bg-gray-50 rounded-lg">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600">{t('common.total') || 'Total'}</p>
+              <p className="text-sm text-gray-600">{t('common.labels.total') || 'Total'}</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">
                 {formatCurrency(totalAmount)}
               </p>

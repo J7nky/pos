@@ -158,7 +158,7 @@ export default function ReceivedBills({
     // Note: form.status is used for notes/comments in ReceiveFormModal, not actual status
     const formData = {
       supplier_id: currentSupplierId,
-      type: batch?.type || first?.type || 'commission',
+      type: batch?.type || '',
       porterage_fee: (batch?.porterage_fee ?? group.batchPorterage ?? '').toString(),
       transfer_fee: (batch?.transfer_fee ?? group.batchTransferFee ?? '').toString(),
       commission_rate: (batch?.commission_rate ?? first?.commissionRate ?? '').toString(),

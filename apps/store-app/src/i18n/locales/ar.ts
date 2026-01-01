@@ -1074,7 +1074,7 @@ const ar = {
     timeOpen: 'وقت الفتح',
     openedAt: 'فتح في',
     openingAmount: 'مبلغ الافتتاح',
-    closingProcess: 'عملية إغلاق درج النقدية',
+    closingProcess: 'عملية إغلاق الصندوق',
     inventoryCheck: 'فحص المخزون',
     cashBalance: 'رصيد النقدية',
     closeDrawer: 'إغلاق الدرج',
@@ -1083,7 +1083,7 @@ const ar = {
     startClosingProcess: 'بدء عملية الإغلاق',
     refreshStatus: 'تحديث الحالة',
     noActiveSession: 'لا توجد جلسة نشطة',
-    mustBeOpenedMessage: 'يجب فتح درج النقدية لبدء تتبع المعاملات',
+    mustBeOpenedMessage: 'يجب فتح الصندوق لبدء تتبع المعاملات',
     verifyCashBalance: 'التحقق من رصيد النقدية',
     expectedAmount: 'المبلغ المتوقع',
     countCashInstructions: 'عد النقد الفعلي في الدرج وأدخل المبلغ أدناه.',
@@ -1121,7 +1121,7 @@ const ar = {
     quantity: 'الكمية',
     weight: 'الوزن',
     price: 'السعر',
-    title: 'تقرير رصيد درج النقدية',
+    title: 'تقرير رصيد الصندوق',
     last30Days: 'آخر 30 يوم',
     startDate: 'تاريخ البداية',
     endDate: 'تاريخ النهاية',
@@ -1139,8 +1139,8 @@ const ar = {
     variance: 'الفرق',
     status: 'الحالة',
     notes: 'ملاحظات',
-    noSessionsFound: 'لم يتم العثور على جلسات درج النقدية',
-    noSessionsMessage: 'لم يتم العثور على جلسات درج نقدية مغلقة للفترة المحددة. يتم إنشاء جلسات درج النقدية عندما يفتح الموظفون ويغلقون درج النقدية.',
+    noSessionsFound: 'لم يتم العثور على جلسات الصندوق',
+    noSessionsMessage: 'لم يتم العثور على جلسات صندوق مغلقة للفترة المحددة. يتم إنشاء جلسات الصندوق عندما يفتح الموظفون ويغلقون الصندوق.',
     sessionDetails: 'تفاصيل الجلسة',
     sessionSummary: 'ملخص الجلسة',
     openingAmount: 'مبلغ الافتتاح',
@@ -1209,3 +1209,16 @@ const ar = {
 export default ar;
 
 
+/*
+Log out button somtimes doesn't work, it doesn't navigate the user to login page instantly, it required to reload 
+pressing it multiple times logs: 
+ℹ️ No active check-in found, skipping check-out
+SupabaseAuthContext.tsx:681 ✅ Branch preference cleared for store: 81b168f5-2ce5-4c40-9ac5-86e239d1af83
+OfflineDataContext.tsx:1528 👀 [FOCUS-SYNC] Window focused, checking if sync needed...
+SupabaseAuthContext.tsx:668 ℹ️ No active check-in found, skipping check-out
+SupabaseAuthContext.tsx:681 ✅ Branch preference cleared for store: 81b168f5-2ce5-4c40-9ac5-86e239d1af83
+CashDrawerMonitor.tsx:33 branch 675443 5754911d-bfe2-4629-90a0-3b83f275f601
+CashDrawerMonitor.tsx:36 💰 Balance: 0
+SupabaseAuthContext.tsx:668 ℹ️ No active check-in found, skipping check-out
+SupabaseAuthContext.tsx:681 ✅ Branch preference cleared for store: 81b168f5-2ce5-4c40-9ac5-86e239d1af83
+**/

@@ -71,6 +71,42 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
         return unit;
     }
   };
+
+  // Function to translate product categories
+  const translateCategory = (category: string | undefined): string => {
+    if (!category) return '';
+    
+    switch (category) {
+      case 'Fruits':
+        return t('inventory.categoryFruits');
+      case 'Vegetables':
+        return t('inventory.categoryVegetables');
+      case 'Herbs':
+      case 'Herbs/Leafy':
+        return t('inventory.categoryHerbs');
+      case 'Nuts':
+        return t('common.labels.nuts');
+      case 'Others':
+        return t('common.labels.others');
+      case 'Grains':
+        return t('inventory.categoryGrains');
+      default:
+        return category;
+    }
+  };
+
+  // Function to translate supplier names (handles special system suppliers like "Trade")
+  const translateSupplierName = (supplier: any): string => {
+    if (!supplier?.name) return '';
+    
+    // Trade is a special system supplier - translate it
+    if (supplier.name === 'Trade') {
+      return t('inventory.trade');
+    }
+    
+    // Other supplier names are user-entered proper nouns, return as-is
+    return supplier.name;
+  };
   return (
     <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
       <div className="p-6 border-b border-gray-200 dark:border-slate-800">
@@ -121,11 +157,11 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                       />
                       <div>
                         <p className="font-medium text-gray-900 dark:text-slate-100">{getProductName(product)}</p>
-                        <p className="text-sm text-gray-500 dark:text-slate-400">{product?.category}</p>
+                        <p className="text-sm text-gray-500 dark:text-slate-400">{translateCategory(product?.category)}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-gray-900 dark:text-slate-100">{supplier?.name}</td>
+                  <td className="px-6 py-4 text-gray-900 dark:text-slate-100">{translateSupplierName(supplier)}</td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 text-xs rounded-full ${
                       item.batch_type === 'commission'
