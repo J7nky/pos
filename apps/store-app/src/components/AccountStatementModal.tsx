@@ -30,8 +30,8 @@ import type { AccountStatementPrintPayload } from '../types/electron';
 interface AccountStatementModalProps {
   isOpen: boolean;
   onClose: () => void;
-  entity: Customer | Supplier;
-  entityType: 'customer' | 'supplier';
+  entity: Customer | Supplier | { id: string; name: string; [key: string]: any };
+  entityType: 'customer' | 'supplier' | 'employee';
   storeId: string;
   sales: BillLineItem[];
   transactions: Transaction[];
@@ -121,8 +121,16 @@ export default function AccountStatementModal({
           viewMode,
           language as 'en' | 'ar' | 'fr'
         );
-      } else {
+      } else if (entityType === 'supplier') {
         newStatement = await accountStatementService.generateSupplierStatement(
+          entity.id,
+          storeId,
+          dateRange,
+          viewMode,
+          language as 'en' | 'ar' | 'fr'
+        );
+      } else if (entityType === 'employee') {
+        newStatement = await accountStatementService.generateEmployeeStatement(
           entity.id,
           storeId,
           dateRange,
@@ -173,12 +181,12 @@ export default function AccountStatementModal({
   }, [statement, viewMode]);
 
   const handlePrintClick = () => {
-    if (!statement) return;
+    if (!statement || !statement.transactions || statement.transactions.length === 0) return;
     setShowPrintPreview(true);
   };
 
   const handlePrint = async (selectedPages?: number[]) => {
-    if (!statement) return;
+    if (!statement || !statement.transactions || statement.transactions.length === 0) return;
 
     // Check if Electron API is available
     if (typeof window !== 'undefined' && (window as any).electronAPI?.printStatement) {
@@ -343,7 +351,13 @@ export default function AccountStatementModal({
 
               <button
                 onClick={handleExportPDF}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                disabled={!statement || !statement.transactions || statement.transactions.length === 0}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  !statement || !statement.transactions || statement.transactions.length === 0
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
+                title={!statement || !statement.transactions || statement.transactions.length === 0 ? t('balanceReport.cannotPrintEmptyStatement') || 'Cannot print empty statement' : ''}
               >
                 <Download className="w-4 h-4" />
                 <span>{t('common.actions.export')}</span>
@@ -351,7 +365,13 @@ export default function AccountStatementModal({
 
               <button
                 onClick={handlePrintClick}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                disabled={!statement || !statement.transactions || statement.transactions.length === 0}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  !statement || !statement.transactions || statement.transactions.length === 0
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
+                title={!statement || !statement.transactions || statement.transactions.length === 0 ? t('balanceReport.cannotPrintEmptyStatement') || 'Cannot print empty statement' : ''}
               >
                 <Printer className="w-4 h-4" />
                 <span>{t('balanceReport.print')}</span>
@@ -519,7 +539,7 @@ export default function AccountStatementModal({
                     <div className="text-center py-16">
                       <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                       <p className="text-xl font-medium text-gray-500 mb-2">{t('dashboard.noTransactionsFound')}</p>
-                      <p className="text-gray-400">{t('common.tryAdjustingTheDateRangeOrCheckingBackLater')}</p>
+                      <p className="text-gray-400">{t('customers.tryAdjustingTheDateRangeOrCheckingBackLater')}</p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">

@@ -67,7 +67,7 @@ const StatCard: React.FC<StatCardProps> = memo(({
             {isMultiLine ? (
               <div className="flex flex-col">
                 {displayValue.map((line: string, idx: number) => (
-                  <p key={idx} className={`${idx === 0 ? 'text-2xl font-bold' : 'text-lg font-semibold'} text-gray-900`}>
+                  <p key={idx} className="text-2xl font-bold text-gray-900">
                     {line}
                   </p>
                 ))}
@@ -75,11 +75,7 @@ const StatCard: React.FC<StatCardProps> = memo(({
             ) : (
               <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
             )}
-            {stat.isLoading && (
-              <div className="ml-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400"></div>
-              </div>
-            )}
+        
             {/* Toggle button for cash drawer card */}
             {stat.isCashDrawer && stat.onToggleCombined && (
               <button

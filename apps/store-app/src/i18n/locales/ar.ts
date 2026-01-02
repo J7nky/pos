@@ -43,6 +43,13 @@ const ar = {
     },
    
     labels: {
+      undo: 'تراجع',
+      undoing: 'جاري التراجع...',
+      actionCompleted: 'تم الإجراء',
+      actionUndone: 'تم التراجع عن الإجراء',
+      actionFailed: 'فشل الإجراء',
+      actionFailedDescription: 'فشل الإجراء. يرجى المحاولة مرة أخرى.',
+      actionFailedTitle: 'فشل الإجراء',
     bill:'فاتورة', saleCompletedSuccessfully: 'تم إتمام البيع بنجاح', billCreatedAndReceiptPrinted: 'تم إنشاء الفاتورة وطباعة الإيصال',
       yourCartIsEmpty: 'سلة المشتريات فارغة', startAddingProductsToBeginYourSale: 'أضف المنتجات لبدء البيع',
       addNewCustomerSupplier: 'إضافة زبون جديد',
@@ -50,6 +57,7 @@ const ar = {
       customerName: 'اسم الزبون',
       selectCustomer: 'اختر الزبون',
       paymentMethod: 'طريقة الدفع',
+      all: 'الكل',
       cash: 'نقدي',
       card: 'بطاقة',
       change: 'الباقي',
@@ -202,6 +210,7 @@ const ar = {
     connection: {
       online: 'متصل',
       offline: 'غير متصل'
+
     },
     unsynced: 'غير متزامنة',
     signOut: 'تسجيل الخروج'
@@ -401,6 +410,10 @@ const ar = {
 
   },
   pos: {
+    pleaseWaitWhileYourReceiptIsBeingPrinted: 'يرجى الإنتظار أثناء طباعة الإيصال',
+    ProcessingSale: 'جاري المعالجة...',
+    PrintingReceipt: 'جاري الطباعة...',
+    Loading: 'جاري التحميل...',
     header: 'نقطة البيع',
     newBill: 'فاتورة جديدة',
     cartEmpty: 'السلة فارغة',
@@ -503,6 +516,12 @@ const ar = {
     generatedOn: 'تم إنشاؤه في'
   },
   customers: {
+    paymentDescriptionPlaceholder: 'مثال: دفعة للمنتجات, دفعة للعمولة, etc.',
+    tryAdjustingTheDateRangeOrCheckingBackLater: 'حاول ضبط الفترة الزمنية أو التحقق مرة أخرى لاحقا',
+    addPaymentReceived: 'إضافة دفعة مستلمة',
+    recordPaymentReceivedFromCustomer: 'تسجيل دفعة مستلمة من الزبون',
+    recordPayment: 'تسجيل دفعة',
+    employees: 'الموظفين',
     selectSupplier: 'اختر المورد *',
     searchSuppliers: 'ابحث عن الموردين...',
     addNewSupplier: 'إضافة مورد جديد',

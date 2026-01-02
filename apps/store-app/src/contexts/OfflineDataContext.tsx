@@ -42,7 +42,7 @@ import { getLocalDateString } from '../utils/dateUtils';
 import enLocale from '../i18n/locales/en';
 import arLocale from '../i18n/locales/ar';
 import type { MultilingualString } from '../utils/multilingual';
-import { createMultilingualFromString } from '../utils/multilingual';
+import { createMultilingualFromString, getTranslatedString } from '../utils/multilingual';
 import { journalService } from '../services/journalService';
 import { getAccountMapping, getEntityCodeForTransaction, getJournalDescription } from '../utils/accountMapping';
 import { getSystemEntity } from '../constants/systemEntities';
@@ -2301,6 +2301,43 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    // ✅ PRE-FETCH ENTITY: Avoid nested transaction by fetching entity before main transaction
+    let preFetchedEntity = null;
+    let entityType: 'customer' | 'supplier' | 'employee' | null = null;
+    let debitAccountInfo = null;
+    let creditAccountInfo = null;
+    
+    if (customerBalanceUpdate) {
+      preFetchedEntity = await getDB().entities.get(customerBalanceUpdate.customerId);
+      if (!preFetchedEntity || (preFetchedEntity.entity_type !== 'customer' && preFetchedEntity.entity_type !== 'supplier' && preFetchedEntity.entity_type !== 'employee')) {
+        throw new Error('Invalid entity for balance update');
+      }
+      entityType = preFetchedEntity.entity_type;
+      
+      // Pre-fetch account information to avoid async operations inside transaction
+      const debitAccountCode = (entityType === 'customer' || entityType === 'employee') ? '1200' : '2100';
+      const creditAccountCode = '4100'; // Revenue
+      
+      const { accountingInitService } = await import('../services/accountingInitService');
+      [debitAccountInfo, creditAccountInfo] = await Promise.all([
+        accountingInitService.getAccount(storeId, debitAccountCode),
+        accountingInitService.getAccount(storeId, creditAccountCode)
+      ]);
+      
+      if (!debitAccountInfo || !creditAccountInfo) {
+        throw new Error(`Invalid account codes: ${debitAccountCode} or ${creditAccountCode}. Please ensure chart of accounts is initialized.`);
+      }
+    }
+
+    // Set entity_id based on entity type (unified field for all entity types)
+    const billDataWithEntity = { ...cleanBillData };
+    if (customerBalanceUpdate) {
+      // Use entity_id for all entity types (customer, supplier, employee)
+      billDataWithEntity.entity_id = customerBalanceUpdate.customerId;
+    } else {
+      billDataWithEntity.entity_id = null;
+    }
+
     const bill = {
       id: billId,
       store_id: storeId,
@@ -2308,7 +2345,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       created_at: now,
       updated_at: now,
       _synced: false,
-      ...cleanBillData
+      ...billDataWithEntity
     };
 
     // Note: created_by is in bills table, not bill_line_items
@@ -2328,15 +2365,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Store original inventory states for undo
     const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
-
-    // ✅ PRE-FETCH ENTITY: Avoid nested transaction by fetching entity before main transaction
-    let preFetchedEntity = null;
-    if (customerBalanceUpdate) {
-      preFetchedEntity = await getDB().entities.get(customerBalanceUpdate.customerId);
-      if (!preFetchedEntity || (preFetchedEntity.entity_type !== 'customer' && preFetchedEntity.entity_type !== 'supplier')) {
-        throw new Error('Invalid entity for balance update');
-      }
-    }
 
     // Store transaction IDs for undo (created inside transaction but needed for undo data)
     let creditSaleTransactionId: string | null = null;
@@ -2480,9 +2508,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // ✅ OPTIMIZED: Handle credit sale transaction WITHOUT nested transaction
       // Use pre-fetched entity to avoid nested getDB().transaction()
       // IMPORTANT: Skip creating journal entries/transactions when amountDue = 0 (non-priced items)
-      if (customerBalanceUpdate && customerBalanceUpdate.amountDue > 0 && preFetchedEntity) {
+      if (customerBalanceUpdate && customerBalanceUpdate.amountDue > 0 && preFetchedEntity && entityType) {
+        console.log('💳 [CREDIT_SALE] Creating credit sale transaction:', {
+          entityId: customerBalanceUpdate.customerId,
+          entityType,
+          amountDue: customerBalanceUpdate.amountDue,
+          billNumber: bill.bill_number
+        });
+        
         const entity = preFetchedEntity;
-        const entityType = entity.entity_type as 'customer' | 'supplier';
         const transactionId = createId();
         creditSaleTransactionId = transactionId; // Store for undo data
         
@@ -2491,11 +2525,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const creditSaleDescription: MultilingualString = {
           en: (entityType === 'customer' 
             ? enLocale.payments.creditSaleDescriptionCustomer 
-            : enLocale.payments.creditSaleDescriptionSupplier)
+            : entityType === 'supplier'
+            ? enLocale.payments.creditSaleDescriptionSupplier
+            : enLocale.payments.creditSaleDescriptionCustomer) // Use customer description for employees
             .replace('{{billNumber}}', bill.bill_number),
           ar: (entityType === 'customer' 
             ? arLocale.payments.creditSaleDescriptionCustomer 
-            : arLocale.payments.creditSaleDescriptionSupplier)
+            : entityType === 'supplier'
+            ? arLocale.payments.creditSaleDescriptionSupplier
+            : arLocale.payments.creditSaleDescriptionCustomer) // Use customer description for employees
             .replace('{{billNumber}}', bill.bill_number),
         };
         
@@ -2506,14 +2544,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           type: 'income',
           category: entityType === 'customer' 
             ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
-            : TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
+            : entityType === 'supplier'
+            ? TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE
+            : TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE, // Use customer credit sale for employees
           amount: customerBalanceUpdate.amountDue,
           currency: currency as 'USD' | 'LBP', // Use store's currency
           description: creditSaleDescription,
           reference:bill.bill_number, // ✅ Ensure reference includes BILL- prefix for consistency
           customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
           supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
-          employee_id: null,
+          employee_id: entityType === 'employee' ? customerBalanceUpdate.customerId : null,
           created_at: now,
           created_by: currentUserId,
           _synced: false,
@@ -2538,8 +2578,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // For credit sales:
         // Customer: Debit AR (1200) / Credit Revenue (4100)
         // Supplier: Debit AP (2100) / Credit Revenue (4100) - rare case
-        const debitAccountCode = entityType === 'customer' ? '1200' : '2100';
-        const debitAccountName = entityType === 'customer' ? 'Accounts Receivable' : 'Accounts Payable';
+        // Employee: Debit AR (1200) / Credit Revenue (4100) - same as customer
+        const debitAccountCode = (entityType === 'customer' || entityType === 'employee') ? '1200' : '2100';
+        const creditAccountCode = '4100'; // Revenue
+        
+        // Use pre-fetched account information (fetched before transaction to avoid async operations inside)
+        if (!debitAccountInfo || !creditAccountInfo) {
+          throw new Error(`Account information not available. Please ensure chart of accounts is initialized.`);
+        }
+        
+        const debitAccountName = debitAccountInfo.account_name;
+        const creditAccountName = creditAccountInfo.account_name;
         
         // Create journal entries using new base currency schema
         const transactionCurrency = creditSaleTransaction.currency;
@@ -2572,8 +2621,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           store_id: storeId,
           branch_id: currentBranchId,
           transaction_id: transactionId,
-          account_code: '4100', // Revenue
-          account_name: 'Revenue',
+          account_code: creditAccountCode,
+          account_name: creditAccountName,
           entity_id: customerBalanceUpdate.customerId,
           entity_type: entityType,
           debit_usd: 0,
@@ -2589,7 +2638,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           _synced: false
         };
         
+        console.log('💳 [CREDIT_SALE] Adding journal entries:', {
+          debitAccount: debitAccountCode,
+          creditAccount: creditAccountCode,
+          amountDue: customerBalanceUpdate.amountDue,
+          currency: transactionCurrency
+        });
+        
         await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);
+        
+        console.log('💳 [CREDIT_SALE] ✅ Journal entries created successfully');
         
         // Balances are now calculated from journal entries - no need to update
         // The journal entries created above will automatically reflect the correct balance
@@ -2602,12 +2660,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           const totalCashAmount = bill.amount_paid || bill.total_amount || 0;
           debug('💰 Processing cash sale transaction atomically:', { totalCashAmount, billNumber: bill.bill_number });
 
+          // For cash drawer sales, always use null/undefined for entityId to use default CASH-CUST system entity
+          // The actual customer/supplier is tracked in the bill, not in the cash drawer transaction
           cashDrawerResult = await createCashDrawerTransactionAtomic(
             totalCashAmount,
             'LBP', // Assuming LBP for now, could be made dynamic
             `Cash sale - Bill ${bill.bill_number}`,
             bill.bill_number,
-            bill.customer_id || undefined,
+            undefined, // Always use default CASH-CUST entity for cash drawer sales
             bill.bill_number
           );
 
@@ -3026,7 +3086,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const billNumberWithoutPrefix = billNumberLower.replace(/^bill-/, '');
         const billNumberMatch = billNumberLower.includes(searchLower) || billNumberWithoutPrefix.includes(searchLower);
         const notesMatch = bill.notes?.toLowerCase().includes(searchLower);
-        const customerName = bill.customer_id ? customersMap.get(bill.customer_id) : '';
+        const customerName = bill.entity_id ? customersMap.get(bill.entity_id) : '';
         const customerMatch = customerName?.includes(searchLower);
         
         return billNumberMatch || notesMatch || customerMatch;
@@ -3233,6 +3293,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const supplierId = supplierData.id || createId();
     const now = new Date().toISOString();
     
+    // Get initial balance values (if provided)
+    const initialLBPBalance = (supplierData as any).lb_balance || 0;
+    const initialUSDBalance = (supplierData as any).usd_balance || 0;
+    
     // Create entity instead of legacy supplier table
     // Note: Balances are calculated from journal entries, not stored on the entity
     const entity = {
@@ -3261,6 +3325,84 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     
     await getDB().entities.add(entity);
     
+    // Create journal entries for initial balance if provided
+    // For suppliers: 
+    // - Positive balance = we owe them (liability): Credit AP (2100), Debit Equity (3100)
+    // - Negative balance = they owe us (asset): Debit AP (2100), Credit Equity (3100)
+    // Handle USD and LBP separately if they have different signs
+    if ((initialLBPBalance !== 0 || initialUSDBalance !== 0) && currentBranchId) {
+      const transactionId = createId();
+      const postedDate = getLocalDateString(now);
+      
+      try {
+        // Create separate journal entries for USD and LBP if they have different signs
+        // Otherwise create one entry for both
+        
+        // Determine sign: use USD if non-zero, otherwise use LBP
+        const primaryAmount = initialUSDBalance !== 0 ? initialUSDBalance : initialLBPBalance;
+        const isPositive = primaryAmount >= 0;
+        const debitAccount = isPositive ? '3100' : '2100'; // Owner's Equity or AP
+        const creditAccount = isPositive ? '2100' : '3100'; // AP or Owner's Equity
+        
+        // If both currencies have the same sign (or one is zero), create one entry
+        const sameSign = (initialUSDBalance >= 0 && initialLBPBalance >= 0) || 
+                         (initialUSDBalance <= 0 && initialLBPBalance <= 0) ||
+                         initialUSDBalance === 0 || initialLBPBalance === 0;
+        
+        if (sameSign) {
+          // Single entry for both currencies
+          await journalService.createJournalEntry({
+            transactionId,
+            debitAccount,
+            creditAccount,
+            amountUSD: Math.abs(initialUSDBalance),
+            amountLBP: Math.abs(initialLBPBalance),
+            entityId: supplierId,
+            description: `Initial balance for ${supplierData.name}`,
+            postedDate,
+            createdBy: userProfile?.id || null,
+            branchId: currentBranchId
+          });
+        } else {
+          // Different signs - create separate entries for each currency
+          if (initialUSDBalance !== 0) {
+            const usdIsPositive = initialUSDBalance >= 0;
+            await journalService.createJournalEntry({
+              transactionId,
+              debitAccount: usdIsPositive ? '3100' : '2100',
+              creditAccount: usdIsPositive ? '2100' : '3100',
+              amountUSD: Math.abs(initialUSDBalance),
+              amountLBP: 0,
+              entityId: supplierId,
+              description: `Initial USD balance for ${supplierData.name}`,
+              postedDate,
+              createdBy: userProfile?.id || null,
+              branchId: currentBranchId
+            });
+          }
+          
+          if (initialLBPBalance !== 0) {
+            const lbpIsPositive = initialLBPBalance >= 0;
+            await journalService.createJournalEntry({
+              transactionId,
+              debitAccount: lbpIsPositive ? '3100' : '2100',
+              creditAccount: lbpIsPositive ? '2100' : '3100',
+              amountUSD: 0,
+              amountLBP: Math.abs(initialLBPBalance),
+              entityId: supplierId,
+              description: `Initial LBP balance for ${supplierData.name}`,
+              postedDate,
+              createdBy: userProfile?.id || null,
+              branchId: currentBranchId
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Failed to create initial balance journal entries for supplier:', error);
+        // Continue even if journal entry creation fails - entity is already created
+      }
+    }
+    
     // Store undo data
     pushUndo({
       type: 'add_supplier',
@@ -3284,6 +3426,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addCustomer = async (customerData: Omit<Tables['customers']['Insert'], 'store_id'>): Promise<void> => {
     const customerId = customerData.id || createId();
     const now = new Date().toISOString();
+    
+    // Get initial balance values (if provided)
+    const initialLBPBalance = (customerData as any).lb_balance || 0;
+    const initialUSDBalance = (customerData as any).usd_balance || 0;
     
     // Create entity instead of legacy customer table
     // Note: Balances are calculated from journal entries, not stored on the entity
@@ -3311,6 +3457,84 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
     
     await getDB().entities.add(entity);
+    
+    // Create journal entries for initial balance if provided
+    // For customers: 
+    // - Positive balance = they owe us (asset): Debit AR (1200), Credit Equity (3100)
+    // - Negative balance = we owe them (liability): Credit AR (1200), Debit Equity (3100)
+    // Handle USD and LBP separately if they have different signs
+    if ((initialLBPBalance !== 0 || initialUSDBalance !== 0) && currentBranchId) {
+      const transactionId = createId();
+      const postedDate = getLocalDateString(now);
+      
+      try {
+        // Create separate journal entries for USD and LBP if they have different signs
+        // Otherwise create one entry for both
+        
+        // Determine sign: use USD if non-zero, otherwise use LBP
+        const primaryAmount = initialUSDBalance !== 0 ? initialUSDBalance : initialLBPBalance;
+        const isPositive = primaryAmount >= 0;
+        const debitAccount = isPositive ? '1200' : '3100'; // Accounts Receivable or Owner's Equity
+        const creditAccount = isPositive ? '3100' : '1200'; // Owner's Equity or Accounts Receivable
+        
+        // If both currencies have the same sign (or one is zero), create one entry
+        const sameSign = (initialUSDBalance >= 0 && initialLBPBalance >= 0) || 
+                         (initialUSDBalance <= 0 && initialLBPBalance <= 0) ||
+                         initialUSDBalance === 0 || initialLBPBalance === 0;
+        
+        if (sameSign) {
+          // Single entry for both currencies
+          await journalService.createJournalEntry({
+            transactionId,
+            debitAccount,
+            creditAccount,
+            amountUSD: Math.abs(initialUSDBalance),
+            amountLBP: Math.abs(initialLBPBalance),
+            entityId: customerId,
+            description: `Initial balance for ${customerData.name}`,
+            postedDate,
+            createdBy: userProfile?.id || null,
+            branchId: currentBranchId
+          });
+        } else {
+          // Different signs - create separate entries for each currency
+          if (initialUSDBalance !== 0) {
+            const usdIsPositive = initialUSDBalance >= 0;
+            await journalService.createJournalEntry({
+              transactionId,
+              debitAccount: usdIsPositive ? '1200' : '3100',
+              creditAccount: usdIsPositive ? '3100' : '1200',
+              amountUSD: Math.abs(initialUSDBalance),
+              amountLBP: 0,
+              entityId: customerId,
+              description: `Initial USD balance for ${customerData.name}`,
+              postedDate,
+              createdBy: userProfile?.id || null,
+              branchId: currentBranchId
+            });
+          }
+          
+          if (initialLBPBalance !== 0) {
+            const lbpIsPositive = initialLBPBalance >= 0;
+            await journalService.createJournalEntry({
+              transactionId,
+              debitAccount: lbpIsPositive ? '1200' : '3100',
+              creditAccount: lbpIsPositive ? '3100' : '1200',
+              amountUSD: 0,
+              amountLBP: Math.abs(initialLBPBalance),
+              entityId: customerId,
+              description: `Initial LBP balance for ${customerData.name}`,
+              postedDate,
+              createdBy: userProfile?.id || null,
+              branchId: currentBranchId
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Failed to create initial balance journal entries for customer:', error);
+        // Continue even if journal entry creation fails - entity is already created
+      }
+    }
     
     // Store undo data
     pushUndo({
@@ -4300,7 +4524,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Check if we need to update customer balance for credit sales
       // This happens when pricing a non-priced item (unit_price goes from 0 to > 0)
       const bill = await getDB().bills.get(originalSale.bill_id);
-      if (bill && bill.payment_method === 'credit' && bill.customer_id) {
+      if (bill && bill.payment_method === 'credit' && bill.entity_id) {
         // Get all line items for this bill to calculate totals
         const allLineItems = await getDB().bill_line_items
           .where('bill_id')
@@ -4330,11 +4554,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Only update balance if:
         // 1. Original item had zero price (was non-priced)
         // 2. Amount due increased (item was priced)
-        if (originalItemHadZeroPrice && amountDueIncrease > 0) {
-          // This is a non-priced item being priced - update customer balance
-          const entity = await getDB().entities.get(bill.customer_id);
-          if (entity && (entity.entity_type === 'customer' || entity.entity_type === 'supplier')) {
-            const entityType = entity.entity_type as 'customer' | 'supplier';
+        if (originalItemHadZeroPrice && amountDueIncrease > 0 && bill.entity_id) {
+          // This is a non-priced item being priced - update entity balance
+          const entity = await getDB().entities.get(bill.entity_id);
+          if (entity && (entity.entity_type === 'customer' || entity.entity_type === 'supplier' || entity.entity_type === 'employee')) {
+            const entityType = entity.entity_type as 'customer' | 'supplier' | 'employee';
             const now = new Date().toISOString();
             const transactionId = createId();
             
@@ -4346,14 +4570,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               type: 'income',
               category: entityType === 'customer' 
                 ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
-                : TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
+                : entityType === 'supplier'
+                ? TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE
+                : TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE, // Use customer credit sale for employees
               amount: amountDueIncrease,
               currency: currency as 'USD' | 'LBP', // Use store's currency
               description: `Credit sale - Bill ${bill.bill_number} (${entityType}) - Item priced`,
               reference: `BILL-${bill.bill_number}`, // ✅ Ensure reference includes BILL- prefix for consistency
-              customer_id: entityType === 'customer' ? bill.customer_id : null,
-              supplier_id: entityType === 'supplier' ? bill.customer_id : null,
-              employee_id: null,
+              customer_id: entityType === 'customer' ? bill.entity_id : null,
+              supplier_id: entityType === 'supplier' ? bill.entity_id : null,
+              employee_id: entityType === 'employee' ? bill.entity_id : null,
               created_at: now,
               created_by: currentUserId,
               _synced: false,
@@ -4374,8 +4600,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             const postedDate = getLocalDateString(now);
             const fiscalPeriod = getFiscalPeriodForDate(now).period;
             
-            const debitAccountCode = entityType === 'customer' ? '1200' : '2100';
-            const debitAccountName = entityType === 'customer' ? 'Accounts Receivable' : 'Accounts Payable';
+            // For credit sales:
+            // Customer/Employee: Debit AR (1200) / Credit Revenue (4100)
+            // Supplier: Debit AP (2100) / Credit Revenue (4100)
+            const debitAccountCode = (entityType === 'customer' || entityType === 'employee') ? '1200' : '2100';
+            const debitAccountName = (entityType === 'customer' || entityType === 'employee') ? 'Accounts Receivable' : 'Accounts Payable';
             
             const debitEntry = {
               id: createId(),
@@ -4384,7 +4613,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               transaction_id: transactionId, // ✅ Use transactionId (same as transaction record)
               account_code: debitAccountCode,
               account_name: debitAccountName,
-              entity_id: bill.customer_id,
+              entity_id: bill.entity_id,
               entity_type: entityType,
               debit: amountDueIncrease,
               credit: 0,
@@ -4405,7 +4634,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               transaction_id: transactionId, // ✅ Use transactionId (same as transaction record)
               account_code: '4100',
               account_name: 'Revenue',
-              entity_id: bill.customer_id,
+              entity_id: bill.entity_id,
               entity_type: entityType,
               debit: 0,
               credit: amountDueIncrease,
@@ -4421,26 +4650,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             
             await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);
             
-            // 3. Update entity balance
-            const transactionCurrency = creditSaleTransaction.currency;
-            const isUSD = transactionCurrency === 'USD';
-            const previousBalance = isUSD ? (entity.usd_balance || 0) : (entity.lb_balance || 0);
-            const newBalance = previousBalance + amountDueIncrease;
-            
+            // 3. Update entity balance (balances are now calculated from journal entries, so this is just for sync)
+            // Note: Balance updates are now handled by journal entries, this is kept for backward compatibility
             const updateData: any = {
               updated_at: now,
               _synced: false
             };
             
-            if (isUSD) {
-              updateData.usd_balance = newBalance;
-            } else {
-              updateData.lb_balance = newBalance;
-            }
+            await getDB().entities.update(bill.entity_id, updateData);
             
-            await getDB().entities.update(bill.customer_id, updateData);
-            
-            console.log(`✅ Updated ${entityType} balance for ${entity.name}: ${previousBalance} → ${newBalance} (increase: ${amountDueIncrease})`);
+            console.log(`✅ Updated ${entityType} balance for ${entity.name} (increase: ${amountDueIncrease})`);
           }
         }
       }
@@ -5137,11 +5356,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Only check cash drawer balance when PAYING OUT money (not when receiving)
       // When paymentDirection is 'receive', money is coming IN, so no balance check needed
       if (paymentDirection === 'pay') {
-        const currentBalance = await getCurrentCashDrawerBalance(storeId);
-        if (amountInLBP > currentBalance) {
+        // Get balance in LBP to match the amount we're checking
+        const currentBalanceLBP = await calculateCashDrawerBalance(storeId, currentBranchId!, 'LBP');
+        if (amountInLBP > currentBalanceLBP) {
+          // Also get USD balance for better error message
+          const currentBalanceUSD = await calculateCashDrawerBalance(storeId, currentBranchId!, 'USD');
           return { 
             success: false, 
-            error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP` 
+            error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: $${currentBalanceUSD.toFixed(2)} USD, ${Math.round(currentBalanceLBP).toLocaleString()} LBP` 
           };
         }
       }
@@ -5376,12 +5598,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         amountInLBP = numAmount * exchangeRate;
       }
 
-      // Check cash drawer balance (read-only operation outside transaction)
-      const currentBalance = await getCurrentCashDrawerBalance(storeId);
-      if (amountInLBP > currentBalance) {
+      // Check cash drawer balance in LBP (read-only operation outside transaction)
+      // Get balance in LBP to match the amount we're checking
+      const currentBalanceLBP = await calculateCashDrawerBalance(storeId, currentBranchId!, 'LBP');
+      if (amountInLBP > currentBalanceLBP) {
+        // Also get USD balance for better error message
+        const currentBalanceUSD = await calculateCashDrawerBalance(storeId, currentBranchId!, 'USD');
         return { 
           success: false, 
-          error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP` 
+          error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: $${currentBalanceUSD.toFixed(2)} USD, ${Math.round(currentBalanceLBP).toLocaleString()} LBP` 
         };
       }
 
@@ -5423,18 +5648,57 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       
       let cashDrawerResult: any;
 
+      // Get cash drawer account (read-only operation outside transaction)
+      const cashDrawerAccount = await getDB().getCashDrawerAccount(storeId, currentBranchId!);
+      if (!cashDrawerAccount) {
+        return { success: false, error: 'No cash drawer account found. Please create one before processing payments.' };
+      }
+
+      // Generate transaction ID
+      const transactionId = createId();
+      const postedDate = getLocalDateString(new Date().toISOString());
+
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK - ALL OR NOTHING ⭐⭐⭐
       await getDB().transaction('rw', 
         [
           getDB().users, 
           getDB().transactions, 
+          getDB().journal_entries,
+          getDB().entities,
+          getDB().chart_of_accounts,
           getDB().cash_drawer_accounts, 
           getDB().cash_drawer_sessions
         ], 
         async () => {
           console.log('💳 [ATOMIC] Starting atomic employee payment transaction...');
 
-          // 1. Update employee balance atomically
+          // 1. Ensure employee entity exists (required for journal entries)
+          let employeeEntity = await getDB().entities.get(employeeId);
+          if (!employeeEntity) {
+            // Create entity record for employee if it doesn't exist
+            const now = new Date().toISOString();
+            const newEntity = {
+              id: employeeId,
+              store_id: storeId,
+              branch_id: currentBranchId,
+              entity_type: 'employee' as const,
+              entity_code: `EMP-${employeeId.slice(0, 8).toUpperCase()}`,
+              name: employee.name,
+              phone: employee.phone || null,
+              is_system_entity: false,
+              is_active: true,
+              customer_data: null,
+              supplier_data: null,
+              created_at: now,
+              updated_at: now,
+              _synced: false
+            };
+            await getDB().entities.add(newEntity);
+            employeeEntity = newEntity;
+            console.log(`💳 [ATOMIC] Created entity record for employee: ${employee.name}`);
+          }
+
+          // 2. Update employee balance atomically
           const updateData = { 
             [balanceField]: newBalance, 
             updated_at: new Date().toISOString(),
@@ -5443,27 +5707,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           await getDB().users.update(employeeId, updateData);
           console.log(`💳 [ATOMIC] Employee balance updated: ${balanceField} = ${newBalance}`);
 
-          // 2. Process cash drawer transaction atomically (within existing transaction)
-          // NOTE: We can't call processCashDrawerTransaction() here because it creates its own transaction
-          // Instead, we'll do the cash drawer operations directly within this atomic block
-          
-          // Get cash drawer account
-          const cashDrawerAccount = await getDB().getCashDrawerAccount(storeId, currentBranchId!);
-          if (!cashDrawerAccount) {
-            throw new Error('No cash drawer account found. Please create one before processing payments.');
-          }
-
-          // Validate cash drawer balance by computing it from journal entries
-          const currentBalance = await calculateCashDrawerBalance(storeId, currentBranchId!, 'LBP');
-          if (currentBalance < amountInLBP) {
-            throw new Error(`Insufficient cash drawer balance. Required: ${Math.round(amountInLBP).toLocaleString()} LBP, Available: ${Math.round(currentBalance).toLocaleString()} LBP`);
-          }
-
-          // Note: Balance is computed from journal entries, no need to update current_balance field
-
-          // Create transaction record atomically
+          // 3. Create transaction record atomically
           const transactionRecord = {
-            id: crypto.randomUUID(),
+            id: transactionId,
             store_id: storeId,
             type: 'expense' as 'expense',
             category: 'Employee Payment',
@@ -5475,7 +5721,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             supplier_id: null,
             employee_id: employeeId,
             created_by: createdBy,
-        branch_id: currentBranchId || '',
+            branch_id: currentBranchId || '',
             is_reversal: false,
             reversal_of_transaction_id: null,
             metadata: {
@@ -5491,19 +5737,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
           await getDB().transactions.add(transactionRecord);
 
-          // Set result for undo data creation
-          cashDrawerResult = {
-            success: true,
-            transactionId: transactionRecord.id,
-            previousBalance: previousCashBalance,
-            newBalance: newCashBalance,
-            accountId: cashDrawerAccount.id
-          };
+          // 4. Create journal entries atomically
+          // Employee payment: Debit Salaries Expense (5200) / Credit Cash (1100)
+          await journalService.createJournalEntry({
+            transactionId,
+            debitAccount: '5200', // Salaries Expense
+            creditAccount: '1100', // Cash
+            amountUSD: currency === 'USD' ? numAmount : 0,
+            amountLBP: currency === 'LBP' ? numAmount : 0,
+            entityId: employeeId,
+            description: typeof transactionDescription === 'string' 
+              ? transactionDescription 
+              : getTranslatedString(transactionDescription, 'en', 'en'),
+            postedDate,
+            createdBy: createdBy,
+            branchId: currentBranchId!
+          });
 
-          console.log(`💳 [ATOMIC] Cash drawer updated: ${previousCashBalance} → ${newCashBalance} LBP`);
-          console.log(`💳 [ATOMIC] Employee transaction created: ${transactionRecord.id}`);
-
-          console.log('💳 [ATOMIC] Cash drawer transaction created successfully');
+          console.log(`💳 [ATOMIC] Employee transaction created: ${transactionId}`);
+          console.log(`💳 [ATOMIC] Journal entries created for employee payment`);
         }
       );
       // ⭐⭐⭐ END ATOMIC TRANSACTION - ALL OPERATIONS COMMITTED ⭐⭐⭐

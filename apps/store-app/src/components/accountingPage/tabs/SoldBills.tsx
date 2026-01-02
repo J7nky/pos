@@ -38,7 +38,7 @@ import {
 interface Bill {
   id: string;
   bill_number: string;
-  customer_id: string | null;
+  entity_id: string | null; // Unified field for customer_id, supplier_id, or employee_id
   payment_method: 'cash' | 'card' | 'credit';
   payment_status: 'paid' | 'partial' | 'pending';
   amount_paid: number;
@@ -316,7 +316,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
     
     // Check bill-level changes
     const billChanges = (
-      editForm.customer_id !== selectedBill.customer_id ||
+      editForm.entity_id !== selectedBill.entity_id ||
       editForm.payment_method !== selectedBill.payment_method ||
       editForm.payment_status !== selectedBill.payment_status ||
       (editForm.amount_paid !== undefined && editForm.amount_paid !== selectedBill.amount_paid) ||
@@ -640,7 +640,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
 
   const handleEditBill = async (bill: Bill) => {
     await loadBillDetails(bill.id);
-    setOriginalCustomerId(bill.customer_id);
+    setOriginalCustomerId(bill.entity_id);
     setBusinessRuleWarnings([]);
     setShowEditBill(true);
   };
@@ -818,8 +818,8 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
       let newPaymentMethod = oldPaymentMethod;
       
       // Only include fields that have actually changed
-      if (editForm.customer_id !== undefined && normalizeForComparison(editForm.customer_id) !== normalizeForComparison(selectedBill.customer_id)) {
-        updates.customer_id = editForm.customer_id ?? null;
+      if (editForm.entity_id !== undefined && normalizeForComparison(editForm.entity_id) !== normalizeForComparison(selectedBill.entity_id)) {
+        updates.entity_id = editForm.entity_id ?? null;
       }
       
       if (editForm.payment_method !== undefined && editForm.payment_method !== selectedBill.payment_method) {
@@ -849,13 +849,13 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
       
       // VALIDATE: Walk-in customers cannot use credit payment method
       const finalPaymentMethod = updates.payment_method || selectedBill.payment_method;
-      const finalCustomerId = updates.customer_id !== undefined ? updates.customer_id : selectedBill.customer_id;
+      const finalEntityId = updates.entity_id !== undefined ? updates.entity_id : selectedBill.entity_id;
       const creditValidation = validateCreditCustomerPayment(
         finalPaymentMethod,
-        finalCustomerId,
+        finalEntityId,
         newAmountPaid,
         totalAmount,
-        updates.customer_id !== undefined && updates.customer_id !== selectedBill.customer_id
+        updates.entity_id !== undefined && updates.entity_id !== selectedBill.entity_id
       );
       
       if (!creditValidation.valid) {
@@ -1447,7 +1447,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                         <div className="flex items-center rtl:space-x-reverse">
                           <User className="w-4 h-4 text-gray-400 rtl:ml-2 ltr:mr-2" />
                           <span className="text-sm text-gray-900 rtl:text-right">
-                            {getCustomerName(bill.customer_id)}
+                            {getCustomerName(bill.entity_id)}
                           </span>
                         </div>
                       </td>
@@ -1597,7 +1597,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.customer')}:</span>
-                      <span className="font-medium rtl:text-right">{getCustomerName(selectedBill.customer_id)}</span>
+                      <span className="font-medium rtl:text-right">{getCustomerName(selectedBill.entity_id)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.paymentMethod')}:</span>
@@ -1731,7 +1731,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.customer')}</label>
                   <select
-                    value={editForm.customer_id || ''}
+                    value={editForm.entity_id || ''}
                     onChange={(e) => {
                       const newCustomerId = e.target.value || null;
                       const totalAmount = (editForm as any).total_amount || 0;
@@ -1747,7 +1747,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                         
                         setEditForm(prev => ({ 
                           ...prev, 
-                          customer_id: null,
+                          entity_id: null,
                           payment_method: 'cash',
                           amount_paid: totalAmount,
                           payment_status: 'paid'
@@ -1801,7 +1801,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                       // Validate: Walk-in customers cannot use credit
                       const validation = validateCreditCustomerPayment(
                         newPaymentMethod,
-                        editForm.customer_id || null,
+                        editForm.entity_id || null,
                         editForm.amount_paid || 0,
                         (editForm as any).total_amount || 0,
                         false
@@ -1820,7 +1820,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                     <option value="card">{t('soldBills.card')}</option>
                     <option value="credit">{t('soldBills.credit')}</option>
                   </select>
-                  {editForm.customer_id === null && (
+                  {editForm.entity_id === null && (
                     <p className="text-xs text-gray-500 mt-1 rtl:text-right">
                       Walk-in customers can only use Cash or Card
                     </p>
@@ -1849,7 +1849,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   />
-                  {editForm.customer_id === null && (
+                  {editForm.entity_id === null && (
                     <p className="text-xs text-gray-500 mt-1 rtl:text-right">
                       Walk-in customers must pay in full
                     </p>

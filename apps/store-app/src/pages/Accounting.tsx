@@ -544,6 +544,12 @@ export default function Accounting() {
 
       if (result.success) {
         await refreshCashDrawerBalance();
+        // Refresh balance hooks to update UI immediately
+        if (form.entityType === 'customer') {
+          await customerBalances.refreshAll();
+        } else if (form.entityType === 'supplier') {
+          await supplierBalances.refreshAll();
+        }
         showToast(t(`accounting.${successMessageKey}`, { 
           amount: formatCurrencyWithSymbol(parseFloat(form.amount), form.currency),
           entityName: entity.name 
@@ -932,7 +938,7 @@ export default function Accounting() {
       
       // Get customer_id from parent bill (normalized schema)
       const bill = billMap.get(item.bill_id);
-      const customer = bill?.customer_id ? customerMap.get(bill.customer_id) : null;
+      const customer = bill?.entity_id ? customerMap.get(bill.entity_id) : null;
       
       // Supplier lookup: inventory_item_id → inventory → batch_id → inventory_bills → supplier_id
       let supplier = null;

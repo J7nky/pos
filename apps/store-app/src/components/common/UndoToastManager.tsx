@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Toast from './Toast';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
-
+import { useI18n } from '../../i18n';
 const UndoToastManager: React.FC = () => {
   const { canUndo, undoLastAction } = useOfflineData();
+  const { t } = useI18n();
   const [visible, setVisible] = useState(false); 
   const [undoing, setUndoing] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -122,7 +123,7 @@ const UndoToastManager: React.FC = () => {
     
     // Hide current toast and show feedback toast
     setVisible(false);
-    setFeedback(result ? 'Action undone!' : 'Undo failed.');
+    setFeedback(result ? t('common.labels.actionUndone') : t('common.labels.actionFailed'));
     
     // Show feedback toast for 2 seconds
     setTimeout(() => {
@@ -133,12 +134,12 @@ const UndoToastManager: React.FC = () => {
   // Determine what to show in the single toast
   const getToastMessage = () => {
     if (feedback) return feedback;
-    if (undoing) return 'Undoing...';
-    return 'Action completed';
+    if (undoing) return t('common.labels.undoing');
+    return t('common.labels.actionCompleted');
   };
 
   const getToastType = () => {
-    if (feedback) return feedback === 'Action undone!' ? 'success' : 'error';
+    if (feedback) return feedback === t('common.labels.actionUndone') ? 'success' : 'error';
     return 'success';
   };
 
@@ -156,7 +157,7 @@ const UndoToastManager: React.FC = () => {
         setFeedback(null);
       }}
       onAction={showActionButton() ? handleUndo : undefined}
-      actionLabel={showActionButton() ? 'Undo' : undefined}
+      actionLabel={showActionButton() ? t('common.labels.undo') : undefined}
       progress={showActionButton() ? progress : undefined}
     />
   );

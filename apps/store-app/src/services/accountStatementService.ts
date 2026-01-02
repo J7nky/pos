@@ -8,7 +8,7 @@ import { parseMultilingualString, getTranslatedString, type SupportedLanguage } 
 export interface AccountStatement {
   entityId: string;
   entityName: string;
-  entityType: 'customer' | 'supplier';
+  entityType: 'customer' | 'supplier' | 'employee';
   statementDate: string;
   dateRange: {
     start: string;
@@ -807,6 +807,105 @@ export class AccountStatementService {
         totalSales: { USD: 0, LBP: 0 }, // Not applicable for suppliers
         totalPayments: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP },
         totalReceivings: { USD: totals.salesUSD, LBP: totals.salesLBP }, // Received bills are "sales" in the totals
+        netChange: { 
+          USD: ending.USD - openingBalance.USD, 
+          LBP: ending.LBP - openingBalance.LBP 
+        }
+      },
+      productSummary
+    };
+  }
+
+  /**
+   * Generate comprehensive account statement for an employee
+   * Uses journal entries as the single source of truth (account_code='1200' for Accounts Receivable)
+   * Employees are treated similar to customers for credit sales
+   */
+  public async generateEmployeeStatement(
+    employeeId: string,
+    storeId: string,
+    dateRange?: { start: string; end: string },
+    viewMode: 'summary' | 'detailed' = 'detailed',
+    language: SupportedLanguage = 'en'
+  ): Promise<AccountStatement> {
+    const now = new Date();
+    const startDate = this.startOfDayISO(dateRange?.start || new Date(now.getFullYear(), 0, 1));
+    const endDate = this.endOfDayISO(dateRange?.end || now);
+
+    // Get entity information
+    const entity = await getDB().entities.get(employeeId);
+    if (!entity || entity.entity_type !== 'employee') {
+      throw new Error(`Employee ${employeeId} not found`);
+    }
+
+    // Calculate opening balance from journal entries (snapshots not implemented yet)
+    // Use existing index [store_id+account_code] and filter by entity_id
+    const startDateObj = new Date(startDate);
+    startDateObj.setHours(0, 0, 0, 0);
+    
+    // Get all journal entries for this account and entity, then filter by date
+    // Employees use Accounts Receivable (1200) like customers
+    const allAccountEntries = await getDB().journal_entries
+      .where('[store_id+account_code]')
+      .equals([storeId, '1200'])
+      .filter(entry => 
+        entry.entity_id === employeeId && 
+        entry.is_posted === true
+      )
+      .toArray();
+    
+    // Calculate opening balance (all entries before start date)
+    const prePeriodEntries = allAccountEntries.filter(entry => {
+      const entryDate = new Date(entry.posted_date);
+      return entryDate < startDateObj;
+    });
+    
+    const openingBalance = {
+      USD: prePeriodEntries.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
+      LBP: prePeriodEntries.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
+    };
+
+    // Get journal entries for the period (account_code='1200' for Accounts Receivable)
+    // Use existing index [store_id+account_code] and filter by entity_id and date
+    const endDateObj = new Date(endDate);
+    endDateObj.setHours(23, 59, 59, 999);
+    
+    const journalEntries = allAccountEntries.filter(entry => {
+      const entryDate = new Date(entry.posted_date);
+      return entryDate >= startDateObj && entryDate <= endDateObj;
+    });
+
+    // Map journal entries to statement transactions
+    // Note: Sorting happens inside mapJournalEntriesToStatementTransactions by transaction_id
+    const { statementTransactions, ending, totals } = await this.mapJournalEntriesToStatementTransactions(
+      journalEntries,
+      openingBalance,
+      viewMode,
+      'customer', // Use customer logic for employees (same as customers)
+      language
+    );
+
+    // Calculate product summary for detailed view
+    const productSummary = viewMode === 'detailed' 
+      ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'customer', language) // Use customer logic
+      : undefined;
+
+    // Use ending balance from date range as current balance for the statement period
+    // This shows the balance as of the end date, not the current balance
+    return {
+      entityId: employeeId,
+      entityName: entity.name,
+      entityType: 'employee',
+      statementDate: now.toISOString(),
+      dateRange: { start: startDate, end: endDate },
+      viewMode,
+      transactions: statementTransactions,
+      financialSummary: {
+        openingBalance,
+        currentBalance: { USD: ending.USD, LBP: ending.LBP },
+        totalSales: { USD: totals.salesUSD, LBP: totals.salesLBP },
+        totalPayments: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP },
+        totalReceivings: { USD: 0, LBP: 0 }, // Not applicable for employees
         netChange: { 
           USD: ending.USD - openingBalance.USD, 
           LBP: ending.LBP - openingBalance.LBP 

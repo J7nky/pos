@@ -274,7 +274,7 @@ export interface Bill {
   store_id: string;
   branch_id: string;
   bill_number: string;
-  customer_id: string | null;
+  entity_id: string | null; // Unified field for customer_id, supplier_id, or employee_id
   payment_method: 'cash' | 'card' | 'credit';
   payment_status: 'paid' | 'partial' | 'pending';
   amount_paid: number;

@@ -4,6 +4,7 @@ import AccessibleButton from "./common/AccessibleButton";
 import { useI18n } from "../i18n";
 import { useProductMultilingual } from "../hooks/useMultilingual";
 import { getProductTags } from "../utils/productTags";
+import { translateCategory } from "./inventory/RecentReceivesTable";
 interface InventoryItem {
   inventoryItemId: string;
   supplierName: string;
@@ -98,7 +99,7 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
         <div className="flex items-center justify-between flex-wrap gap-1">
           {product.category && (
             <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-              {product.category}
+              {translateCategory(product.category, t)}
             </span>
           )}
         </div>
@@ -144,7 +145,7 @@ const EnhancedProductCard: React.FC<EnhancedProductCardProps> = ({
               tabIndex={100 + index}
             >
               <div className="space-y-1">
-                <div className="font-medium text-xs">{item.supplierName}</div>
+                <div className="font-medium text-xs">{item.supplierName==='Trade'?t('inventory.trade'):item.supplierName}</div>
                 <div className="flex items-center justify-between text-[10px]">
                   <span
                     className={`px-1.5 py-0.5 rounded-full ${

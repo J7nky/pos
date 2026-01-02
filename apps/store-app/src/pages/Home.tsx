@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback } from 'react';
+import { useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
@@ -41,12 +41,14 @@ export default function Home() {
   const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
   const [isLoadingCashDrawer, setIsLoadingCashDrawer] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [lastCashDrawerValue, setLastCashDrawerValue] = useState<number | null>(null);
-  const [lastCashDrawerBalances, setLastCashDrawerBalances] = useState<{ USD: number; LBP: number } | null>(null);
   const [showOpeningModal, setShowOpeningModal] = useState(false);
   const [showCombinedBalance, setShowCombinedBalance] = useState(false);
   const [showExpensesModal, setShowExpensesModal] = useState(false);
   const [showIncomeModal, setShowIncomeModal] = useState(false);
+  // Use ref to store debounce timeout to avoid memory leaks
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Use ref to track previous balances for comparison (not for rendering)
+  const prevBalancesRef = useRef<{ USD: number; LBP: number } | null>(null);
 
   const raw = useOfflineData();
   const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
@@ -175,9 +177,14 @@ export default function Home() {
       
       // If there's no active session, set status to null
       if (!currentSession) {
-        setCashDrawerStatus(null);
-        setLastCashDrawerValue(null);
+        setCashDrawerStatus((prev) => {
+          // Only update if status actually changed to prevent unnecessary re-renders
+          if (prev === null) return prev;
+          return null;
+        });
+        prevBalancesRef.current = null;
         setIsInitialLoad(false);
+        setIsLoadingCashDrawer(false);
         return;
       }
       
@@ -194,43 +201,57 @@ export default function Home() {
       
       const localHistory = getLocalCashDrawerHistory();
       
-      // Smooth transition: only update if balances actually changed
-      const balancesChanged = !lastCashDrawerBalances || 
-        lastCashDrawerBalances.USD !== balances.USD || 
-        lastCashDrawerBalances.LBP !== balances.LBP;
+      // Only update if balances actually changed to prevent unnecessary re-renders
+      const prevBalances = prevBalancesRef.current;
+      const balancesChanged = !prevBalances || 
+        prevBalances.USD !== balances.USD || 
+        prevBalances.LBP !== balances.LBP;
       
-      if (balancesChanged || lastCashDrawerValue !== currentBalance) {
-        setCashDrawerStatus({
-          currentBalance, // Keep for backward compatibility
-          usdBalance: balances.USD,
-          lbpBalance: balances.LBP,
-          lastUpdated: new Date().toISOString(),
-          transactionCount: localHistory.length,
-          openedAt: currentSession?.opened_at || currentSession?.lastUpdated || ''
+      if (balancesChanged) {
+        // Update ref for next comparison
+        prevBalancesRef.current = balances;
+        
+        // Only update state if something actually changed
+        setCashDrawerStatus((prevStatus) => {
+          if (prevStatus && 
+              prevStatus.usdBalance === balances.USD && 
+              prevStatus.lbpBalance === balances.LBP &&
+              prevStatus.transactionCount === localHistory.length) {
+            return prevStatus; // No change
+          }
+          
+          return {
+            currentBalance, // Keep for backward compatibility
+            usdBalance: balances.USD,
+            lbpBalance: balances.LBP,
+            lastUpdated: new Date().toISOString(),
+            transactionCount: localHistory.length,
+            openedAt: currentSession?.opened_at || currentSession?.lastUpdated || ''
+          };
         });
-        setLastCashDrawerValue(currentBalance);
-        setLastCashDrawerBalances(balances);
       }
       
       setIsInitialLoad(false);
     } catch (error) {
       console.error('Error loading cash drawer status:', error);
+      // Don't show error state in UI, just log it
     } finally {
       setIsLoadingCashDrawer(false);
     }
-  }, [raw.storeId, raw.currentBranchId, getLocalCurrentSession, getLocalCashDrawerHistory, lastCashDrawerValue, lastCashDrawerBalances, storePreferredCurrency, exchangeRate, isInitialLoad]);
+  }, [raw.storeId, raw.currentBranchId, getLocalCurrentSession, getLocalCashDrawerHistory, storePreferredCurrency, exchangeRate, isInitialLoad]);
 
   // Debounced update function to prevent excessive reloading
   const debouncedLoadCashDrawerStatus = useCallback(() => {
     // Clear any existing timeout
-    if ((window as any).cashDrawerTimeout) {
-      clearTimeout((window as any).cashDrawerTimeout);
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
     }
     
     // Set new timeout
-    (window as any).cashDrawerTimeout = setTimeout(() => {
+    debounceTimeoutRef.current = setTimeout(() => {
       loadCashDrawerStatus();
-    }, 300); // 300ms debounce
+      debounceTimeoutRef.current = null;
+    }, 500); // Increased to 500ms for better debouncing
   }, [loadCashDrawerStatus]);
 
   // Helper function to format currency based on store's preferred currency
@@ -260,8 +281,10 @@ export default function Home() {
     
     // Handle data synced events (from event stream) - refresh cash drawer when remote changes arrive
     const handleDataSynced = () => {
-      console.log('🔄 [Home] Data synced event received, refreshing cash drawer status...');
-      debouncedLoadCashDrawerStatus();
+      // Only refresh if not already loading to prevent excessive reloads
+      if (!isLoadingCashDrawer) {
+        debouncedLoadCashDrawerStatus();
+      }
     };
     
     window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
@@ -269,30 +292,56 @@ export default function Home() {
     window.addEventListener('data-synced', handleDataSynced as any);
 
     // Refresh every 60 seconds as a fallback (reduced frequency)
-    const interval = setInterval(() => loadCashDrawerStatus(), 60000);
+    const interval = setInterval(() => {
+      // Only refresh if not currently loading
+      if (!isLoadingCashDrawer) {
+        loadCashDrawerStatus();
+      }
+    }, 60000);
+    
     return () => {
       clearInterval(interval);
+      // Clear debounce timeout on cleanup
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+        debounceTimeoutRef.current = null;
+      }
       window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
       window.removeEventListener('undo-completed', handleUndoCompleted as any);
       window.removeEventListener('data-synced', handleDataSynced as any);
     };
-  }, [raw.storeId, loadCashDrawerStatus, debouncedLoadCashDrawerStatus]);
+  }, [raw.storeId, loadCashDrawerStatus, debouncedLoadCashDrawerStatus, isLoadingCashDrawer]);
 
   // Re-fetch after initial sync completes, to avoid showing 0 before cloud data arrives
+  // Only trigger once when sync completes, not on every transaction change
   useEffect(() => {
-    if (!raw.storeId || !raw.transactions) return;
-    if (!raw.loading?.sync) {
-      // Use debounced version to prevent flashing
+    if (!raw.storeId || !raw.transactions || isLoadingCashDrawer) return;
+    // Only trigger when sync transitions from loading to complete
+    if (raw.loading?.sync === false) {
+      // Use a small delay to batch with other updates
+      const timeoutId = setTimeout(() => {
+        debouncedLoadCashDrawerStatus();
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [raw.storeId, raw.loading?.sync, debouncedLoadCashDrawerStatus, isLoadingCashDrawer]);
+
+  // Track transaction count to detect actual cash drawer transaction changes
+  // Only reload if transaction count changes AND we're not already loading
+  const prevTransactionCountRef = useRef(transactions.length);
+  useEffect(() => {
+    if (!raw.storeId || isLoadingCashDrawer) return;
+    
+    // Only reload if transaction count actually changed (new cash drawer transaction added)
+    const currentCount = transactions.filter(t => 
+      t.category?.startsWith('cash_drawer_')
+    ).length;
+    
+    if (prevTransactionCountRef.current !== currentCount) {
+      prevTransactionCountRef.current = currentCount;
       debouncedLoadCashDrawerStatus();
     }
-  }, [raw.storeId, raw.transactions, raw.loading?.sync, debouncedLoadCashDrawerStatus]);
-
-  // Re-fetch when transactions change (e.g., after sync brings cash_drawer_* records)
-  // Use debounced version to prevent excessive updates
-  useEffect(() => {
-    if (!raw.storeId) return;
-    debouncedLoadCashDrawerStatus();
-  }, [raw.storeId, transactions.length, debouncedLoadCashDrawerStatus]);
+  }, [raw.storeId, transactions, debouncedLoadCashDrawerStatus, isLoadingCashDrawer]);
 
   const lowStockItems = lowStockAlertsEnabled 
     ? stockLevels.filter(item => item.currentStock < lowStockThreshold)
@@ -411,8 +460,9 @@ export default function Home() {
     }
   ];
 
-  // Smooth cash drawer value display
-  const getCashDrawerDisplayValue = () => {
+  // Smooth cash drawer value display - memoized to prevent unnecessary recalculations
+  const getCashDrawerDisplayValue = useCallback(() => {
+    // Only show loading on initial load
     if (isInitialLoad && isLoadingCashDrawer) {
       return t('common.loading');
     }
@@ -421,13 +471,10 @@ export default function Home() {
       return t('common.closed');
     }
     
-    // Show last known balances during updates to prevent flashing
-    const usdBalance = isLoadingCashDrawer && lastCashDrawerBalances 
-      ? lastCashDrawerBalances.USD 
-      : cashDrawerStatus.usdBalance;
-    const lbpBalance = isLoadingCashDrawer && lastCashDrawerBalances 
-      ? lastCashDrawerBalances.LBP 
-      : cashDrawerStatus.lbpBalance;
+    // Always use current status values, but show subtle loading indicator during updates
+    // This prevents flickering by keeping the display stable
+    const usdBalance = cashDrawerStatus.usdBalance;
+    const lbpBalance = cashDrawerStatus.lbpBalance;
     
     // If showing combined balance, convert both to preferred currency and sum
     if (showCombinedBalance) {
@@ -446,9 +493,9 @@ export default function Home() {
     const usdFormatted = `$${usdBalance.toFixed(2)}`;
     const lbpFormatted = `${Math.round(lbpBalance).toLocaleString()} ل.ل`;
     return `${usdFormatted}\n${lbpFormatted}`;
-  };
+  }, [cashDrawerStatus, showCombinedBalance, storePreferredCurrency, exchangeRate, isInitialLoad, isLoadingCashDrawer, formatCurrencyForStore, t]);
 
-  const getCashDrawerDisplayChange = () => {
+  const getCashDrawerDisplayChange = useCallback(() => {
     if (isInitialLoad && isLoadingCashDrawer) {
       return t('common.loading');
     }
@@ -458,7 +505,7 @@ export default function Home() {
     }
     
     return `${t('common.opened')}: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}`;
-  };
+  }, [cashDrawerStatus, isInitialLoad, isLoadingCashDrawer, t]);
 
   const stats = [
     {
@@ -467,7 +514,7 @@ export default function Home() {
       icon: DollarSign,
       color: 'bg-green-500',
       change: getCashDrawerDisplayChange(),
-      isLoading: isLoadingCashDrawer && !isInitialLoad, // Show subtle loading indicator
+      isLoading: isLoadingCashDrawer && !isInitialLoad && cashDrawerStatus !== null, // Show subtle loading indicator only during updates, not initial load
       isCashDrawer: true,
       showCombinedBalance,
       onToggleCombined: () => setShowCombinedBalance(!showCombinedBalance),

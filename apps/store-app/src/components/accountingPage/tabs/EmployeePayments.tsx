@@ -3,7 +3,7 @@ import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { EmployeeAttendanceService } from '../../../services/employeeAttendanceService';
 import { EmployeeAttendance, Employee } from '../../../types';
-import { Clock, DollarSign, User, LogIn, LogOut, Calendar, TrendingUp } from 'lucide-react';
+import { Clock, DollarSign, User, LogIn, LogOut, Calendar, TrendingUp, FileText } from 'lucide-react';
 import { useCurrency } from '../../../hooks/useCurrency';
 import { Pagination } from '../../../components/common/Pagination';
 import SearchableSelect from '../../../components/common/SearchableSelect';
@@ -33,7 +33,8 @@ export default function EmployeePayments({
   refreshData,
   processEmployeePayment,
   formatCurrency,
-  formatCurrencyWithSymbol
+  formatCurrencyWithSymbol,
+  onViewAccountStatement
 }: EmployeePaymentsProps) {
   const { userProfile } = useSupabaseAuth();
   const raw = useOfflineData();
@@ -254,6 +255,17 @@ const { t } = useI18n();
                           >
                             <Calendar className="w-5 h-5" />
                           </button>
+                          {onViewAccountStatement && (
+                            <button
+                              onClick={() => {
+                                onViewAccountStatement(employee);
+                              }}
+                              className="text-purple-600 hover:text-purple-900"
+                              title={t('customers.viewAccountStatement')}
+                            >
+                              <FileText className="w-5 h-5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

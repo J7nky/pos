@@ -13,6 +13,7 @@ import { useI18n } from '../../../i18n';
 import { Supplier, Transaction } from '../../../types';
 import SupplierFormModal from '../../common/SupplierFormModal';
 import { Pagination } from '../../../components/common/Pagination';
+import { getTranslatedString } from '../../../utils/multilingual';
 
 interface SupplierAdvancesProps {
   suppliers: Supplier[];
@@ -79,9 +80,12 @@ export default function SupplierAdvances({
     ).length;
 
     // Get advance transactions (excluding deleted)
-    const advanceTransactions = transactions.filter(t => 
-      (t.category === 'Supplier Advance' || t.description?.includes('advance')) && !t._deleted
-    );
+    const advanceTransactions = transactions.filter(t => {
+      const descriptionStr = typeof t.description === 'string' 
+        ? t.description 
+        : getTranslatedString(t.description, 'en', 'en');
+      return (t.category === 'Supplier Advance' || descriptionStr?.toLowerCase().includes('advance')) && !t._deleted;
+    });
 
     return {
       totalUSD,
@@ -94,18 +98,29 @@ export default function SupplierAdvances({
   // Get all advance transactions with supplier details
   const advanceTransactionsWithDetails = useMemo(() => {
     return transactions
-      .filter(t => (t.category === 'Supplier Advance' || t.description?.includes('advance')) && !t._deleted)
+      .filter(t => {
+        const descriptionStr = typeof t.description === 'string' 
+          ? t.description 
+          : getTranslatedString(t.description, 'en', 'en');
+        return (t.category === 'Supplier Advance' || descriptionStr?.toLowerCase().includes('advance')) && !t._deleted;
+      })
       .map(transaction => {
         const supplier = suppliers.find(s => s.id === transaction.supplier_id);
         
+        // Convert description to string for processing
+        const descriptionStr = typeof transaction.description === 'string' 
+          ? transaction.description 
+          : getTranslatedString(transaction.description, 'en', 'en');
+        
         // Extract review date from description if it exists
-        const reviewDateMatch = transaction.description?.match(/\[Review: (.*?)\]/);
+        const reviewDateMatch = descriptionStr?.match(/\[Review: (.*?)\]/);
         const reviewDate = reviewDateMatch ? reviewDateMatch[1] : null;
         
         return {
           ...transaction,
           supplierName: supplier?.name || 'Unknown Supplier',
           reviewDate: reviewDate,
+          description: descriptionStr, // Store as string for easier filtering
           // Determine if this is USD or LBP based on currency field
           advanceUSD: transaction.currency === 'USD' ? transaction.amount : 0,
           advanceLBP: transaction.currency === 'LBP' ? transaction.amount : 0,
@@ -730,8 +745,8 @@ export default function SupplierAdvances({
             phone: supplierData.phone!,
             email: supplierData.email || '',
             address: supplierData.address || '',
-            lb_balance: 0,
-            usd_balance: 0,
+            lb_balance: supplierData.lb_balance || 0,
+            usd_balance: supplierData.usd_balance || 0,
             advance_lb_balance: supplierData.advance_lb_balance || 0,
             advance_usd_balance: supplierData.advance_usd_balance || 0,
           });

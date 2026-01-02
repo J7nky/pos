@@ -36,6 +36,7 @@ export interface SearchableSelectProps {
   size?: 'sm' | 'md' | 'lg';
   onOpenChange?: (open: boolean) => void;
   tabIndex?: number;
+  customFilterButtons?: React.ReactNode;
 }
 
 export default function SearchableSelect({
@@ -63,7 +64,8 @@ export default function SearchableSelect({
   clearable = false,
   size = 'md',
   onOpenChange,
-  tabIndex
+  tabIndex,
+  customFilterButtons
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -410,6 +412,13 @@ export default function SearchableSelect({
             </div>
           </div>
 
+          {/* Custom Filter Buttons */}
+          {customFilterButtons && (
+            <div className="p-3 border-b border-gray-200">
+              {customFilterButtons}
+            </div>
+          )}
+
           {/* Category Filter */}
           {categories.length > 0 && (
             <div className="p-3 border-b border-gray-200">
@@ -589,6 +598,13 @@ export default function SearchableSelect({
               )}
             </div>
           </div>
+
+          {/* Custom Filter Buttons */}
+          {customFilterButtons && (
+            <div className="p-3 border-b border-gray-200">
+              {customFilterButtons}
+            </div>
+          )}
 
           {/* Category Filter */}
           {categories.length > 0 && (

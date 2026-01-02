@@ -417,7 +417,7 @@ export interface Database {
           id: string;
           store_id: string;
           bill_number: string;
-          customer_id: string | null;
+          entity_id: string | null; // Unified field for customer_id, supplier_id, or employee_id
           subtotal: number;
           total_amount: number;
           payment_method: 'cash' | 'card' | 'credit';
@@ -437,7 +437,7 @@ export interface Database {
           id?: string;
           store_id: string;
           bill_number: string;
-          customer_id?: string | null;
+          entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
           subtotal?: number;
           total_amount?: number;
           payment_method: 'cash' | 'card' | 'credit';

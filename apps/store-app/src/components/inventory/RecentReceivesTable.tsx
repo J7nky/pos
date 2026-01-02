@@ -4,6 +4,29 @@ import { Pagination } from '../common/Pagination';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
 import { getProductImageUrl, handleImageError } from '../../constants/productImages';
 
+// Function to translate product categories
+export const translateCategory = (category: string | undefined, t: (key: string) => string): string => {
+  if (!category) return '';
+  
+  switch (category) {
+    case 'Fruits':
+      return t('inventory.categoryFruits');
+    case 'Vegetables':
+      return t('inventory.categoryVegetables');
+    case 'Herbs':
+    case 'Herbs/Leafy':
+      return t('inventory.categoryHerbs');
+    case 'Nuts':
+      return t('common.labels.nuts');
+    case 'Others':
+      return t('common.labels.others');
+    case 'Grains':
+      return t('inventory.categoryGrains');
+    default:
+      return category;
+  }
+};
+
 interface RecentReceivesTableProps {
   recentReceives: any[];
   products: any[];
@@ -72,28 +95,6 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
     }
   };
 
-  // Function to translate product categories
-  const translateCategory = (category: string | undefined): string => {
-    if (!category) return '';
-    
-    switch (category) {
-      case 'Fruits':
-        return t('inventory.categoryFruits');
-      case 'Vegetables':
-        return t('inventory.categoryVegetables');
-      case 'Herbs':
-      case 'Herbs/Leafy':
-        return t('inventory.categoryHerbs');
-      case 'Nuts':
-        return t('common.labels.nuts');
-      case 'Others':
-        return t('common.labels.others');
-      case 'Grains':
-        return t('inventory.categoryGrains');
-      default:
-        return category;
-    }
-  };
 
   // Function to translate supplier names (handles special system suppliers like "Trade")
   const translateSupplierName = (supplier: any): string => {
@@ -157,7 +158,7 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                       />
                       <div>
                         <p className="font-medium text-gray-900 dark:text-slate-100">{getProductName(product)}</p>
-                        <p className="text-sm text-gray-500 dark:text-slate-400">{translateCategory(product?.category)}</p>
+                        <p className="text-sm text-gray-500 dark:text-slate-400">{translateCategory(product?.category, t)}</p>
                       </div>
                     </div>
                   </td>

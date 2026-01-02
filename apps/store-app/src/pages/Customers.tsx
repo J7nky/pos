@@ -160,8 +160,8 @@ export default function Customers() {
   });
 
   // Account statement modal states
-  const [showAccountStatement, setShowAccountStatement] = useState<'customer' | 'supplier' | null>(null);
-  const [selectedEntity, setSelectedEntity] = useState<Customer | Supplier | null>(null);
+  const [showAccountStatement, setShowAccountStatement] = useState<'customer' | 'supplier' | 'employee' | null>(null);
+  const [selectedEntity, setSelectedEntity] = useState<Customer | Supplier | { id: string; name: string; [key: string]: any } | null>(null);
   
   // Overpayment warning state
   const [overpaymentWarning, setOverpaymentWarning] = useState<{ show: boolean; amount: number; currency: string } | null>(null);
@@ -286,6 +286,12 @@ export default function Customers() {
       if (result.success) {
         // Force immediate refresh to ensure UI updates with new balances
         await raw.refreshData();
+        // Refresh balance hooks to update UI immediately
+        if (entityType === 'customer') {
+          await customerBalances.refreshAll();
+        } else {
+          await supplierBalances.refreshAll();
+        }
         // Show success message
         const action = entityType === 'customer' ? 'received' : 'sent';
         showToast(`Payment ${action}! ${entity.name} balance updated`, 'success');
@@ -1003,8 +1009,8 @@ export default function Customers() {
               phone: supplierData.phone!,
               email: supplierData.email || '',
               address: supplierData.address || '',
-              lb_balance: 0,
-              usd_balance: 0,
+              lb_balance: supplierData.lb_balance || 0,
+              usd_balance: supplierData.usd_balance || 0,
             });
             // Force immediate refresh to ensure UI updates
             await raw.refreshData();
@@ -1021,13 +1027,13 @@ export default function Customers() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">Add Payment Received</h2>
+              <h2 className="text-xl font-semibold text-gray-900">{t('customers.addPaymentReceived')}</h2>
             </div>
             <form onSubmit={(e) => handlePaymentSubmit(e, 'customer')} className="p-6 space-y-6">
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
                 <div className="flex items-center">
                   <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
-                  <span className="text-green-800 font-medium">Record a payment received from a customer</span>
+                  <span className="text-green-800 font-medium">{t('customers.recordPaymentReceivedFromCustomer')}</span>
                 </div>
               </div>
               
@@ -1151,13 +1157,13 @@ export default function Customers() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentDescription')} (optional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentDescription')} {t('common.placeholders.optional')}</label>
                 <input
                   type="text"
                   value={paymentForm.description}
                   onChange={(e) => setPaymentForm(prev => ({ ...prev, description: e.target.value }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
-                  placeholder="e.g., Payment for invoice #123, Cash payment, etc."
+                  placeholder={t('customers.paymentDescriptionPlaceholder')}
                 />
               </div>
               
@@ -1167,14 +1173,14 @@ export default function Customers() {
                   onClick={() => setShowPaymentForm(null)}
                   className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  Cancel
+                  {t('common.labels.cancel')}
                 </button>
 
                 <button
                   type="submit"
                   className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
                 >
-                  Record Payment
+                  {t('customers.recordPayment')}
                 </button>
               </div>
             </form>
@@ -1320,13 +1326,13 @@ export default function Customers() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentDescription')} (optional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentDescription')} {t('common.labels.optional')}</label>
                 <input
                   type="text"
                   value={paymentForm.description}
                   onChange={(e) => setPaymentForm(prev => ({ ...prev, description: e.target.value }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
-                  placeholder="e.g., Payment for goods, Commission payment, etc."
+                  placeholder={t('common.placeholders.paymentDescription')}
                 />
               </div>
               
@@ -1381,6 +1387,7 @@ export default function Customers() {
           processEmployeePayment={raw.processEmployeePayment || (async () => ({ success: false, error: 'Not available' }))}
           formatCurrency={formatCurrency}
           formatCurrencyWithSymbol={formatCurrencyWithSymbol}
+          onViewAccountStatement={(employee) => handleViewAccountStatement(employee, 'employee')}
         />
       )}
 

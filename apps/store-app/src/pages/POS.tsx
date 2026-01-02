@@ -82,6 +82,7 @@ export default function POS() {
     };
   }) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
+  const employees = (raw.employees || []).map(e => ({...e, createdAt: e.created_at})) as Array<any>;
   const inventory = (raw.inventory || []) as Array<any>;
   const inventoryBills = (raw.inventoryBills || []) as Array<any>;
 
@@ -93,6 +94,8 @@ export default function POS() {
 
   const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('pos_recent_customers', []);
   const [searchTerm, setSearchTerm] = useState('');
+  // Add customer/supplier filter state
+  const [entityFilter, setEntityFilter] = useState<'all' | 'customers' | 'suppliers' | 'employees'>('all');
   // Add isProcessing state for async checkout
   const [isProcessing, setIsProcessing] = useState(false);
   // Add toast state
@@ -887,7 +890,7 @@ ${dashSeparator}`;
       
       const billData = {
         bill_number: generateBillReference(), // Generate unique bill number in format BILL-123456
-        customer_id: activeTab.selectedCustomer || null,
+        entity_id: activeTab.selectedCustomer || null, // Unified field for customer, supplier, or employee
         subtotal: total, // Same as total for now
         total_amount: total,
         payment_method: activeTab.paymentMethod,
@@ -931,12 +934,18 @@ ${dashSeparator}`;
       if (activeTab.paymentMethod === 'credit' || amountDue > 0) {
         // First try to find as customer
         let entity = customers.find(c => c.id === activeTab.selectedCustomer);
-        let entityType = 'customer';
+        let entityType: 'customer' | 'supplier' | 'employee' = 'customer';
         
         // If not found as customer, try as supplier
         if (!entity) {
           entity = suppliers.find(s => s.id === activeTab.selectedCustomer);
           entityType = 'supplier';
+        }
+        
+        // If not found as supplier, try as employee
+        if (!entity) {
+          entity = employees.find(e => e.id === activeTab.selectedCustomer);
+          entityType = 'employee';
         }
         
         if (entity) {
@@ -950,7 +959,16 @@ ${dashSeparator}`;
       }
 
       // Use offline-first bill creation from OfflineDataContext
+      console.log('💳 [POS] Creating bill with data:', {
+        entity_id: billData.entity_id,
+        payment_method: billData.payment_method,
+        amountDue: customerBalanceUpdate?.amountDue || 0,
+        hasBalanceUpdate: !!customerBalanceUpdate
+      });
+      
       const billId = await raw.createBill(billData, lineItemsData, customerBalanceUpdate || undefined);
+      
+      console.log('💳 [POS] ✅ Bill created successfully:', billId);
 
       // The sale is now handled entirely through the bill creation above
       // No need for separate sale_items creation since bill_line_items now contains all sale data
@@ -1081,10 +1099,10 @@ ${dashSeparator}`;
             <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             <div className="text-center">
               <p className="text-lg font-medium text-gray-900">
-                {isProcessing ? 'Processing Sale...' : isPrinting ? 'Printing Receipt...' : 'Loading...'}
+                {isProcessing ? t('pos.ProcessingSale') : isPrinting ? t('pos.PrintingReceipt') : t('pos.Loading')}
               </p>
               {isPrinting && (
-                <p className="text-sm text-gray-600 mt-1">Please wait while your receipt is being printed</p>
+                <p className="text-sm text-gray-600 mt-1">{t('pos.pleaseWaitWhileYourReceiptIsBeingPrinted')}</p>
               )}
             </div>
           </div>
@@ -1165,36 +1183,48 @@ ${dashSeparator}`;
                 <div ref={customerSelectRef}>
                   <SearchableSelect
                   options={
-                    activeTab.paymentMethod === 'credit'
-                      ? [
-                          ...customers.filter(c => c.isActive).map(customer => ({
+                    (() => {
+                      const customerOptions = activeTab.paymentMethod === 'credit'
+                        ? customers.filter(c => c.isActive).map(customer => ({
                             id: customer.id,
                             label: customer.name,
                             value: customer.id,
-                            category: 'Customer'
-                          })),
-                          ...suppliers.map(supplier => ({
-                            id: supplier.id,
-                            label: supplier.name,
-                            value: supplier.id,
-                            category: 'Supplier'
+                            category: `${t('common.labels.customer')}`
                           }))
-                        ]
-                      : [
-                          { id: '', label: `${t('common.labels.walkInCustomer')}`, value: '', category: 'Customer' },
-                          ...customers.filter(c => c.isActive).map(customer => ({
-                            id: customer.id,
-                            label: customer.name,
-                            value: customer.id,
-                            category: 'Customer'
-                          })),
-                          ...suppliers.map(supplier => ({
-                            id: supplier.id,
-                            label: supplier.name,
-                            value: supplier.id,
-                            category: 'Supplier'
-                          }))
-                        ]
+                        : [
+                            { id: '', label: `${t('common.labels.walkInCustomer')}`, value: '', category: `${t('soldBills.customer')}` },
+                            ...customers.filter(c => c.isActive).map(customer => ({
+                              id: customer.id,
+                              label: customer.name,
+                              value: customer.id,
+                              category: `${t('common.labels.customer')}`
+                            }))
+                          ];
+                      
+                      const supplierOptions = suppliers.filter(s => s.name !== 'Trade').map(supplier => ({
+                        id: supplier.id,
+                        label: supplier.name,
+                        value: supplier.id,
+                        category: `${t('customers.supplier')}`
+                      }));
+
+                      const employeeOptions = employees.map(employee => ({
+                        id: employee.id,
+                        label: employee.name,
+                        value: employee.id,
+                        category: `${t('customers.employees')}`
+                      }));
+
+                      if (entityFilter === 'customers') {
+                        return customerOptions;
+                      } else if (entityFilter === 'suppliers') {
+                        return supplierOptions;
+                      } else if (entityFilter === 'employees') {
+                        return employeeOptions;
+                      } else {
+                        return [...customerOptions, ...supplierOptions, ...employeeOptions];
+                      }
+                    })()
                   }
                   value={activeTab.selectedCustomer}
                   onChange={(value) => {
@@ -1215,6 +1245,70 @@ ${dashSeparator}`;
                   }}
                   className={`w-full ${customerError ? 'border border-red-500' : ''}`}
                   tabIndex={10000}
+                  customFilterButtons={
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEntityFilter('all');
+                        }}
+                        className={`flex-1 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          entityFilter === 'all'
+                            ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium'
+                            : 'bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                        tabIndex={0}
+                      >
+                        {t('common.labels.all')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEntityFilter('customers');
+                        }}
+                        className={`flex-1 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          entityFilter === 'customers'
+                            ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium'
+                            : 'bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                        tabIndex={0}
+                      >
+                        {t('customers.customers')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEntityFilter('suppliers');
+                        }}
+                        className={`flex-1 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          entityFilter === 'suppliers'
+                            ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium'
+                            : 'bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                        tabIndex={0}
+                      >
+                        {t('customers.suppliers')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEntityFilter('employees');
+                        }}
+                        className={`flex-1 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          entityFilter === 'employees'
+                            ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium'
+                            : 'bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                        tabIndex={0}
+                      >
+                        {t('customers.employees')}
+                      </button>
+                    </div>
+                  }
                   />
                 </div>
                 {customerError && (
@@ -1512,7 +1606,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                     </div>
                     <p className="text-sm text-gray-600 flex items-center">
                       <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
-                      {supplier?.name || 'Unknown Supplier'}
+                      { supplier?.name==='Trade'?t('inventory.trade'):supplier?.name || 'Unknown Supplier'}
                     </p>
 
                   </div>
