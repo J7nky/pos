@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, X, ChevronDown, Check, Loader2, Plus } from 'lucide-react';
+import { normalizeNameForComparison } from '../../utils/nameNormalization';
 export interface Option {
   id: string;
   label: string;
@@ -140,24 +141,25 @@ export default function SearchableSelect({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fuzzy search function
+  // Fuzzy search function with Arabic normalization
   const fuzzySearch = (text: string, searchTerm: string): boolean => {
     if (!searchTerm) return true;
     
-    const searchLower = searchTerm.toLowerCase();
-    const textLower = text.toLowerCase();
+    // Normalize both text and search term for Arabic text (handles أ = ا normalization)
+    const normalizedText = normalizeNameForComparison(text);
+    const normalizedSearchTerm = normalizeNameForComparison(searchTerm);
     
     // Exact match
-    if (textLower.includes(searchLower)) return true;
+    if (normalizedText.includes(normalizedSearchTerm)) return true;
     
-    // Fuzzy match - allow for typos
+    // Fuzzy match - allow for typos (using normalized strings)
     let searchIndex = 0;
-    for (let i = 0; i < textLower.length && searchIndex < searchLower.length; i++) {
-      if (textLower[i] === searchLower[searchIndex]) {
+    for (let i = 0; i < normalizedText.length && searchIndex < normalizedSearchTerm.length; i++) {
+      if (normalizedText[i] === normalizedSearchTerm[searchIndex]) {
         searchIndex++;
       }
     }
-    return searchIndex === searchLower.length;
+    return searchIndex === normalizedSearchTerm.length;
   };
 
   // Filter and sort options

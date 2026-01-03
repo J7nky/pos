@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { auditLogService, AuditLogEntry, AuditQuery } from '../services/auditLogService';
 import { useCurrency } from '../hooks/useCurrency';
+import { normalizeNameForComparison } from '../utils/nameNormalization';
 
 interface ActivityFeedProps {
   showSearch?: boolean;
@@ -120,8 +121,8 @@ export default function ActivityFeed({
         (selectedAction === 'all' || newEntry.action === selectedAction) &&
         (selectedUser === 'all' || newEntry.userId === selectedUser) &&
         (!searchTerm || 
-          newEntry.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          newEntry.entityName?.toLowerCase().includes(searchTerm.toLowerCase())
+          normalizeNameForComparison(newEntry.description).includes(normalizeNameForComparison(searchTerm)) ||
+          normalizeNameForComparison(newEntry.entityName || '').includes(normalizeNameForComparison(searchTerm))
         );
 
       if (matchesFilters) {

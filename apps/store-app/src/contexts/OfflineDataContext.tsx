@@ -47,6 +47,7 @@ import { journalService } from '../services/journalService';
 import { getAccountMapping, getEntityCodeForTransaction, getJournalDescription } from '../utils/accountMapping';
 import { getSystemEntity } from '../constants/systemEntities';
 import { currencyService } from '../services/currencyService';
+import { normalizeNameForComparison } from '../utils/nameNormalization';
 
 // Removed SupabaseService import - using offline-first approach only
 
@@ -171,6 +172,7 @@ interface OfflineDataContextType {
   createBill: (billData: any, lineItems: any[], customerBalanceUpdate?: { customerId: string; amountDue: number; originalBalance: number }) => Promise<string>;
   updateBill: (billId: string, updates: any, changedBy: string, changeReason?: string) => Promise<void>;
   deleteBill: (billId: string, deletedBy: string, deleteReason?: string, softDelete?: boolean) => Promise<void>;
+  reactivateBill: (billId: string, reactivatedBy: string, reactivationReason?: string) => Promise<void>;
   getBills: (filters?: any) => Promise<any[]>;
   getBillDetails: (billId: string) => Promise<any | null>;
   createBillAuditLog: (auditData: any) => Promise<void>;
@@ -2932,37 +2934,197 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Get bill and line items for undo and audit trail
     const bill = await getDB().bills.get(billId);
+    if (!bill) throw new Error('Bill not found');
+    
+    // Prevent deleting already cancelled bills
+    if (bill.status === 'cancelled') {
+      throw new Error('Bill is already cancelled. Use reactivate to restore it.');
+    }
+
     const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
 
-    // Pure offline-first approach - delete from local database only
-    await getDB().transaction('rw', [getDB().bills, getDB().bill_line_items, getDB().bill_audit_logs], async () => {
-      if (softDelete) {
-        // Soft delete - mark as deleted
-        await getDB().bills.update(billId, {
-          _deleted: true,
-          updated_at: now,
-          _synced: false // Mark as unsynced for background sync
-        });
+    // Find transactions related to this bill
+    // Transactions use reference field with bill_number
+    const billTransactions = await getDB().transactions
+      .where('store_id')
+      .equals(storeId)
+      .filter(t => 
+        (t.reference === bill.bill_number || 
+         t.reference === `BILL-${bill.bill_number}` ||
+         (bill.bill_number.startsWith('BILL-') && t.reference === bill.bill_number.replace('BILL-', ''))) &&
+        !t._deleted
+      )
+      .toArray();
 
-        // Also soft delete line items
-        for (const item of lineItems) {
-          await getDB().bill_line_items.update(item.id, {
-            _deleted: true,
-            _synced: false // Mark as unsynced for background sync
-          });
+    // Collect all transaction IDs
+    const transactionIds = billTransactions.map(t => t.id);
+    
+    // Find all journal entries for these transactions
+    const journalEntries: any[] = [];
+    for (const transactionId of transactionIds) {
+      const entries = await getDB().journal_entries
+        .where('transaction_id')
+        .equals(transactionId)
+        .and(e => e.is_posted === true && !e._deleted)
+        .toArray();
+      journalEntries.push(...entries);
+    }
+
+    // Pure offline-first approach - delete from local database only
+    // Include journal_entries and transactions in transaction scope
+    await getDB().transaction('rw', [
+      getDB().bills, 
+      getDB().bill_line_items, 
+      getDB().bill_audit_logs,
+      getDB().journal_entries,
+      getDB().transactions,
+      getDB().inventory_items
+    ], async () => {
+      // Always soft delete - set status to cancelled
+      await getDB().bills.update(billId, {
+        status: 'cancelled',
+        _deleted: true,
+        updated_at: now,
+        last_modified_by: deletedBy,
+        _synced: false
+      });
+
+      // Also soft delete line items
+      for (const item of lineItems) {
+        await getDB().bill_line_items.update(item.id, {
+          _deleted: true,
+          _synced: false
+        });
+      }
+
+      // ==================== REVERSE JOURNAL ENTRIES ====================
+      // Create reversal entries for each original journal entry
+      const reversalTransactionId = createId();
+      const postedDate = getLocalDateString(now);
+      const fiscalPeriod = getFiscalPeriodForDate(now).period;
+      
+      const reversalEntries: any[] = [];
+      for (const entry of journalEntries) {
+        // Create reversal entry by swapping debit/credit
+        const reversalEntry = {
+          id: createId(),
+          store_id: entry.store_id,
+          branch_id: entry.branch_id,
+          transaction_id: reversalTransactionId,
+          account_code: entry.account_code,
+          account_name: entry.account_name,
+          entity_id: entry.entity_id,
+          entity_type: entry.entity_type,
+          debit_usd: entry.credit_usd, // Swap: original credit becomes debit
+          credit_usd: entry.debit_usd, // Swap: original debit becomes credit
+          debit_lbp: entry.credit_lbp,
+          credit_lbp: entry.debit_lbp,
+          description: `Reversal: ${entry.description || 'Bill cancellation'}`,
+          posted_date: postedDate,
+          fiscal_period: fiscalPeriod,
+          is_posted: true,
+          created_by: deletedBy,
+          created_at: now,
+          _synced: false
+        };
+        reversalEntries.push(reversalEntry);
+      }
+
+      if (reversalEntries.length > 0) {
+        await getDB().journal_entries.bulkAdd(reversalEntries);
+        console.log(`🔄 Created ${reversalEntries.length} reversal journal entries for bill ${bill.bill_number}`);
+      }
+
+      // ==================== REVERSE CASH DRAWER IMPACT ====================
+      // For cash/card payments, reverse the cash drawer transaction
+      if ((bill.payment_method === 'cash' || bill.payment_method === 'card') && bill.amount_paid > 0) {
+        try {
+          // Find cash drawer transaction for this bill
+          const cashTransaction = billTransactions.find(t => 
+            t.category === TRANSACTION_CATEGORIES.CASH_DRAWER_SALE
+          );
+
+          if (cashTransaction) {
+            // Create reversal transaction for cash drawer
+            const reversalTransaction: Transaction = {
+              id: createId(),
+              store_id: storeId,
+              branch_id: currentBranchId || '',
+              type: 'expense',
+              category: TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
+              amount: bill.amount_paid,
+              currency: 'LBP', // TODO: Get actual currency from bill
+              description: createMultilingualFromString(`Bill cancellation refund - ${bill.bill_number}`),
+              reference: `REVERSAL-${bill.bill_number}`,
+              customer_id: null,
+              supplier_id: null,
+              employee_id: null,
+              created_at: now,
+              created_by: deletedBy,
+              _synced: false,
+              _deleted: false,
+              is_reversal: true,
+              reversal_of_transaction_id: cashTransaction.id,
+              metadata: {
+                correlationId: createId(),
+                source: 'offline',
+                module: 'billing'
+              }
+            };
+
+            await getDB().transactions.add(reversalTransaction);
+
+            // Create reversal journal entries for cash drawer (account_code 1100)
+            const cashJournalEntries = journalEntries.filter(e => e.account_code === '1100');
+            for (const entry of cashJournalEntries) {
+              const cashReversalEntry = {
+                id: createId(),
+                store_id: entry.store_id,
+                branch_id: entry.branch_id,
+                transaction_id: reversalTransaction.id,
+                account_code: entry.account_code,
+                account_name: entry.account_name,
+                entity_id: entry.entity_id,
+                entity_type: entry.entity_type,
+                debit_usd: entry.credit_usd,
+                credit_usd: entry.debit_usd,
+                debit_lbp: entry.credit_lbp,
+                credit_lbp: entry.debit_lbp,
+                description: `Reversal: Cash drawer refund - Bill ${bill.bill_number}`,
+                posted_date: postedDate,
+                fiscal_period: fiscalPeriod,
+                is_posted: true,
+                created_by: deletedBy,
+                created_at: now,
+                _synced: false
+              };
+              await getDB().journal_entries.add(cashReversalEntry);
+            }
+
+            console.log(`💰 Created cash drawer reversal for bill ${bill.bill_number}`);
+          }
+        } catch (error) {
+          console.error('❌ Error reversing cash drawer transaction:', error);
+          // Continue with cancellation even if cash drawer reversal fails
         }
-      } else {
-        // Hard delete
-        await getDB().bills.delete(billId);
-        await getDB().bill_line_items.where('bill_id').equals(billId).delete();
+      }
+
+      // ==================== RESTORE INVENTORY ====================
+      // Restore inventory quantities for cancelled bill
+      for (const lineItem of lineItems) {
+        if (lineItem.inventory_item_id) {
+          const inventoryItem = await getDB().inventory_items.get(lineItem.inventory_item_id);
+          if (inventoryItem) {
+            await getDB().inventory_items.update(lineItem.inventory_item_id, {
+              quantity: inventoryItem.quantity + lineItem.quantity,
+              _synced: false
+            });
+          }
+        }
       }
 
       // ==================== CREATE AUDIT LOG ====================
-      // Create ONE audit log with descriptive reason
-      const deleteAction = softDelete ? 'cancelled' : 'permanently deleted';
-      const generatedReason = bill 
-        ? `Deleting bill #${bill.bill_number} (${deleteAction})` 
-        : `Deleting bill (${deleteAction})`;
+      const generatedReason = deleteReason || `Cancelling bill #${bill.bill_number} - reversing accounting effects`;
 
       const auditLog = {
         id: auditLogId,
@@ -2970,9 +3132,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         store_id: storeId,
         action: 'deleted' as const,
         field_changed: 'status',
-        old_value: bill?.status || 'active',
-        new_value: softDelete ? 'cancelled' : 'deleted',
-        change_reason: deleteReason || generatedReason,
+        old_value: bill.status,
+        new_value: 'cancelled',
+        change_reason: generatedReason,
         changed_by: deletedBy,
         ip_address: null,
         user_agent: null,
@@ -2992,15 +3154,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       { table: 'bill_audit_logs', id: auditLogId }
     ];
     
-    if (softDelete) {
-      // Restore bill and line items
-      undoSteps.push({ op: 'update', table: 'bills', id: billId, changes: { _deleted: false, _synced: false } });
-      for (const item of lineItems) {
-        undoSteps.push({ op: 'update', table: 'bill_line_items', id: item.id, changes: { _deleted: false, _synced: false } });
-        affectedRecords.push({ table: 'bill_line_items', id: item.id });
-      }
+    // Restore bill and line items
+    undoSteps.push({ op: 'update', table: 'bills', id: billId, changes: { status: bill.status, _deleted: false, _synced: false } });
+    for (const item of lineItems) {
+      undoSteps.push({ op: 'update', table: 'bill_line_items', id: item.id, changes: { _deleted: false, _synced: false } });
+      affectedRecords.push({ table: 'bill_line_items', id: item.id });
     }
-    // Note: Hard delete cannot be undone as we lost the data
     
     undoSteps.push({ op: 'delete', table: 'bill_audit_logs', id: auditLogId });
     
@@ -3008,6 +3167,228 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       type: 'delete_bill',
       affected: affectedRecords,
       steps: undoSteps
+    });
+
+    await refreshData();
+    await updateUnsyncedCount();
+    debouncedSync();
+  };
+
+  const reactivateBill = async (billId: string, reactivatedBy: string, reactivationReason?: string): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+
+    const now = new Date().toISOString();
+    const auditLogId = createId();
+
+    // Get bill and verify it's cancelled
+    const bill = await getDB().bills.get(billId);
+    if (!bill) throw new Error('Bill not found');
+    
+    if (bill.status !== 'cancelled') {
+      throw new Error('Bill is not cancelled. Only cancelled bills can be reactivated.');
+    }
+
+    const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
+
+    // Find reversal transactions for this bill
+    const reversalTransactions = await getDB().transactions
+      .where('store_id')
+      .equals(storeId)
+      .filter(t => 
+        (t.reference === `REVERSAL-${bill.bill_number}` ||
+         t.reference?.includes(`REVERSAL-${bill.bill_number}`) ||
+         t.reference?.includes(bill.bill_number)) &&
+        t.is_reversal === true &&
+        !t._deleted
+      )
+      .toArray();
+
+    // Find reversal journal entries (entries with "Reversal:" in description)
+    const reversalJournalEntries = await getDB().journal_entries
+      .where('store_id')
+      .equals(storeId)
+      .filter(e => 
+        e.description?.includes(`Reversal:`) &&
+        e.description?.includes(bill.bill_number) &&
+        e.is_posted === true &&
+        !e._deleted
+      )
+      .toArray();
+
+    // Pure offline-first approach - reactivate in local database only
+    await getDB().transaction('rw', [
+      getDB().bills, 
+      getDB().bill_line_items, 
+      getDB().bill_audit_logs,
+      getDB().journal_entries,
+      getDB().transactions,
+      getDB().inventory_items
+    ], async () => {
+      // Change status from cancelled to active
+      await getDB().bills.update(billId, {
+        status: 'active',
+        _deleted: false,
+        updated_at: now,
+        last_modified_by: reactivatedBy,
+        _synced: false
+      });
+
+      // Restore line items
+      for (const item of lineItems) {
+        await getDB().bill_line_items.update(item.id, {
+          _deleted: false,
+          _synced: false
+        });
+      }
+
+      // ==================== RESTORE JOURNAL ENTRIES ====================
+      // Create counter-reversal entries (restore original entries)
+      const reactivationTransactionId = createId();
+      const postedDate = getLocalDateString(now);
+      const fiscalPeriod = getFiscalPeriodForDate(now).period;
+      
+      const counterReversalEntries: any[] = [];
+      for (const reversalEntry of reversalJournalEntries) {
+        // Create counter-reversal entry by swapping debit/credit back
+        const counterReversalEntry = {
+          id: createId(),
+          store_id: reversalEntry.store_id,
+          branch_id: reversalEntry.branch_id,
+          transaction_id: reactivationTransactionId,
+          account_code: reversalEntry.account_code,
+          account_name: reversalEntry.account_name,
+          entity_id: reversalEntry.entity_id,
+          entity_type: reversalEntry.entity_type,
+          debit_usd: reversalEntry.credit_usd, // Swap back: reversal credit becomes original debit
+          credit_usd: reversalEntry.debit_usd, // Swap back: reversal debit becomes original credit
+          debit_lbp: reversalEntry.credit_lbp,
+          credit_lbp: reversalEntry.debit_lbp,
+          description: reversalEntry.description?.replace('Reversal: ', 'Reactivation: ') || `Reactivation: Bill ${bill.bill_number}`,
+          posted_date: postedDate,
+          fiscal_period: fiscalPeriod,
+          is_posted: true,
+          created_by: reactivatedBy,
+          created_at: now,
+          _synced: false
+        };
+        counterReversalEntries.push(counterReversalEntry);
+      }
+
+      if (counterReversalEntries.length > 0) {
+        await getDB().journal_entries.bulkAdd(counterReversalEntries);
+        console.log(`🔄 Created ${counterReversalEntries.length} counter-reversal journal entries for bill ${bill.bill_number}`);
+      }
+
+      // ==================== RESTORE CASH DRAWER IMPACT ====================
+      // For cash/card payments, restore the cash drawer transaction
+      if ((bill.payment_method === 'cash' || bill.payment_method === 'card') && bill.amount_paid > 0) {
+        try {
+          // Find reversal transaction for cash drawer
+          const cashReversalTransaction = reversalTransactions.find(t => 
+            t.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE
+          );
+
+          if (cashReversalTransaction) {
+            // Create restoration transaction for cash drawer
+            const restorationTransaction: Transaction = {
+              id: createId(),
+              store_id: storeId,
+              branch_id: currentBranchId || '',
+              type: 'income',
+              category: TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
+              amount: bill.amount_paid,
+              currency: 'LBP', // TODO: Get actual currency from bill
+              description: createMultilingualFromString(`Bill reactivation - ${bill.bill_number}`),
+              reference: bill.bill_number,
+              customer_id: null,
+              supplier_id: null,
+              employee_id: null,
+              created_at: now,
+              created_by: reactivatedBy,
+              _synced: false,
+              _deleted: false,
+              is_reversal: false,
+              reversal_of_transaction_id: cashReversalTransaction.id,
+              metadata: {
+                correlationId: createId(),
+                source: 'offline',
+                module: 'billing'
+              }
+            };
+
+            await getDB().transactions.add(restorationTransaction);
+
+            // Create restoration journal entries for cash drawer (account_code 1100)
+            const cashReversalEntries = reversalJournalEntries.filter(e => e.account_code === '1100');
+            for (const entry of cashReversalEntries) {
+              const cashRestorationEntry = {
+                id: createId(),
+                store_id: entry.store_id,
+                branch_id: entry.branch_id,
+                transaction_id: restorationTransaction.id,
+                account_code: entry.account_code,
+                account_name: entry.account_name,
+                entity_id: entry.entity_id,
+                entity_type: entry.entity_type,
+                debit_usd: entry.credit_usd, // Swap back
+                credit_usd: entry.debit_usd,
+                debit_lbp: entry.credit_lbp,
+                credit_lbp: entry.debit_lbp,
+                description: `Reactivation: Cash drawer restoration - Bill ${bill.bill_number}`,
+                posted_date: postedDate,
+                fiscal_period: fiscalPeriod,
+                is_posted: true,
+                created_by: reactivatedBy,
+                created_at: now,
+                _synced: false
+              };
+              await getDB().journal_entries.add(cashRestorationEntry);
+            }
+
+            console.log(`💰 Created cash drawer restoration for bill ${bill.bill_number}`);
+          }
+        } catch (error) {
+          console.error('❌ Error restoring cash drawer transaction:', error);
+          // Continue with reactivation even if cash drawer restoration fails
+        }
+      }
+
+      // ==================== RE-DEDUCT INVENTORY ====================
+      // Re-deduct inventory quantities for reactivated bill
+      for (const lineItem of lineItems) {
+        if (lineItem.inventory_item_id) {
+          const inventoryItem = await getDB().inventory_items.get(lineItem.inventory_item_id);
+          if (inventoryItem) {
+            await getDB().inventory_items.update(lineItem.inventory_item_id, {
+              quantity: Math.max(0, inventoryItem.quantity - lineItem.quantity),
+              _synced: false
+            });
+          }
+        }
+      }
+
+      // ==================== CREATE AUDIT LOG ====================
+      const generatedReason = reactivationReason || `Reactivating bill #${bill.bill_number} - restoring accounting effects`;
+
+      const auditLog = {
+        id: auditLogId,
+        bill_id: billId,
+        store_id: storeId,
+        action: 'updated' as const,
+        field_changed: 'status',
+        old_value: 'cancelled',
+        new_value: 'active',
+        change_reason: generatedReason,
+        changed_by: reactivatedBy,
+        ip_address: null,
+        user_agent: null,
+        created_at: now,
+        updated_at: now,
+        branch_id: currentBranchId || '',
+        _synced: false
+      };
+
+      await getDB().bill_audit_logs.add(auditLog);
     });
 
     await refreshData();
@@ -3069,7 +3450,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Apply search term filter if provided (needs customer lookup, so done in memory)
     if (filters?.searchTerm) {
-      const searchLower = filters.searchTerm.toLowerCase();
+      // Normalize search term for Arabic text (handles أ = ا normalization)
+      const normalizedSearchTerm = normalizeNameForComparison(filters.searchTerm);
       // Get customer entities for name lookup
       const customersMap = new Map<string, string>();
       const allCustomerEntities = await getDB().entities
@@ -3077,17 +3459,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         .equals([storeId, 'customer'])
         .filter((e: any) => !e._deleted)
         .toArray();
-      allCustomerEntities.forEach(e => customersMap.set(e.id, e.name.toLowerCase()));
+      allCustomerEntities.forEach(e => customersMap.set(e.id, normalizeNameForComparison(e.name)));
 
       billsData = billsData.filter(bill => {
         const billNumberLower = bill.bill_number?.toLowerCase() || '';
         // Support searching with or without "Bill-" prefix
         // e.g., searching "12345678" will match "Bill-12345678"
         const billNumberWithoutPrefix = billNumberLower.replace(/^bill-/, '');
-        const billNumberMatch = billNumberLower.includes(searchLower) || billNumberWithoutPrefix.includes(searchLower);
-        const notesMatch = bill.notes?.toLowerCase().includes(searchLower);
+        const billNumberMatch = normalizeNameForComparison(billNumberLower).includes(normalizedSearchTerm) || 
+                                normalizeNameForComparison(billNumberWithoutPrefix).includes(normalizedSearchTerm);
+        const notesMatch = bill.notes ? normalizeNameForComparison(bill.notes).includes(normalizedSearchTerm) : false;
         const customerName = bill.entity_id ? customersMap.get(bill.entity_id) : '';
-        const customerMatch = customerName?.includes(searchLower);
+        const customerMatch = customerName ? customerName.includes(normalizedSearchTerm) : false;
         
         return billNumberMatch || notesMatch || customerMatch;
       });
@@ -7315,6 +7698,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         createBill: async () => '',
         updateBill: async () => { },
         deleteBill: async () => { },
+        reactivateBill: async () => { },
         getBills: async () => [],
         getBillDetails: async () => null,
         createBillAuditLog: async () => { },
@@ -7451,6 +7835,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       createBill,
       updateBill,
       deleteBill,
+      reactivateBill,
       getBills,
       getBillDetails,
       createBillAuditLog,

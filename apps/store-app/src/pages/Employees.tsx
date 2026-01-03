@@ -314,12 +314,13 @@ console.log(userProfile,123123123);
   };
 
   const filteredEmployees = employees.filter(emp => {
-    const searchLower = searchTerm.toLowerCase();
+    if (!searchTerm) return true;
+    const normalizedSearchTerm = normalizeNameForComparison(searchTerm);
     return (
-      emp.name.toLowerCase().includes(searchLower) ||
-      emp.email.toLowerCase().includes(searchLower) ||
-      emp.role.toLowerCase().includes(searchLower) ||
-      (emp.phone && emp.phone.toLowerCase().includes(searchLower))
+      normalizeNameForComparison(emp.name).includes(normalizedSearchTerm) ||
+      normalizeNameForComparison(emp.email).includes(normalizedSearchTerm) ||
+      normalizeNameForComparison(emp.role).includes(normalizedSearchTerm) ||
+      (emp.phone && normalizeNameForComparison(emp.phone).includes(normalizedSearchTerm))
     );
   });
 

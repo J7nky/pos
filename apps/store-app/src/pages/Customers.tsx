@@ -473,17 +473,25 @@ export default function Customers() {
   };
 
 
-  const filteredCustomers = useMemo(() => customers.filter(customer =>
-    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.phone.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
-  ), [customers, searchTerm]);
+  const filteredCustomers = useMemo(() => {
+    if (!searchTerm) return customers;
+    const normalizedSearchTerm = normalizeNameForComparison(searchTerm);
+    return customers.filter(customer =>
+      normalizeNameForComparison(customer.name).includes(normalizedSearchTerm) ||
+      normalizeNameForComparison(customer.phone || '').includes(normalizedSearchTerm) ||
+      (customer.email && normalizeNameForComparison(customer.email).includes(normalizedSearchTerm))
+    );
+  }, [customers, searchTerm]);
 
-  const filteredSuppliers = useMemo(() => suppliers.filter(supplier =>
-    supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    supplier.phone.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (supplier.email && supplier.email.toLowerCase().includes(searchTerm.toLowerCase()))
-  ), [suppliers, searchTerm]);
+  const filteredSuppliers = useMemo(() => {
+    if (!searchTerm) return suppliers;
+    const normalizedSearchTerm = normalizeNameForComparison(searchTerm);
+    return suppliers.filter(supplier =>
+      normalizeNameForComparison(supplier.name).includes(normalizedSearchTerm) ||
+      normalizeNameForComparison(supplier.phone || '').includes(normalizedSearchTerm) ||
+      (supplier.email && normalizeNameForComparison(supplier.email).includes(normalizedSearchTerm))
+    );
+  }, [suppliers, searchTerm]);
 
   // Pagination for customers
   const paginatedCustomers = useMemo(() => {

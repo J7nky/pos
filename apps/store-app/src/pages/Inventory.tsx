@@ -15,7 +15,8 @@ import RecentReceivesTable from '../components/inventory/RecentReceivesTable';
 import ProductTable from '../components/inventory/ProductTable';
 import { Product, Supplier, InventoryItem } from '../types/inventory';
 import { useI18n } from '../i18n';
-import { parseMultilingualString } from '../utils/multilingual';    
+import { parseMultilingualString } from '../utils/multilingual';
+import { normalizeNameForComparison } from '../utils/nameNormalization';    
 
 const Inventory: React.FC = () => {
   // Data from context
@@ -101,10 +102,9 @@ const Inventory: React.FC = () => {
   } = useInventoryModals();
 
 
-  // Recent receives
+  // Recent receives - sorted by date (newest first), no limit (pagination handled in table)
   const recentReceives = inventory
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 10);
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
 
   // Form handlers
@@ -207,7 +207,9 @@ const Inventory: React.FC = () => {
       return products;
     }
     
-    const searchLower = searchTerm.toLowerCase();
+    // Normalize search term for Arabic text (handles أ = ا normalization)
+    const normalizedSearchTerm = normalizeNameForComparison(searchTerm);
+    
     const filtered = products.filter(p => {
       const parsedName = parseMultilingualString(p.name);
       
@@ -222,7 +224,10 @@ const Inventory: React.FC = () => {
             parsedName.fr || ''
           ].filter(Boolean);
       
-      return allNames.some(name => name.toLowerCase().includes(searchLower));
+      return allNames.some(name => {
+        const normalizedName = normalizeNameForComparison(name);
+        return normalizedName.includes(normalizedSearchTerm);
+      });
     });
     
     console.log('📦 Inventory page: Filtered products:', filtered.length);

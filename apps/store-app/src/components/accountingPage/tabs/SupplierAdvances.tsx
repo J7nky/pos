@@ -14,6 +14,7 @@ import { Supplier, Transaction } from '../../../types';
 import SupplierFormModal from '../../common/SupplierFormModal';
 import { Pagination } from '../../../components/common/Pagination';
 import { getTranslatedString } from '../../../utils/multilingual';
+import { normalizeNameForComparison } from '../../../utils/nameNormalization';
 
 interface SupplierAdvancesProps {
   suppliers: Supplier[];
@@ -135,11 +136,12 @@ export default function SupplierAdvances({
 
     // Search filter
     if (searchTerm) {
-      const search = searchTerm.toLowerCase();
+      // Normalize search term for Arabic text (handles أ = ا normalization)
+      const normalizedSearchTerm = normalizeNameForComparison(searchTerm);
       filtered = filtered.filter(adv =>
-        adv.supplierName.toLowerCase().includes(search) ||
-        adv.description?.toLowerCase().includes(search) ||
-        adv.reference?.toLowerCase().includes(search)
+        normalizeNameForComparison(adv.supplierName).includes(normalizedSearchTerm) ||
+        normalizeNameForComparison(adv.description || '').includes(normalizedSearchTerm) ||
+        normalizeNameForComparison(adv.reference || '').includes(normalizedSearchTerm)
       );
     }
 

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useI18n } from "../../../i18n";
 import { getTranslatedString, parseMultilingualString } from "../../../utils/multilingual";
+import { normalizeNameForComparison } from "../../../utils/nameNormalization";
 import TransactionListItem from "../../common/TransactionListItem";
 import {
   RefreshCw,
@@ -428,13 +429,16 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
   // Enhanced filtered transactions with advanced filtering
   const filteredTransactions = useMemo(() => {
+    // Normalize search term for Arabic text (handles أ = ا normalization)
+    const normalizedSearchTerm = filters.searchTerm ? normalizeNameForComparison(filters.searchTerm) : '';
+    
     let filtered = transactions.filter((transaction) => {
       // Search filter - convert multilingual strings to strings for searching
       const categoryStr = getTranslatedString(parseMultilingualString(transaction.category as any), language as any);
       const descriptionStr = getTranslatedString(parseMultilingualString(transaction.description as any), language as any);
       const matchesSearch = !filters.searchTerm || 
-        categoryStr.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-        descriptionStr.toLowerCase().includes(filters.searchTerm.toLowerCase());
+        normalizeNameForComparison(categoryStr).includes(normalizedSearchTerm) ||
+        normalizeNameForComparison(descriptionStr).includes(normalizedSearchTerm);
       
       // Type filter
       const matchesType = !filters.type || transaction.type === filters.type;

@@ -32,6 +32,7 @@ import { accountingInitService } from '../services/accountingInitService';
 import { useProductMultilingual } from '../hooks/useMultilingual';
 import { parseMultilingualString } from '../utils/multilingual';
 import { getDB } from '../lib/db';
+import { normalizeNameForComparison } from '../utils/nameNormalization';
 
 
 interface BillTab {
@@ -613,23 +614,26 @@ ${dashSeparator}`;
   const filteredProducts = (products || []).filter(product => {
     if (getProductStock(product.id) === 0) return false;
 
-    const searchLower = searchTerm.toLowerCase();
+    // Normalize search term for Arabic text (handles أ = ا normalization)
+    const normalizedSearchTerm = normalizeNameForComparison(searchTerm);
 
     // Search by product name (multilingual)
     const productName = getProductName(product);
-    if (productName.toLowerCase().includes(searchLower)) {
+    const normalizedProductName = normalizeNameForComparison(productName);
+    if (normalizedProductName.includes(normalizedSearchTerm)) {
       return true;
     }
 
     // Search by supplier names for this product
     const productInventoryItems = getProductInventoryItems(product.id);
-    const hasMatchingSupplier = productInventoryItems.some(item => 
-      item.supplierName.toLowerCase().includes(searchLower)
-    );
+    const hasMatchingSupplier = productInventoryItems.some(item => {
+      const normalizedSupplierName = normalizeNameForComparison(item.supplierName);
+      return normalizedSupplierName.includes(normalizedSearchTerm);
+    });
 
     // Search by SKU/barcode for inventory items of this product
     const hasMatchingSku = productInventoryItems.some(item => 
-      item.sku && item.sku.toLowerCase().includes(searchLower)
+      item.sku && normalizeNameForComparison(item.sku).includes(normalizedSearchTerm)
     );
 
     return hasMatchingSupplier || hasMatchingSku;

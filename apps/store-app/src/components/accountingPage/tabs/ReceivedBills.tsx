@@ -19,6 +19,7 @@ import { ReceivedBillDetailsModal } from './receivedBills/ReceivedBillDetailsMod
 import { ReceivedBillSalesLogsModal } from './receivedBills/ReceivedBillSalesLogsModal';
 import { ReceivedBill } from './receivedBills/types';
 import { getLocalDateString } from '../../../utils/dateUtils';
+import { normalizeNameForComparison } from '../../../utils/nameNormalization';
 
 type ReceivedBillsProps = {
   inventory: any[];
@@ -384,11 +385,12 @@ export default function ReceivedBills({
       let filtered = getReceivedBills;
 
       if (receivedBillsSearchTerm) {
-        const searchLower = receivedBillsSearchTerm.toLowerCase();
+        // Normalize search term for Arabic text (handles أ = ا normalization)
+        const normalizedSearchTerm = normalizeNameForComparison(receivedBillsSearchTerm);
         filtered = filtered.filter(bill =>
-          bill.productName.toLowerCase().includes(searchLower) ||
-          bill.supplierName.toLowerCase().includes(searchLower) ||
-          bill.type.toLowerCase().includes(searchLower)
+          normalizeNameForComparison(bill.productName).includes(normalizedSearchTerm) ||
+          normalizeNameForComparison(bill.supplierName).includes(normalizedSearchTerm) ||
+          normalizeNameForComparison(bill.type).includes(normalizedSearchTerm)
         );
       }
       if (receivedBillsSupplierFilter) {

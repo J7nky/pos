@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useCurrency } from '../../../hooks/useCurrency';
 import { useI18n } from '../../../i18n';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
+import { useProductMultilingual } from '../../../hooks/useMultilingual';
 import { Pagination } from '../../common/Pagination';
 import { calculateBillTotals, BillWithTotals, addComputedTotals } from '../../../utils/billCalculations';
 import { 
@@ -32,7 +33,9 @@ import {
   History,
   CreditCard,
   Activity,
-
+  ChevronRight,
+  Package,
+  Info,
 } from 'lucide-react';
 
 interface Bill {
@@ -101,8 +104,11 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
   const raw = useOfflineData();
   const { formatCurrency } = useCurrency();
   const { t } = useI18n();
+  const { getProductName } = useProductMultilingual();
   const storeId = userProfile?.store_id;
   const [highlightedBillNumber, setHighlightedBillNumber] = useState<string | null>(null);
+  const [expandedBills, setExpandedBills] = useState<Set<string>>(new Set());
+  const [expandedLineItems, setExpandedLineItems] = useState<Set<string>>(new Set());
 
   // Check for bill to highlight from sessionStorage
   useEffect(() => {
@@ -145,6 +151,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
   const inventoryBills = raw.inventoryBills || [];
   const products = raw.products || [];
   const suppliers = raw.suppliers || [];
+  const employees = raw.employees || [];
 
   // Helper function to get customer name - memoized for performance
   const getCustomerName = useCallback((customerId: string | null): string => {
@@ -152,6 +159,13 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
     const customer = customers.find(c => c.id === customerId);
     return customer?.name || 'Walk-in Customer';
   }, [customers]);
+
+  // Helper function to get user name - memoized for performance
+  const getUserName = useCallback((userId: string | null | undefined): string => {
+    if (!userId) return t('soldBills.unknown');
+    const user = employees.find((u: any) => u.id === userId);
+    return user?.name || t('soldBills.unknown');
+  }, [employees, t]);
 
   // State
   const [bills, setBills] = useState<Bill[]>([]);
@@ -1008,23 +1022,51 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
     setLineItemEdits({});
   };
 
-  const handleDeleteBill = async (bill: Bill, softDelete: boolean = true) => {
+  const handleDeleteBill = async (bill: Bill) => {
     if (!userProfile?.id) return;
 
-    const confirmMessage = softDelete 
-      ? `Are you sure you want to cancel bill ${bill.bill_number}? This will mark it as cancelled but keep it in the system.`
-      : `Are you sure you want to permanently delete bill ${bill.bill_number}? This action cannot be undone.`;
+    // Prevent deleting already cancelled bills
+    if (bill.status === 'cancelled') {
+      showToast('Bill is already cancelled. Use reactivate to restore it.', 'error');
+      return;
+    }
+
+    const confirmMessage = `Are you sure you want to cancel bill ${bill.bill_number}? This will reverse all accounting effects including customer balance and cash drawer balance.`;
 
     if (!confirm(confirmMessage)) return;
 
     try {
-      await raw.deleteBill(bill.id, userProfile.id, softDelete ? 'Bill cancelled' : 'Bill permanently deleted', softDelete);
+      await raw.deleteBill(bill.id, userProfile.id, 'Bill cancelled', true);
 
-      showToast(`Bill ${softDelete ? 'cancelled' : 'deleted'} successfully`);
+      showToast('Bill cancelled successfully. All accounting effects have been reversed.');
       loadBills();
-    } catch (error) {
-      console.error('Error deleting bill:', error);
-      showToast('Failed to delete bill', 'error');
+    } catch (error: any) {
+      console.error('Error cancelling bill:', error);
+      showToast(error?.message || 'Failed to cancel bill', 'error');
+    }
+  };
+
+  const handleReactivateBill = async (bill: Bill) => {
+    if (!userProfile?.id) return;
+
+    // Only allow reactivating cancelled bills
+    if (bill.status !== 'cancelled') {
+      showToast('Only cancelled bills can be reactivated.', 'error');
+      return;
+    }
+
+    const confirmMessage = `Are you sure you want to reactivate bill ${bill.bill_number}? This will restore all accounting effects including customer balance and cash drawer balance.`;
+
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      await raw.reactivateBill(bill.id, userProfile.id, 'Bill reactivated');
+
+      showToast('Bill reactivated successfully. All accounting effects have been restored.');
+      loadBills();
+    } catch (error: any) {
+      console.error('Error reactivating bill:', error);
+      showToast(error?.message || 'Failed to reactivate bill', 'error');
     }
   };
 
@@ -1167,6 +1209,24 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
       default: return 'bg-gray-100 text-gray-800';
     }
   };
+
+  // Helper to get line items for a bill
+  const getBillLineItems = useCallback((billId: string) => {
+    return raw.billLineItems.filter(li => li.bill_id === billId);
+  }, [raw.billLineItems]);
+
+  // Toggle bill expansion
+  const toggleBillExpansion = useCallback((billId: string) => {
+    setExpandedBills(prev => {
+      const next = new Set(prev);
+      if (next.has(billId)) {
+        next.delete(billId);
+      } else {
+        next.add(billId);
+      }
+      return next;
+    });
+  }, []);
 
   // // Memoize expensive analytics calculations
   // const analytics = useMemo(() => {
@@ -1395,6 +1455,9 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                     {t('soldBills.customer')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
+                    {t('soldBills.items')}
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
                     {t('soldBills.amount')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">
@@ -1411,7 +1474,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
               <tbody className="bg-white divide-y divide-gray-200">
                 {bills.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                       <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p className="text-lg font-medium rtl:text-right">{t('soldBills.noBillsFound')}</p>
                       <p className="text-sm rtl:text-right">{t('soldBills.noBillsMessage')}</p>
@@ -1424,113 +1487,213 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                     const paginatedBills = sortedBills.slice(startIndex, startIndex + itemsPerPage);
                     return paginatedBills.map((bill) => {
                       const isHighlighted = highlightedBillNumber === bill.bill_number;
+                      const billLineItems = getBillLineItems(bill.id);
+                      const hasLineItems = billLineItems.length > 0;
+                      
                       return (
-                    <tr 
-                      key={bill.id} 
-                      id={`bill-${bill.bill_number}`}
-                      className={`hover:bg-gray-50 ${
-                        isHighlighted ? 'border-2 border-blue-400 shadow-xl bg-blue-50' : ''
-                      }`}
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="rtl:text-right">
-                          <div className="text-sm font-medium text-gray-900">{bill.bill_number}</div>
-                          <div className="text-sm text-gray-500">
-                            {new Date(bill.bill_date).toLocaleDateString()} at {new Date(bill.bill_date).toLocaleTimeString()}
-                          </div>
-                          <div className="text-xs text-gray-400">
-                            {t('soldBills.createdBy')} {bill.users?.name || t('soldBills.unknown')}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center rtl:space-x-reverse">
-                          <User className="w-4 h-4 text-gray-400 rtl:ml-2 ltr:mr-2" />
-                          <span className="text-sm text-gray-900 rtl:text-right">
-                            {getCustomerName(bill.entity_id)}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="rtl:text-right">
-                          <div className="text-sm font-medium text-gray-900">
-                            {formatCurrency(bill.total_amount)}
-                          </div>
-                          {bill.total_amount - bill.amount_paid > 0 && (
-                            <div className="text-xs text-red-600">
-                              {t('soldBills.due')}: {formatCurrency(bill.total_amount - bill.amount_paid)}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-2 rtl:space-x-reverse">
-                          <span className={`px-2 py-1 text-xs rounded-full ${getPaymentStatusColor(bill.payment_status)}`}>
-                            {t(`soldBills.${bill.payment_status}`)}
-                          </span>
-                          <div className="flex items-center text-xs text-gray-500 rtl:space-x-reverse">
-                            {bill.payment_method === 'cash' && <DollarSign className="w-3 h-3" />}
-                            {bill.payment_method === 'card' && <CreditCard className="w-3 h-3" />}
-                            {bill.payment_method === 'credit' && <Clock className="w-3 h-3" />}
-                            <span className="rtl:mr-1 ltr:ml-1 capitalize">{t(`soldBills.${bill.payment_method}`)}</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-2 rtl:space-x-reverse">
-                          <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(bill.status)}`}>
-                            {t(`soldBills.${bill.status}`)}
-                          </span>
-                          <div className="flex items-center space-x-1 rtl:space-x-reverse">
-                            {bill._synced ? (
-                              <CheckCircle className="w-3 h-3 text-green-500" />
-                            ) : (
-                              <Clock className="w-3 h-3 text-yellow-500" />
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex items-center space-x-2 rtl:space-x-reverse">
-                          <button
-                            onClick={() => handleViewBill(bill)}
-                            className="text-blue-600 hover:text-blue-900"
-                            title={t('soldBills.viewDetails')}
+                        <React.Fragment key={bill.id}>
+                          <tr
+                            id={`bill-${bill.bill_number}`}
+                            className={`hover:bg-gray-50 ${hasLineItems ? 'cursor-pointer' : ''} ${
+                              isHighlighted ? 'border-2 border-blue-400 shadow-xl bg-blue-50' : ''
+                            }`}
+                            onClick={() => hasLineItems && toggleBillExpansion(bill.id)}
                           >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          {(userProfile?.role === 'admin' || userProfile?.role === 'manager') && (
-                            <button
-                              onClick={() => handleEditBill(bill)}
-                              className="text-green-600 hover:text-green-900"
-                              title={t('soldBills.editBill')}
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center gap-2 rtl:space-x-reverse">
+                                {hasLineItems && (
+                                  <div className="p-1">
+                                    <ChevronRight className={`w-4 h-4 text-gray-500 transition-transform ${expandedBills.has(bill.id) ? 'rotate-90' : ''}`} />
+                                  </div>
+                                )}
+                                <div className="rtl:text-right flex-1">
+                                  <div className="text-sm font-medium text-gray-900">{bill.bill_number}</div>
+                                  <div className="text-sm text-gray-500">
+                                    {new Date(bill.bill_date).toLocaleDateString()} at {new Date(bill.bill_date).toLocaleTimeString()}
+                                  </div>
+                                  <div className="text-xs text-gray-400">
+                                    {t('soldBills.createdBy')} {getUserName(bill.created_by)}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center rtl:space-x-reverse">
+                                <User className="w-4 h-4 text-gray-400 rtl:ml-2 ltr:mr-2" />
+                                <span className="text-sm text-gray-900 rtl:text-right">
+                                  {getCustomerName(bill.entity_id)}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center gap-2 rtl:space-x-reverse">
+                                {hasLineItems ? (
+                                  <div className="flex items-center gap-1.5 rtl:flex-row-reverse">
+                                    <Package className="w-4 h-4 text-gray-400" />
+                                    <span className="text-sm font-medium text-gray-900 rtl:text-right">
+                                      {billLineItems.length} {billLineItems.length === 1 ? t('soldBills.item') : t('soldBills.items')}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-sm text-gray-400 rtl:text-right">—</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="rtl:text-right">
+                                <div className="text-sm font-medium text-gray-900">
+                                  {formatCurrency(bill.total_amount)}
+                                </div>
+                                {bill.total_amount - bill.amount_paid > 0 && (
+                                  <div className="text-xs text-red-600">
+                                    {t('soldBills.due')}: {formatCurrency(bill.total_amount - bill.amount_paid)}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center space-x-2 rtl:space-x-reverse">
+                                <span className={`px-2 py-1 text-xs rounded-full ${getPaymentStatusColor(bill.payment_status)}`}>
+                                  {t(`soldBills.${bill.payment_status}`)}
+                                </span>
+                                <div className="flex items-center text-xs text-gray-500 rtl:space-x-reverse">
+                                  {bill.payment_method === 'cash' && <DollarSign className="w-3 h-3" />}
+                                  {bill.payment_method === 'card' && <CreditCard className="w-3 h-3" />}
+                                  {bill.payment_method === 'credit' && <Clock className="w-3 h-3" />}
+                                  <span className="rtl:mr-1 ltr:ml-1 capitalize">{t(`soldBills.${bill.payment_method}`)}</span>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center space-x-2 rtl:space-x-reverse">
+                                <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(bill.status)}`}>
+                                  {t(`soldBills.${bill.status}`)}
+                                </span>
+                                <div className="flex items-center space-x-1 rtl:space-x-reverse">
+                                  {bill._synced ? (
+                                    <CheckCircle className="w-3 h-3 text-green-500" />
+                                  ) : (
+                                    <Clock className="w-3 h-3 text-yellow-500" />
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                              <div className="flex items-center space-x-2 rtl:space-x-reverse">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleViewBill(bill);
+                                  }}
+                                  className="text-blue-600 hover:text-blue-900"
+                                  title={t('soldBills.viewDetails')}
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                {(userProfile?.role === 'admin' || userProfile?.role === 'manager') && bill.status !== 'cancelled' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleEditBill(bill);
+                                    }}
+                                    className="text-green-600 hover:text-green-900"
+                                    title={t('soldBills.editBill')}
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {userProfile?.role === 'admin' && (
+                                  <>
+                                    {bill.status === 'cancelled' ? (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleReactivateBill(bill);
+                                        }}
+                                        className="text-green-600 hover:text-green-900"
+                                        title={t('soldBills.reactivateBill')}
+                                      >
+                                        <RefreshCw className="w-4 h-4" />
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeleteBill(bill);
+                                        }}
+                                        className="text-red-600 hover:text-red-900"
+                                        title={t('soldBills.cancelBill')}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await loadBillDetails(bill.id);
+                                    setShowAuditTrail(true);
+                                  }}
+                                  className="text-purple-600 hover:text-purple-900"
+                                  title={t('soldBills.viewAuditTrail')}
+                                >
+                                  <History className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          {/* Expandable Line Items Row */}
+                          {hasLineItems && expandedBills.has(bill.id) && (
+                            <tr className="bg-gray-50">
+                              <td colSpan={7} className="px-6 py-4">
+                                <div className="border rounded-lg overflow-hidden">
+                                  <div className="bg-gray-100 px-4 py-2 text-sm text-gray-700 flex items-center justify-between">
+                                    <div className="rtl:text-right">
+                                      {billLineItems.length} {billLineItems.length === 1 ? t('soldBills.item') || 'item' : t('soldBills.items')} {t('soldBills.inThisBill') || 'in this bill'}
+                                    </div>
+                                  </div>
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('soldBills.product')}</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('soldBills.supplier')}</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('soldBills.quantity')}</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('soldBills.price')}</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rtl:text-right">{t('soldBills.total')}</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {billLineItems.map((item) => {
+                                          const product = products.find(p => p.id === item.product_id);
+                                          const productName = product ? getProductName(product) : 'Unknown Product';
+                                          const supplierName = resolveSupplierName(item.inventory_item_id, inventoryItems, inventoryBills, suppliers);
+                                          
+                                          return (
+                                            <tr key={item.id}>
+                                              <td className="px-6 py-3 whitespace-nowrap text-sm font-medium rtl:text-right text-gray-900">{productName}</td>
+                                              <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600 rtl:text-right">{supplierName}</td>
+                                              <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900 rtl:text-right">
+                                                {item.quantity}
+                                                {item.weight && item.weight > 0 && (
+                                                  <span className="text-xs text-gray-500 ltr:ml-1 rtl:mr-1">({item.weight}kg)</span>
+                                                )}
+                                              </td>
+                                              <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900 rtl:text-right">{formatCurrency(item.unit_price)}</td>
+                                              <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900 rtl:text-right">{formatCurrency(item.line_total)}</td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
                           )}
-                          {userProfile?.role === 'admin' && (
-                            <button
-                              onClick={() => handleDeleteBill(bill)}
-                              className="text-red-600 hover:text-red-900"
-                              title={t('soldBills.cancelBill')}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button
-                            onClick={async () => {
-                              await loadBillDetails(bill.id);
-                              setShowAuditTrail(true);
-                            }}
-                            className="text-purple-600 hover:text-purple-900"
-                            title={t('soldBills.viewAuditTrail')}
-                          >
-                            <History className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    );
+                        </React.Fragment>
+                      );
                   })
                   })()
                 )}
@@ -1631,42 +1794,155 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                 </div>
               </div>
 
-              {/* Line Items */}
+              {/* Line Items - Enhanced */}
               <div>
-                <h3 className="text-lg font-medium text-gray-900 mb-4 rtl:text-right">{t('soldBills.lineItems')}</h3>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.product')}</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.supplier')}</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.quantity')}</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.price')}</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">{t('soldBills.total')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {billLineItems.map((item) => {
-                        const product = products.find(p => p.id === item.product_id);
-                        const inventoryItem = item.inventory_item_id ? inventoryItems.find(i => i.id === item.inventory_item_id) : null;
-                        const supplier = inventoryItem ? suppliers.find(s => s.id === inventoryItem.supplier_id) : null;
-                        
-                        return (
-                          <tr key={item.id}>
-                            <td className="px-4 py-3 text-sm text-gray-900">{product?.name || 'Unknown Product'}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{supplier?.name || 'Unknown Supplier'}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900">
-                              {item.quantity}
-                              {item.weight && <div className="text-xs text-gray-500">{item.weight}kg</div>}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900">{formatCurrency(item.unit_price)}</td>
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{formatCurrency(item.line_total)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900 rtl:text-right">
+                    {t('soldBills.lineItems')} ({billLineItems.length})
+                  </h3>
                 </div>
+                
+                {billLineItems.length === 0 ? (
+                  <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                    <Package className="w-12 h-12 mx-auto text-gray-300 mb-2" />
+                    <p className="text-sm text-gray-500 rtl:text-right">{t('soldBills.noLineItems')}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {billLineItems.map((item, index) => {
+                      const product = products.find(p => p.id === item.product_id);
+                      const productName = product ? getProductName(product) : 'Unknown Product';
+                      const supplierName = resolveSupplierName(item.inventory_item_id, inventoryItems, inventoryBills, suppliers);
+                      const isExpanded = expandedLineItems.has(item.id);
+                      const hasDetails = item.weight !== null || item.notes !== null;
+                      
+                      return (
+                        <div
+                          key={item.id}
+                          className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow"
+                        >
+                          {/* Main Row - Always Visible */}
+                          <div className="p-4">
+                            <div className="flex items-start justify-between rtl:flex-row-reverse">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-3 mb-2 rtl:flex-row-reverse">
+                                  <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                    <span className="text-xs font-semibold text-blue-700">{index + 1}</span>
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <h4 className="text-sm font-semibold text-gray-900 truncate rtl:text-right">
+                                      {productName}
+                                    </h4>
+                                    <p className="text-xs text-gray-500 mt-0.5 rtl:text-right">
+                                      {supplierName}
+                                    </p>
+                                  </div>
+                                </div>
+                                
+                                {/* Quick Info Grid */}
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 rtl:text-right">
+                                  <div className="bg-gray-50 rounded-md p-2">
+                                    <div className="text-xs text-gray-500 mb-1">{t('soldBills.quantity')}</div>
+                                    <div className="text-sm font-medium text-gray-900">
+                                      {item.quantity}
+                                      {item.weight && item.weight > 0 && (
+                                        <span className="text-xs text-gray-500 ltr:ml-1 rtl:mr-1">
+                                          ({item.weight}kg)
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="bg-gray-50 rounded-md p-2">
+                                    <div className="text-xs text-gray-500 mb-1">{t('soldBills.price')}</div>
+                                    <div className="text-sm font-medium text-gray-900">{formatCurrency(item.unit_price)}</div>
+                                  </div>
+                                  <div className="bg-gray-50 rounded-md p-2">
+                                    <div className="text-xs text-gray-500 mb-1">{t('soldBills.total')}</div>
+                                    <div className="text-sm font-semibold text-blue-600">{formatCurrency(item.line_total)}</div>
+                                  </div>
+                                  <div className="bg-gray-50 rounded-md p-2">
+                                    <div className="text-xs text-gray-500 mb-1">{t('soldBills.lineOrder') || 'Order'}</div>
+                                    <div className="text-sm font-medium text-gray-900">#{item.line_order}</div>
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              {/* Expand/Collapse Button */}
+                              {hasDetails && (
+                                <button
+                                  onClick={() => {
+                                    setExpandedLineItems(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(item.id)) {
+                                        next.delete(item.id);
+                                      } else {
+                                        next.add(item.id);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className="flex-shrink-0 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors rtl:mr-2 ltr:ml-2"
+                                  title={isExpanded ? t('soldBills.hideDetails') || 'Hide Details' : t('soldBills.showDetails') || 'Show Details'}
+                                >
+                                  <ChevronRight className={`w-5 h-5 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Expanded Details */}
+                          {isExpanded && hasDetails && (
+                            <div className="border-t border-gray-200 bg-gray-50 p-4">
+                              <div className="space-y-3">
+                                {item.weight !== null && item.weight > 0 && (
+                                  <div className="flex items-start gap-2 rtl:flex-row-reverse">
+                                    <Package className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                    <div className="flex-1">
+                                      <div className="text-xs font-medium text-gray-500 mb-1 rtl:text-right">
+                                        {t('soldBills.weight')}
+                                      </div>
+                                      <div className="text-sm text-gray-900 rtl:text-right">
+                                        {item.weight} kg
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                {item.notes && (
+                                  <div className="flex items-start gap-2 rtl:flex-row-reverse">
+                                    <Info className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                    <div className="flex-1">
+                                      <div className="text-xs font-medium text-gray-500 mb-1 rtl:text-right">
+                                        {t('soldBills.notes')}
+                                      </div>
+                                      <div className="text-sm text-gray-700 bg-white rounded-md p-2 border border-gray-200 rtl:text-right">
+                                        {item.notes}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                {/* Additional Metadata */}
+                                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-200">
+                                  <div>
+                                    <div className="text-xs text-gray-500 mb-1 rtl:text-right">Product ID</div>
+                                    <div className="text-xs font-mono text-gray-600 rtl:text-right">{item.product_id.slice(0, 8)}...</div>
+                                  </div>
+                                  {item.inventory_item_id && (
+                                    <div>
+                                      <div className="text-xs text-gray-500 mb-1 rtl:text-right">Inventory Item</div>
+                                      <div className="text-xs font-mono text-gray-600 rtl:text-right">{item.inventory_item_id.slice(0, 8)}...</div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Notes */}
@@ -1919,8 +2195,9 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
 
                           const { isEditable, batchStatus } = getInventoryContextForLineItem(item);
                           
-                          // Resolve product name
-                          const product = products.find(p => p.id === item.product_id);
+                          // Resolve product name for display
+                          const currentProduct = products.find(p => p.id === item.product_id);
+                          const productName = currentProduct ? getProductName(currentProduct) : 'Unknown Product';
 
                           return (
                             <tr key={item.id} className="align-top">
@@ -1932,10 +2209,11 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                                   }}
                                   disabled={!isEditable || isEditing}
                                   className="w-full border border-gray-300 rounded-lg px-2 py-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
+                                  title={productName}
                                 >
                                   {raw.products.map(product => (
                                     <option key={product.id} value={product.id}>
-                                      {product.name}
+                                      {getProductName(product)}
                                     </option>
                                   ))}
                                 </select>
