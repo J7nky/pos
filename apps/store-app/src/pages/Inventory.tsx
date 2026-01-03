@@ -103,7 +103,19 @@ const Inventory: React.FC = () => {
 
 
   // Recent receives - sorted by date (newest first), no limit (pagination handled in table)
+  // Filter out items from closed bills
   const recentReceives = inventory
+    .filter((item) => {
+      // If item has a batch_id, check if the bill is closed
+      if (item.batch_id) {
+        const batch = batchMap.get(item.batch_id);
+        // Exclude items from closed bills
+        if (batch?.status === 'CLOSED' || batch?.closed_at) {
+          return false;
+        }
+      }
+      return true;
+    })
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
 

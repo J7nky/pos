@@ -1036,7 +1036,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
     if (!confirm(confirmMessage)) return;
 
     try {
-      await raw.deleteBill(bill.id, userProfile.id, 'Bill cancelled', true);
+      await raw.deleteBill(bill.id, userProfile.id, 'Bill cancelled');
 
       showToast('Bill cancelled successfully. All accounting effects have been reversed.');
       loadBills();

@@ -171,7 +171,7 @@ interface OfflineDataContextType {
   // Bill management operations
   createBill: (billData: any, lineItems: any[], customerBalanceUpdate?: { customerId: string; amountDue: number; originalBalance: number }) => Promise<string>;
   updateBill: (billId: string, updates: any, changedBy: string, changeReason?: string) => Promise<void>;
-  deleteBill: (billId: string, deletedBy: string, deleteReason?: string, softDelete?: boolean) => Promise<void>;
+  deleteBill: (billId: string, deletedBy: string, deleteReason?: string) => Promise<void>;
   reactivateBill: (billId: string, reactivatedBy: string, reactivationReason?: string) => Promise<void>;
   getBills: (filters?: any) => Promise<any[]>;
   getBillDetails: (billId: string) => Promise<any | null>;
@@ -2926,7 +2926,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     debouncedSync();
   };
 
-  const deleteBill = async (billId: string, deletedBy: string, deleteReason?: string, softDelete = true): Promise<void> => {
+  const deleteBill = async (billId: string, deletedBy: string, deleteReason?: string): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
 
     const now = new Date().toISOString();
@@ -2944,28 +2944,59 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
 
     // Find transactions related to this bill
-    // Transactions use reference field with bill_number
-    const billTransactions = await getDB().transactions
+    // IMPORTANT: Only find ORIGINAL transactions, not reversal or restoration transactions
+    // Exclude: transactions with is_reversal=true, transactions with REVERSAL- prefix
+    const allBillTransactions = await getDB().transactions
       .where('store_id')
       .equals(storeId)
-      .filter(t => 
-        (t.reference === bill.bill_number || 
+      .filter(t => {
+        const matchesReference = t.reference === bill.bill_number || 
          t.reference === `BILL-${bill.bill_number}` ||
-         (bill.bill_number.startsWith('BILL-') && t.reference === bill.bill_number.replace('BILL-', ''))) &&
-        !t._deleted
-      )
+         (bill.bill_number.startsWith('BILL-') && t.reference === bill.bill_number.replace('BILL-', ''));
+        const isNotReversal = !t.is_reversal && !t.reference?.startsWith('REVERSAL-');
+        const notDeleted = !t._deleted;
+        return Boolean(matchesReference && isNotReversal && notDeleted);
+      })
       .toArray();
+
+    // Filter out restoration transactions (they have "Reactivation:" in their journal entries)
+    // Only keep transactions that are ORIGINAL (created before the bill was cancelled)
+    const billTransactions: any[] = [];
+    for (const transaction of allBillTransactions) {
+      // Check if this transaction's journal entries are all reactivations
+      const entries = await getDB().journal_entries
+        .where('transaction_id')
+        .equals(transaction.id)
+        .and(e => e.is_posted === true)
+        .toArray();
+      
+      // If all entries are reactivations, this is a restoration transaction - skip it
+      const allAreReactivations = entries.length > 0 && entries.every(e => 
+        e.description?.includes('Reactivation:')
+      );
+      
+      if (!allAreReactivations) {
+        billTransactions.push(transaction);
+      }
+    }
 
     // Collect all transaction IDs
     const transactionIds = billTransactions.map(t => t.id);
     
-    // Find all journal entries for these transactions
+    // Find all journal entries for these ORIGINAL transactions only
+    // Exclude entries that are already reversals (have "Reversal:" in description)
+    // Exclude entries that are reactivations (have "Reactivation:" in description)
     const journalEntries: any[] = [];
     for (const transactionId of transactionIds) {
       const entries = await getDB().journal_entries
         .where('transaction_id')
         .equals(transactionId)
-        .and(e => e.is_posted === true && !e._deleted)
+        .and(e => {
+          // Only include entries that are NOT reversals or reactivations
+          const isNotReversal = !e.description?.includes('Reversal:');
+          const isNotReactivation = !e.description?.includes('Reactivation:');
+          return e.is_posted === true && isNotReversal && isNotReactivation;
+        })
         .toArray();
       journalEntries.push(...entries);
     }
@@ -2980,22 +3011,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       getDB().transactions,
       getDB().inventory_items
     ], async () => {
-      // Always soft delete - set status to cancelled
+      // Always soft delete - set status to cancelled (don't set _deleted to allow reactivation)
       await getDB().bills.update(billId, {
         status: 'cancelled',
-        _deleted: true,
         updated_at: now,
         last_modified_by: deletedBy,
         _synced: false
       });
 
-      // Also soft delete line items
-      for (const item of lineItems) {
-        await getDB().bill_line_items.update(item.id, {
-          _deleted: true,
-          _synced: false
-        });
-      }
+      // Don't soft delete line items - keep them visible for cancelled bills
+      // Line items are kept so the bill can be fully restored on reactivation
 
       // ==================== REVERSE JOURNAL ENTRIES ====================
       // Create reversal entries for each original journal entry
@@ -3006,6 +3031,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const reversalEntries: any[] = [];
       for (const entry of journalEntries) {
         // Create reversal entry by swapping debit/credit
+        // Include bill number in description for reactivation to find these entries
+        const originalDesc = entry.description || 'Bill cancellation';
+        const reversalDescription = `Reversal: ${originalDesc} - Bill ${bill.bill_number}`;
+        
         const reversalEntry = {
           id: createId(),
           store_id: entry.store_id,
@@ -3019,7 +3048,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           credit_usd: entry.debit_usd, // Swap: original debit becomes credit
           debit_lbp: entry.credit_lbp,
           credit_lbp: entry.debit_lbp,
-          description: `Reversal: ${entry.description || 'Bill cancellation'}`,
+          description: reversalDescription,
           posted_date: postedDate,
           fiscal_period: fiscalPeriod,
           is_posted: true,
@@ -3032,7 +3061,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       if (reversalEntries.length > 0) {
         await getDB().journal_entries.bulkAdd(reversalEntries);
-        console.log(`🔄 Created ${reversalEntries.length} reversal journal entries for bill ${bill.bill_number}`);
+        console.log(`🔄 Created ${reversalEntries.length} reversal journal entries for bill ${bill.bill_number}:`,reversalEntries);
       }
 
       // ==================== REVERSE CASH DRAWER IMPACT ====================
@@ -3044,8 +3073,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             t.category === TRANSACTION_CATEGORIES.CASH_DRAWER_SALE
           );
 
-          if (cashTransaction) {
+          if (cashTransaction && cashTransaction.id) {
             // Create reversal transaction for cash drawer
+            // When is_reversal is true, reversal_of_transaction_id must be set (not null)
             const reversalTransaction: Transaction = {
               id: createId(),
               store_id: storeId,
@@ -3064,7 +3094,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               _synced: false,
               _deleted: false,
               is_reversal: true,
-              reversal_of_transaction_id: cashTransaction.id,
+              reversal_of_transaction_id: cashTransaction.id, // Required when is_reversal is true
               metadata: {
                 correlationId: createId(),
                 source: 'offline',
@@ -3154,10 +3184,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       { table: 'bill_audit_logs', id: auditLogId }
     ];
     
-    // Restore bill and line items
-    undoSteps.push({ op: 'update', table: 'bills', id: billId, changes: { status: bill.status, _deleted: false, _synced: false } });
+    // Restore bill status
+    undoSteps.push({ op: 'update', table: 'bills', id: billId, changes: { status: bill.status, _synced: false } });
     for (const item of lineItems) {
-      undoSteps.push({ op: 'update', table: 'bill_line_items', id: item.id, changes: { _deleted: false, _synced: false } });
       affectedRecords.push({ table: 'bill_line_items', id: item.id });
     }
     
@@ -3190,30 +3219,52 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
 
-    // Find reversal transactions for this bill
-    const reversalTransactions = await getDB().transactions
+    // Find ALL reversal transactions for this bill (not just one)
+    // There can be multiple: one for general journal entries, one for cash drawer
+    const allReversalTransactions = await getDB().transactions
       .where('store_id')
       .equals(storeId)
-      .filter(t => 
-        (t.reference === `REVERSAL-${bill.bill_number}` ||
-         t.reference?.includes(`REVERSAL-${bill.bill_number}`) ||
-         t.reference?.includes(bill.bill_number)) &&
-        t.is_reversal === true &&
-        !t._deleted
-      )
+      .filter(t => {
+        const matchesReference = t.reference === `REVERSAL-${bill.bill_number}` ||
+         (t.reference ? t.reference.includes(`REVERSAL-${bill.bill_number}`) : false);
+        const isReversal = t.is_reversal === true;
+        const notDeleted = !t._deleted;
+        return Boolean(matchesReference && isReversal && notDeleted);
+      })
       .toArray();
+    
+    // Get the most recent set of reversal transactions (grouped by created_at)
+    // Sort by created_at descending to get the most recent cancellation
+    const sortedReversals = allReversalTransactions.sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    
+    // Get the timestamp of the most recent reversal
+    const mostRecentTimestamp = sortedReversals.length > 0 
+      ? sortedReversals[0].created_at 
+      : null;
+    
+    // Get all reversal transactions from the most recent cancellation
+    const mostRecentReversalTransactions = mostRecentTimestamp
+      ? sortedReversals.filter(t => t.created_at === mostRecentTimestamp)
+      : [];
 
-    // Find reversal journal entries (entries with "Reversal:" in description)
-    const reversalJournalEntries = await getDB().journal_entries
-      .where('store_id')
-      .equals(storeId)
-      .filter(e => 
-        e.description?.includes(`Reversal:`) &&
-        e.description?.includes(bill.bill_number) &&
-        e.is_posted === true &&
-        !e._deleted
-      )
-      .toArray();
+    // Find reversal journal entries from ALL most recent reversal transactions
+    // This includes both general reversal entries and cash drawer reversal entries
+    const reversalJournalEntries: any[] = [];
+    for (const reversalTransaction of mostRecentReversalTransactions) {
+      const entries = await getDB().journal_entries
+        .where('transaction_id')
+        .equals(reversalTransaction.id)
+        .and(e => e.is_posted === true)
+        .toArray();
+      reversalJournalEntries.push(...entries);
+    }
+    
+    // Also find the most recent reversal transaction for cash drawer operations
+    const reversalTransaction = mostRecentReversalTransactions.length > 0
+      ? mostRecentReversalTransactions[0]
+      : null;
 
     // Pure offline-first approach - reactivate in local database only
     await getDB().transaction('rw', [
@@ -3227,19 +3278,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Change status from cancelled to active
       await getDB().bills.update(billId, {
         status: 'active',
-        _deleted: false,
         updated_at: now,
         last_modified_by: reactivatedBy,
         _synced: false
       });
 
-      // Restore line items
-      for (const item of lineItems) {
-        await getDB().bill_line_items.update(item.id, {
-          _deleted: false,
-          _synced: false
-        });
-      }
+      // Line items don't need to be restored - they were never soft deleted
 
       // ==================== RESTORE JOURNAL ENTRIES ====================
       // Create counter-reversal entries (restore original entries)
@@ -3276,7 +3320,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       if (counterReversalEntries.length > 0) {
         await getDB().journal_entries.bulkAdd(counterReversalEntries);
-        console.log(`🔄 Created ${counterReversalEntries.length} counter-reversal journal entries for bill ${bill.bill_number}`);
+        console.log(`🔄 Created ${counterReversalEntries.length} counter-reversal journal entries for bill ${bill.bill_number}`,counterReversalEntries);
       }
 
       // ==================== RESTORE CASH DRAWER IMPACT ====================
@@ -3284,12 +3328,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if ((bill.payment_method === 'cash' || bill.payment_method === 'card') && bill.amount_paid > 0) {
         try {
           // Find reversal transaction for cash drawer
-          const cashReversalTransaction = reversalTransactions.find(t => 
-            t.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE
-          );
+          const cashReversalTransaction = reversalTransaction && 
+            reversalTransaction.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE
+              ? reversalTransaction
+              : null;
 
           if (cashReversalTransaction) {
             // Create restoration transaction for cash drawer
+            // This is NOT a reversal transaction - it's a restoration, so reversal_of_transaction_id must be null
             const restorationTransaction: Transaction = {
               id: createId(),
               store_id: storeId,
@@ -3308,7 +3354,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               _synced: false,
               _deleted: false,
               is_reversal: false,
-              reversal_of_transaction_id: cashReversalTransaction.id,
+              reversal_of_transaction_id: null, // Must be null when is_reversal is false
               metadata: {
                 correlationId: createId(),
                 source: 'offline',
@@ -3319,6 +3365,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             await getDB().transactions.add(restorationTransaction);
 
             // Create restoration journal entries for cash drawer (account_code 1100)
+            // Use the reversal journal entries we already found (linked to the reversal transaction)
             const cashReversalEntries = reversalJournalEntries.filter(e => e.account_code === '1100');
             for (const entry of cashReversalEntries) {
               const cashRestorationEntry = {
@@ -3400,7 +3447,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return [];
 
     // Pure offline-first approach - read only from local database
-    let query = getDB().bills.where('store_id').equals(storeId).filter(bill => !bill._deleted);
+    // Show all bills including cancelled ones (they can be reactivated)
+    // Only filter out truly deleted bills (if _deleted is set, though we don't use it for bills anymore)
+    let query = getDB().bills.where('store_id').equals(storeId).filter(bill => !bill._deleted || bill._deleted === undefined);
 
     // Apply filters that can be done at the query level
     if (filters) {
