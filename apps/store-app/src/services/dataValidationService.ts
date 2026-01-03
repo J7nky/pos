@@ -606,7 +606,8 @@ export class DataValidationService {
       delete cleanRecord.discount_amount;
       delete cleanRecord.inventoryItemId;
       delete cleanRecord.due_date;
-      delete cleanRecord.status;
+      // Keep status field - it's needed for soft delete (cancelled bills)
+      // delete cleanRecord.status;
       delete cleanRecord.last_modified_by;
       
       // Remove any line item fields from bills

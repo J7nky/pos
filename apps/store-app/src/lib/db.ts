@@ -3472,7 +3472,7 @@ class POSDatabase extends Dexie {
     let bills = await this.bills
       .where('store_id')
       .equals(storeId)
-      .filter(bill => !bill._deleted)
+      .filter(bill => !bill._deleted || bill._deleted === undefined)
       .toArray();
     
     // Apply filters
