@@ -1022,51 +1022,23 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
     setLineItemEdits({});
   };
 
-  const handleDeleteBill = async (bill: Bill) => {
+  const handleDeleteBill = async (bill: Bill, softDelete: boolean = true) => {
     if (!userProfile?.id) return;
 
-    // Prevent deleting already cancelled bills
-    if (bill.status === 'cancelled') {
-      showToast('Bill is already cancelled. Use reactivate to restore it.', 'error');
-      return;
-    }
-
-    const confirmMessage = `Are you sure you want to cancel bill ${bill.bill_number}? This will reverse all accounting effects including customer balance and cash drawer balance.`;
+    const confirmMessage = softDelete 
+      ? `Are you sure you want to cancel bill ${bill.bill_number}? This will mark it as cancelled but keep it in the system.`
+      : `Are you sure you want to permanently delete bill ${bill.bill_number}? This action cannot be undone.`;
 
     if (!confirm(confirmMessage)) return;
 
     try {
-      await raw.deleteBill(bill.id, userProfile.id, 'Bill cancelled', true);
+      await raw.deleteBill(bill.id, userProfile.id, softDelete ? 'Bill cancelled' : 'Bill permanently deleted', softDelete);
 
-      showToast('Bill cancelled successfully. All accounting effects have been reversed.');
+      showToast(`Bill ${softDelete ? 'cancelled' : 'deleted'} successfully`);
       loadBills();
-    } catch (error: any) {
-      console.error('Error cancelling bill:', error);
-      showToast(error?.message || 'Failed to cancel bill', 'error');
-    }
-  };
-
-  const handleReactivateBill = async (bill: Bill) => {
-    if (!userProfile?.id) return;
-
-    // Only allow reactivating cancelled bills
-    if (bill.status !== 'cancelled') {
-      showToast('Only cancelled bills can be reactivated.', 'error');
-      return;
-    }
-
-    const confirmMessage = `Are you sure you want to reactivate bill ${bill.bill_number}? This will restore all accounting effects including customer balance and cash drawer balance.`;
-
-    if (!confirm(confirmMessage)) return;
-
-    try {
-      await raw.reactivateBill(bill.id, userProfile.id, 'Bill reactivated');
-
-      showToast('Bill reactivated successfully. All accounting effects have been restored.');
-      loadBills();
-    } catch (error: any) {
-      console.error('Error reactivating bill:', error);
-      showToast(error?.message || 'Failed to reactivate bill', 'error');
+    } catch (error) {
+      console.error('Error deleting bill:', error);
+      showToast('Failed to delete bill', 'error');
     }
   };
 
@@ -1590,7 +1562,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                                 >
                                   <Eye className="w-4 h-4" />
                                 </button>
-                                {(userProfile?.role === 'admin' || userProfile?.role === 'manager') && bill.status !== 'cancelled' && (
+                                {(userProfile?.role === 'admin' || userProfile?.role === 'manager') && (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -1603,31 +1575,16 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                                   </button>
                                 )}
                                 {userProfile?.role === 'admin' && (
-                                  <>
-                                    {bill.status === 'cancelled' ? (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleReactivateBill(bill);
-                                        }}
-                                        className="text-green-600 hover:text-green-900"
-                                        title={t('soldBills.reactivateBill')}
-                                      >
-                                        <RefreshCw className="w-4 h-4" />
-                                      </button>
-                                    ) : (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleDeleteBill(bill);
-                                        }}
-                                        className="text-red-600 hover:text-red-900"
-                                        title={t('soldBills.cancelBill')}
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
-                                    )}
-                                  </>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteBill(bill);
+                                    }}
+                                    className="text-red-600 hover:text-red-900"
+                                    title={t('soldBills.cancelBill')}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
                                 )}
                                 <button
                                   onClick={async (e) => {

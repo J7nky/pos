@@ -999,10 +999,7 @@ const ar = {
     reason: 'السبب',
     old: 'قديم',
     new: 'جديد',
-    noAuditTrailAvailable: 'لا يوجد سجل تدقيق متاح لهذه الفاتورة',
-    reactivateBill: 'إعادة تفعيل الفاتورة',
-    reactivateBillConfirm: 'هل أنت متأكد من إعادة تفعيل الفاتورة {{billNumber}}؟ سيتم استعادة جميع التأثيرات المحاسبية.',
-    billReactivated: 'تم إعادة تفعيل الفاتورة بنجاح'
+    noAuditTrailAvailable: 'لا يوجد سجل تدقيق متاح لهذه الفاتورة'
   },
   receivedBills: {
     credit: 'دين',

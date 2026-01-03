@@ -865,10 +865,7 @@ const en = {
     reason: 'Reason',
     old: 'Old',
     new: 'New',
-    noAuditTrailAvailable: 'No audit trail available for this bill',
-    reactivateBill: 'Reactivate Bill',
-    reactivateBillConfirm: 'Are you sure you want to reactivate bill {{billNumber}}? This will restore all accounting effects.',
-    billReactivated: 'Bill reactivated successfully'
+    noAuditTrailAvailable: 'No audit trail available for this bill'
   },
   receivedBills: {
     credit: 'Credit',
