@@ -100,9 +100,11 @@ export class ReceivedBillMonitoringService {
         .equals(storeId)
         .toArray();
 
-      const suppliers = await getDB().suppliers
+      // Suppliers migrated to entities table
+      const suppliers = await getDB().entities
         .where('store_id')
         .equals(storeId)
+        .and((e: any) => e.entity_type === 'supplier' && !e._deleted)
         .toArray();
 
       // Get all sales (bill line items)

@@ -688,6 +688,8 @@ export interface Database {
           created_at: string;
           supplier_id: string | null;
           customer_id: string | null;
+          employee_id?: string | null;
+          entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
           is_reversal: boolean;
           reversal_of_transaction_id?: string | null;
         };
@@ -704,6 +706,8 @@ export interface Database {
           created_at?: string;
           supplier_id?: string | null;
           customer_id?: string | null;
+          employee_id?: string | null;
+          entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
           is_reversal?: boolean;
           reversal_of_transaction_id?: string | null;
         };
@@ -714,6 +718,8 @@ export interface Database {
           reference?: string | null;
           supplier_id?: string | null;
           customer_id?: string | null;
+          employee_id?: string | null;
+          entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
           is_reversal?: boolean;
           reversal_of_transaction_id?: string | null;
         };
@@ -899,6 +905,9 @@ export interface Database {
           created_at: string;
           created_by: string;
           _synced: boolean;
+          bill_id?: string | null;
+          reversal_of_journal_entry_id?: string | null;
+          entry_type?: 'original' | 'reversal' | 'reactivation';
         };
         Insert: {
           id?: string;
@@ -920,6 +929,9 @@ export interface Database {
           created_at?: string;
           created_by?: string;
           _synced?: boolean;
+          bill_id?: string | null;
+          reversal_of_journal_entry_id?: string | null;
+          entry_type?: 'original' | 'reversal' | 'reactivation';
         };
         Update: {
           id?: string;
@@ -941,6 +953,9 @@ export interface Database {
           updated_at?: string;
           created_by?: string;
           _synced?: boolean;
+          bill_id?: string | null;
+          reversal_of_journal_entry_id?: string | null;
+          entry_type?: 'original' | 'reversal' | 'reactivation';
         };
       };
       balance_snapshots: {

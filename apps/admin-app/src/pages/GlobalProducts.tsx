@@ -51,14 +51,31 @@ export default function GlobalProducts() {
       if (error) throw error;
 
       // Transform database products to Product type
-      const transformedProducts: Product[] = (data || []).map((p) => ({
-        id: p.id,
-        name: p.name as MultilingualString,
-        category: p.category,
-        image: p.image || '',
-        is_global: p.is_global,
-        createdAt: p.created_at,
-      }));
+      const transformedProducts: Product[] = (data || []).map((p) => {
+        // Parse name if it's a JSON string, otherwise use as-is
+        let name: MultilingualString;
+        if (typeof p.name === 'string') {
+          try {
+            name = JSON.parse(p.name);
+          } catch {
+            // If parsing fails, treat as plain string
+            name = { en: p.name };
+          }
+        } else if (typeof p.name === 'object' && p.name !== null) {
+          name = p.name as MultilingualString;
+        } else {
+          name = { en: String(p.name || '') };
+        }
+        
+        return {
+          id: p.id,
+          name,
+          category: p.category,
+          image: p.image || '',
+          is_global: p.is_global,
+          createdAt: p.created_at,
+        };
+      });
 
       setProducts(transformedProducts);
     } catch (error) {
@@ -73,7 +90,24 @@ export default function GlobalProducts() {
     if (product) {
       setEditingProduct(product);
       // Extract multilingual name values
-      const nameObj = typeof product.name === 'object' ? product.name : { en: product.name };
+      let nameObj: MultilingualString | Record<string, string>;
+      
+      if (typeof product.name === 'string') {
+        // Try to parse if it's a JSON string
+        try {
+          nameObj = JSON.parse(product.name);
+        } catch {
+          // If parsing fails, treat as plain string
+          nameObj = { en: product.name };
+        }
+      } else if (typeof product.name === 'object' && product.name !== null) {
+        // Already an object
+        nameObj = product.name;
+      } else {
+        // Fallback
+        nameObj = { en: String(product.name || '') };
+      }
+      
       setFormData({
         nameEn: nameObj.en || '',
         nameAr: nameObj.ar || '',

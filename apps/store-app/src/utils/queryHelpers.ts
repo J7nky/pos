@@ -143,8 +143,9 @@ export class QueryHelpers {
       query = this.byStoreBranch(table, params.storeId, params.branchId);
     } else if (params.storeId) {
       query = this.byStore(table, params.storeId);
-    } else if (params.entityType && params.entityId) {
-      query = this.byEntity(table, params.entityType, params.entityId);
+    } else if (params.entityId) {
+      // Use entity_id (unified field) - prefer entity_id index
+      query = table.where('entity_id').equals(params.entityId);
     } else {
       query = table.toCollection();
     }

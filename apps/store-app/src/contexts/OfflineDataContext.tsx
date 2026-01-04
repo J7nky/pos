@@ -885,8 +885,33 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               console.log('⚠️ Admin: Stored branch preference was invalid, cleared');
             }
           }
-          // No valid stored preference - admin needs to select branch
-          // DO NOT call ensureDefaultBranch - let them choose
+          
+          // No valid stored preference - check if branches are being synced
+          // If sync is complete, try to auto-select default branch
+          if (branchSyncStatus.isComplete && !branchSyncStatus.isSyncing) {
+            // Branches have been synced, try to get default branch
+            console.log('🔄 Admin: Branch sync complete, attempting to auto-select default branch...');
+            try {
+              const branchId = await ensureDefaultBranch(storeId);
+              if (branchId) {
+                setCurrentBranchId(branchId);
+                console.log('✅ Admin: Auto-selected default branch after sync:', branchId);
+                return;
+              }
+            } catch (error) {
+              console.warn('⚠️ Admin: Failed to auto-select default branch:', error);
+            }
+          }
+          
+          // If sync is still in progress, wait for it to complete
+          // The useEffect will re-run when branchSyncStatus changes
+          if (branchSyncStatus.isSyncing) {
+            console.log('⏳ Admin: Waiting for branch sync to complete...');
+            return;
+          }
+          
+          // No valid stored preference and sync is complete but no branch found
+          // Admin needs to select branch manually
           console.log('⏳ Admin: Waiting for branch selection via BranchSelectionScreen');
           return;
         }
@@ -937,7 +962,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
     
     initializeBranch();
-  }, [storeId, currentBranchId, userProfile]);
+  }, [storeId, currentBranchId, userProfile, branchSyncStatus]);
 
   // Helper functions defined before they're used
   const refreshCashDrawerStatus = useCallback(async () => {
@@ -1933,8 +1958,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currency,
       description: multilingualDescription,
       reference,
+      entity_id: supplierId || null, // Unified field
       customer_id: null,
-      supplier_id: supplierId || null,
+      supplier_id: supplierId || null, // Legacy field - keep for backward compatibility
       employee_id: null,
       created_at: timestamp,
       created_by: userProfile.id,
@@ -2065,8 +2091,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currency,
       description: multilingualDescription,
       reference,
+      entity_id: supplierId || null, // Unified field
       customer_id: null,
-      supplier_id: supplierId || null,
+      supplier_id: supplierId || null, // Legacy field - keep for backward compatibility
       employee_id: null,
       created_at: timestamp,
       created_by: userProfile.id,
@@ -2189,7 +2216,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currency,
       description: multilingualDescription,
       reference,
-      customer_id: customerId || null,
+      entity_id: customerId || null, // Unified field
+      customer_id: customerId || null, // Legacy field - keep for backward compatibility
       supplier_id: null,
       employee_id: null,
       created_at: timestamp,
@@ -2552,6 +2580,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           currency: currency as 'USD' | 'LBP', // Use store's currency
           description: creditSaleDescription,
           reference:bill.bill_number, // ✅ Ensure reference includes BILL- prefix for consistency
+          // Set entity_id (unified field)
+          entity_id: customerBalanceUpdate.customerId,
+          // Keep legacy fields for backward compatibility during migration
           customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
           supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
           employee_id: entityType === 'employee' ? customerBalanceUpdate.customerId : null,
@@ -2614,7 +2645,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           is_posted: true,
           created_by: currentUserId,
           created_at: now,
-          _synced: false
+          _synced: false,
+          bill_id: billId, // Direct link to bill
+          entry_type: 'original' as const // Explicit type
         };
         
         const creditEntry = {
@@ -2636,7 +2669,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           is_posted: true,
           created_by: currentUserId,
           created_at: now,
-          _synced: false
+          _synced: false,
+          bill_id: billId, // Direct link to bill
+          entry_type: 'original' as const // Explicit type
         };
         
         console.log('💳 [CREDIT_SALE] Adding journal entries:', {
@@ -2674,6 +2709,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
           cashDrawerTransactionId = cashDrawerResult.transactionId;
           debug(`✅ Cash drawer transaction created atomically: ${cashDrawerTransactionId}`);
+
+          // Update cash drawer journal entries with bill_id and entry_type
+          const cashJournalEntries = await getDB().journal_entries
+            .where('transaction_id')
+            .equals(cashDrawerTransactionId)
+            .toArray();
+          
+          for (const entry of cashJournalEntries) {
+            await getDB().journal_entries.update(entry.id, {
+              bill_id: billId,
+              entry_type: 'original'
+            });
+          }
         } catch (error) {
           console.error('❌ Error creating cash drawer transaction:', error);
           // Re-throw to trigger transaction rollback
@@ -2933,11 +2981,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Get bill and line items for undo and audit trail
     const bill = await getDB().bills.get(billId);
+    if (!bill) throw new Error('Bill not found');
+    
     const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
 
     // Find transactions related to this bill
     // IMPORTANT: Only find ORIGINAL transactions, not reversal or restoration transactions
-    // Exclude: transactions with is_reversal=true, transactions with REVERSAL- prefix
+    // Use explicit is_reversal field instead of string parsing
     const allBillTransactions = await getDB().transactions
       .where('store_id')
       .equals(storeId)
@@ -2945,53 +2995,50 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const matchesReference = t.reference === bill.bill_number || 
          t.reference === `BILL-${bill.bill_number}` ||
          (bill.bill_number.startsWith('BILL-') && t.reference === bill.bill_number.replace('BILL-', ''));
-        const isNotReversal = !t.is_reversal && !t.reference?.startsWith('REVERSAL-');
+        const isNotReversal = !t.is_reversal; // Use explicit field instead of reference parsing
         const notDeleted = !t._deleted;
         return Boolean(matchesReference && isNotReversal && notDeleted);
       })
       .toArray();
 
-    // Filter out restoration transactions (they have "Reactivation:" in their journal entries)
-    // Only keep transactions that are ORIGINAL (created before the bill was cancelled)
-    const billTransactions: any[] = [];
-    for (const transaction of allBillTransactions) {
-      // Check if this transaction's journal entries are all reactivations
-      const entries = await getDB().journal_entries
-        .where('transaction_id')
-        .equals(transaction.id)
-        .and(e => e.is_posted === true)
-        .toArray();
-      
-      // If all entries are reactivations, this is a restoration transaction - skip it
-      const allAreReactivations = entries.length > 0 && entries.every(e => 
-        e.description?.includes('Reactivation:')
-      );
-      
-      if (!allAreReactivations) {
-        billTransactions.push(transaction);
+    // Collect all transaction IDs for batch query
+    const transactionIds = allBillTransactions.map(t => t.id);
+    
+    // Batch fetch all journal entries for these transactions at once
+    // Use explicit entry_type field instead of description parsing
+    const allJournalEntries = transactionIds.length > 0
+      ? await getDB().journal_entries
+          .where('transaction_id')
+          .anyOf(transactionIds)
+          .and(e => {
+            // Use explicit entry_type field - only include original entries
+            const isOriginal = !e.entry_type || e.entry_type === 'original';
+            return e.is_posted === true && isOriginal;
+          })
+          .toArray()
+      : [];
+
+    // Filter out transactions whose journal entries are all reactivations
+    // Group entries by transaction_id in memory
+    const entriesByTransaction = new Map<string, any[]>();
+    for (const entry of allJournalEntries) {
+      if (!entriesByTransaction.has(entry.transaction_id)) {
+        entriesByTransaction.set(entry.transaction_id, []);
       }
+      entriesByTransaction.get(entry.transaction_id)!.push(entry);
     }
 
-    // Collect all transaction IDs
-    const transactionIds = billTransactions.map(t => t.id);
-    
-    // Find all journal entries for these ORIGINAL transactions only
-    // Exclude entries that are already reversals (have "Reversal:" in description)
-    // Exclude entries that are reactivations (have "Reactivation:" in description)
-    const journalEntries: any[] = [];
-    for (const transactionId of transactionIds) {
-      const entries = await getDB().journal_entries
-        .where('transaction_id')
-        .equals(transactionId)
-        .and(e => {
-          // Only include entries that are NOT reversals or reactivations
-          const isNotReversal = !e.description?.includes('Reversal:');
-          const isNotReactivation = !e.description?.includes('Reactivation:');
-          return e.is_posted === true && isNotReversal && isNotReactivation;
-        })
-        .toArray();
-      journalEntries.push(...entries);
-    }
+    // Only keep transactions that have at least one original entry
+    const billTransactions = allBillTransactions.filter(t => {
+      const entries = entriesByTransaction.get(t.id) || [];
+      // If all entries are reactivations, skip this transaction
+      return entries.length > 0 && entries.some(e => !e.entry_type || e.entry_type === 'original');
+    });
+
+    // Get journal entries for the filtered transactions
+    const journalEntries = allJournalEntries.filter(e => 
+      billTransactions.some(t => t.id === e.transaction_id)
+    );
 
     // Pure offline-first approach - delete from local database only
     // Include journal_entries and transactions in transaction scope
@@ -3020,40 +3067,51 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const postedDate = getLocalDateString(now);
       const fiscalPeriod = getFiscalPeriodForDate(now).period;
       
-      const reversalEntries: any[] = [];
-      for (const entry of journalEntries) {
-        // Create reversal entry by swapping debit/credit
-        // Include bill number in description for reactivation to find these entries
-        const originalDesc = entry.description || 'Bill cancellation';
-        const reversalDescription = `Reversal: ${originalDesc} - Bill ${bill.bill_number}`;
-        
-        const reversalEntry = {
-          id: createId(),
-          store_id: entry.store_id,
-          branch_id: entry.branch_id,
-          transaction_id: reversalTransactionId,
-          account_code: entry.account_code,
-          account_name: entry.account_name,
-          entity_id: entry.entity_id,
-          entity_type: entry.entity_type,
-          debit_usd: entry.credit_usd, // Swap: original credit becomes debit
-          credit_usd: entry.debit_usd, // Swap: original debit becomes credit
-          debit_lbp: entry.credit_lbp,
-          credit_lbp: entry.debit_lbp,
-          description: reversalDescription,
-          posted_date: postedDate,
-          fiscal_period: fiscalPeriod,
-          is_posted: true,
-          created_by: deletedBy,
-          created_at: now,
-          _synced: false
-        };
-        reversalEntries.push(reversalEntry);
-      }
+      // Helper function to create reversal journal entries
+      const createReversalJournalEntries = (entries: any[], transactionId: string, includeCashDrawer: boolean = true): any[] => {
+        const reversalEntries: any[] = [];
+        for (const entry of entries) {
+          // Skip cash drawer entries if not including them (they'll be handled separately)
+          if (!includeCashDrawer && entry.account_code === '1100') {
+            continue;
+          }
+          
+          const reversalEntry = {
+            id: createId(),
+            store_id: entry.store_id,
+            branch_id: entry.branch_id,
+            transaction_id: transactionId,
+            account_code: entry.account_code,
+            account_name: entry.account_name,
+            entity_id: entry.entity_id,
+            entity_type: entry.entity_type,
+            debit_usd: entry.credit_usd, // Swap: original credit becomes debit
+            credit_usd: entry.debit_usd, // Swap: original debit becomes credit
+            debit_lbp: entry.credit_lbp,
+            credit_lbp: entry.debit_lbp,
+            description: `Bill cancellation - ${bill.bill_number}`, // No "Reversal:" prefix needed
+            posted_date: postedDate,
+            fiscal_period: fiscalPeriod,
+            is_posted: true,
+            created_by: deletedBy,
+            created_at: now,
+            _synced: false,
+            bill_id: billId, // Direct link to bill
+            entry_type: 'reversal' as const, // Explicit type
+            reversal_of_journal_entry_id: entry.id // Link to original entry
+          };
+          reversalEntries.push(reversalEntry);
+        }
+        return reversalEntries;
+      };
+
+      // Create reversal entries for all journal entries (excluding cash drawer if handled separately)
+      const nonCashEntries = journalEntries.filter(e => e.account_code !== '1100');
+      const reversalEntries = createReversalJournalEntries(nonCashEntries, reversalTransactionId, false);
 
       if (reversalEntries.length > 0) {
         await getDB().journal_entries.bulkAdd(reversalEntries);
-        console.log(`🔄 Created ${reversalEntries.length} reversal journal entries for bill ${bill.bill_number}:`,reversalEntries);
+        console.log(`🔄 Created ${reversalEntries.length} reversal journal entries for bill ${bill.bill_number}`);
       }
 
       // ==================== REVERSE CASH DRAWER IMPACT ====================
@@ -3068,8 +3126,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           if (cashTransaction && cashTransaction.id) {
             // Create reversal transaction for cash drawer
             // When is_reversal is true, reversal_of_transaction_id must be set (not null)
+            const cashReversalTransactionId = createId();
             const reversalTransaction: Transaction = {
-              id: createId(),
+              id: cashReversalTransactionId,
               store_id: storeId,
               branch_id: currentBranchId || '',
               type: 'expense',
@@ -3077,7 +3136,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               amount: bill.amount_paid,
               currency: 'LBP', // TODO: Get actual currency from bill
               description: createMultilingualFromString(`Bill cancellation refund - ${bill.bill_number}`),
-              reference: `REVERSAL-${bill.bill_number}`,
+              reference: bill.bill_number, // Use bill number instead of REVERSAL- prefix
+              entity_id: cashTransaction.entity_id || cashTransaction.customer_id || null, // Use entity_id from original transaction
               customer_id: null,
               supplier_id: null,
               employee_id: null,
@@ -3098,29 +3158,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
             // Create reversal journal entries for cash drawer (account_code 1100)
             const cashJournalEntries = journalEntries.filter(e => e.account_code === '1100');
-            for (const entry of cashJournalEntries) {
-              const cashReversalEntry = {
-                id: createId(),
-                store_id: entry.store_id,
-                branch_id: entry.branch_id,
-                transaction_id: reversalTransaction.id,
-                account_code: entry.account_code,
-                account_name: entry.account_name,
-                entity_id: entry.entity_id,
-                entity_type: entry.entity_type,
-                debit_usd: entry.credit_usd,
-                credit_usd: entry.debit_usd,
-                debit_lbp: entry.credit_lbp,
-                credit_lbp: entry.debit_lbp,
-                description: `Reversal: Cash drawer refund - Bill ${bill.bill_number}`,
-                posted_date: postedDate,
-                fiscal_period: fiscalPeriod,
-                is_posted: true,
-                created_by: deletedBy,
-                created_at: now,
-                _synced: false
-              };
-              await getDB().journal_entries.add(cashReversalEntry);
+            const cashReversalEntries = createReversalJournalEntries(cashJournalEntries, cashReversalTransactionId, true);
+            
+            if (cashReversalEntries.length > 0) {
+              await getDB().journal_entries.bulkAdd(cashReversalEntries);
             }
 
             console.log(`💰 Created cash drawer reversal for bill ${bill.bill_number}`);
@@ -3147,7 +3188,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // ==================== CREATE AUDIT LOG ====================
       // Create ONE audit log with descriptive reason
-      const deleteAction = softDelete ? 'cancelled' : 'permanently deleted';
+      // Always soft delete (set status to cancelled) to allow reactivation
+      const deleteAction = 'cancelled';
       const generatedReason = bill 
         ? `Deleting bill #${bill.bill_number} (${deleteAction})` 
         : `Deleting bill (${deleteAction})`;
@@ -3159,7 +3201,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         action: 'deleted' as const,
         field_changed: 'status',
         old_value: bill?.status || 'active',
-        new_value: softDelete ? 'cancelled' : 'deleted',
+        new_value: 'cancelled',
         change_reason: deleteReason || generatedReason,
         changed_by: deletedBy,
         ip_address: null,
@@ -3215,52 +3257,44 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
 
-    // Find ALL reversal transactions for this bill (not just one)
-    // There can be multiple: one for general journal entries, one for cash drawer
-    const allReversalTransactions = await getDB().transactions
+    // Find original transactions for this bill (deterministic approach)
+    // Use explicit is_reversal field instead of reference string parsing
+    const originalTransactions = await getDB().transactions
       .where('store_id')
       .equals(storeId)
       .filter(t => {
-        const matchesReference = t.reference === `REVERSAL-${bill.bill_number}` ||
-         (t.reference ? t.reference.includes(`REVERSAL-${bill.bill_number}`) : false);
-        const isReversal = t.is_reversal === true;
-        const notDeleted = !t._deleted;
-        return Boolean(matchesReference && isReversal && notDeleted);
+        const matchesBill = t.reference === bill.bill_number || 
+                          t.reference === `BILL-${bill.bill_number}` ||
+                          (bill.bill_number.startsWith('BILL-') && t.reference === bill.bill_number.replace('BILL-', ''));
+        return matchesBill && !t.is_reversal && !t._deleted;
       })
       .toArray();
     
-    // Get the most recent set of reversal transactions (grouped by created_at)
-    // Sort by created_at descending to get the most recent cancellation
-    const sortedReversals = allReversalTransactions.sort((a, b) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-    
-    // Get the timestamp of the most recent reversal
-    const mostRecentTimestamp = sortedReversals.length > 0 
-      ? sortedReversals[0].created_at 
-      : null;
-    
-    // Get all reversal transactions from the most recent cancellation
-    const mostRecentReversalTransactions = mostRecentTimestamp
-      ? sortedReversals.filter(t => t.created_at === mostRecentTimestamp)
+    // Find all reversal transactions for these original transactions
+    // Use reversal_of_transaction_id for deterministic linking (replaces time-based grouping)
+    const originalTransactionIds = originalTransactions.map(t => t.id);
+    const reversalTransactions = originalTransactionIds.length > 0
+      ? await getDB().transactions
+          .where('reversal_of_transaction_id')
+          .anyOf(originalTransactionIds)
+          .and(t => !t._deleted)
+          .toArray()
       : [];
 
-    // Find reversal journal entries from ALL most recent reversal transactions
-    // This includes both general reversal entries and cash drawer reversal entries
-    const reversalJournalEntries: any[] = [];
-    for (const reversalTransaction of mostRecentReversalTransactions) {
-      const entries = await getDB().journal_entries
-        .where('transaction_id')
-        .equals(reversalTransaction.id)
-        .and(e => e.is_posted === true)
-        .toArray();
-      reversalJournalEntries.push(...entries);
-    }
+    // Batch fetch all reversal journal entries at once
+    const reversalTransactionIds = reversalTransactions.map(t => t.id);
+    const reversalJournalEntries = reversalTransactionIds.length > 0
+      ? await getDB().journal_entries
+          .where('transaction_id')
+          .anyOf(reversalTransactionIds)
+          .and(e => e.is_posted === true && e.entry_type === 'reversal')
+          .toArray()
+      : [];
     
-    // Also find the most recent reversal transaction for cash drawer operations
-    const reversalTransaction = mostRecentReversalTransactions.length > 0
-      ? mostRecentReversalTransactions[0]
-      : null;
+    // Find cash drawer reversal transaction (if exists)
+    const cashReversalTransaction = reversalTransactions.find(t => 
+      t.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE
+    ) || null;
 
     // Pure offline-first approach - reactivate in local database only
     await getDB().transaction('rw', [
@@ -3287,53 +3321,63 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const postedDate = getLocalDateString(now);
       const fiscalPeriod = getFiscalPeriodForDate(now).period;
       
-      const counterReversalEntries: any[] = [];
-      for (const reversalEntry of reversalJournalEntries) {
-        // Create counter-reversal entry by swapping debit/credit back
-        const counterReversalEntry = {
-          id: createId(),
-          store_id: reversalEntry.store_id,
-          branch_id: reversalEntry.branch_id,
-          transaction_id: reactivationTransactionId,
-          account_code: reversalEntry.account_code,
-          account_name: reversalEntry.account_name,
-          entity_id: reversalEntry.entity_id,
-          entity_type: reversalEntry.entity_type,
-          debit_usd: reversalEntry.credit_usd, // Swap back: reversal credit becomes original debit
-          credit_usd: reversalEntry.debit_usd, // Swap back: reversal debit becomes original credit
-          debit_lbp: reversalEntry.credit_lbp,
-          credit_lbp: reversalEntry.debit_lbp,
-          description: reversalEntry.description?.replace('Reversal: ', 'Reactivation: ') || `Reactivation: Bill ${bill.bill_number}`,
-          posted_date: postedDate,
-          fiscal_period: fiscalPeriod,
-          is_posted: true,
-          created_by: reactivatedBy,
-          created_at: now,
-          _synced: false
-        };
-        counterReversalEntries.push(counterReversalEntry);
-      }
+      // Helper function to create reactivation journal entries
+      const createReactivationJournalEntries = (entries: any[], transactionId: string, includeCashDrawer: boolean = true): any[] => {
+        const reactivationEntries: any[] = [];
+        for (const reversalEntry of entries) {
+          // Skip cash drawer entries if not including them (they'll be handled separately)
+          if (!includeCashDrawer && reversalEntry.account_code === '1100') {
+            continue;
+          }
+          
+          const reactivationEntry = {
+            id: createId(),
+            store_id: reversalEntry.store_id,
+            branch_id: reversalEntry.branch_id,
+            transaction_id: transactionId,
+            account_code: reversalEntry.account_code,
+            account_name: reversalEntry.account_name,
+            entity_id: reversalEntry.entity_id,
+            entity_type: reversalEntry.entity_type,
+            debit_usd: reversalEntry.credit_usd, // Swap back: reversal credit becomes original debit
+            credit_usd: reversalEntry.debit_usd, // Swap back: reversal debit becomes original credit
+            debit_lbp: reversalEntry.credit_lbp,
+            credit_lbp: reversalEntry.debit_lbp,
+            description: `Bill reactivation - ${bill.bill_number}`, // No "Reactivation:" prefix needed
+            posted_date: postedDate,
+            fiscal_period: fiscalPeriod,
+            is_posted: true,
+            created_by: reactivatedBy,
+            created_at: now,
+            _synced: false,
+            bill_id: billId, // Direct link to bill
+            entry_type: 'reactivation' as const, // Explicit type
+            reversal_of_journal_entry_id: reversalEntry.id // Link to reversal entry
+          };
+          reactivationEntries.push(reactivationEntry);
+        }
+        return reactivationEntries;
+      };
 
-      if (counterReversalEntries.length > 0) {
-        await getDB().journal_entries.bulkAdd(counterReversalEntries);
-        console.log(`🔄 Created ${counterReversalEntries.length} counter-reversal journal entries for bill ${bill.bill_number}`,counterReversalEntries);
+      // Create reactivation entries for all journal entries (excluding cash drawer if handled separately)
+      const nonCashReversalEntries = reversalJournalEntries.filter(e => e.account_code !== '1100');
+      const reactivationEntries = createReactivationJournalEntries(nonCashReversalEntries, reactivationTransactionId, false);
+
+      if (reactivationEntries.length > 0) {
+        await getDB().journal_entries.bulkAdd(reactivationEntries);
+        console.log(`🔄 Created ${reactivationEntries.length} reactivation journal entries for bill ${bill.bill_number}`);
       }
 
       // ==================== RESTORE CASH DRAWER IMPACT ====================
       // For cash/card payments, restore the cash drawer transaction
       if ((bill.payment_method === 'cash' || bill.payment_method === 'card') && bill.amount_paid > 0) {
         try {
-          // Find reversal transaction for cash drawer
-          const cashReversalTransaction = reversalTransaction && 
-            reversalTransaction.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE
-              ? reversalTransaction
-              : null;
-
           if (cashReversalTransaction) {
             // Create restoration transaction for cash drawer
             // This is NOT a reversal transaction - it's a restoration, so reversal_of_transaction_id must be null
+            const cashRestorationTransactionId = createId();
             const restorationTransaction: Transaction = {
-              id: createId(),
+              id: cashRestorationTransactionId,
               store_id: storeId,
               branch_id: currentBranchId || '',
               type: 'income',
@@ -3342,6 +3386,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               currency: 'LBP', // TODO: Get actual currency from bill
               description: createMultilingualFromString(`Bill reactivation - ${bill.bill_number}`),
               reference: bill.bill_number,
+              entity_id: cashReversalTransaction.entity_id || cashReversalTransaction.customer_id || null, // Use entity_id from reversal transaction
               customer_id: null,
               supplier_id: null,
               employee_id: null,
@@ -3361,31 +3406,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             await getDB().transactions.add(restorationTransaction);
 
             // Create restoration journal entries for cash drawer (account_code 1100)
-            // Use the reversal journal entries we already found (linked to the reversal transaction)
             const cashReversalEntries = reversalJournalEntries.filter(e => e.account_code === '1100');
-            for (const entry of cashReversalEntries) {
-              const cashRestorationEntry = {
-                id: createId(),
-                store_id: entry.store_id,
-                branch_id: entry.branch_id,
-                transaction_id: restorationTransaction.id,
-                account_code: entry.account_code,
-                account_name: entry.account_name,
-                entity_id: entry.entity_id,
-                entity_type: entry.entity_type,
-                debit_usd: entry.credit_usd, // Swap back
-                credit_usd: entry.debit_usd,
-                debit_lbp: entry.credit_lbp,
-                credit_lbp: entry.debit_lbp,
-                description: `Reactivation: Cash drawer restoration - Bill ${bill.bill_number}`,
-                posted_date: postedDate,
-                fiscal_period: fiscalPeriod,
-                is_posted: true,
-                created_by: reactivatedBy,
-                created_at: now,
-                _synced: false
-              };
-              await getDB().journal_entries.add(cashRestorationEntry);
+            const cashReactivationEntries = createReactivationJournalEntries(cashReversalEntries, cashRestorationTransactionId, true);
+            
+            if (cashReactivationEntries.length > 0) {
+              await getDB().journal_entries.bulkAdd(cashReactivationEntries);
             }
 
             console.log(`💰 Created cash drawer restoration for bill ${bill.bill_number}`);
@@ -5005,9 +5030,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               currency: currency as 'USD' | 'LBP', // Use store's currency
               description: `Credit sale - Bill ${bill.bill_number} (${entityType}) - Item priced`,
               reference: `BILL-${bill.bill_number}`, // ✅ Ensure reference includes BILL- prefix for consistency
-              customer_id: entityType === 'customer' ? bill.entity_id : null,
-              supplier_id: entityType === 'supplier' ? bill.entity_id : null,
-              employee_id: entityType === 'employee' ? bill.entity_id : null,
+              entity_id: bill.entity_id, // Unified field
+              customer_id: entityType === 'customer' ? bill.entity_id : null, // Legacy field
+              supplier_id: entityType === 'supplier' ? bill.entity_id : null, // Legacy field
+              employee_id: entityType === 'employee' ? bill.entity_id : null, // Legacy field
               created_at: now,
               created_by: currentUserId,
               _synced: false,
@@ -5220,11 +5246,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!isValidCategory) {
       // Fallback: use direct DB write for unknown categories (backward compatibility)
       console.warn(`⚠️ Unknown transaction category: ${transactionData.category}. Using direct DB write.`);
+      // Determine entity_id from transactionData (prefer entity_id, fall back to legacy fields)
+      const entityId = (transactionData as any).entity_id || transactionData.customer_id || transactionData.supplier_id || transactionData.employee_id || null;
+      
       const transaction: Transaction = {
         ...transactionData,
         id: transactionId,
-        customer_id: transactionData.customer_id ?? null,
-        supplier_id: transactionData.supplier_id ?? null,
+        entity_id: entityId, // Unified field
+        customer_id: transactionData.customer_id ?? null, // Legacy field
+        supplier_id: transactionData.supplier_id ?? null, // Legacy field
+        employee_id: (transactionData as any).employee_id ?? null, // Legacy field
         store_id: storeId,
         branch_id: currentBranchId || '',
 
@@ -5885,7 +5916,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             amount: numAmount,
             currency,
             description: transactionDescription,
-            customerId: entityId,
+            entityId: entityId, // Unified field
+            customerId: entityId, // Legacy field - keep for backward compatibility
             reference: reference || generatePaymentReference(),
             context,
             updateBalances: true,   // ✅ Increases AR (customer owes us more/we owe them more)
@@ -5918,7 +5950,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             amount: numAmount,
             currency,
             description: transactionDescription,
-            supplierId: entityId,
+            entityId: entityId, // Unified field
+            supplierId: entityId, // Legacy field - keep for backward compatibility
             reference: reference || generatePaymentReference(),
             context,
             updateBalances: true,   // ✅ Increases AP (we owe supplier more)
@@ -6145,9 +6178,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             currency: currency,
             description: transactionDescription,
             reference: reference || generatePaymentReference(),
+            entity_id: employeeId, // Unified field
             customer_id: null,
             supplier_id: null,
-            employee_id: employeeId,
+            employee_id: employeeId, // Legacy field - keep for backward compatibility
             created_by: createdBy,
             branch_id: currentBranchId || '',
             is_reversal: false,
@@ -6332,8 +6366,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           currency: currency,
           description: transactionDescription,
           reference: generateAdvanceReference(),
+          entity_id: supplierId, // Unified field
           customer_id: null,
-          supplier_id: supplierId,
+          supplier_id: supplierId, // Legacy field - keep for backward compatibility
           employee_id: null,
           created_at: now,
           created_by: userProfile?.id || '',

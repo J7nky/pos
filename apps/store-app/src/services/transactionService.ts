@@ -57,9 +57,10 @@ export interface CreateTransactionParams {
   
   // Optional fields
   reference?: string;
-  customerId?: string | null;
-  supplierId?: string | null;
-  employeeId?: string | null;
+  customerId?: string | null; // Legacy - use entityId instead
+  supplierId?: string | null; // Legacy - use entityId instead
+  employeeId?: string | null; // Legacy - use entityId instead
+  entityId?: string | null; // Unified field for customer/supplier/employee
   metadata?: Record<string, any>;
   is_reversal?: boolean;
   reversal_of_transaction_id?: string | null;
@@ -95,9 +96,10 @@ export interface Transaction {
   currency: 'USD' | 'LBP';
   description: string;
   reference: string | null;
-  customer_id: string | null;
-  supplier_id: string | null;
-  employee_id?: string | null;
+  customer_id: string | null; // Legacy field - use entity_id instead
+  supplier_id: string | null; // Legacy field - use entity_id instead
+  employee_id?: string | null; // Legacy field - use entity_id instead
+  entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
   created_at: string;
   updated_at?: string;
   created_by: string;
@@ -105,6 +107,8 @@ export interface Transaction {
   _deleted?: boolean;
   _lastSyncedAt?: string;
   metadata?: Record<string, any>;
+  is_reversal?: boolean;
+  reversal_of_transaction_id?: string | null;
 }
 
 // ============================================================================
@@ -229,11 +233,14 @@ export class TransactionService {
       // Generate reference if not provided
       const reference = params.reference || this.generateReferenceForCategory(params.category);
 
+      // Determine entity_id from params (prefer entityId, fall back to legacy fields)
+      const entityId = params.entityId || params.customerId || params.supplierId || params.employeeId || null;
+      
       // 3. GET BALANCE BEFORE (outside transaction - read-only)
       const balanceBefore = await this.getEntityBalance(
-        params.customerId,
-        params.supplierId,
-        params.employeeId,
+        params.entityId ? null : params.customerId,
+        params.entityId ? null : params.supplierId,
+        params.entityId ? null : params.employeeId,
         params.currency
       );
       // 4. PREPARE TRANSACTION RECORD
@@ -247,6 +254,9 @@ export class TransactionService {
         currency: params.currency,
         description: params.description,
         reference,
+        // Set entity_id (unified field)
+        entity_id: entityId,
+        // Keep legacy fields for backward compatibility during migration
         customer_id: params.customerId || null,
         supplier_id: params.supplierId || null,
         employee_id: params.employeeId || null,
@@ -1082,18 +1092,30 @@ export class TransactionService {
 
   /**
    * Get transactions by entity
+   * Uses entity_id (unified field) with fallback to legacy fields for backward compatibility
    */
   public async getTransactionsByEntity(
     entityId: string,
     entityType: 'customer' | 'supplier' | 'employee'
   ): Promise<Transaction[]> {
     try {
-      const fieldName = `${entityType}_id`;
-      const transactions = await getDB().transactions
-        .where(fieldName)
+      // Prefer entity_id index, but fall back to legacy fields for backward compatibility
+      // Try entity_id first (unified field)
+      let transactions = await getDB().transactions
+        .where('entity_id')
         .equals(entityId)
         .and(t => !t._deleted)
         .toArray();
+      
+      // If no results with entity_id, fall back to legacy field
+      if (transactions.length === 0) {
+        const fieldName = `${entityType}_id`;
+        transactions = await getDB().transactions
+          .where(fieldName)
+          .equals(entityId)
+          .and(t => !t._deleted)
+          .toArray();
+      }
 
       return transactions.sort((a, b) => 
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()

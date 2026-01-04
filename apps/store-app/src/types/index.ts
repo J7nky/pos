@@ -492,9 +492,10 @@ export interface Transaction {
   created_by: string;
   created_at: string;
   updated_at?: string;
-  supplier_id: string | null;
-  customer_id: string | null;
-  employee_id?: string | null;
+  supplier_id: string | null; // Legacy field - use entity_id instead
+  customer_id: string | null; // Legacy field - use entity_id instead
+  employee_id?: string | null; // Legacy field - use entity_id instead
+  entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
   metadata?: Record<string, any>;
   _synced: boolean;
   _lastSyncedAt?: string;

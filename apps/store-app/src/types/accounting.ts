@@ -27,6 +27,10 @@ export interface JournalEntry {
   created_at: string;
   created_by: string | null;  // User ID (UUID) - null for system-generated
   _synced: boolean;
+  // New fields for reversal/reactivation tracking (replaces string parsing)
+  bill_id?: string | null;        // Direct link to bill - enables fast queries
+  reversal_of_journal_entry_id?: string | null;  // Links reversal entry to original entry
+  entry_type?: 'original' | 'reversal' | 'reactivation';  // Explicit type instead of parsing description
 }
 
 /**

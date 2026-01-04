@@ -63,10 +63,13 @@ export class PaymentService {
       }
     }
 
-    // Apply entity ID filter
+    // Apply entity ID filter - use entity_id (unified field) with fallback to legacy fields
     if (filter.entityId) {
       filteredTransactions = filteredTransactions.filter(t => 
-        t.customer_id === filter.entityId || t.supplier_id === filter.entityId
+        t.entity_id === filter.entityId || 
+        t.customer_id === filter.entityId || 
+        t.supplier_id === filter.entityId ||
+        t.employee_id === filter.entityId
       );
     }
 

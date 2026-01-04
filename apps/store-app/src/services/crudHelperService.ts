@@ -353,8 +353,13 @@ export class CRUDHelperService {
     const operations = [
       // Store-level data (no branch filtering)
       () => this.getEntitiesByStore('products', storeId),
-      () => this.getEntitiesByStore('suppliers', storeId), // Legacy - will be empty after migration
-      () => this.getEntitiesByStore('customers', storeId), // Legacy - will be empty after migration
+      // Suppliers and customers migrated to entities table - query entities instead
+      () => this.getEntitiesByStore('entities', storeId).then(entities => 
+        entities.filter((e: any) => e.entity_type === 'supplier')
+      ),
+      () => this.getEntitiesByStore('entities', storeId).then(entities => 
+        entities.filter((e: any) => e.entity_type === 'customer')
+      ),
       () => this.getEntitiesByStore('users', storeId),
       () => this.getEntitiesByStore('chart_of_accounts', storeId),
       
