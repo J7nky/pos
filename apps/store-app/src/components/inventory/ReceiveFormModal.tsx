@@ -472,46 +472,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         ? Number(form.plastic_count || 0) * Number(form.plastic_price || 0)
         : undefined;
 
-      // Validate cash drawer balance for cash purchases BEFORE submitting
-      if (form.type === 'cash' && raw.storeId && raw.currentBranchId) {
-        const purchaseData = {
-          supplier_id: 'trade',
-          type: 'cash' as const,
-          currency: batchCurrency,
-          items: items.map(item => ({
-            product_id: item.product_id,
-            quantity: item.quantity,
-            unit: item.unit,
-            weight: item.weight,
-            price: item.price,
-            selling_price: item.selling_price,
-          })),
-          porterage_fee: form.porterage_fee ? parseFloat(form.porterage_fee) : undefined,
-          transfer_fee: form.transfer_fee ? parseFloat(form.transfer_fee) : undefined,
-          plastic_fee: plasticFee,
-          created_by: userProfile?.id || '',
-          store_id: raw.storeId,
-          branch_id: raw.currentBranchId,
-        };
-
-        const balanceValidation = await inventoryPurchaseService.validateCashDrawerBalance(purchaseData);
-        
-        if (!balanceValidation.isValid) {
-          // Use translation with balance parameters if available
-          if (balanceValidation.formattedBalance && balanceValidation.formattedAmount) {
-            setErrors({ 
-              form: t('inventory.insufficientCashDrawerBalance', { 
-                currentBalance: balanceValidation.formattedBalance, 
-                requiredAmount: balanceValidation.formattedAmount 
-              }) 
-            });
-          } else {
-            setErrors({ form: balanceValidation.error || t('inventory.insufficientCashDrawerBalance', { currentBalance: '', requiredAmount: '' }) });
-          }
-          setLoading(false);
-          return;
-        }
-      }
+      // Cash drawer balance validation removed - negative balances are now allowed
         
       await onSuccess({
         mode: 'batch',
@@ -571,8 +532,18 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       setShowSuggestions(false);
       onClose();
     } catch (e) {
-      // Check if error is related to insufficient balance
+      // Log the actual error for debugging
+      console.error('[RECEIVE_FORM_MODAL] Error receiving inventory:', e);
       const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorStack = e instanceof Error ? e.stack : undefined;
+      
+      console.error('[RECEIVE_FORM_MODAL] Error details:', {
+        message: errorMessage,
+        stack: errorStack,
+        error: e
+      });
+      
+      // Check if error is related to insufficient balance
       if (errorMessage.includes('Insufficient cash drawer balance') || errorMessage.includes('insufficient')) {
         // Try to extract balance info from error message
         // Error format: "Insufficient cash drawer balance. Current balance: X, Required: Y"
@@ -591,7 +562,8 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           setErrors({ form: errorMessage || t('inventory.insufficientCashDrawerBalance', { currentBalance: '', requiredAmount: '' }) });
         }
       } else {
-        setErrors({ form: `${t('inventory.failedToReceiveInventory')}` });
+        // Show the actual error message instead of generic message
+        setErrors({ form: `${t('inventory.failedToReceiveInventory')}: ${errorMessage}` });
       }
     }
     setLoading(false);
@@ -763,12 +735,12 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                       </span>
                       {form.porterage_fee && (
                         <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                          {t('receivedBills.porterage')}: {form.porterage_fee} {t(`customers.${form.porterage_currency.toLowerCase() || preferredCurrency}`)}
+                          {t('receivedBills.porterage')}: {form.porterage_fee} {t(`customers.${form.porterage_currency || preferredCurrency}`)}
                         </span>
                       )}
                       {form.transfer_fee && (
                         <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                          {t('receivedBills.transferFee')}: {form.transfer_fee} {t(`customers.${form.transfer_currency.toLowerCase() || preferredCurrency}`)}
+                          {t('receivedBills.transferFee')}: {form.transfer_fee} {t(`customers.${form.transfer_currency || preferredCurrency}`)}
                         </span>
                       )}
                     </div>

@@ -380,6 +380,7 @@ return (
       {editItem && (
         <EditInventoryModal
           item={editItem}
+          inventoryBills={inventoryBills}
           onClose={() => setEditItem(null)}
           onSave={async (form: any) => {
             await handleUpdateInventoryItem(form);

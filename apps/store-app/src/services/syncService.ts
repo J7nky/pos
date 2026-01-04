@@ -77,9 +77,9 @@ const SYNC_TABLES = [
   'inventory_bills',
   'inventory_items',
   'transactions',
-  'journal_entries', // Must sync after entities and chart_of_accounts
+  'bills', // Must sync before journal_entries (journal entries have bill_id foreign key)
+  'journal_entries', // Must sync after entities, chart_of_accounts, and bills
   'balance_snapshots', // Must sync after entities
-  'bills',
   'bill_line_items',
   'bill_audit_logs',
   'cash_drawer_sessions',
@@ -103,13 +103,13 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   // NEW: Accounting foundation dependencies
   'chart_of_accounts': ['stores'], // Chart of accounts belongs to stores
   'entities': ['stores'], // Entities belong to stores (replaces customers/suppliers)
-  'journal_entries': ['stores', 'entities', 'chart_of_accounts'], // Journal entries reference entities and accounts
+  'bills': ['entities'], // customer_id references entity.id
+  'journal_entries': ['stores', 'entities', 'chart_of_accounts', 'bills'], // Journal entries reference entities, accounts, and bills (bill_id FK)
   'balance_snapshots': ['stores', 'entities'], // Balance snapshots reference entities
   'inventory_bills': ['entities'], // supplier_id references entity.id
   // supplier_id was removed from inventory_items; depend on batch linkage only
   'inventory_items': ['products', 'inventory_bills'],
   'transactions': [],
-  'bills': ['entities'], // customer_id references entity.id
   'bill_line_items': ['bills', 'products', 'entities', 'inventory_items'], // supplier_id references entity.id
   'bill_audit_logs': ['bills'],
   'cash_drawer_sessions': ['cash_drawer_accounts'],
@@ -1392,24 +1392,35 @@ export class SyncService {
    * Helper: Apply store filter to query based on table type
    */
   private applyStoreFilter(query: any, tableName: string, storeId: string): any {
+    let filteredQuery: any;
+    
     // Special case: products - include both store-specific and global
     if (tableName === 'products') {
-      return query.or(`store_id.eq.${storeId},is_global.eq.true`);
+      filteredQuery = query.or(`store_id.eq.${storeId},is_global.eq.true`);
+      console.log(`🔍 applyStoreFilter: ${tableName} - using OR filter: store_id=${storeId} OR is_global=true`);
     }
     // Special case: stores - filter by id (not store_id)
-    if (tableName === 'stores') {
-      return query.eq('id', storeId);
+    else if (tableName === 'stores') {
+      filteredQuery = query.eq('id', storeId);
+      console.log(`🔍 applyStoreFilter: ${tableName} - filtering by id=${storeId}`);
     }
     // Special case: transactions - no store filter
-    if (tableName === 'transactions') {
-      return query; // No filter
+    else if (tableName === 'transactions') {
+      filteredQuery = query; // No filter
+      console.log(`🔍 applyStoreFilter: ${tableName} - no filter applied`);
     }
     // Special case: role_permissions - GLOBAL table (no store_id column)
-    if (tableName === 'role_permissions') {
-      return query; // No filter - download all global permissions
+    else if (tableName === 'role_permissions') {
+      filteredQuery = query; // No filter - download all global permissions
+      console.log(`🔍 applyStoreFilter: ${tableName} - no filter applied (global table)`);
     }
     // Default: filter by store_id
-    return query.eq('store_id', storeId);
+    else {
+      filteredQuery = query.eq('store_id', storeId);
+      console.log(`🔍 applyStoreFilter: ${tableName} - filtering by store_id=${storeId}`);
+    }
+    
+    return filteredQuery;
   }
 
   private async downloadRemoteChanges(storeId: string) {
@@ -1479,6 +1490,9 @@ export class SyncService {
         // Build query with store filter
         let query = supabase.from(tableName as any).select('*');
         query = this.applyStoreFilter(query, tableName, storeId);
+
+        // Log query details for debugging
+        console.log(`🔍 downloadRemoteChanges: Fetching ${tableName} for storeId=${storeId}, shouldDoFullSync=${shouldDoFullSync}, lastSyncAt=${lastSyncAt}`);
 
         // Special handling for products: always include global products even in incremental syncs
         // Global products might not have been updated recently, so we need to fetch them separately
@@ -1593,17 +1607,40 @@ export class SyncService {
             .limit(SYNC_CONFIG.maxRecordsPerSync);
 
           const queryResult = await query;
+          
+          // Log query results for debugging
+          console.log(`🔍 downloadRemoteChanges: Query result for ${tableName}:`, {
+            hasError: !!queryResult.error,
+            error: queryResult.error ? {
+              message: queryResult.error.message,
+              details: queryResult.error.details,
+              hint: queryResult.error.hint,
+              code: queryResult.error.code
+            } : null,
+            hasData: !!queryResult.data,
+            dataType: Array.isArray(queryResult.data) ? 'array' : typeof queryResult.data,
+            recordCount: Array.isArray(queryResult.data) ? queryResult.data.length : (queryResult.data ? 1 : 0),
+            dataSample: Array.isArray(queryResult.data) && queryResult.data.length > 0 ? queryResult.data.slice(0, 2) : queryResult.data
+          });
+          
           remoteRecords = queryResult.data || [];
           error = queryResult.error;
         }
 
         if (error) {
           result.errors.push(`Download failed for ${tableName}: ${error.message}`);
-          console.error(`❌ Query error for ${tableName}:`, error);
+          console.error(`❌ downloadRemoteChanges: Query error for ${tableName}:`, error);
           continue;
         }
 
         if (!remoteRecords || remoteRecords.length === 0) {
+          console.warn(`⚠️ downloadRemoteChanges: ${tableName} query returned no data. Possible causes:`, {
+            storeId,
+            tableName,
+            shouldDoFullSync,
+            lastSyncAt,
+            timestampField: this.getTimestampField(tableName)
+          });
           const tableTime = performance.now() - tableStart;
 
           // For inventory_items specifically, log diagnostic info
@@ -2557,11 +2594,34 @@ export class SyncService {
       let query = supabase.from(tableName as any).select('*');
       query = this.applyStoreFilter(query, tableName, storeId);
 
+      // Log query details for debugging
+      console.log(`🔍 syncTable: Fetching ${tableName} for storeId=${storeId}, isFirstSync=${isFirstSync}, lastSyncAt=${lastSyncAt}`);
+
       const { data: remoteRecords, error } = await query;
 
+      // Log query results for debugging
+      console.log(`🔍 syncTable: Query result for ${tableName}:`, {
+        hasError: !!error,
+        error: error ? {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        } : null,
+        hasData: !!remoteRecords,
+        dataType: Array.isArray(remoteRecords) ? 'array' : typeof remoteRecords,
+        recordCount: Array.isArray(remoteRecords) ? remoteRecords.length : (remoteRecords ? 1 : 0),
+        dataSample: Array.isArray(remoteRecords) && remoteRecords.length > 0 ? remoteRecords.slice(0, 2) : remoteRecords
+      });
+
       if (error) {
+        console.error(`❌ syncTable: Download failed for ${tableName}:`, error);
         result.errors.push(`Download failed: ${error.message}`);
-      } else if (remoteRecords) {
+        result.success = false;
+      } else if (remoteRecords && Array.isArray(remoteRecords)) {
+        if (remoteRecords.length === 0) {
+          console.log(`ℹ️ syncTable: ${tableName} query returned empty array (no records found)`);
+        }
         // For branches and stores, wrap writes in a transaction to ensure atomicity
         // This guarantees data is immediately queryable after sync completes
         const needsTransaction = tableName === 'branches' || tableName === 'stores';
@@ -2631,6 +2691,20 @@ export class SyncService {
           }
         }
         result.synced.downloaded = remoteRecords.length;
+        console.log(`✅ syncTable: Successfully downloaded ${remoteRecords.length} records for ${tableName}`);
+      } else {
+        // No error but also no data - this is unexpected
+        console.warn(`⚠️ syncTable: ${tableName} query returned no data and no error. Possible causes:`, {
+          remoteRecords,
+          storeId,
+          tableName,
+          isFirstSync,
+          lastSyncAt
+        });
+        console.warn(`   - RLS policies might be blocking access`);
+        console.warn(`   - Table might be empty`);
+        console.warn(`   - Query filter might be too restrictive`);
+        // Don't mark as error if it's just empty data, but log it
       }
 
       result.success = result.errors.length === 0;

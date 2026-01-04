@@ -5,14 +5,22 @@ interface EditInventoryModalProps {
   item: any;
   onClose: () => void;
   onSave: (form: any) => Promise<void>;
+  inventoryBills?: any[];
 }
 
-const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, onSave }) => {
+const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, onSave, inventoryBills = [] }) => {
   const [form, setForm] = useState({ ...item });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<any>({});
   const firstInputRef = useRef<HTMLInputElement>(null);
+
+  // Check if this is a commission bill
+  const isCommissionBill = React.useMemo(() => {
+    if (!item.batch_id || !inventoryBills.length) return false;
+    const batch = inventoryBills.find(bill => bill.id === item.batch_id);
+    return batch?.type === 'commission';
+  }, [item.batch_id, inventoryBills]);
 
   // Auto-focus first field when modal opens
   useEffect(() => {
@@ -40,7 +48,8 @@ const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, 
       errors.unit = 'Unit is required.';
     }
 
-    if (form.price && (isNaN(Number(form.price)) || Number(form.price) < 0)) {
+    // Skip price validation for commission bills
+    if (!isCommissionBill && form.price && (isNaN(Number(form.price)) || Number(form.price) < 0)) {
       errors.price = 'Price must be a valid positive number.';
     }
 
@@ -61,10 +70,20 @@ const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, 
     setLoading(true);
     setError('');
     try {
-      await onSave(form);
+      // Clear price for commission bills
+      const formToSave = isCommissionBill ? { ...form, price: null } : form;
+      await onSave(formToSave);
       onClose();
     } catch (err: any) {
-      setError('Failed to update inventory item.');
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('[EDIT_INVENTORY_MODAL] Error updating inventory item:', err);
+      
+      // Check if error is related to insufficient balance
+      if (errorMessage.includes('Insufficient cash drawer balance')) {
+        setError(errorMessage);
+      } else {
+        setError('Failed to update inventory item.');
+      }
     }
     setLoading(false);
   };
@@ -165,19 +184,21 @@ const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, 
                 </h3>
 
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Price (optional)</label>
-                    <input
-                      type="number"
-                      value={form.price || ''}
-                      onChange={e => setForm((f: any) => ({ ...f, price: e.target.value }))}
-                      className={`w-full border ${errors.price ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                      min="0"
-                      step="0.01"
-                      placeholder="Enter price per unit"
-                    />
-                    {errors.price && <p className="text-xs text-red-600 mt-1">{errors.price}</p>}
-                  </div>
+                  {!isCommissionBill && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Price (optional)</label>
+                      <input
+                        type="number"
+                        value={form.price || ''}
+                        onChange={e => setForm((f: any) => ({ ...f, price: e.target.value }))}
+                        className={`w-full border ${errors.price ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                        min="0"
+                        step="0.01"
+                        placeholder="Enter price per unit"
+                      />
+                      {errors.price && <p className="text-xs text-red-600 mt-1">{errors.price}</p>}
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Notes (optional)</label>

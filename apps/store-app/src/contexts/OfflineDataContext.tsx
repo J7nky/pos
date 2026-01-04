@@ -4373,11 +4373,122 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateInventoryItem = async (id: string, updates: Tables['inventory_items']['Update']): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+    if (!currentBranchId) throw new Error('No branch ID available');
+    
     // Get original data for undo
     const originalItem = await getDB().inventory_items.get(id);
     if (!originalItem) throw new Error('Inventory item not found');
     
+    // Check if price changed
+    const priceChanged = updates.price !== undefined && updates.price !== originalItem.price;
+    const oldPrice = originalItem.price;
+    const newPrice = updates.price ?? null;
+    
+    // Validate price change before updating (for cash purchases)
+    if (priceChanged && originalItem.batch_id) {
+      try {
+        const batch = await getDB().inventory_bills.get(originalItem.batch_id);
+        if (batch && batch.type === 'cash') {
+          // Find original transaction to check if it's a cash purchase
+          const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
+          const originalTransaction = await inventoryPurchaseService.findOriginalTransactionForBatch(
+            originalItem.batch_id,
+            storeId
+          );
+          
+          if (originalTransaction) {
+            // Calculate the difference to check if we need more cash
+            const batchItems = await getDB().inventory_items
+              .where('batch_id')
+              .equals(originalItem.batch_id)
+              .toArray();
+            
+            const oldBatchTotal = batchItems.reduce((total, item) => {
+              const itemPrice = item.id === id ? (oldPrice ?? 0) : (item.price ?? 0);
+              const itemValue = item.weight && itemPrice
+                ? item.weight * itemPrice
+                : (item.quantity || 0) * itemPrice;
+              return total + itemValue;
+            }, 0);
+            
+            const newBatchTotal = batchItems.reduce((total, item) => {
+              const itemPrice = item.id === id ? (newPrice ?? 0) : (item.price ?? 0);
+              const itemValue = item.weight && itemPrice
+                ? item.weight * itemPrice
+                : (item.quantity || 0) * itemPrice;
+              return total + itemValue;
+            }, 0);
+            
+            const difference = newBatchTotal - oldBatchTotal;
+            
+            // Cash drawer balance validation removed - negative balances are now allowed
+          }
+        }
+      } catch (error) {
+        // Re-throw validation errors so they can be shown to the user
+        if (error instanceof Error && error.message.includes('Insufficient cash drawer balance')) {
+          throw error;
+        }
+        // Log other errors but don't block the update
+        console.error(`[UPDATE_INVENTORY_ITEM] Error validating price change:`, error);
+      }
+    }
+    
+    // Update the inventory item
     await crudHelperService.updateEntity('inventory_items', id, updates);
+    
+    // If price changed and batch exists, create adjustment transaction
+    if (priceChanged && originalItem.batch_id) {
+      try {
+        const batch = await getDB().inventory_bills.get(originalItem.batch_id);
+        if (batch) {
+          // Skip commission bills (they don't have inventory cost journal entries)
+          if (batch.type !== 'commission') {
+            // Find original transaction for batch
+            const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
+            const originalTransaction = await inventoryPurchaseService.findOriginalTransactionForBatch(
+              originalItem.batch_id,
+              storeId
+            );
+            
+            if (originalTransaction) {
+              // Create adjustment transaction
+              const currentUserId = userProfile?.id;
+              if (!currentUserId) {
+                throw new Error('User not authenticated');
+              }
+              
+              await inventoryPurchaseService.createPriceAdjustmentTransaction(
+                id,
+                oldPrice ?? null,
+                newPrice ?? null,
+                originalItem.batch_id,
+                originalTransaction.id,
+                batch.currency || currency,
+                storeId,
+                currentBranchId,
+                currentUserId
+              );
+              
+              console.log(`[UPDATE_INVENTORY_ITEM] ✅ Price adjustment transaction created for item ${id}`);
+            } else {
+              console.log(`[UPDATE_INVENTORY_ITEM] No original transaction found for batch ${originalItem.batch_id}, skipping adjustment`);
+            }
+          } else {
+            console.log(`[UPDATE_INVENTORY_ITEM] Skipping commission bill adjustment (COGS = 0)`);
+          }
+        }
+      } catch (error) {
+        console.error(`[UPDATE_INVENTORY_ITEM] Error creating price adjustment transaction:`, error);
+        // Re-throw validation errors so they can be shown to the user
+        if (error instanceof Error && error.message.includes('Insufficient cash drawer balance')) {
+          throw error;
+        }
+        // Don't throw other errors - allow the inventory item update to succeed even if adjustment fails
+        // The adjustment can be retried later if needed
+      }
+    }
     
     // Store undo data with original values
     const undoChanges: any = {};
@@ -4530,69 +4641,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       actual: actualSupplierId
     });
 
-    // Process financial transactions for cash and credit purchases
+    // Process financial transactions for cash, credit, and commission purchases
+    // Commission bills need fee transactions even though there's no inventory cost
+    // NOTE: This is done AFTER creating batch/items to avoid nested transaction issues
     let financialResult = null;
-    if (type === 'cash' || type === 'credit') {
-      try {
-        console.log(`[ADD_INVENTORY_BATCH] Processing financial transaction for ${type} purchase`);
-        
-        const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
-
-        // Use batch currency if provided, otherwise use store preferred currency
-        const purchaseCurrency = batchCurrency || currency;
-        
-        const purchaseData = {
-          supplier_id: actualSupplierId,
-          type: type as 'cash' | 'credit' | 'commission',
-          currency: purchaseCurrency,
-          items: items.map(item => ({
-            product_id: item.product_id || '',
-            quantity: item.quantity || 0,
-            unit: item.unit || '',
-            weight: item.weight || undefined,
-            price: item.price || undefined,
-            selling_price: item.selling_price || undefined
-          })),
-          porterage_fee: porterage_fee || undefined,
-          transfer_fee: transfer_fee || undefined,
-          plastic_fee: plastic_fee || undefined,
-          commission_rate: commission_rate || undefined,
-          created_by,
-          store_id: storeId,
-          branch_id: currentBranchId || '',
-          status: status || undefined
-        };
-
-        console.log(`[ADD_INVENTORY_BATCH] Purchase data prepared:`, {
-          ...purchaseData,
-          items: purchaseData.items.map(i => ({ product_id: i.product_id, quantity: i.quantity, price: i.price }))
-        });
-
-        financialResult = await inventoryPurchaseService.processInventoryPurchase(purchaseData);
-        
-        console.log(`[ADD_INVENTORY_BATCH] ✅ Financial transaction processed:`, {
-          success: financialResult.success,
-          transactionId: financialResult.transactionId,
-          totalAmount: financialResult.totalAmount,
-          cashDrawerImpact: financialResult.cashDrawerImpact,
-          fees: financialResult.fees
-        });
-        
-        debug('Financial transaction processed:', financialResult);
-      } catch (error) {
-        console.error(`[ADD_INVENTORY_BATCH] ❌ Error processing financial transaction:`, {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          stack: error instanceof Error ? error.stack : undefined,
-          type,
-          supplierId: actualSupplierId,
-          storeId,
-          branchId: currentBranchId
-        });
-        throw new Error(`Failed to process financial transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      }
-    } else {
-      console.log(`[ADD_INVENTORY_BATCH] Skipping financial transaction (type: ${type})`);
-    }
 
     const batchRecord = {
       id: batchId,
@@ -4708,6 +4760,73 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         steps: undoSteps
       });
     });
+
+    // Process financial transactions AFTER batch/items are created
+    // This avoids nested transaction issues with Dexie
+    if (type === 'cash' || type === 'credit' || type === 'commission') {
+      try {
+        console.log(`[ADD_INVENTORY_BATCH] Processing financial transaction for ${type} purchase`);
+        
+        const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
+
+        // Use batch currency if provided, otherwise use store preferred currency
+        const purchaseCurrency = batchCurrency || currency;
+        
+        const purchaseData = {
+          supplier_id: actualSupplierId,
+          type: type as 'cash' | 'credit' | 'commission',
+          currency: purchaseCurrency,
+          items: items.map(item => ({
+            product_id: item.product_id || '',
+            quantity: item.quantity || 0,
+            unit: item.unit || '',
+            weight: item.weight || undefined,
+            price: item.price || undefined,
+            selling_price: item.selling_price || undefined
+          })),
+          porterage_fee: porterage_fee || undefined,
+          transfer_fee: transfer_fee || undefined,
+          plastic_fee: plastic_fee || undefined,
+          commission_rate: commission_rate || undefined,
+          created_by,
+          store_id: storeId,
+          branch_id: currentBranchId || '',
+          status: status || undefined,
+          batch_id: batchId
+        };
+
+        console.log(`[ADD_INVENTORY_BATCH] Purchase data prepared:`, {
+          ...purchaseData,
+          items: purchaseData.items.map(i => ({ product_id: i.product_id, quantity: i.quantity, price: i.price }))
+        });
+
+        financialResult = await inventoryPurchaseService.processInventoryPurchase(purchaseData);
+        
+        console.log(`[ADD_INVENTORY_BATCH] ✅ Financial transaction processed:`, {
+          success: financialResult.success,
+          transactionId: financialResult.transactionId,
+          totalAmount: financialResult.totalAmount,
+          cashDrawerImpact: financialResult.cashDrawerImpact,
+          fees: financialResult.fees
+        });
+        
+        debug('Financial transaction processed:', financialResult);
+      } catch (error) {
+        console.error(`[ADD_INVENTORY_BATCH] ❌ Error processing financial transaction:`, {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          stack: error instanceof Error ? error.stack : undefined,
+          type,
+          supplierId: actualSupplierId,
+          storeId,
+          branchId: currentBranchId
+        });
+        // Don't throw - batch/items are already created, financial transaction failure is non-critical
+        // The user can retry or fix the financial transaction separately
+        console.warn(`[ADD_INVENTORY_BATCH] ⚠️ Financial transaction failed but batch/items were created successfully`);
+      }
+    } else {
+      console.log(`[ADD_INVENTORY_BATCH] Skipping financial transaction (type: ${type})`);
+    }
 
     await refreshData();
     await updateUnsyncedCount();
@@ -5812,20 +5931,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         amountInLBP = numAmount * exchangeRate;
       }
 
-      // Only check cash drawer balance when PAYING OUT money (not when receiving)
-      // When paymentDirection is 'receive', money is coming IN, so no balance check needed
-      if (paymentDirection === 'pay') {
-        // Get balance in LBP to match the amount we're checking
-        const currentBalanceLBP = await calculateCashDrawerBalance(storeId, currentBranchId!, 'LBP');
-        if (amountInLBP > currentBalanceLBP) {
-          // Also get USD balance for better error message
-          const currentBalanceUSD = await calculateCashDrawerBalance(storeId, currentBranchId!, 'USD');
-          return { 
-            success: false, 
-            error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: $${currentBalanceUSD.toFixed(2)} USD, ${Math.round(currentBalanceLBP).toLocaleString()} LBP` 
-          };
-        }
-      }
+      // Cash drawer balance validation removed - negative balances are now allowed
 
       // Get current balances (read-only operation outside transaction)
       const currentLbBalance = entity.lb_balance || 0;
@@ -6059,17 +6165,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         amountInLBP = numAmount * exchangeRate;
       }
 
-      // Check cash drawer balance in LBP (read-only operation outside transaction)
-      // Get balance in LBP to match the amount we're checking
-      const currentBalanceLBP = await calculateCashDrawerBalance(storeId, currentBranchId!, 'LBP');
-      if (amountInLBP > currentBalanceLBP) {
-        // Also get USD balance for better error message
-        const currentBalanceUSD = await calculateCashDrawerBalance(storeId, currentBranchId!, 'USD');
-        return { 
-          success: false, 
-          error: `Insufficient cash drawer balance. Payment: ${currency === 'USD' ? `$${numAmount.toFixed(2)}` : `${Math.round(numAmount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: $${currentBalanceUSD.toFixed(2)} USD, ${Math.round(currentBalanceLBP).toLocaleString()} LBP` 
-        };
-      }
+      // Cash drawer balance validation removed - negative balances are now allowed
 
       // Get current balances (read-only operation outside transaction)
       const currentLbBalance = employee.lbp_balance || 0;
@@ -6318,17 +6414,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const previousAdvanceLBP = currentAdvanceLBP;
       const previousAdvanceUSD = currentAdvanceUSD;
 
-      // Pre-validate cash drawer balance if giving advance
+      // Cash drawer balance validation removed - negative balances are now allowed
       let amountInLBP = 0;
       let previousCashDrawerBalance: number | undefined = undefined;
       if (type === 'give') {
         amountInLBP = currency === 'USD' ? amount * exchangeRate : amount;
         const currentBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
         previousCashDrawerBalance = currentBalance;
-        
-        if (amountInLBP > currentBalance) {
-          throw new Error(`Insufficient cash drawer balance. Advance: ${currency === 'USD' ? `$${amount.toFixed(2)}` : `${Math.round(amount).toLocaleString()} ل.ل`} (${Math.round(amountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP`);
-        }
       }
 
       const reviewDateNote = reviewDate ? ` [Review: ${new Date(reviewDate).toLocaleDateString()}]` : '';
@@ -6895,13 +6987,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (newIsGiveAdvance) {
         const newAmountInLBP = updates.currency === 'USD' ? updates.amount * exchangeRate : updates.amount;
         
-        // Check cash drawer balance
+        // Cash drawer balance validation removed - negative balances are now allowed
         const currentBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
         newPreviousCashDrawerBalance = currentBalance;
-        
-        if (newAmountInLBP > currentBalance) {
-          throw new Error(`Insufficient cash drawer balance. Advance: ${updates.currency === 'USD' ? `$${updates.amount.toFixed(2)}` : `${Math.round(updates.amount).toLocaleString()} ل.ل`} (${Math.round(newAmountInLBP).toLocaleString()} LBP), Available: ${Math.round(currentBalance).toLocaleString()} LBP`);
-        }
 
         // Process cash drawer withdrawal
         newCashDrawerResult = await processCashDrawerTransaction({

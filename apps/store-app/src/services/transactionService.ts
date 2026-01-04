@@ -30,7 +30,6 @@ import {
 } from '../utils/referenceGenerator';
 import { getLocalDateString } from '../utils/dateUtils';
 import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
-import { useI18n } from '../i18n';
 // ============================================================================
 // TYPES & INTERFACES
 // ============================================================================
@@ -166,51 +165,17 @@ export class TransactionService {
         };
       }
 
-      // 1.5. VALIDATE CASH DRAWER BALANCE FOR EXPENSE TRANSACTIONS
-      // Check if this is a cash expense transaction that would result in negative balance
+      // 1.5. VERIFY CASH DRAWER ACCOUNT EXISTS (no balance validation - negative balances allowed)
       const isCashExpense = params.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE || 
                            params.category === TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE;
       
       if (isCashExpense) {
-        try {
-          // Get cash drawer account to verify it exists
-          const account = await getDB().getCashDrawerAccount(params.context.storeId, params.context.branchId);
-          if (!account) {
-            return {
-              success: false,
-              error: 'No cash drawer account found. Please create one before processing expenses.',
-              balanceBefore: 0,
-              balanceAfter: 0,
-              affectedRecords: []
-            };
-          }
-
-          // Calculate current cash drawer balance in the transaction currency
-          // Cash drawer balances are stored separately for USD and LBP in journal entries
-          const currentBalance = await calculateCashDrawerBalance(
-            params.context.storeId,
-            params.context.branchId,
-            params.currency
-          );
-
-          // Check if expense would result in negative balance
-          if (params.amount > currentBalance) {
-            const formattedBalance = currencyService.formatCurrency(currentBalance, params.currency);
-            const formattedAmount = currencyService.formatCurrency(params.amount, params.currency);
-            const { t } = useI18n();
-            return {
-              success: false,
-              error: t('inventory.insufficientCashDrawerBalance', { currentBalance: formattedBalance, requiredAmount: formattedAmount }),
-              balanceBefore: currentBalance,
-              balanceAfter: currentBalance - params.amount,
-              affectedRecords: []
-            };
-          }
-        } catch (error) {
-          console.error('[CREATE_TRANSACTION] Error validating cash drawer balance:', error);
+        // Get cash drawer account to verify it exists
+        const account = await getDB().getCashDrawerAccount(params.context.storeId, params.context.branchId);
+        if (!account) {
           return {
             success: false,
-            error: error instanceof Error ? error.message : 'Failed to validate cash drawer balance',
+            error: 'No cash drawer account found. Please create one before processing expenses.',
             balanceBefore: 0,
             balanceAfter: 0,
             affectedRecords: []
@@ -671,7 +636,7 @@ export class TransactionService {
     currency: 'USD' | 'LBP',
     description: string,
     context: TransactionContext,
-    options: { reference?: string } = {}
+    options: { reference?: string; metadata?: Record<string, any> } = {}
   ): Promise<TransactionResult> {
     return this.createTransaction({
       category: TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE,
@@ -680,6 +645,7 @@ export class TransactionService {
       description,
       context,
       reference: options.reference,
+      metadata: options.metadata,
       updateCashDrawer: true
     });
   }
@@ -725,6 +691,32 @@ export class TransactionService {
       supplierId,
       reference: generateAPReference(),
       updateCashDrawer: false
+    });
+  }
+
+  /**
+   * Create supplier credit purchase transaction
+   * Creates journal entries: Debit Inventory (1300), Credit Accounts Payable (2100)
+   * Does NOT affect cash drawer
+   */
+  public async createSupplierCreditPurchase(
+    supplierId: string,
+    amount: number,
+    currency: 'USD' | 'LBP',
+    description: string,
+    context: TransactionContext,
+    options: { reference?: string; metadata?: Record<string, any> } = {}
+  ): Promise<TransactionResult> {
+    return this.createTransaction({
+      category: TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
+      amount,
+      currency,
+      description,
+      context,
+      supplierId,
+      reference: options.reference || generateAPReference(),
+      metadata: options.metadata,
+      updateCashDrawer: false // Credit purchases don't affect cash drawer
     });
   }
 
