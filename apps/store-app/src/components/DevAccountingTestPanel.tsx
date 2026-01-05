@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { AccountingFlowTester } from '../utils/testAccountingFlows';
+// import { AccountingFlowTester } from '../utils/testAccountingFlows';
 import { balanceVerificationService } from '../services/balanceVerificationService';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
@@ -72,43 +72,43 @@ export function DevAccountingTestPanel() {
     rawKeys: Object.keys(raw)
   };
 
-  const handleRunTests = async () => {
-    // Check what's missing
-    const missing = [];
-    if (!storeId) missing.push('storeId');
-    if (!currentBranchId) missing.push('branchId');
-    if (effectiveUserId === 'unknown') missing.push('userId');
+  // const handleRunTests = async () => {
+  //   // Check what's missing
+  //   const missing = [];
+  //   if (!storeId) missing.push('storeId');
+  //   if (!currentBranchId) missing.push('branchId');
+  //   if (effectiveUserId === 'unknown') missing.push('userId');
 
-    if (missing.length > 0) {
-      setShowDebugInfo(true);
-      alert(`Missing: ${missing.join(', ')}\n\nCheck the debug info panel below for details.`);
-      return;
-    }
+  //   if (missing.length > 0) {
+  //     setShowDebugInfo(true);
+  //     alert(`Missing: ${missing.join(', ')}\n\nCheck the debug info panel below for details.`);
+  //     return;
+  //   }
 
-    setIsRunning(true);
-    setTestResults(null);
+  //   setIsRunning(true);
+  //   setTestResults(null);
     
-    try {
-      console.log('🧪 Running tests with:', {
-        storeId,
-        branchId: currentBranchId,
-        userId: effectiveUserId
-      });
+  //   try {
+  //     console.log('🧪 Running tests with:', {
+  //       storeId,
+  //       branchId: currentBranchId,
+  //       userId: effectiveUserId
+  //     });
 
-      const tester = new AccountingFlowTester(
-        storeId,
-        currentBranchId,
-        effectiveUserId
-      );
-      const results = await tester.runAllTests();
-      setTestResults(results);
-    } catch (error) {
-      console.error('Test error:', error);
-      alert(`Test error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+  //     const tester = new AccountingFlowTester(
+  //       storeId,
+  //       currentBranchId,
+  //       effectiveUserId
+  //     );
+  //     const results = await tester.runAllTests();
+  //     setTestResults(results);
+  //   } catch (error) {
+  //     console.error('Test error:', error);
+  //     alert(`Test error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  //   }
     
-    setIsRunning(false);
-  };
+  //   setIsRunning(false);
+  // };
 
   const handleVerifyBalances = async () => {
     if (!storeId) {
@@ -263,7 +263,7 @@ await runAccountingTests('store-id', 'branch-id', 'user-id');`}
           </p>
 
           <button
-            onClick={handleRunTests}
+            // onClick={handleRunTests}
             disabled={isRunning}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
           >

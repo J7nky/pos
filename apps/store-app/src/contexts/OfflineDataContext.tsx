@@ -481,7 +481,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  // Customers and suppliers are now direct entity arrays (no transformation needed)
+  // Filter entities by type
   const customers = useMemo(() => {
     return entities.filter((e): e is Tables['entities']['Row'] => 
       e.entity_type === 'customer' && !e._deleted
@@ -1958,10 +1958,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currency,
       description: multilingualDescription,
       reference,
-      entity_id: supplierId || null, // Unified field
-      customer_id: null,
-      supplier_id: supplierId || null, // Legacy field - keep for backward compatibility
-      employee_id: null,
+      entity_id: supplierId || null,
       created_at: timestamp,
       created_by: userProfile.id,
       _synced: false,
@@ -2091,10 +2088,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currency,
       description: multilingualDescription,
       reference,
-      entity_id: supplierId || null, // Unified field
-      customer_id: null,
-      supplier_id: supplierId || null, // Legacy field - keep for backward compatibility
-      employee_id: null,
+      entity_id: supplierId || null,
       created_at: timestamp,
       created_by: userProfile.id,
       _synced: false,
@@ -2216,10 +2210,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currency,
       description: multilingualDescription,
       reference,
-      entity_id: customerId || null, // Unified field
-      customer_id: customerId || null, // Legacy field - keep for backward compatibility
-      supplier_id: null,
-      employee_id: null,
+      entity_id: customerId || null,
       created_at: timestamp,
       created_by: userProfile.id,
       _synced: false,
@@ -2580,12 +2571,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           currency: currency as 'USD' | 'LBP', // Use store's currency
           description: creditSaleDescription,
           reference:bill.bill_number, // ✅ Ensure reference includes BILL- prefix for consistency
-          // Set entity_id (unified field)
           entity_id: customerBalanceUpdate.customerId,
-          // Keep legacy fields for backward compatibility during migration
-          customer_id: entityType === 'customer' ? customerBalanceUpdate.customerId : null,
-          supplier_id: entityType === 'supplier' ? customerBalanceUpdate.customerId : null,
-          employee_id: entityType === 'employee' ? customerBalanceUpdate.customerId : null,
           created_at: now,
           created_by: currentUserId,
           _synced: false,
@@ -3137,10 +3123,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               currency: 'LBP', // TODO: Get actual currency from bill
               description: createMultilingualFromString(`Bill cancellation refund - ${bill.bill_number}`),
               reference: bill.bill_number, // Use bill number instead of REVERSAL- prefix
-              entity_id: cashTransaction.entity_id || cashTransaction.customer_id || null, // Use entity_id from original transaction
-              customer_id: null,
-              supplier_id: null,
-              employee_id: null,
+              entity_id: cashTransaction.entity_id || null,
               created_at: now,
               created_by: deletedBy,
               _synced: false,
@@ -3386,10 +3369,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               currency: 'LBP', // TODO: Get actual currency from bill
               description: createMultilingualFromString(`Bill reactivation - ${bill.bill_number}`),
               reference: bill.bill_number,
-              entity_id: cashReversalTransaction.entity_id || cashReversalTransaction.customer_id || null, // Use entity_id from reversal transaction
-              customer_id: null,
-              supplier_id: null,
-              employee_id: null,
+              entity_id: cashReversalTransaction.entity_id || null,
               created_at: now,
               created_by: reactivatedBy,
               _synced: false,
@@ -5149,10 +5129,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               currency: currency as 'USD' | 'LBP', // Use store's currency
               description: `Credit sale - Bill ${bill.bill_number} (${entityType}) - Item priced`,
               reference: `BILL-${bill.bill_number}`, // ✅ Ensure reference includes BILL- prefix for consistency
-              entity_id: bill.entity_id, // Unified field
-              customer_id: entityType === 'customer' ? bill.entity_id : null, // Legacy field
-              supplier_id: entityType === 'supplier' ? bill.entity_id : null, // Legacy field
-              employee_id: entityType === 'employee' ? bill.entity_id : null, // Legacy field
+              entity_id: bill.entity_id,
               created_at: now,
               created_by: currentUserId,
               _synced: false,
@@ -5363,21 +5340,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const isValidCategory = Object.values(TRANSACTION_CATEGORIES).includes(mappedCategory as any);
     
     if (!isValidCategory) {
-      // Fallback: use direct DB write for unknown categories (backward compatibility)
+      // Fallback: use direct DB write for unknown categories
       console.warn(`⚠️ Unknown transaction category: ${transactionData.category}. Using direct DB write.`);
-      // Determine entity_id from transactionData (prefer entity_id, fall back to legacy fields)
-      const entityId = (transactionData as any).entity_id || transactionData.customer_id || transactionData.supplier_id || transactionData.employee_id || null;
+      const entityId = (transactionData as any).entity_id || null;
       
       const transaction: Transaction = {
         ...transactionData,
         id: transactionId,
-        entity_id: entityId, // Unified field
-        customer_id: transactionData.customer_id ?? null, // Legacy field
-        supplier_id: transactionData.supplier_id ?? null, // Legacy field
-        employee_id: (transactionData as any).employee_id ?? null, // Legacy field
+        entity_id: entityId,
         store_id: storeId,
         branch_id: currentBranchId || '',
-
         created_at: new Date().toISOString(),
         _synced: false,
         amount: transactionData.amount,
@@ -5394,8 +5366,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         currency: (transactionData.currency as 'USD' | 'LBP') || 'USD',
         description: transactionData.description || '',
         reference: transactionData.reference ?? undefined,
-        customerId: transactionData.customer_id ?? undefined,
-        supplierId: transactionData.supplier_id ?? undefined,
+        entityId: transactionData.entity_id ?? undefined,
         context: {
           userId: currentUserId,
           storeId: storeId,
@@ -5701,14 +5672,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           context,
           {
             reference: transactionData.reference,
-            customerId: transactionData.customerId
+            entityId: transactionData.entityId || transactionData.customerId
           }
         );
       } else if (transactionData.type === 'payment') {
         // Determine if it's customer or supplier payment
-        if (transactionData.customerId) {
+        const entityId = transactionData.entityId || transactionData.customerId || transactionData.supplierId;
+        if (!entityId) {
+          throw new Error('Entity ID is required for payment transactions');
+        }
+        
+        // Determine entity type
+        const entity = await getDB().entities.get(entityId);
+        if (!entity) {
+          throw new Error(`Entity not found: ${entityId}`);
+        }
+        
+        if (entity.entity_type === 'customer') {
           result = await transactionService.createCustomerPayment(
-            transactionData.customerId,
+            entityId,
             transactionData.amount,
             transactionData.currency,
             transactionData.description,
@@ -5718,9 +5700,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               updateCashDrawer: true
             }
           );
-        } else if (transactionData.supplierId) {
+        } else if (entity.entity_type === 'supplier') {
           result = await transactionService.createSupplierPayment(
-            transactionData.supplierId,
+            entityId,
             transactionData.amount,
             transactionData.currency,
             transactionData.description,
@@ -6022,8 +6004,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             amount: numAmount,
             currency,
             description: transactionDescription,
-            entityId: entityId, // Unified field
-            customerId: entityId, // Legacy field - keep for backward compatibility
+            entityId: entityId,
             reference: reference || generatePaymentReference(),
             context,
             updateBalances: true,   // ✅ Increases AR (customer owes us more/we owe them more)
@@ -6056,8 +6037,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             amount: numAmount,
             currency,
             description: transactionDescription,
-            entityId: entityId, // Unified field
-            supplierId: entityId, // Legacy field - keep for backward compatibility
+            entityId: entityId,
             reference: reference || generatePaymentReference(),
             context,
             updateBalances: true,   // ✅ Increases AP (we owe supplier more)
@@ -6081,13 +6061,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         try {
           const baseUndoData = {
             affected: [
-              { table: isCustomer ? 'customers' : 'suppliers', id: entityId },
+              { table: 'entities', id: entityId },
               { table: 'transactions', id: result.transactionId }
             ],
             steps: [
               {
                 op: 'update',
-                table: isCustomer ? 'customers' : 'suppliers',
+                table: 'entities',
                 id: entityId,
                 changes: currency === 'LBP'
                   ? { lb_balance: currentLbBalance, _synced: false }
@@ -6567,7 +6547,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Create undo data
       const baseUndoData = {
         affected: [
-          { table: 'suppliers', id: supplierId },
+          { table: 'entities', id: supplierId },
           { table: 'transactions', id: transactionId }
         ],
         steps: [
@@ -6630,12 +6610,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         throw new Error('Can only delete Supplier Advance transactions from this module');
       }
 
-      if (!transaction.supplier_id) {
-        throw new Error('Transaction missing supplier ID');
+      if (!transaction.entity_id) {
+        throw new Error('Transaction missing entity ID');
       }
 
       // Find supplier
-      const supplier = suppliers.find(s => s.id === transaction.supplier_id);
+      const supplier = suppliers.find(s => s.id === transaction.entity_id);
       if (!supplier) {
         throw new Error('Supplier not found');
       }
@@ -6708,7 +6688,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         getDB().cash_drawer_accounts
       ], async () => {
         // Step 1: Update supplier balance (reverse the advance)
-        await getDB().entities.update(transaction.supplier_id, updateData);
+        await getDB().entities.update(transaction.entity_id!, updateData);
 
         // Step 2: Soft delete the transaction
         await getDB().transactions.update(transactionId, {
@@ -6723,7 +6703,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             'LBP',
             `Reversal: Deleted advance payment to ${supplier.name}`,
             generateReversalReference(),
-            transaction.supplier_id
+            transaction.entity_id!
           );
           cashDrawerAccountId = cashDrawerResult.accountId || undefined;
         }
@@ -6732,7 +6712,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Create undo data - restore transaction and supplier balances
       const baseUndoData = {
         affected: [
-          { table: 'suppliers', id: transaction.supplier_id },
+          { table: 'entities', id: transaction.entity_id! },
           { table: 'transactions', id: transactionId }
         ],
         steps: [
@@ -6745,7 +6725,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           {
             op: 'update',
             table: 'entities',
-            id: transaction.supplier_id,
+            id: transaction.entity_id!,
             changes: {
               supplier_data: {
                 ...(supplier.supplier_data as any || {}),
@@ -6867,10 +6847,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Store previous balances for undo
       const { advance_lb_balance: oldPreviousAdvanceLBP, advance_usd_balance: oldPreviousAdvanceUSD } = getSupplierAdvanceBalances(oldSupplier);
       const newSupplierBalances = getSupplierAdvanceBalances(newSupplier);
-      const newPreviousAdvanceLBP = updates.supplierId !== oldTransaction.supplier_id 
+      const newPreviousAdvanceLBP = updates.supplierId !== oldTransaction.entity_id 
         ? newSupplierBalances.advance_lb_balance
         : oldPreviousAdvanceLBP;
-      const newPreviousAdvanceUSD = updates.supplierId !== oldTransaction.supplier_id 
+      const newPreviousAdvanceUSD = updates.supplierId !== oldTransaction.entity_id 
         ? newSupplierBalances.advance_usd_balance
         : oldPreviousAdvanceUSD;
 
@@ -6926,7 +6906,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           currency: 'LBP',
           description: `Reversal: Updated advance payment to ${oldSupplier.name}`,
           reference: generateReversalReference(),
-          supplierId: oldTransaction.supplier_id,
+          supplierId: oldTransaction.entity_id!,
           storeId: userProfile?.store_id || '',
           createdBy: userProfile?.id || '',
         } as any);
@@ -6936,7 +6916,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // STEP 2: Apply new transaction effects
       // Get supplier balance after reversal (if supplier changed, use new supplier's current balance)
-      const supplierToUpdate = updates.supplierId === oldTransaction.supplier_id 
+      const supplierToUpdate = updates.supplierId === oldTransaction.entity_id 
         ? { ...oldSupplier, ...oldReverseData }
         : newSupplier;
       
@@ -6972,8 +6952,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
 
       // Update old supplier (if changed, reverse the old transaction)
-      if (updates.supplierId !== oldTransaction.supplier_id) {
-        await updateSupplier(oldTransaction.supplier_id, oldReverseData);
+      if (updates.supplierId !== oldTransaction.entity_id) {
+        await updateSupplier(oldTransaction.entity_id!, oldReverseData);
       }
 
       // Update new supplier
@@ -7026,7 +7006,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         amount: oldTransaction.amount,
         currency: oldTransaction.currency,
         description: oldTransaction.description,
-        supplier_id: oldTransaction.supplier_id,
+        entity_id: oldTransaction.entity_id!,
         created_at: oldTransaction.created_at,
         _synced: oldTransaction._synced
       };
@@ -7037,7 +7017,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Create undo data - restore old transaction and supplier balances
       const affectedTables: any[] = [
         { table: 'transactions', id: transactionId },
-        { table: 'suppliers', id: oldTransaction.supplier_id }
+        { table: 'entities', id: oldTransaction.entity_id! }
       ];
       
       const undoSteps: any[] = [
@@ -7050,7 +7030,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         {
           op: 'update',
           table: 'entities',
-          id: oldTransaction.supplier_id,
+          id: oldTransaction.entity_id!,
           changes: {
             supplier_data: {
               ...(oldSupplier.supplier_data as any || {}),
@@ -7062,8 +7042,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       ];
 
       // If supplier changed, add new supplier to undo
-      if (updates.supplierId !== oldTransaction.supplier_id) {
-        affectedTables.push({ table: 'suppliers', id: updates.supplierId });
+      if (updates.supplierId !== oldTransaction.entity_id) {
+        affectedTables.push({ table: 'entities', id: updates.supplierId });
         undoSteps.push({
           op: 'update',
           table: 'entities',
@@ -7171,10 +7151,28 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       const action = JSON.parse(undoData);
 
+      // Map old table names to new ones (for backward compatibility)
+      const tableNameMap: Record<string, string> = {
+        'suppliers': 'entities',
+        'customers': 'entities'
+      };
+
       // Check if any affected records are synced
       // Exception: cash_drawer_accounts can be synced and still allow undo (only balance changes)
       for (const item of action.affected || []) {
-        const record = await (getDB() as any)[item.table].get(item.id);
+        // Map old table names to new ones
+        const tableName = tableNameMap[item.table] || item.table;
+        
+        // Check if table exists in database
+        const db = getDB() as any;
+        if (!db[tableName]) {
+          console.warn(`⚠️ Undo action references unknown table: ${item.table} (mapped to: ${tableName})`);
+          localStorage.removeItem('last_undo_action');
+          setCanUndo(false);
+          return false;
+        }
+
+        const record = await db[tableName].get(item.id);
         
         if (!record) {
           localStorage.removeItem('last_undo_action');

@@ -5,12 +5,9 @@ import SearchableSelect from "../../common/SearchableSelect";
 interface PayFormProps {
   payForm: any;
   setPayForm: React.Dispatch<React.SetStateAction<any>>;
-  customers: any[];
-  suppliers: any[];
-  recentCustomers: any[];
-  recentSuppliers: any[];
-  setRecentCustomers: any;
-  setRecentSuppliers: any;
+  entities: any[]; // Unified entities array (customers, suppliers, employees)
+  recentEntities: any[];
+  setRecentEntities: any;
   setShowAddCustomerForm: any;
   setShowAddSupplierForm: any;
   handlePaySubmit: (e: React.FormEvent) => void;
@@ -25,12 +22,9 @@ interface PayFormProps {
 export const PayForm: React.FC<PayFormProps> = ({
   payForm,
   setPayForm,
-  customers,
-  suppliers,
-  recentCustomers,
-  recentSuppliers,
-  setRecentCustomers,
-  setRecentSuppliers,
+  entities,
+  recentEntities,
+  setRecentEntities,
   setShowAddCustomerForm,
   setShowAddSupplierForm,
   handlePaySubmit,
@@ -41,6 +35,27 @@ export const PayForm: React.FC<PayFormProps> = ({
   getConvertedAmount,
   onCancel
 }) => {
+  // Filter entities by type for the current selection
+  const filteredEntities = entities.filter((entity) => {
+    if (payForm.entityType === "customer") {
+      return entity.entity_type === "customer" && (entity.is_active !== false);
+    } else if (payForm.entityType === "supplier") {
+      return entity.entity_type === "supplier" && !entity._deleted;
+    }
+    return false;
+  });
+
+  // Filter recent entities by type
+  const filteredRecentEntities = recentEntities.filter((id: string) => {
+    const entity = entities.find((e) => e.id === id);
+    if (!entity) return false;
+    if (payForm.entityType === "customer") {
+      return entity.entity_type === "customer";
+    } else if (payForm.entityType === "supplier") {
+      return entity.entity_type === "supplier";
+    }
+    return false;
+  });
   return (
     <form onSubmit={handlePaySubmit} className="space-y-6">
       <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
@@ -99,43 +114,43 @@ export const PayForm: React.FC<PayFormProps> = ({
         {/* Entity Selector */}
         <div>
           <SearchableSelect
-            options={
-              payForm.entityType === "customer"
-                ? customers
-                    .filter((c) => c.is_active)
-                    .map((customer) => ({
-                      id: customer.id,
-                      label: customer.name,
-                      value: customer.id,
-                      category: "Customer"
-                    }))
-                : suppliers.map((supplier) => ({
-                    id: supplier.id,
-                    label: supplier.name,
-                    value: supplier.id,
-                    category: "Supplier"
-                  }))
-            }
+            options={filteredEntities.map((entity) => ({
+              id: entity.id,
+              label: entity.name,
+              value: entity.id,
+              category: payForm.entityType === "customer" ? "Customer" : "Supplier"
+            }))}
             value={payForm.entityId}
-            onChange={(value) =>
-              setPayForm((prev: any) => ({ ...prev, entityId: value as string }))
-            }
+            onChange={(value) => {
+              setPayForm((prev: any) => ({ ...prev, entityId: value as string }));
+              // Update recent entities
+              if (value && !filteredRecentEntities.includes(value)) {
+                const updated = [value, ...filteredRecentEntities].slice(0, 10);
+                // Merge with existing recent entities, keeping only the ones for current type
+                const otherRecentEntities = recentEntities.filter((id: string) => {
+                  const entity = entities.find((e) => e.id === id);
+                  if (!entity) return false;
+                  return entity.entity_type !== payForm.entityType;
+                });
+                setRecentEntities([...updated, ...otherRecentEntities]);
+              }
+            }}
             placeholder={`Select ${
               payForm.entityType === "customer" ? "Customer" : "Supplier"
             } *`}
             searchPlaceholder={`Search ${
               payForm.entityType === "customer" ? "customers" : "suppliers"
             }...`}
-            recentSelections={
-              payForm.entityType === "customer"
-                ? recentCustomers
-                : recentSuppliers
-            }
-            onRecentUpdate={
-              payForm.entityType === "customer"
-                ? setRecentCustomers
-                : setRecentSuppliers
-            }
+            recentSelections={filteredRecentEntities}
+            onRecentUpdate={(updated) => {
+              // Merge with entities of other types
+              const otherRecentEntities = recentEntities.filter((id: string) => {
+                const entity = entities.find((e) => e.id === id);
+                if (!entity) return false;
+                return entity.entity_type !== payForm.entityType;
+              });
+              setRecentEntities([...updated, ...otherRecentEntities]);
+            }}
             showAddOption={true}
             addOptionText={`Add New ${
               payForm.entityType === "customer" ? "Customer" : "Supplier"

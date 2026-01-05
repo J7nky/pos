@@ -58,34 +58,30 @@ export default function Accounting() {
   const getCurrentCashDrawerStatus = raw.getCurrentCashDrawerStatus;
   const transactions = raw.transactions?.map(t => ({...t, createdAt: t.created_at})) || [];
   
-  // Get customer entities and calculate balances from journal entries
-  const customerEntities = raw.customers || [];
-  const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
-  const customerBalances = useEntityBalances(customerIds, 'customer', true);
-  const customers = customerEntities.map(c => {
-    const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
-    return {
-      ...c, 
-      isActive: c.is_active, 
-      createdAt: c.created_at, 
-      lb_balance: balances.LBP,  // From journal entries
-      usd_balance: balances.USD  // From journal entries
-    };
-  });
+  // Get unified entities (customers, suppliers, employees)
+  const allEntities = raw.entities || [];
   
-  // Get supplier entities and calculate balances from journal entries
-  const supplierEntities = raw.suppliers || [];
-  const supplierIds = useMemo(() => supplierEntities.map(s => s.id), [supplierEntities]);
+  // Filter entities by type
+  const customers = useMemo(() => 
+    allEntities.filter((e: any) => e.entity_type === 'customer' && !e._deleted), 
+    [allEntities]
+  );
+  const suppliers = useMemo(() => 
+    allEntities.filter((e: any) => e.entity_type === 'supplier' && !e._deleted), 
+    [allEntities]
+  );
+  
+  // Calculate balances for entities that need them
+  const customerIds = useMemo(() => 
+    customers.map(c => c.id), 
+    [customers]
+  );
+  const supplierIds = useMemo(() => 
+    suppliers.map(s => s.id), 
+    [suppliers]
+  );
+  const customerBalances = useEntityBalances(customerIds, 'customer', true);
   const supplierBalances = useEntityBalances(supplierIds, 'supplier', true);
-  const suppliers = supplierEntities.map(s => {
-    const balances = supplierBalances.getBalances(s.id) || { USD: 0, LBP: 0 };
-    return {
-      ...s, 
-      createdAt: s.created_at, 
-      lb_balance: balances.LBP,  // From journal entries
-      usd_balance: balances.USD  // From journal entries
-    };
-  });
   const expenseCategories = raw.expenseCategories || [];
   const inventory = raw.inventory || [];
   const sales = raw.sales || [];
@@ -120,8 +116,8 @@ export default function Accounting() {
     getConvertedAmount = (amount: number, curr: string) => amount;
   }
 
-  const [recentCustomers, setRecentCustomers] = useLocalStorage<string[]>('accounting_recent_customers', []);
-  const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('accounting_recent_suppliers', []);
+  // Unified recent entities (replaces separate recentCustomers and recentSuppliers)
+  const [recentEntities, setRecentEntities] = useLocalStorage<string[]>('accounting_recent_entities', []);
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
 
   const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer' | 'payments'>('accounting_active_tab', 'dashboard');
@@ -138,10 +134,10 @@ export default function Accounting() {
 
   useEffect(() => {
     // Check if all required data is loaded
-    if (raw && transactions && customers && suppliers && products) {
+    if (raw && transactions && allEntities && products) {
       setIsDataReady(true);
     }
-  }, [raw, transactions, customers, suppliers, products]);
+  }, [raw, transactions, allEntities, products]);
 
   // Handle navigation from missed products history and transaction clicks
   useEffect(() => {
@@ -520,9 +516,8 @@ export default function Accounting() {
       return;
     }
 
-    const entity = form.entityType === 'customer' 
-      ? customers.find(c => c.id === form.entityId) 
-      : suppliers.find(s => s.id === form.entityId);
+    // Find entity from unified entities array
+    const entity = allEntities.find((e: any) => e.id === form.entityId && e.entity_type === form.entityType);
     if (!entity) {
       showToast(t('accounting.entityNotFound'), 'error');
       return;
@@ -1407,11 +1402,12 @@ export default function Accounting() {
             formatCurrencyWithSymbol={formatCurrencyWithSymbol}
             dashboardPeriod={dashboardPeriod}
             getPeriodData={getPeriodData}
-            customers={customers}
+            entities={allEntities}
+            customerBalances={customerBalances}
+            supplierBalances={supplierBalances}
             transactions={transactions}
             inventory={inventory}
             products={products}
-            suppliers={suppliers}
           />
         </div>
       )}
@@ -1484,9 +1480,8 @@ export default function Accounting() {
           inventoryBills={inventoryBills}
           bills={bills}
           products={products}
-          suppliers={suppliers}
+          entities={allEntities}
           sales={sales}
-          customers={customers}
           formatCurrency={formatCurrency}
           showToast={showToast}
           onEditSale={handleEditSale}
@@ -1494,8 +1489,8 @@ export default function Accounting() {
           onCloseBill={handleCloseReceivedBill}
           onUpdateBatch={handleUpdateBatch}
           defaultCommissionRate={defaultCommissionRate}
-          recentSuppliers={recentSuppliers}
-          setRecentSuppliers={setRecentSuppliers}
+          recentEntities={recentEntities}
+          setRecentEntities={setRecentEntities}
           addSupplier={addSupplier}
           flashingItemId={flashingItemId}
           autoExpandGroupId={autoExpandGroupId}
@@ -1523,17 +1518,20 @@ export default function Accounting() {
             expenseForm,
             setExpenseForm,
 
-            customers,
-            suppliers,
+            entities: allEntities, // Unified entities array
             expenseCategories,
 
-            recentCustomers,
-            recentSuppliers,
+            recentEntities,
             recentCategories,
-            setRecentCustomers,
-            setRecentSuppliers,
+            setRecentEntities,
             setRecentCategories,
 
+            setShowAddCustomerForm: () => {
+              showToast(t('accounting.pleaseAddCustomerFromCustomersPage'), 'info');
+            },
+            setShowAddSupplierForm: () => {
+              showToast(t('accounting.pleaseAddSupplierFromCustomersPage'), 'info');
+            },
 
             handleReceiveSubmit,
             handlePaySubmit,
@@ -1555,7 +1553,7 @@ export default function Accounting() {
           originalSale={editingSale}
           isOpen={showEditSaleModal}
           sale={editingSale}
-          customers={customers}
+          entities={allEntities}
           formatCurrency={formatCurrency}
           onClose={() => {
             setShowEditSaleModal(false);

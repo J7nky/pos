@@ -88,7 +88,7 @@ console.log(userProfile,123123123);
       errors.email = t('employees.invalidEmailFormat');
     }
     if (!editingEmployee && (!password || password.length < 6)) {
-      errors.password = t('employees.passwordRequired');
+      errors.password = password ? t('employees.passwordMinimum6Characters') || 'Password must be at least 6 characters' : t('employees.passwordRequired');
     }
     if (!formData.role) {
       errors.role = t('employees.roleRequired');
@@ -107,13 +107,41 @@ console.log(userProfile,123123123);
     }
 
     setFormErrors(errors);
-    return Object.keys(errors).length === 0;
+    const isValid = Object.keys(errors).length === 0;
+    if (!isValid) {
+      console.log('❌ Validation errors:', errors);
+    }
+    return isValid;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!validateForm() || !storeId) return;
+    console.log('Submitting employee data:', {
+      isEdit: !!editingEmployee,
+      employeeId: editingEmployee?.id,
+      employeeData: formData,
+      password: password ? '***' : 'MISSING',
+      passwordLength: password?.length || 0,
+      storeId
+    });
+    
+    if (!storeId) {
+      console.error('❌ No storeId available');
+      setToast({ message: 'Store ID is missing', type: 'error', visible: true });
+      return;
+    }
+
+    const isValid = validateForm();
+    if (!isValid) {
+      console.error('❌ Form validation failed:', formErrors);
+      setToast({ 
+        message: 'Please fix form errors before submitting', 
+        type: 'error', 
+        visible: true 
+      });
+      return;
+    }
 
     try {
       // NOTE: Employee balance fields (lbp_balance/usd_balance) store monthly salary configuration,
@@ -212,16 +240,20 @@ console.log(userProfile,123123123);
         }
         
         // Create employee with auth user using the service
-        await EmployeeService.createEmployeeWithAuth(storeId, employeeData as any, password);
+        console.log('🚀 Creating employee with auth...', { storeId, email: employeeData.email, name: employeeData.name });
+        const createdEmployee = await EmployeeService.createEmployeeWithAuth(storeId, employeeData as any, password);
+        console.log('✅ Employee created successfully:', createdEmployee);
         setToast({ message: t('employees.employeeCreatedSuccessfullyWithLoginCredentials'), type: 'success', visible: true });
+        setShowForm(false); // Close the form after successful creation
       }
       
       resetForm();
       // No need to reload, context will auto-update
     } catch (error) {
       console.error('❌ Error saving employee:', error);
+      const errorMessage = error instanceof Error ? error.message : t('employees.employeeCreatedFailed');
       setToast({ 
-        message: error instanceof Error ? error.message : t('employees.employeeCreatedFailed'), 
+        message: errorMessage, 
         type: 'error', 
         visible: true 
       });

@@ -1,5 +1,6 @@
 import { getDB } from '../lib/db';
 import { Employee } from '../types';
+import { Entity } from '../types/accounting';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 
@@ -8,6 +9,44 @@ import { supabase } from '../lib/supabase';
  * Creates auth users in Supabase, then stores profile in IndexedDB for sync
  */
 export class EmployeeService {
+  /**
+   * Ensure an entity record exists for an employee
+   * Creates entity if it doesn't exist, otherwise returns existing entity
+   * @param employee - Employee/user object
+   * @param synced - Whether the entity should be marked as synced (defaults to employee's _synced)
+   * @returns The entity record
+   */
+  private static async ensureEmployeeEntity(
+    employee: Employee,
+    synced?: boolean
+  ): Promise<Entity> {
+    // Check if entity already exists
+    const existingEntity = await getDB().entities.get(employee.id);
+    if (existingEntity) {
+      return existingEntity;
+    }
+
+    // Create entity record
+    const entity: Entity = {
+      id: employee.id, // Use same ID as employee for backward compatibility
+      store_id: employee.store_id,
+      branch_id: employee.branch_id || null,
+      entity_type: 'employee',
+      entity_code: `EMP-${employee.id.slice(0, 8).toUpperCase()}`,
+      name: employee.name,
+      phone: employee.phone || null,
+      is_system_entity: false,
+      is_active: true, // Default to active, employees don't have is_active field
+      customer_data: null,
+      supplier_data: null,
+      created_at: employee.created_at,
+      updated_at: employee.updated_at,
+      _synced: synced !== undefined ? synced : (employee._synced ?? false)
+    };
+
+    return entity;
+  }
+
   /**
    * Get all employees for a store (excluding deleted ones)
    */
@@ -86,12 +125,6 @@ export class EmployeeService {
       throw new Error(`Failed to create auth user: ${authError?.message || 'No user returned'}`);
     }
 
-    // Check if signUp auto-logged in the new user
-    const { data: { session: afterSignUpSession } } = await supabase.auth.getSession();
-    if (afterSignUpSession && afterSignUpSession.user.id !== currentSession?.user?.id) {
-      sessionChanged = true;
-    }
-
     // Create employee record with auth user ID
     const now = new Date().toISOString();
     const employee: Employee = {
@@ -104,22 +137,80 @@ export class EmployeeService {
       _deleted: false
     };
 
-    // Insert directly to Supabase users table (don't wait for sync)
+    // Insert directly to Supabase users table IMMEDIATELY after signUp
+    // This must happen before any auth state change events fire
     // Remove sync-specific fields before inserting
     const { _synced, _deleted, _lastSyncedAt, ...supabaseRecord } = employee;
     
     const { error: insertError } = await supabase
       .from('users')
-      .insert(supabaseRecord as any);
+      .insert(supabaseRecord as any)
+      .select()
+      .single();
 
     if (insertError) {
-      // Rollback: delete the auth user if we can't create the profile
+      // Note: Cannot rollback auth user deletion in store-app (no admin access)
+      // Admin will need to manually clean up if needed
       console.error('Failed to create employee profile in Supabase:', insertError);
       throw new Error(`Failed to create employee profile: ${insertError.message}`);
     }
 
-    // Store in IndexedDB first (already synced)
+    // Verify the user record exists and is accessible (prevents race condition)
+    // Retry up to 3 times with increasing delays
+    let userRecordExists = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data: verifyData, error: verifyError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', authData.user.id)
+        .single();
+      
+      if (verifyData && !verifyError) {
+        userRecordExists = true;
+        break;
+      }
+      
+      if (attempt < 2) {
+        // Wait before retrying (exponential backoff: 100ms, 200ms)
+        await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+      }
+    }
+
+    if (!userRecordExists) {
+      console.warn('⚠️ User record verification failed, but insert appeared successful. Continuing anyway...');
+    }
+
+    // Store in IndexedDB (already synced)
     await getDB().users.add(employee);
+
+    // Check if signUp auto-logged in the new user (AFTER user record is created)
+    const { data: { session: afterSignUpSession } } = await supabase.auth.getSession();
+    if (afterSignUpSession && afterSignUpSession.user.id !== currentSession?.user?.id) {
+      sessionChanged = true;
+    }
+
+    // Create corresponding entity record
+    try {
+      const entity = await this.ensureEmployeeEntity(employee, true);
+      
+      // Insert entity directly to Supabase (like the user)
+      const { _synced, ...supabaseEntityRecord } = entity;
+      const { error: entityInsertError } = await supabase
+        .from('entities')
+        .insert(supabaseEntityRecord as any);
+
+      if (entityInsertError) {
+        console.error('Failed to create employee entity in Supabase:', entityInsertError);
+        // Don't fail the whole operation - entity can be created later via sync
+      } else {
+        // Store entity in IndexedDB (already synced)
+        await getDB().entities.add(entity);
+        console.log(`✅ Created entity record for employee: ${employee.name}`);
+      }
+    } catch (error) {
+      console.error('Error creating employee entity:', error);
+      // Don't fail the whole operation - entity can be created later via sync
+    }
 
     // Restore admin session if it was changed (do this AFTER storing to avoid race conditions)
     if (sessionChanged && currentSession) {
@@ -182,6 +273,17 @@ export class EmployeeService {
     };
 
     await getDB().users.add(employee);
+
+    // Create corresponding entity record
+    try {
+      const entity = await this.ensureEmployeeEntity(employee, false);
+      await getDB().entities.add(entity);
+      console.log(`✅ Created entity record for employee: ${employee.name}`);
+    } catch (error) {
+      console.error('Error creating employee entity:', error);
+      // Don't fail the whole operation - entity can be created later via sync
+    }
+
     return employee;
   }
 

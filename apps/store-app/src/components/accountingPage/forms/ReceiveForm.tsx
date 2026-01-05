@@ -5,12 +5,9 @@ import SearchableSelect from "../../common/SearchableSelect";
 interface ReceiveFormProps {
   receiveForm: any;
   setReceiveForm: React.Dispatch<React.SetStateAction<any>>;
-  customers: any[];
-  suppliers: any[];
-  recentCustomers: any[];
-  recentSuppliers: any[];
-  setRecentCustomers: any;
-  setRecentSuppliers: any;
+  entities: any[]; // Unified entities array (customers, suppliers, employees)
+  recentEntities: any[];
+  setRecentEntities: any;
   setShowAddCustomerForm: any;
   setShowAddSupplierForm: any;
   handleReceiveSubmit: (e: React.FormEvent) => void;
@@ -25,12 +22,9 @@ interface ReceiveFormProps {
 export const ReceiveForm: React.FC<ReceiveFormProps> = ({
   receiveForm,
   setReceiveForm,
-  customers,
-  suppliers,
-  recentCustomers,
-  recentSuppliers,
-  setRecentCustomers,
-  setRecentSuppliers,
+  entities,
+  recentEntities,
+  setRecentEntities,
   setShowAddCustomerForm,
   setShowAddSupplierForm,
   handleReceiveSubmit,
@@ -41,6 +35,27 @@ export const ReceiveForm: React.FC<ReceiveFormProps> = ({
   getConvertedAmount,
   onCancel
 }) => {
+  // Filter entities by type for the current selection
+  const filteredEntities = entities.filter((entity) => {
+    if (receiveForm.entityType === "customer") {
+      return entity.entity_type === "customer" && (entity.is_active !== false);
+    } else if (receiveForm.entityType === "supplier") {
+      return entity.entity_type === "supplier" && !entity._deleted;
+    }
+    return false;
+  });
+
+  // Filter recent entities by type
+  const filteredRecentEntities = recentEntities.filter((id: string) => {
+    const entity = entities.find((e) => e.id === id);
+    if (!entity) return false;
+    if (receiveForm.entityType === "customer") {
+      return entity.entity_type === "customer";
+    } else if (receiveForm.entityType === "supplier") {
+      return entity.entity_type === "supplier";
+    }
+    return false;
+  });
   return (
     <form onSubmit={handleReceiveSubmit} className="space-y-6">
       <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
@@ -95,27 +110,39 @@ export const ReceiveForm: React.FC<ReceiveFormProps> = ({
 
         <div>
             <SearchableSelect
-            options={
-                receiveForm.entityType === 'customer' 
-                ? customers.filter(c => c.is_active).map(customer => ({
-                    id: customer.id,
-                    label: customer.name,
-                    value: customer.id,
-                    category: 'Customer'
-                    }))
-                : suppliers.map(supplier => ({
-                    id: supplier.id,
-                    label: supplier.name,
-                    value: supplier.id,
-                    category: 'Supplier'
-                    }))
-            }
+            options={filteredEntities.map((entity) => ({
+              id: entity.id,
+              label: entity.name,
+              value: entity.id,
+              category: receiveForm.entityType === "customer" ? "Customer" : "Supplier"
+            }))}
             value={receiveForm.entityId}
-            onChange={(value) => setReceiveForm((prev: any) => ({ ...prev, entityId: value as string }))}
+            onChange={(value) => {
+              setReceiveForm((prev: any) => ({ ...prev, entityId: value as string }));
+              // Update recent entities
+              if (value && !filteredRecentEntities.includes(value)) {
+                const updated = [value, ...filteredRecentEntities].slice(0, 10);
+                // Merge with existing recent entities, keeping only the ones for current type
+                const otherRecentEntities = recentEntities.filter((id: string) => {
+                  const entity = entities.find((e) => e.id === id);
+                  if (!entity) return false;
+                  return entity.entity_type !== receiveForm.entityType;
+                });
+                setRecentEntities([...updated, ...otherRecentEntities]);
+              }
+            }}
             placeholder={`Select ${receiveForm.entityType === 'customer' ? 'Customer' : 'Supplier'} *`}
             searchPlaceholder={`Search ${receiveForm.entityType === 'customer' ? 'customers' : 'suppliers'}...`}
-            recentSelections={receiveForm.entityType === 'customer' ? recentCustomers : recentSuppliers}
-            onRecentUpdate={receiveForm.entityType === 'customer' ? setRecentCustomers : setRecentSuppliers}
+            recentSelections={filteredRecentEntities}
+            onRecentUpdate={(updated) => {
+              // Merge with entities of other types
+              const otherRecentEntities = recentEntities.filter((id: string) => {
+                const entity = entities.find((e) => e.id === id);
+                if (!entity) return false;
+                return entity.entity_type !== receiveForm.entityType;
+              });
+              setRecentEntities([...updated, ...otherRecentEntities]);
+            }}
             showAddOption={true}
             addOptionText={`Add New ${receiveForm.entityType === 'customer' ? 'Customer' : 'Supplier'}`}
             onAddNew={() => receiveForm.entityType === 'customer' ? setShowAddCustomerForm(true) : setShowAddSupplierForm(true)}

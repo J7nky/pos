@@ -6,6 +6,10 @@ import { QueryHelpers, DateFilters } from '../utils/queryHelpers';
 import { CacheManager, CacheKeys } from '../utils/cacheManager';
 import { PerformanceMonitor } from '../utils/performanceMonitor';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
+import { createId } from '../lib/db';
+import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
+import { getLocalDateString } from '../utils/dateUtils';
+import type { JournalEntry } from '../types/accounting';
 
 export interface RunningBalance {
   USD: number;
@@ -467,7 +471,53 @@ export class AccountBalanceService {
         branchId: originalTransaction.branch_id || originalTransaction.store_id
       };
 
+      // Get entity_id from unified field or legacy fields
+      const entityId = originalTransaction.entity_id || 
+                       originalTransaction.customer_id || 
+                       originalTransaction.supplier_id || 
+                       originalTransaction.employee_id || 
+                       null;
+
+      // Determine entity type from transaction category or entity_id
+      // First try to get entity to determine type
+      let entityType: 'customer' | 'supplier' | 'employee' | null = null;
+      if (entityId) {
+        try {
+          const entity = await getDB().entities.get(entityId);
+          if (entity && !entity._deleted) {
+            entityType = entity.entity_type as 'customer' | 'supplier' | 'employee';
+          }
+        } catch (error) {
+          console.warn('Could not fetch entity to determine type:', error);
+        }
+      }
+
+      // Fallback: determine from legacy fields
+      if (!entityType) {
       if (originalTransaction.customer_id) {
+          entityType = 'customer';
+        } else if (originalTransaction.supplier_id) {
+          entityType = 'supplier';
+        } else if (originalTransaction.employee_id) {
+          entityType = 'employee';
+        }
+      }
+
+      // Validate that we have entityId for payment transactions
+      // Payment transactions require an entity (customer, supplier, or employee)
+      const isPaymentCategory = originalTransaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT ||
+                                 originalTransaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED ||
+                                 originalTransaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND ||
+                                 originalTransaction.category === TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT ||
+                                 originalTransaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND ||
+                                 originalTransaction.category === TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT ||
+                                 originalTransaction.category === TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT_RECEIVED;
+
+      if (isPaymentCategory && !entityId) {
+        throw new Error(`Entity ID is required for payment transaction category: ${originalTransaction.category}`);
+      }
+
+      if (entityType === 'customer') {
         // For customer transactions, use CUSTOMER_REFUND for reversals
         if (originalTransaction.type === 'income') {
           // Original was income (customer paid us), reversal is refund (we refund customer)
@@ -478,7 +528,7 @@ export class AccountBalanceService {
             currency: reversalCurrency,
             description: reversalDescription,
             context,
-            customerId: originalTransaction.customer_id,
+            entityId: entityId!,
             reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`,
             is_reversal: true,
             reversal_of_transaction_id: originalTransactionId
@@ -487,7 +537,7 @@ export class AccountBalanceService {
           // Original was expense (we paid customer/refund), reversal is payment (customer pays us back)
           // Note: createCustomerPayment doesn't support is_reversal directly, so we'll update it after
           reversalResult = await transactionService.createCustomerPayment(
-            originalTransaction.customer_id,
+            entityId!,
             reversalAmount,
             reversalCurrency,
             reversalDescription,
@@ -505,7 +555,7 @@ export class AccountBalanceService {
             });
           }
         }
-      } else if (originalTransaction.supplier_id) {
+      } else if (entityType === 'supplier') {
         // For supplier transactions, use SUPPLIER_REFUND for reversals
         if (originalTransaction.type === 'expense') {
           // Original was expense (we paid supplier), reversal is refund (supplier refunds us)
@@ -516,7 +566,7 @@ export class AccountBalanceService {
             currency: reversalCurrency,
             description: reversalDescription,
             context,
-            supplierId: originalTransaction.supplier_id,
+            entityId: entityId!,
             reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`,
             is_reversal: true,
             reversal_of_transaction_id: originalTransactionId
@@ -524,7 +574,7 @@ export class AccountBalanceService {
         } else {
           // Original was income (supplier paid us/refund), reversal is payment (we pay supplier back)
           reversalResult = await transactionService.createSupplierPayment(
-            originalTransaction.supplier_id,
+            entityId!,
             reversalAmount,
             reversalCurrency,
             reversalDescription,
@@ -542,7 +592,7 @@ export class AccountBalanceService {
             });
           }
         }
-      } else if (originalTransaction.employee_id) {
+      } else if (entityType === 'employee') {
         // For employee transactions, use opposite category
         // If original was EMPLOYEE_PAYMENT (expense), reversal is EMPLOYEE_PAYMENT_RECEIVED (income)
         // If original was EMPLOYEE_PAYMENT_RECEIVED (income), reversal is EMPLOYEE_PAYMENT (expense)
@@ -556,13 +606,13 @@ export class AccountBalanceService {
           currency: reversalCurrency,
           description: reversalDescription,
           context,
-          employeeId: originalTransaction.employee_id,
+          entityId: entityId!,
           reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`,
           is_reversal: true,
           reversal_of_transaction_id: originalTransactionId
         });
-      } else {
-        // General transaction reversal - reverse the type
+      } else if (entityId) {
+        // General transaction with entity_id - reverse the type
         const reversalType = originalTransaction.type === 'income' ? 'expense' : 'income';
         reversalResult = await transactionService.createTransaction({
           category: originalTransaction.category as any,
@@ -570,10 +620,14 @@ export class AccountBalanceService {
           currency: reversalCurrency,
           description: reversalDescription,
           context,
+          entityId: entityId,
           reference: `REV-${originalTransaction.reference || originalTransaction.id.substring(0, 8)}`,
           is_reversal: true,
           reversal_of_transaction_id: originalTransactionId
         });
+      } else {
+        // No entity ID - this shouldn't happen for payment transactions
+        throw new Error('Entity ID is required for this transaction category');
       }
       
       // Check if reversal transaction was created successfully
@@ -609,6 +663,72 @@ export class AccountBalanceService {
         if (!reversalTransaction) {
           throw new Error('Failed to retrieve updated reversal transaction');
         }
+      }
+
+      // Link reversal journal entries to original journal entries
+      // Get original journal entries
+      const originalJournalEntries = await getDB().journal_entries
+        .where('transaction_id')
+        .equals(originalTransactionId)
+        .and(entry => entry.is_posted === true)
+        .toArray();
+
+      // Get reversal journal entries (just created)
+      const reversalJournalEntries = await getDB().journal_entries
+        .where('transaction_id')
+        .equals(reversalResult.transactionId!)
+        .and(entry => entry.is_posted === true)
+        .toArray();
+
+      // Link reversal entries to original entries
+      // Note: Reversal entries have swapped debit/credit, so we match by account_code
+      // and ensure we're matching the correct entry (debit reversal matches credit original, etc.)
+      if (originalJournalEntries.length > 0 && reversalJournalEntries.length > 0) {
+        // Create maps of original entries by account_code
+        // Since reversal swaps debit/credit, a reversal debit matches an original credit (same account)
+        const originalEntriesByAccount = new Map<string, JournalEntry[]>();
+        originalJournalEntries.forEach(entry => {
+          if (!originalEntriesByAccount.has(entry.account_code)) {
+            originalEntriesByAccount.set(entry.account_code, []);
+          }
+          originalEntriesByAccount.get(entry.account_code)!.push(entry);
+        });
+
+        // Update reversal entries to link back to originals
+        const updates: Promise<void>[] = [];
+        for (const reversalEntry of reversalJournalEntries) {
+          // Find matching original entry with same account_code
+          // Since reversal swaps debit/credit, we match by account_code
+          const matchingOriginals = originalEntriesByAccount.get(reversalEntry.account_code) || [];
+          
+          // For each reversal entry, find the best matching original entry
+          // Prefer matching by entity_id if available, otherwise use first match
+          let matchingOriginal: JournalEntry | undefined;
+          if (matchingOriginals.length === 1) {
+            matchingOriginal = matchingOriginals[0];
+          } else if (matchingOriginals.length > 1 && reversalEntry.entity_id) {
+            // If multiple entries for same account, match by entity_id
+            matchingOriginal = matchingOriginals.find(e => e.entity_id === reversalEntry.entity_id);
+            if (!matchingOriginal) {
+              matchingOriginal = matchingOriginals[0]; // Fallback to first
+            }
+          } else if (matchingOriginals.length > 0) {
+            matchingOriginal = matchingOriginals[0];
+          }
+
+          if (matchingOriginal) {
+            updates.push(
+              getDB().journal_entries.update(reversalEntry.id, {
+                entry_type: 'reversal' as const,
+                reversal_of_journal_entry_id: matchingOriginal.id,
+                _synced: false
+              })
+            );
+          }
+        }
+
+        await Promise.all(updates);
+        console.log(`✅ Linked ${updates.length} reversal journal entries to original entries`);
       }
 
       // Update affected account balance

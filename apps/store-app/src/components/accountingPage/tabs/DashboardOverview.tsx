@@ -341,10 +341,11 @@ type DashboardOverviewProps = {
     incomeChange: number;
     expenseChange: number;
   };
-  customers: Customer[];
+  entities: any[]; // Unified entities array
+  customerBalances: any; // Balance hook for customers
+  supplierBalances: any; // Balance hook for suppliers
   transactions: Transaction[];
   products: Product[];
-  suppliers: Supplier[];
 };
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
@@ -354,11 +355,38 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   formatCurrencyWithSymbol,
   dashboardPeriod,
   getPeriodData,
-  customers,
+  entities,
+  customerBalances,
+  supplierBalances,
   transactions,
   products,
-  suppliers,
 }) => {
+  // Filter entities by type
+  const customers = useMemo(() => {
+    return entities
+      .filter((e: any) => e.entity_type === 'customer' && !e._deleted)
+      .map((c: any) => {
+        const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+        return {
+          ...c,
+          lb_balance: balances.LBP,
+          usd_balance: balances.USD,
+        };
+      });
+  }, [entities, customerBalances]);
+
+  const suppliers = useMemo(() => {
+    return entities
+      .filter((e: any) => e.entity_type === 'supplier' && !e._deleted)
+      .map((s: any) => {
+        const balances = supplierBalances.getBalances(s.id) || { USD: 0, LBP: 0 };
+        return {
+          ...s,
+          lb_balance: balances.LBP,
+          usd_balance: balances.USD,
+        };
+      });
+  }, [entities, supplierBalances]);
   const { t, language } = useI18n();
   const [highlightedTransactionId, setHighlightedTransactionId] = useState<string | null>(null);
 

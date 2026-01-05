@@ -30,6 +30,9 @@ import {
 } from '../utils/referenceGenerator';
 import { getLocalDateString } from '../utils/dateUtils';
 import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
+import { createId } from '../lib/db';
+import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
+import type { JournalEntry } from '../types/accounting';
 // ============================================================================
 // TYPES & INTERFACES
 // ============================================================================
@@ -56,9 +59,6 @@ export interface CreateTransactionParams {
   
   // Optional fields
   reference?: string;
-  customerId?: string | null; // Legacy - use entityId instead
-  supplierId?: string | null; // Legacy - use entityId instead
-  employeeId?: string | null; // Legacy - use entityId instead
   entityId?: string | null; // Unified field for customer/supplier/employee
   metadata?: Record<string, any>;
   is_reversal?: boolean;
@@ -95,10 +95,7 @@ export interface Transaction {
   currency: 'USD' | 'LBP';
   description: string;
   reference: string | null;
-  customer_id: string | null; // Legacy field - use entity_id instead
-  supplier_id: string | null; // Legacy field - use entity_id instead
-  employee_id?: string | null; // Legacy field - use entity_id instead
-  entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
+  entity_id?: string | null;
   created_at: string;
   updated_at?: string;
   created_by: string;
@@ -198,16 +195,11 @@ export class TransactionService {
       // Generate reference if not provided
       const reference = params.reference || this.generateReferenceForCategory(params.category);
 
-      // Determine entity_id from params (prefer entityId, fall back to legacy fields)
-      const entityId = params.entityId || params.customerId || params.supplierId || params.employeeId || null;
+      // Get entity_id from params
+      const entityId = params.entityId || null;
       
       // 3. GET BALANCE BEFORE (outside transaction - read-only)
-      const balanceBefore = await this.getEntityBalance(
-        params.entityId ? null : params.customerId,
-        params.entityId ? null : params.supplierId,
-        params.entityId ? null : params.employeeId,
-        params.currency
-      );
+      const balanceBefore = await this.getEntityBalance(entityId, params.currency);
       // 4. PREPARE TRANSACTION RECORD
       const transaction: Transaction = {
         id: transactionId,
@@ -221,10 +213,6 @@ export class TransactionService {
         reference,
         // Set entity_id (unified field)
         entity_id: entityId,
-        // Keep legacy fields for backward compatibility during migration
-        customer_id: params.customerId || null,
-        supplier_id: params.supplierId || null,
-        employee_id: params.employeeId || null,
         created_at: '', // Will be set inside transaction block
         created_by: params.context.userId,
         _synced: params._synced ?? false,
@@ -490,7 +478,7 @@ export class TransactionService {
    * Create customer payment transaction
    */
   public async createCustomerPayment(
-    customerId: string,
+    entityId: string,
     amount: number,
     currency: 'USD' | 'LBP',
     description: MultilingualString,
@@ -503,7 +491,7 @@ export class TransactionService {
       currency,
       description,
       context,
-      customerId,
+      entityId,
       reference: options.reference,
       updateCashDrawer: options.updateCashDrawer
     });
@@ -513,7 +501,7 @@ export class TransactionService {
    * Create supplier payment transaction
    */
   public async createSupplierPayment(
-    supplierId: string,
+    entityId: string,
     amount: number,
     currency: 'USD' | 'LBP',
     description: MultilingualString,
@@ -526,7 +514,7 @@ export class TransactionService {
       currency,
       description,
       context,
-      supplierId,
+      entityId,
       reference: options.reference,
       updateCashDrawer: options.updateCashDrawer
     });
@@ -536,7 +524,7 @@ export class TransactionService {
    * Create customer credit sale transaction
    */
   public async createCustomerCreditSale(
-    customerId: string,
+    entityId: string,
     amount: number,
     currency: 'USD' | 'LBP',
     description: string,
@@ -549,7 +537,7 @@ export class TransactionService {
       currency,
       description,
       context,
-      customerId,
+      entityId,
       reference: options.reference,
       updateCashDrawer: false // Credit sales don't affect cash drawer
     });
@@ -559,7 +547,7 @@ export class TransactionService {
    * Create employee payment transaction
    */
   public async createEmployeePayment(
-    employeeId: string,
+    entityId: string,
     amount: number,
     currency: 'USD' | 'LBP',
     description: string,
@@ -572,7 +560,7 @@ export class TransactionService {
       currency,
       description,
       context,
-      employeeId,
+      entityId,
       reference: options.reference,
       updateCashDrawer: options.updateCashDrawer
     });
@@ -586,7 +574,7 @@ export class TransactionService {
     currency: 'USD' | 'LBP',
     description: string | MultilingualString,
     context: TransactionContext,
-    options: { reference?: string; customerId?: string } = {}
+    options: { reference?: string; entityId?: string } = {}
   ): Promise<TransactionResult> {
     // Convert string description to MultilingualString if needed
     const multilingualDescription: MultilingualString = typeof description === 'string' 
@@ -599,7 +587,7 @@ export class TransactionService {
       currency,
       description: multilingualDescription,
       context,
-      customerId: options.customerId,
+      entityId: options.entityId,
       reference: options.reference,
       updateCashDrawer: true
     });
@@ -654,7 +642,7 @@ export class TransactionService {
    * Create accounts receivable transaction
    */
   public async createAccountsReceivable(
-    customerId: string,
+    entityId: string,
     amount: number,
     currency: 'USD' | 'LBP',
     description: string,
@@ -666,7 +654,7 @@ export class TransactionService {
       currency,
       description,
       context,
-      customerId,
+      entityId,
       reference: generateARReference(),
       updateCashDrawer: false
     });
@@ -676,7 +664,7 @@ export class TransactionService {
    * Create accounts payable transaction
    */
   public async createAccountsPayable(
-    supplierId: string,
+    entityId: string,
     amount: number,
     currency: 'USD' | 'LBP',
     description: string,
@@ -688,7 +676,7 @@ export class TransactionService {
       currency,
       description,
       context,
-      supplierId,
+      entityId,
       reference: generateAPReference(),
       updateCashDrawer: false
     });
@@ -700,7 +688,7 @@ export class TransactionService {
    * Does NOT affect cash drawer
    */
   public async createSupplierCreditPurchase(
-    supplierId: string,
+    entityId: string,
     amount: number,
     currency: 'USD' | 'LBP',
     description: string,
@@ -713,7 +701,7 @@ export class TransactionService {
       currency,
       description,
       context,
-      supplierId,
+      entityId,
       reference: options.reference || generateAPReference(),
       metadata: options.metadata,
       updateCashDrawer: false // Credit purchases don't affect cash drawer
@@ -767,9 +755,7 @@ export class TransactionService {
         async () => {
           // Get current balance before update
           balanceBefore = await this.getEntityBalance(
-            original.customer_id,
-            original.supplier_id,
-            original.employee_id,
+            original.entity_id || null,
             original.currency
           );
 
@@ -862,6 +848,57 @@ export class TransactionService {
   }
 
   /**
+   * Create reversal journal entries for a set of original journal entries
+   * This helper function swaps debit/credit and links entries via reversal_of_journal_entry_id
+   */
+  private createReversalJournalEntries(
+    originalEntries: JournalEntry[],
+    reversalTransactionId: string,
+    description: string,
+    createdBy: string,
+    postedDate: string,
+    includeCashDrawer: boolean = true
+  ): JournalEntry[] {
+    const reversalEntries: JournalEntry[] = [];
+    const now = new Date().toISOString();
+    const fiscalPeriod = getFiscalPeriodForDate(now).period;
+
+    for (const entry of originalEntries) {
+      // Skip cash drawer entries if not including them (they'll be handled separately)
+      if (!includeCashDrawer && entry.account_code === '1100') {
+        continue;
+      }
+
+      const reversalEntry: JournalEntry = {
+        id: createId(),
+        store_id: entry.store_id,
+        branch_id: entry.branch_id,
+        transaction_id: reversalTransactionId,
+        account_code: entry.account_code,
+        account_name: entry.account_name,
+        entity_id: entry.entity_id,
+        entity_type: entry.entity_type,
+        debit_usd: entry.credit_usd, // Swap: original credit becomes debit
+        credit_usd: entry.debit_usd, // Swap: original debit becomes credit
+        debit_lbp: entry.credit_lbp,
+        credit_lbp: entry.debit_lbp,
+        description: description,
+        posted_date: postedDate,
+        fiscal_period: fiscalPeriod,
+        is_posted: true,
+        created_by: createdBy,
+        created_at: now,
+        _synced: false,
+        entry_type: 'reversal' as const, // Explicit type
+        reversal_of_journal_entry_id: entry.id // Link to original entry
+      };
+      reversalEntries.push(reversalEntry);
+    }
+
+    return reversalEntries;
+  }
+
+  /**
    * Delete (soft delete) a transaction atomically
    * Reverses balance impacts and maintains data integrity
    */
@@ -894,27 +931,61 @@ export class TransactionService {
       }
 
       const timestamp = new Date().toISOString();
-      let balanceBefore = 0;
-      let balanceAfter = 0;
+      const postedDate = getLocalDateString(timestamp);
+      
+      // Get current balance before deletion (outside transaction - read-only)
+      const balanceBefore = await this.getEntityBalance(
+        transaction.entity_id || null,
+        transaction.currency
+      );
+      
+      let balanceAfter = balanceBefore;
       const affectedRecords: string[] = [transactionId];
+
+      // Get original journal entries (outside transaction - read-only)
+      const originalJournalEntries = await getDB().journal_entries
+        .where('transaction_id')
+        .equals(transactionId)
+        .and(entry => entry.is_posted === true)
+        .toArray();
+
+      if (originalJournalEntries.length === 0) {
+        console.warn(`⚠️ No journal entries found for transaction ${transactionId} - cannot create reversals`);
+      }
+
+      // Create reversal transaction ID for linking
+      const reversalTransactionId = createId();
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
       // Include all object stores that updateCashDrawerAtomic needs:
       // - cash_drawer_accounts (for updating balance)
-      // - journal_entries (for reading cash journal entries)
+      // - journal_entries (for reading cash journal entries and creating reversals)
       await getDB().transaction('rw', 
         [getDB().transactions, getDB().entities, getDB().cash_drawer_sessions, getDB().cash_drawer_accounts, getDB().journal_entries], 
         async () => {
-          // Get current balance before deletion
-          balanceBefore = await this.getEntityBalance(
-            transaction.customer_id,
-            transaction.supplier_id,
-            transaction.employee_id,
-            transaction.currency
-          );
 
-          // Balances are calculated from journal entries - no need to update
-          // The reversal journal entries will automatically reflect the correct balance
+          // Create reversal journal entries for all original entries
+          if (originalJournalEntries.length > 0) {
+            const reversalDescription = `Transaction deletion - ${typeof transaction.description === 'string' ? transaction.description : JSON.stringify(transaction.description)}`;
+            
+            // Create reversal entries for all journal entries
+            const reversalEntries = this.createReversalJournalEntries(
+              originalJournalEntries,
+              reversalTransactionId,
+              reversalDescription,
+              context.userId,
+              postedDate,
+              true // Include cash drawer entries
+            );
+
+            if (reversalEntries.length > 0) {
+              await getDB().journal_entries.bulkAdd(reversalEntries);
+              console.log(`🔄 Created ${reversalEntries.length} reversal journal entries for transaction ${transactionId}`);
+              affectedRecords.push(...reversalEntries.map(e => e.id));
+            }
+          }
+
+          // Balances are calculated from journal entries - the reversal entries will automatically reflect the correct balance
           // Use entityBalanceService.getEntityBalance() to get current balance
 
           // Reverse cash drawer impact if applicable
@@ -924,11 +995,7 @@ export class TransactionService {
             
             if (account) {
               // Get journal entries for the original transaction to calculate what it did
-              const cashJournalEntries = await getDB().journal_entries
-                .where('transaction_id')
-                .equals(transactionId)
-                .and(entry => entry.account_code === '1100' && entry.is_posted === true)
-                .toArray();
+              const cashJournalEntries = originalJournalEntries.filter(e => e.account_code === '1100');
               
               // Calculate original balance change: sum of (debit - credit) for cash account entries
               // ✅ Journal entries use new schema: debit_usd, credit_usd, debit_lbp, credit_lbp
@@ -965,7 +1032,8 @@ export class TransactionService {
               deleted: true,
               deletedAt: timestamp,
               deletedBy: context.userId,
-              deletionReason: 'Payment canceled by user'
+              deletionReason: 'Payment canceled by user',
+              reversalTransactionId: reversalTransactionId
             },
             updated_at: timestamp,
             _synced: false
@@ -1150,16 +1218,13 @@ export class TransactionService {
       let entityType: 'customer' | 'supplier' | null = null;
       let entityId: string | null = null;
 
-      if (transaction.customer_id) {
-        const entity = await getDB().entities.get(transaction.customer_id);
-        entityName = entity?.name || 'Unknown Customer';
-        entityType = 'customer';
-        entityId = transaction.customer_id;
-      } else if (transaction.supplier_id) {
-        const entity = await getDB().entities.get(transaction.supplier_id);
-        entityName = entity?.name || 'Unknown Supplier';
-        entityType = 'supplier';
-        entityId = transaction.supplier_id;
+      if (transaction.entity_id) {
+        const entity = await getDB().entities.get(transaction.entity_id);
+        if (entity) {
+          entityName = entity.name || 'Unknown Entity';
+          entityType = entity.entity_type as 'customer' | 'supplier' | 'employee';
+          entityId = transaction.entity_id;
+        }
       }
 
       // Check if transaction affects cash drawer
@@ -1254,8 +1319,8 @@ export class TransactionService {
       TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE
     ].includes(params.category);
 
-    if (requiresEntity && !params.customerId && !params.supplierId && !params.employeeId) {
-      errors.push('At least one entity ID (customer, supplier, or employee) is required');
+    if (requiresEntity && !params.entityId) {
+      errors.push('Entity ID is required for this transaction category');
     }
 
     return {
@@ -1270,13 +1335,10 @@ export class TransactionService {
    * Updated to use journal-based calculations instead of cached balance fields
    */
   private async getEntityBalance(
-    customerId?: string | null,
-    supplierId?: string | null,
-    employeeId?: string | null,
+    entityId: string | null | undefined,
     currency: 'USD' | 'LBP' = 'USD'
   ): Promise<number> {
     try {
-      const entityId = customerId || supplierId || employeeId;
       if (!entityId) {
         return 0;
       }
@@ -1528,7 +1590,7 @@ export class TransactionService {
       userName: context.userName,
       newData: transaction,
       balanceChange: {
-        entityType: transaction.customer_id ? 'customer' : transaction.supplier_id ? 'supplier' : 'cash_drawer',
+        entityType: transaction.entity_id ? (await getDB().entities.get(transaction.entity_id))?.entity_type as 'customer' | 'supplier' | 'employee' || 'cash_drawer' : 'cash_drawer',
         balanceBefore,
         balanceAfter,
         currency: transaction.currency
@@ -1554,16 +1616,14 @@ export class TransactionService {
       category: transaction.category,
       amount: transaction.amount,
       currency: transaction.currency,
-      customer_id: transaction.customer_id,
-      supplier_id: transaction.supplier_id,
-      employee_id: transaction.employee_id,
+      entity_id: transaction.entity_id,
       branch_id: transaction.branch_id
     });
     
     try {
       // Get entity CODE using account mapping utilities
       // Note: getEntityCodeForTransaction returns an entity CODE (e.g., "CASH-CUST"), not an entity ID
-      const providedEntityCode = transaction.customer_id || transaction.supplier_id || transaction.employee_id;
+      const providedEntityCode = transaction.entity_id || null;
       console.log(`[CREATE_JOURNAL_ENTRIES] Provided entity code: ${providedEntityCode}`);
       
       const entityCode = getEntityCodeForTransaction(transaction.category, providedEntityCode);
@@ -1653,8 +1713,7 @@ export class TransactionService {
         stack: error instanceof Error ? error.stack : undefined,
         transactionId: transaction.id,
         category: transaction.category,
-        supplier_id: transaction.supplier_id,
-        customer_id: transaction.customer_id
+        entity_id: transaction.entity_id
       });
       throw error;
     }

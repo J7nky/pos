@@ -225,6 +225,9 @@ const fr = {
   customers: {
     noActiveAdvances: 'Aucune avance active',
     noAdvancesRecorded: 'Aucune avance enregistrée',
+    priceAdjustment: 'Ajustement de prix',
+    from: 'de',
+    to: 'à',
     advanceHistory: 'Historique des avances',
     given: 'Donné',
     deducted: 'Déduit',

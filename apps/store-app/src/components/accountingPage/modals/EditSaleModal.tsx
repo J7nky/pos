@@ -6,7 +6,7 @@ interface EditSaleModalProps {
   isOpen: boolean;
   originalSale: any;
   sale: any; // ideally you define a Sale type
-  customers: any[];
+  entities: any[]; // Unified entities array
   formatCurrency: (value: number) => string;
   onClose: () => void;
   onSave: (updatedSale: any) => void;
@@ -16,11 +16,14 @@ export default function EditSaleModal({
   isOpen,
   originalSale,
   sale,
-  customers,
+  entities,
   formatCurrency,
   onClose,
   onSave,
 }: EditSaleModalProps) {
+  // Filter for customers only
+  const customers = entities.filter((e: any) => e.entity_type === 'customer' && !e._deleted);
+  
   console.log('EditSaleModal props:', { isOpen, originalSale, sale, customers: customers?.length });
   
   if (!sale) {

@@ -26,9 +26,8 @@ type ReceivedBillsProps = {
   inventoryBills: any[];
   bills: Bill[];
   products: any[];
-  suppliers: any[];
+  entities: any[]; // Unified entities array
   sales: any[];
-  customers: any[];
   formatCurrency: (amount: number) => string;
   showToast: (message: string, type?: 'success' | 'error') => void;
   onEditSale: (sale: any) => void;
@@ -37,8 +36,8 @@ type ReceivedBillsProps = {
   onCloseBill?: (bill: any, fees: { commission: number; porterage: number; transfer: number; supplierAmount: number }) => Promise<void>;
   // Additional props for ReceiveFormModal
   defaultCommissionRate: number;
-  recentSuppliers: string[];
-  setRecentSuppliers: (suppliers: string[]) => void;
+  recentEntities: string[];
+  setRecentEntities: (entities: string[]) => void;
   addSupplier?: (supplier: any) => Promise<void>;
   flashingItemId?: string | null;
   autoExpandGroupId?: string | null;
@@ -50,9 +49,8 @@ export default function ReceivedBills({
   inventoryBills,
   bills: _bills,
   products,
-  suppliers,
+  entities,
   sales,
-  customers,
   formatCurrency,
   showToast,
   onEditSale,
@@ -60,13 +58,37 @@ export default function ReceivedBills({
   onUpdateBatch,
   onCloseBill,
   defaultCommissionRate,
-  recentSuppliers,
-  setRecentSuppliers,
+  recentEntities,
+  setRecentEntities,
   addSupplier,
   flashingItemId,
   autoExpandGroupId,
   preferredCurrency
 }: ReceivedBillsProps) {
+  // Filter entities by type
+  const suppliers = useMemo(() => 
+    entities.filter((e: any) => e.entity_type === 'supplier' && !e._deleted),
+    [entities]
+  );
+  const customers = useMemo(() => 
+    entities.filter((e: any) => e.entity_type === 'customer' && !e._deleted),
+    [entities]
+  );
+  const recentSuppliers = useMemo(() => 
+    recentEntities.filter((id: string) => {
+      const entity = entities.find((e: any) => e.id === id);
+      return entity && entity.entity_type === 'supplier';
+    }),
+    [recentEntities, entities]
+  );
+  const setRecentSuppliers = (supplierIds: string[]) => {
+    // Merge with other entity types
+    const otherEntities = recentEntities.filter((id: string) => {
+      const entity = entities.find((e: any) => e.id === id);
+      return entity && entity.entity_type !== 'supplier';
+    });
+    setRecentEntities([...supplierIds, ...otherEntities]);
+  };
   const { t } = useI18n();
   const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
   // const [receivedBills, setReceivedBills] = useState<Bill[]>([]);

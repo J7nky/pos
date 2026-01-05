@@ -513,7 +513,7 @@ export class InventoryPurchaseService {
           amount: itemsTotal,
           currency: data.currency,
           supplierId: data.supplier_id,
-          reference: `CREDIT-PURCH-${transactionId.substring(0, 8)}`
+          reference: `CBILL-${transactionId.substring(0, 8)}`
         });
         
         creditPurchaseResult = await transactionService.createSupplierCreditPurchase(
@@ -529,7 +529,7 @@ export class InventoryPurchaseService {
             branchId: data.branch_id
           },
           {
-            reference: `CREDIT-PURCH-${transactionId.substring(0, 8)}`,
+            reference: `CBILL-${transactionId.substring(0, 8)}`,
             metadata: data.batch_id ? { batch_id: data.batch_id } : undefined
           }
         );
@@ -1031,7 +1031,7 @@ export class InventoryPurchaseService {
       // If difference > 0: same direction as original (increase inventory cost)
       // If difference < 0: reverse direction (decrease inventory cost)
       const adjustmentAmount = Math.abs(difference);
-      const description = `Price adjustment - ${difference > 0 ? 'increase' : 'decrease'} of ${currency} ${adjustmentAmount.toFixed(2)}`;
+      const description = `Price adjustment - ${difference > 0 ? 'increase' : 'decrease'}`;
 
       // Cash drawer balance validation removed - negative balances are now allowed
 
@@ -1041,29 +1041,63 @@ export class InventoryPurchaseService {
       if (isCashPurchase) {
         if (difference > 0) {
           // Increase: Debit Inventory (1300), Credit Cash (1100) - same as original
-          adjustmentResult = await transactionService.createInventoryCashPurchase(
-            adjustmentAmount,
+          // Use journal service directly to create correct entries with INVENTORY_PRICE_ADJUSTMENT category
+          const { journalService } = await import('./journalService');
+          const { accountingInitService } = await import('./accountingInitService');
+          
+          // Get internal entity for cash drawer
+          const internalEntity = await accountingInitService.getSystemEntityByType(storeId, 'internal');
+          if (!internalEntity) {
+            throw new Error('Internal entity not found');
+          }
+
+          // Create transaction record first
+          const transaction = {
+            id: adjustmentTransactionId,
+            store_id: storeId,
+            branch_id: branchId,
+            type: 'expense' as const,
+            category: TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT,
+            amount: adjustmentAmount,
             currency,
             description,
-            {
-              userId,
-              storeId,
-              branchId,
-              module: 'inventory_purchase',
-              source: 'web'
-            },
-            {
-              reference: `PRICE-ADJ-${adjustmentTransactionId.substring(0, 8)}`,
-              metadata: {
-                batch_id: batchId,
-                adjustment_of: originalTransactionId,
-                reason: 'Price correction',
-                inventory_item_id: inventoryItemId,
-                old_price: oldPrice,
-                new_price: newPrice
-              }
+            reference: `PRICE-ADJ-${adjustmentTransactionId.substring(0, 8)}`,
+            entity_id: internalEntity.id,
+
+            created_at: new Date().toISOString(),
+            created_by: userId,
+            _synced: false,
+            _deleted: false,
+            metadata: {
+              batch_id: batchId,
+              adjustment_of: originalTransactionId,
+              reason: 'Price correction',
+              inventory_item_id: inventoryItemId,
+              old_price: oldPrice,
+              new_price: newPrice
             }
-          );
+          };
+
+          await getDB().transactions.add(transaction);
+
+          // Create journal entries: Debit Inventory (1300), Credit Cash (1100)
+          await journalService.createJournalEntry({
+            transactionId: adjustmentTransactionId,
+            debitAccount: '1300', // Inventory
+            creditAccount: '1100', // Cash
+            amountUSD: currency === 'USD' ? adjustmentAmount : 0,
+            amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
+            entityId: internalEntity.id,
+            description: description,
+            postedDate: new Date().toISOString().split('T')[0],
+            createdBy: userId,
+            branchId
+          });
+
+          adjustmentResult = {
+            success: true,
+            transactionId: adjustmentTransactionId
+          };
         } else {
           // Decrease: Debit Cash (1100), Credit Inventory (1300) - reverse direction
           // Use CASH_DRAWER_EXPENSE category which creates: Debit Expense, Credit Cash
@@ -1084,14 +1118,12 @@ export class InventoryPurchaseService {
             store_id: storeId,
             branch_id: branchId,
             type: 'expense' as const,
-            category: TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
+            category: TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT,
             amount: adjustmentAmount,
             currency,
             description,
             reference: `PRICE-ADJ-${adjustmentTransactionId.substring(0, 8)}`,
             entity_id: internalEntity.id,
-            customer_id: null,
-            supplier_id: null,
             created_at: new Date().toISOString(),
             created_by: userId,
             _synced: false,
@@ -1136,30 +1168,59 @@ export class InventoryPurchaseService {
 
         if (difference > 0) {
           // Increase: Debit Inventory (1300), Credit Accounts Payable (2100) - same as original
-          adjustmentResult = await transactionService.createSupplierCreditPurchase(
-            supplierId,
-            adjustmentAmount,
+          // Use journal service directly to create correct entries with INVENTORY_PRICE_ADJUSTMENT category
+          const { journalService } = await import('./journalService');
+          const supplierEntity = await getDB().entities.get(supplierId);
+          if (!supplierEntity) {
+            throw new Error(`Supplier entity not found: ${supplierId}`);
+          }
+
+          // Create transaction record first
+          const transaction = {
+            id: adjustmentTransactionId,
+            store_id: storeId,
+            branch_id: branchId,
+            type: 'expense' as const,
+            category: TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT,
+            amount: adjustmentAmount,
             currency,
             description,
-            {
-              userId,
-              storeId,
-              branchId,
-              module: 'inventory_purchase',
-              source: 'web'
-            },
-            {
-              reference: `PRICE-ADJ-${adjustmentTransactionId.substring(0, 8)}`,
-              metadata: {
-                batch_id: batchId,
-                adjustment_of: originalTransactionId,
-                reason: 'Price correction',
-                inventory_item_id: inventoryItemId,
-                old_price: oldPrice,
-                new_price: newPrice
-              }
+            reference: `PRICE-ADJ-${adjustmentTransactionId.substring(0, 8)}`,
+            entity_id: supplierId,
+            created_at: new Date().toISOString(),
+            created_by: userId,
+            _synced: false,
+            _deleted: false,
+            metadata: {
+              batch_id: batchId,
+              adjustment_of: originalTransactionId,
+              reason: 'Price correction',
+              inventory_item_id: inventoryItemId,
+              old_price: oldPrice,
+              new_price: newPrice
             }
-          );
+          };
+
+          await getDB().transactions.add(transaction);
+
+          // Create journal entries: Debit Inventory (1300), Credit Accounts Payable (2100)
+          await journalService.createJournalEntry({
+            transactionId: adjustmentTransactionId,
+            debitAccount: '1300', // Inventory
+            creditAccount: '2100', // Accounts Payable
+            amountUSD: currency === 'USD' ? adjustmentAmount : 0,
+            amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
+            entityId: supplierId,
+            description: description,
+            postedDate: new Date().toISOString().split('T')[0],
+            createdBy: userId,
+            branchId
+          });
+
+          adjustmentResult = {
+            success: true,
+            transactionId: adjustmentTransactionId
+          };
         } else {
           // Decrease: Debit Accounts Payable (2100), Credit Inventory (1300) - reverse direction
           // Use journal service directly to create reverse entries
@@ -1175,14 +1236,12 @@ export class InventoryPurchaseService {
             store_id: storeId,
             branch_id: branchId,
             type: 'expense' as const,
-            category: TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
+            category: TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT,
             amount: adjustmentAmount,
             currency,
             description,
             reference: `PRICE-ADJ-${adjustmentTransactionId.substring(0, 8)}`,
             entity_id: supplierId,
-            customer_id: null,
-            supplier_id: supplierId,
             created_at: new Date().toISOString(),
             created_by: userId,
             _synced: false,
@@ -1228,7 +1287,8 @@ export class InventoryPurchaseService {
         transactionId: adjustmentResult.transactionId,
         amount: adjustmentAmount,
         difference,
-        category
+        category: TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT,
+        originalCategory: category
       });
 
       return adjustmentResult.transactionId || '';

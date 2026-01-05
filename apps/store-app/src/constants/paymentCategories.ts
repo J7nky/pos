@@ -6,27 +6,20 @@
 export const PAYMENT_CATEGORIES = {
   // Customer-related payments
   CUSTOMER_PAYMENT: 'Customer Payment',
-  CUSTOMER_CREDIT_SALE: 'Customer Credit Sale',
-  CUSTOMER_REFUND: 'Customer Refund',
+
   // Supplier-related payments
   SUPPLIER_PAYMENT: 'Supplier Payment',
-  SUPPLIER_COMMISSION: 'Supplier Commission',
-  SUPPLIER_REFUND: 'Supplier Refund',
-  SUPPLIER_CREDIT_SALE: 'Supplier Credit Sale',
+
   // Cash drawer payments
   CASH_PAYMENT: 'Cash Payment',
-  CASH_SALE: 'Cash Sale',
-  CASH_DRAWER_SALE: 'cash_drawer_sale',
   CASH_DRAWER_PAYMENT: 'cash_drawer_payment',
   CASH_DRAWER_CUSTOMER_PAYMENT: 'cash_drawer_customer_payment',
-  CASH_DRAWER_EXPENSE: 'cash_drawer_expense',
-  CASH_DRAWER_REFUND: 'cash_drawer_refund',
+
   
   // Employee payments
   EMPLOYEE_PAYMENT: 'Employee Payment',
   
   // Sales
-  SALE: 'sale',
   
   // General payment types
   PAYMENT_RECEIVED: 'Payment Received',
@@ -60,8 +53,6 @@ export const isCustomerPayment = (transaction: { type: string; category: string;
   return (
    (transaction.type === PAYMENT_TYPES.INCOME || transaction.type === PAYMENT_TYPES.EXPENSE) &&
     (transaction.category === PAYMENT_CATEGORIES.CUSTOMER_PAYMENT ||
-     transaction.category === PAYMENT_CATEGORIES.CUSTOMER_REFUND ||
-     transaction.category === PAYMENT_CATEGORIES.CUSTOMER_CREDIT_SALE ||
      transaction.category === PAYMENT_CATEGORIES.PAYMENT_RECEIVED) &&
     !!transaction.customer_id
   );  
@@ -76,9 +67,6 @@ export const isSupplierPayment = (transaction: { type: string; category: string;
   return (
     transaction.type === PAYMENT_TYPES.EXPENSE &&
     (transaction.category === PAYMENT_CATEGORIES.SUPPLIER_PAYMENT ||
-     transaction.category === PAYMENT_CATEGORIES.SUPPLIER_CREDIT_SALE ||
-     transaction.category === PAYMENT_CATEGORIES.SUPPLIER_COMMISSION ||
-     transaction.category === PAYMENT_CATEGORIES.SUPPLIER_REFUND ||
      transaction.category === PAYMENT_CATEGORIES.PAYMENT_SENT) &&
     !!transaction.supplier_id
   );
@@ -87,7 +75,7 @@ export const isSupplierPayment = (transaction: { type: string; category: string;
 /**
  * Check if a transaction is any type of payment
  */
-export const isPaymentTransaction = (transaction: { type: string; category: string; customer_id?: string | null; supplier_id?: string | null }): boolean => {
+export const isPaymentTransaction = (transaction: { type: string; category: string; entity_id?: string | null }): boolean => {
   return isCustomerPayment(transaction) || isSupplierPayment(transaction) || isPaymentCategory(transaction.category);
 };
 
@@ -105,6 +93,9 @@ export const getPaymentDirection = (transaction: { type: string; category: strin
 
 /**
  * Get entity type from payment transaction
+ * 
+ * @deprecated Use getEntityTypeFromTransaction from utils/entityUtils.ts instead
+ * This function is kept for backward compatibility but should be migrated to use entity_id
  */
 export const getPaymentEntityType = (transaction: { customer_id?: string | null; supplier_id?: string | null }): 'customer' | 'supplier' | 'unknown' => {
   if (transaction.customer_id) {
@@ -113,4 +104,19 @@ export const getPaymentEntityType = (transaction: { customer_id?: string | null;
     return 'supplier';
   }
   return 'unknown';
+};
+
+/**
+ * Get entity type from payment transaction using entity_id (new unified field)
+ * This is the preferred method after migration to entity_id
+ * 
+ * Note: This is an async function because it needs to look up the entity in the database
+ * For synchronous usage when you already have the entity, use getEntityTypeFromEntity from utils/entityUtils.ts
+ */
+export const getPaymentEntityTypeFromEntityId = async (
+  transaction: { entity_id?: string | null }
+): Promise<'customer' | 'supplier' | 'employee' | 'cash' | 'internal' | 'unknown'> => {
+  const { getEntityTypeFromTransaction } = await import('../utils/entityUtils');
+  const entityType = await getEntityTypeFromTransaction(transaction);
+  return entityType || 'unknown';
 };

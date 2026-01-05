@@ -89,7 +89,25 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
           setTimeout(() => reject(new Error('Profile load timeout')), timeoutMs)
         );
         
-        const profile = await Promise.race([profilePromise, timeoutPromise]) as any;
+        let profile: any;
+        try {
+          profile = await Promise.race([profilePromise, timeoutPromise]) as any;
+        } catch (error: any) {
+          // Handle PGRST116 (no rows) error - user record might not exist yet
+          // This can happen during user creation when auth state changes before user record is inserted
+          if (error?.code === 'PGRST116' || error?.message?.includes('0 rows')) {
+            console.log('⚠️ User profile not found (PGRST116) - might be newly created, retrying...');
+            // Wait a bit longer for newly created users (up to 2 seconds)
+            if (retryCount < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, 500 * (retryCount + 1)));
+              return loadUserProfile(userId, retryCount + 1, forceRefresh);
+            }
+            // If still not found after retries, return null gracefully
+            console.warn('⚠️ User profile not found after retries - user might be newly created');
+            return null;
+          }
+          throw error;
+        }
         
         if (profile) {
           setUserProfile(profile);

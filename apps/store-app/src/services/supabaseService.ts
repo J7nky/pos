@@ -31,7 +31,14 @@ export class SupabaseService {
         .eq('id', userId)
         .single();
       
-      if (error) throw error;
+      if (error) {
+        // Preserve error code for PGRST116 (no rows) handling in auth context
+        const enhancedError: any = new Error(error.message);
+        enhancedError.code = error.code;
+        enhancedError.details = error.details;
+        enhancedError.hint = error.hint;
+        throw enhancedError;
+      }
       
       // Cache the profile for offline use
       if (data) {
@@ -40,7 +47,12 @@ export class SupabaseService {
       }
       
       return data;
-    } catch (error) {
+    } catch (error: any) {
+      // If it's already an enhanced error with code, re-throw it
+      if (error.code) {
+        throw error;
+      }
+      // Otherwise, use standard error handling
       handleSupabaseError(error);
     }
   }

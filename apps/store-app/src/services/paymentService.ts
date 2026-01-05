@@ -6,7 +6,8 @@ import {
   isCustomerPayment, 
   isSupplierPayment,
   getPaymentDirection,
-  getPaymentEntityType
+  getPaymentEntityType,
+  getPaymentEntityTypeFromEntityId
 } from '../constants/paymentCategories';
 
 export interface PaymentFilter {
@@ -66,10 +67,7 @@ export class PaymentService {
     // Apply entity ID filter - use entity_id (unified field) with fallback to legacy fields
     if (filter.entityId) {
       filteredTransactions = filteredTransactions.filter(t => 
-        t.entity_id === filter.entityId || 
-        t.customer_id === filter.entityId || 
-        t.supplier_id === filter.entityId ||
-        t.employee_id === filter.entityId
+        t.entity_id === filter.entityId
       );
     }
 
@@ -109,7 +107,7 @@ export class PaymentService {
     return filteredTransactions.map(t => ({
       ...t,
       paymentDirection: getPaymentDirection(t),
-      entityType: getPaymentEntityType(t)
+      entityType:  getPaymentEntityTypeFromEntityId({ entity_id: t.entity_id })
     }));
   }
 
@@ -194,7 +192,7 @@ export class PaymentService {
     const grouped: Record<string, PaymentTransaction[]> = {};
 
     paymentTransactions.forEach(transaction => {
-      const entityId = transaction.customer_id || transaction.supplier_id;
+      const entityId = transaction.entity_id;
       if (entityId) {
         if (!grouped[entityId]) {
           grouped[entityId] = [];
@@ -292,11 +290,11 @@ export class PaymentService {
       errors.push('Invalid currency');
     }
 
-    if (!transaction.customer_id && !transaction.supplier_id) {
+    if (!transaction.entity_id) {
       errors.push('Either customer_id or supplier_id is required for payment transactions');
     }
 
-    if (transaction.customer_id && transaction.supplier_id) {
+    if (transaction.entity_id) {
       errors.push('Payment transaction cannot have both customer_id and supplier_id');
     }
 

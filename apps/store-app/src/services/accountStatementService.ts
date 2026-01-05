@@ -2,8 +2,71 @@ import { getDB } from '../lib/db';
 import { Customer, Supplier, Transaction, BillLineItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
+import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 import { parseMultilingualString, getTranslatedString, type SupportedLanguage } from '../utils/multilingual';
 // Note: snapshotService import removed - snapshots not implemented yet, using direct journal entry calculation
+
+// Import locale dictionaries for direct translation access in services
+import enLocale from '../i18n/locales/en';
+import arLocale from '../i18n/locales/ar';
+import frLocale from '../i18n/locales/fr';
+
+const LOCALE_DICTIONARIES: Record<string, any> = { en: enLocale, ar: arLocale, fr: frLocale };
+
+// Translation cache: Key format: "language:key", Value: translated string
+const translationCache = new Map<string, string>();
+let cachedLanguage: SupportedLanguage | null = null;
+
+/**
+ * Helper function to get translation strings in services (without React context)
+ * Optimized with caching to reduce object traversal overhead
+ * @param key - Translation key path (e.g., 'customers.priceAdjustment')
+ * @param language - Language code ('en', 'ar', 'fr')
+ * @returns Translated string or the key if not found
+ */
+function getTranslation(key: string, language: SupportedLanguage): string {
+  // Clear cache if language changed
+  if (cachedLanguage !== language) {
+    translationCache.clear();
+    cachedLanguage = language;
+  }
+  
+  // Check cache first
+  const cacheKey = `${language}:${key}`;
+  if (translationCache.has(cacheKey)) {
+    return translationCache.get(cacheKey)!;
+  }
+  
+  const dict = LOCALE_DICTIONARIES[language] || LOCALE_DICTIONARIES.en || {};
+  const parts = key.split('.');
+  let value: any = dict;
+  
+  for (const part of parts) {
+    if (value && typeof value === 'object' && part in value) {
+      value = value[part];
+    } else {
+      // Fallback to English if translation not found
+      const enDict = LOCALE_DICTIONARIES.en || {};
+      let enValue: any = enDict;
+      for (const enPart of parts) {
+        if (enValue && typeof enValue === 'object' && enPart in enValue) {
+          enValue = enValue[enPart];
+        } else {
+          const result = key; // Return key if not found in English either
+          translationCache.set(cacheKey, result);
+          return result;
+        }
+      }
+      const result = typeof enValue === 'string' ? enValue : key;
+      translationCache.set(cacheKey, result);
+      return result;
+    }
+  }
+  
+  const result = typeof value === 'string' ? value : key;
+  translationCache.set(cacheKey, result);
+  return result;
+}
 
 export interface AccountStatement {
   entityId: string;
@@ -116,6 +179,14 @@ export class AccountStatementService {
 
     // Get all transaction IDs to look up related transactions and bills
     const transactionIds = Array.from(entriesByTransaction.keys());
+    
+    // Optimize: Parallelize independent database queries
+    // Pre-normalize bill references for efficient lookup
+    const allBillReferences = new Set<string>();
+    const inventoryBillIds = new Set<string>();
+    const priceAdjustmentTransactionIds: string[] = [];
+    
+    // First, fetch transactions to determine what else we need
     const transactions = transactionIds.length > 0
       ? await getDB().transactions.where('id').anyOf(transactionIds).toArray()
       : [];
@@ -129,60 +200,192 @@ export class AccountStatementService {
 
     const transactionMap = new Map(transactions.map(t => [t.id, t]));
 
-    // Get bills for transactions that have references
-    // Handle both 'BILL-' prefix and direct bill numbers
-    const allBillReferences = new Set<string>();
+    // Pre-process transactions to collect all bill references and inventory bill IDs
     transactions.forEach(t => {
+      // Collect bill references (normalize all variations upfront)
       if (t.reference) {
-        // Add the reference as-is
         allBillReferences.add(t.reference);
-        // Also add normalized versions
         if (t.reference.startsWith('BILL-')) {
           allBillReferences.add(t.reference.replace('BILL-', ''));
         } else {
           allBillReferences.add(`BILL-${t.reference}`);
         }
       }
+      
+      // Collect inventory bill IDs for suppliers
+      if (entityType === 'supplier' && t.category !== TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT) {
+        const batchId = (t.metadata as any)?.batch_id;
+        if (batchId) {
+          inventoryBillIds.add(batchId);
+        }
+      }
+      
+      // Collect price adjustment transaction IDs for batch fetching
+      if (t.category === TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT) {
+        priceAdjustmentTransactionIds.push(t.id);
+      }
     });
     
     const billReferencesArray = Array.from(allBillReferences);
-    const bills = billReferencesArray.length > 0
-      ? await getDB().bills.where('bill_number').anyOf(billReferencesArray).toArray()
+    const inventoryBillIdsArray = Array.from(inventoryBillIds);
+    
+    // Optimize: Parallelize independent queries (stage 1: bills, inventory bills, inventory items, price adjustments)
+    const [bills, inventoryBills, allInventoryItems, priceAdjustmentData] = await Promise.all([
+      // Fetch bills
+      billReferencesArray.length > 0
+        ? getDB().bills.where('bill_number').anyOf(billReferencesArray).toArray()
+        : Promise.resolve([]),
+      
+      // Fetch inventory bills for suppliers
+      inventoryBillIdsArray.length > 0 && viewMode === 'detailed'
+        ? getDB().inventory_bills.where('id').anyOf(inventoryBillIdsArray).toArray()
+        : Promise.resolve([]),
+      
+      // Fetch inventory items
+      inventoryBillIdsArray.length > 0 && viewMode === 'detailed'
+        ? getDB().inventory_items
+            .where('batch_id')
+            .anyOf(inventoryBillIdsArray)
+            .filter(item => !item._deleted)
+            .toArray()
+        : Promise.resolve([]),
+      
+      // Batch fetch price adjustment data (inventory items and products)
+      priceAdjustmentTransactionIds.length > 0 && viewMode === 'detailed'
+        ? (async () => {
+            const priceAdjustmentMetadata = transactions
+              .filter(t => t.category === TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT)
+              .map(t => ({
+                transactionId: t.id,
+                inventoryItemId: (t.metadata as any)?.inventory_item_id,
+                oldPrice: (t.metadata as any)?.old_price,
+                newPrice: (t.metadata as any)?.new_price
+              }))
+              .filter(m => m.inventoryItemId);
+            
+            const inventoryItemIds = [...new Set(priceAdjustmentMetadata.map(m => m.inventoryItemId))];
+            
+            if (inventoryItemIds.length === 0) {
+              return { inventoryItems: [], products: [], metadata: [] };
+            }
+            
+            // Fetch inventory items once
+            const inventoryItems = await getDB().inventory_items.where('id').anyOf(inventoryItemIds).toArray();
+            
+            // Get product IDs from inventory items
+            const productIds = [...new Set(inventoryItems.map(item => item.product_id))];
+            const products = productIds.length > 0
+              ? await getDB().products.where('id').anyOf(productIds).toArray()
+              : [];
+            
+            return { inventoryItems, products, metadata: priceAdjustmentMetadata };
+          })()
+        : Promise.resolve({ inventoryItems: [], products: [], metadata: [] })
+    ]);
+    
+    // Stage 2: Fetch bill line items and products (after we have bill IDs)
+    const billIds = bills.map(b => b.id);
+    
+    // Collect all product IDs we need before fetching
+    const productIdsSet = new Set<string>();
+    allInventoryItems.forEach(item => productIdsSet.add(item.product_id));
+    if (priceAdjustmentData.products) {
+      priceAdjustmentData.products.forEach((p: any) => productIdsSet.add(p.id));
+    }
+    
+    // Fetch bill line items and products in parallel
+    const [allBillLineItemsFinal, inventoryProducts] = await Promise.all([
+      // Fetch bill line items
+      viewMode === 'detailed' && billIds.length > 0
+        ? getDB().bill_line_items.where('bill_id').anyOf(billIds).toArray()
+        : Promise.resolve([]),
+      
+      // Fetch products for inventory items and price adjustments
+      (() => {
+        const productIds = Array.from(productIdsSet);
+        return productIds.length > 0 && viewMode === 'detailed'
+          ? getDB().products.where('id').anyOf(productIds).toArray()
+          : Promise.resolve([]);
+      })()
+    ]);
+    
+    // Add bill line item product IDs and fetch those products
+    allBillLineItemsFinal.forEach(item => productIdsSet.add(item.product_id));
+    const billLineItemProductIds = Array.from(productIdsSet).filter(id => 
+      !inventoryProducts.some(p => p.id === id)
+    );
+    const billLineItemProducts = viewMode === 'detailed' && billLineItemProductIds.length > 0
+      ? await getDB().products.where('id').anyOf(billLineItemProductIds).toArray()
       : [];
     
-    // Create map with all possible lookup keys for flexible matching
+    // Combine all products (avoid duplicates)
+    const allProductsMap = new Map(inventoryProducts.map(p => [p.id, p]));
+    billLineItemProducts.forEach(p => {
+      if (!allProductsMap.has(p.id)) {
+        allProductsMap.set(p.id, p);
+      }
+    });
+    const allProducts = Array.from(allProductsMap.values());
+    
+    // Create comprehensive bill map with all variations upfront (optimize bill lookup)
     const billMap = new Map<string, any>();
     for (const bill of bills) {
-      // Add bill_number as-is
       billMap.set(bill.bill_number, bill);
-      // Add with BILL- prefix
       billMap.set(`BILL-${bill.bill_number}`, bill);
-      // Also handle if bill_number already has BILL- prefix
       if (bill.bill_number.startsWith('BILL-')) {
         billMap.set(bill.bill_number.replace('BILL-', ''), bill);
       }
     }
-
-    // Pre-fetch all bill_line_items and products for detailed view (performance optimization)
-    const billIds = bills.map(b => b.id);
-    const allBillLineItems = viewMode === 'detailed' && billIds.length > 0
-      ? await getDB().bill_line_items.where('bill_id').anyOf(billIds).toArray()
-      : [];
     
     const billLineItemsMap = new Map<string, any[]>();
-    for (const item of allBillLineItems) {
+    for (const item of allBillLineItemsFinal) {
       if (!billLineItemsMap.has(item.bill_id)) {
         billLineItemsMap.set(item.bill_id, []);
       }
       billLineItemsMap.get(item.bill_id)!.push(item);
     }
 
-    // Pre-fetch all products for detailed view (performance optimization)
-    const productIds = [...new Set(allBillLineItems.map(item => item.product_id))];
-    const allProducts = viewMode === 'detailed' && productIds.length > 0
-      ? await getDB().products.where('id').anyOf(productIds).toArray()
-      : [];
+    // Build product map from all fetched products
     const productMap = new Map(allProducts.map(p => [p.id, p]));
+    
+    // Add price adjustment products to product map
+    if (priceAdjustmentData.products) {
+      priceAdjustmentData.products.forEach((p: any) => {
+        if (!productMap.has(p.id)) {
+          productMap.set(p.id, p);
+        }
+      });
+    }
+
+    const inventoryBillMap = new Map(inventoryBills.map(b => [b.id, b]));
+
+    // Organize inventory items by batch
+    const inventoryItemsByBatch = new Map<string, any[]>();
+    for (const item of allInventoryItems) {
+      if (item.batch_id) {
+        if (!inventoryItemsByBatch.has(item.batch_id)) {
+          inventoryItemsByBatch.set(item.batch_id, []);
+        }
+        inventoryItemsByBatch.get(item.batch_id)!.push(item);
+      }
+    }
+    
+    // Create price adjustment lookup map
+    const priceAdjustmentMap = new Map<string, { inventoryItem: any; product: any; oldPrice: number; newPrice: number }>();
+    if (priceAdjustmentData.inventoryItems && priceAdjustmentData.products) {
+      for (const metadata of priceAdjustmentData.metadata) {
+        const inventoryItem = priceAdjustmentData.inventoryItems.find((item: any) => item.id === metadata.inventoryItemId);
+        const product = priceAdjustmentData.products.find((p: any) => inventoryItem && p.id === inventoryItem.product_id);
+        if (inventoryItem && product) {
+          priceAdjustmentMap.set(metadata.transactionId, {
+            inventoryItem,
+            product,
+            oldPrice: metadata.oldPrice,
+            newPrice: metadata.newPrice
+          });
+        }
+      }
+    }
 
     // Build statement transactions
     const statementTransactions: StatementTransaction[] = [];
@@ -195,19 +398,11 @@ export class AccountStatementService {
       paymentsUSD: 0,
       paymentsLBP: 0
     };
-    // Sort transaction IDs by transaction created_at for accurate chronological ordering
-    // This ensures transactions are ordered by when they were actually created, not posted_date
+    // Sort transaction IDs by posted_date (accounting date) for accurate chronological ordering
+    // This ensures transactions are ordered by their accounting date, matching how they appear after sync
     const sortedTransactionIds = Array.from(entriesByTransaction.entries())
       .sort(([transactionIdA, entriesA], [transactionIdB, entriesB]) => {
-        // Use transaction created_at as primary sort key (most accurate)
-        const transactionA = transactionMap.get(transactionIdA);
-        const transactionB = transactionMap.get(transactionIdB);
-        
-        if (transactionA && transactionB) {
-          return transactionA.created_at.localeCompare(transactionB.created_at);
-        }
-        
-        // Fallback: Get account entry and use its created_at
+        // Get account entries for both transactions
         const accountEntryA = entriesA.find(e => 
           (entityType === 'customer' && e.account_code === '1200') ||
           (entityType === 'supplier' && e.account_code === '2100')
@@ -219,8 +414,20 @@ export class AccountStatementService {
         
         if (!accountEntryA || !accountEntryB) return 0;
         
-        // Use journal entry created_at as fallback
-        return accountEntryA.created_at.localeCompare(accountEntryB.created_at);
+        // Primary sort: Use posted_date (accounting date) - YYYY-MM-DD format sorts correctly with localeCompare
+        const dateCompare = (accountEntryA.posted_date || '').localeCompare(accountEntryB.posted_date || '');
+        if (dateCompare !== 0) return dateCompare;
+        
+        // Secondary sort: Use created_at as tiebreaker (convert to Date for proper comparison)
+        const transactionA = transactionMap.get(transactionIdA);
+        const transactionB = transactionMap.get(transactionIdB);
+        
+        if (transactionA && transactionB) {
+          return new Date(transactionA.created_at).getTime() - new Date(transactionB.created_at).getTime();
+        }
+        
+        // Fallback: Use journal entry created_at
+        return new Date(accountEntryA.created_at).getTime() - new Date(accountEntryB.created_at).getTime();
       })
       .map(([transactionId]) => transactionId);
 
@@ -237,6 +444,26 @@ export class AccountStatementService {
 
       if (!accountEntry) continue;
       const transaction = transactionMap.get(transactionId);
+      
+      // Skip reversal transactions, corrected original transactions, and deleted transactions from display
+      // These affect balances but shouldn't appear as line items:
+      // - Reversals: correction entries that reverse the original (check both transaction and journal entry)
+      // - Corrected originals: original transactions that were corrected (only corrected version should appear)
+      // - Deleted transactions: transactions that were deleted (neither original nor reversal should appear)
+      // Reversal journal entries are still included in balance calculations (they're in journalEntries parameter)
+      const isReversalTransaction = transaction && (transaction.is_reversal === true || transaction.reversal_of_transaction_id);
+      const isReversalEntry = accountEntry.entry_type === 'reversal';
+      const isCorrectedOriginal = transaction && (transaction.metadata as any)?.corrected === true;
+      const isDeleted = transaction && (transaction.metadata as any)?.deleted === true;
+      
+      if (isReversalTransaction || isReversalEntry || isCorrectedOriginal || isDeleted) {
+        // Still update running balance because reversal/corrected/deleted entries affect the balance
+        const amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
+        const amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
+        runningUSD += amountUSD;
+        runningLBP += amountLBP;
+        continue; // Skip adding to statementTransactions but keep balance updated
+      }
       
       // Calculate amounts for both currencies
       const amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
@@ -295,7 +522,9 @@ export class AccountStatementService {
       if (transaction && (hasDebit && hasCredit)) {
         // Both debit and credit exist, use transaction category
         if (transaction.category?.includes('CREDIT_SALE') || transaction.category?.includes('SALE')) {
-          type = entityType === 'customer' ? 'sale' : 'expense';
+          // For supplier credit purchases, type should be 'income' (purchase/receiving)
+          // For customer credit sales, type should be 'sale'
+          type = entityType === 'customer' ? 'sale' : 'income';
           description = transaction.description 
             ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
             : description;
@@ -310,91 +539,86 @@ export class AccountStatementService {
           type = 'expense';
         }
       } else if (transaction) {
+        // Also check transaction category for supplier credit purchases when type wasn't set from debit/credit
+        if (entityType === 'supplier' && transaction.category?.includes('CREDIT_SALE')) {
+          type = 'income'; // Supplier credit purchase
+        }
         // Update description from transaction if available (translate multilingual)
         description = transaction.description 
           ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
           : description;
       }
 
+      // Check if this is a price adjustment transaction
+      const isPriceAdjustment = transaction?.category === TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT;
+
+      // Format description for price adjustments with product details (using pre-fetched data)
+      if (isPriceAdjustment && transaction) {
+        const priceAdjustmentInfo = priceAdjustmentMap.get(transactionId);
+        if (priceAdjustmentInfo) {
+          const { product, oldPrice, newPrice } = priceAdjustmentInfo;
+          
+          // Parse and translate product name
+          const parsedName = product.name ? parseMultilingualString(product.name) : null;
+          const productName = parsedName ? getTranslatedString(parsedName, language, 'en') : 'Unknown Product';
+          
+          // Format prices with thousand separators
+          const formatPrice = (price: number | null) => {
+            if (price === null || price === undefined) return 'N/A';
+            return new Intl.NumberFormat('en-US', {
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 2
+            }).format(price);
+          };
+          
+          // Get translated strings for price adjustment description
+          const priceAdjustmentLabel = getTranslation('customers.priceAdjustment', language);
+          const fromLabel = getTranslation('customers.from', language);
+          const toLabel = getTranslation('customers.to', language);
+          
+          // Build formatted description: "Price Adjustment | Product Name | from OldPrice | to NewPrice"
+          description = `${priceAdjustmentLabel} | ${productName} | ${fromLabel} ${formatPrice(oldPrice)} | ${toLabel} ${formatPrice(newPrice)}`;
+        }
+      }
+
       // Get bill information if available (using pre-fetched data)
+      // Optimize: Use comprehensive bill map (no expensive fallback searches)
       let bill: any = null;
       let billLineItems: any[] = [];
       if (transaction?.reference) {
-        // Try multiple lookup strategies for bill reference
-        // First try direct lookup with the reference as-is
-        bill = billMap.get(transaction.reference);
+        // Use pre-normalized bill map (all variations already included)
+        bill = billMap.get(transaction.reference) || 
+               billMap.get(transaction.reference.startsWith('BILL-') ? transaction.reference.replace('BILL-', '') : `BILL-${transaction.reference}`);
         
-        // If not found, try without BILL- prefix
-        if (!bill && transaction.reference.startsWith('BILL-')) {
-          const billNumber = transaction.reference.replace('BILL-', '');
-          bill = billMap.get(billNumber);
-        }
-        
-        // If still not found, try with BILL- prefix
-        if (!bill && !transaction.reference.startsWith('BILL-')) {
-          bill = billMap.get(`BILL-${transaction.reference}`);
-        }
-        
-        // Last resort: if still not found and reference looks like a bill, search all bills
-        // This handles cases where bill_number format doesn't match exactly
-        if (!bill && (transaction.reference.startsWith('BILL-') || /^[0-9]+$/.test(transaction.reference))) {
-          const normalizedRef = transaction.reference.startsWith('BILL-') 
-            ? transaction.reference.replace('BILL-', '') 
-            : transaction.reference;
-          // Search for bills where bill_number matches (with or without BILL- prefix)
-          const allBills = await getDB().bills
-            .filter(b => 
-              b.bill_number === normalizedRef || 
-              b.bill_number === `BILL-${normalizedRef}` ||
-              b.bill_number === transaction.reference ||
-              (b.bill_number.startsWith('BILL-') && b.bill_number.replace('BILL-', '') === normalizedRef)
-            )
-            .toArray();
-          if (allBills.length > 0) {
-            bill = allBills[0];
-            // Add to map for future lookups
-            billMap.set(bill.bill_number, bill);
-            billMap.set(`BILL-${bill.bill_number}`, bill);
-            if (bill.bill_number.startsWith('BILL-')) {
-              billMap.set(bill.bill_number.replace('BILL-', ''), bill);
-            }
-          }
-        }
-        
-        // If bill is found, get line items (always fetch, but only use in detailed mode)
+        // If bill is found, get line items from pre-fetched map
         if (bill) {
           billLineItems = billLineItemsMap.get(bill.id) || [];
+        }
+      }
+
+      // Get inventory bill information for supplier transactions (inventory purchases)
+      // Inventory purchases link to inventory_bills via metadata.batch_id
+      // Skip price adjustments - they shouldn't show inventory items
+      // Optimize: Use pre-fetched data (no individual queries)
+      let inventoryBill: any = null;
+      let inventoryItems: any[] = [];
+      if (entityType === 'supplier' && transaction && !isPriceAdjustment) {
+        const batchId = (transaction.metadata as any)?.batch_id;
+        if (batchId) {
+          // Get inventory bill from pre-fetched map
+          inventoryBill = inventoryBillMap.get(batchId);
           
-          // If no line items found in pre-fetched data and we're in detailed mode, try direct fetch
-          // This handles edge cases where bills might have been created after pre-fetch
-          if (viewMode === 'detailed' && billLineItems.length === 0) {
-            const directLineItems = await getDB().bill_line_items
-              .where('bill_id')
-              .equals(bill.id)
-              .toArray();
-            if (directLineItems.length > 0) {
-              billLineItems = directLineItems;
-              // Update the map for future use
-              billLineItemsMap.set(bill.id, directLineItems);
-              
-              // Also fetch products if not already in productMap
-              const missingProductIds = directLineItems
-                .map(item => item.product_id)
-                .filter(id => !productMap.has(id));
-              if (missingProductIds.length > 0) {
-                const missingProducts = await getDB().products
-                  .where('id')
-                  .anyOf(missingProductIds)
-                  .toArray();
-                missingProducts.forEach(p => productMap.set(p.id, p));
-              }
-            }
+          // Get inventory items for this batch from pre-fetched map
+          if (inventoryBill) {
+            inventoryItems = inventoryItemsByBatch.get(batchId) || [];
           }
         }
       }
 
       // Build product details for detailed view (using pre-fetched products)
       const productDetails: StatementProductDetail[] = [];
+      
+      // Process bill line items (for customer bills and supplier bills from POS)
       if (viewMode === 'detailed' && billLineItems.length > 0) {
         for (const item of billLineItems) {
           const product = productMap.get(item.product_id);
@@ -429,8 +653,10 @@ export class AccountStatementService {
               credit_amount = 0;
             }
           } else if (entityType === 'supplier') {
-            if (type === 'income' || (type === 'sale' && transaction?.category?.includes('CREDIT_SALE'))) {
-              // Supplier receiving: show as credit (increases payable)
+            // Supplier credit purchases: show as credit (increases payable)
+            if (type === 'income' || 
+                transaction?.category?.includes('SUPPLIER_CREDIT_SALE') || 
+                transaction?.category?.includes('CREDIT_SALE')) {
               debit_amount = 0;
               credit_amount = lineTotal;
             } else if (type === 'payment') {
@@ -464,6 +690,54 @@ export class AccountStatementService {
         }
       }
 
+      // Process inventory items for supplier inventory bills (inventory purchases)
+      if (viewMode === 'detailed' && inventoryItems.length > 0 && entityType === 'supplier') {
+        for (const item of inventoryItems) {
+          const product = productMap.get(item.product_id);
+          // Parse and translate multilingual product name
+          const parsedName = product?.name ? parseMultilingualString(product.name) : null;
+          const translatedName = parsedName ? getTranslatedString(parsedName, language, 'en') : 'Unknown Product';
+          
+          // Calculate credit/debit for each inventory item
+          // For suppliers: purchases increase payable (credit)
+          let debit_amount = 0;
+          let credit_amount = 0;
+          
+          // Use the item's currency if available, otherwise use transaction currency
+          const itemCurrency = item.currency || currency;
+          // Calculate line total: quantity * price (or use received_quantity if different)
+          const itemQuantity = item.received_quantity || item.quantity || 0;
+          const itemPrice = item.price || 0;
+          const lineTotal = itemQuantity * itemPrice;
+          
+          // Supplier inventory purchases: show as credit (increases payable)
+          if (type === 'income' || 
+              transaction?.category?.includes('SUPPLIER_CREDIT_SALE') || 
+              transaction?.category?.includes('CREDIT_SALE')) {
+            debit_amount = 0;
+            credit_amount = lineTotal;
+          } else {
+            // Default: treat as purchase for suppliers
+            debit_amount = 0;
+            credit_amount = lineTotal;
+          }
+          
+          productDetails.push({
+            product_id: item.product_id,
+            product_name: translatedName,
+            quantity: itemQuantity,
+            unit: item.unit || 'piece',
+            unit_price: itemPrice,
+            total_price: lineTotal,
+            weight: item.weight || undefined,
+            notes: undefined, // Inventory items don't have notes field
+            debit_amount,
+            credit_amount,
+            currency: itemCurrency
+          } as StatementProductDetail);
+        }
+      }
+
       // Calculate totals for both currencies
       if (type === 'sale' || (type === 'income' && entityType === 'customer')) {
         totals.salesUSD += Math.abs(amountUSD);
@@ -479,17 +753,35 @@ export class AccountStatementService {
         ? '' // Empty when line items are shown - they will display the product details
         : description; // Use multilingual description only when no line items
 
+      // Calculate quantity and average price from line items (bill items or inventory items)
+      const allLineItems = billLineItems.length > 0 ? billLineItems : inventoryItems;
+      const totalQuantity = allLineItems.length > 0
+        ? allLineItems.reduce((sum, item) => {
+            if (item.quantity !== undefined) {
+              return sum + (item.quantity || 0);
+            } else if (item.received_quantity !== undefined) {
+              return sum + (item.received_quantity || 0);
+            }
+            return sum;
+          }, 0)
+        : 0;
+      
+      const averagePrice = allLineItems.length > 0
+        ? allLineItems.reduce((sum, item) => {
+            const price = item.unit_price || item.price || 0;
+            return sum + price;
+          }, 0) / allLineItems.length
+        : 0;
+
       statementTransactions.push({
         id: transactionId,
-        date: transaction?.created_at || accountEntry.created_at,
+        date: accountEntry.posted_date || accountEntry.created_at,
         type,
         description: finalDescription,
         amount: Math.abs(amount),
-        quantity: billLineItems.length || 0,
+        quantity: totalQuantity,
         weight: 0,
-        price: billLineItems.length > 0 
-          ? billLineItems.reduce((sum, item) => sum + (item.unit_price || 0), 0) / billLineItems.length
-          : 0,
+        price: averagePrice,
         currency,
         balance_after: currency === 'USD' ? runningUSD : runningLBP,
         payment_method: transaction?.category?.includes('CASH') ? 'cash' : 
@@ -514,6 +806,7 @@ export class AccountStatementService {
 
   /**
    * Calculate product summary from journal entries
+   * Enhanced to include inventory items for suppliers
    */
   private async calculateProductSummaryFromJournalEntries(
     journalEntries: any[],
@@ -538,31 +831,67 @@ export class AccountStatementService {
       ? await getDB().transactions.where('id').anyOf(transactionIds).toArray()
       : [];
 
-    // Get bills for credit sales
+    // Get bills for credit sales (customer/employee) and supplier bills
     const billReferences = transactions
       .filter(t => t.category?.includes('CREDIT_SALE') || t.category?.includes('SALE'))
       .map(t => t.reference)
       .filter(ref => ref && (ref.startsWith('BILL-') || /^[A-Z0-9-]+$/.test(ref)))
       .map(ref => ref!.replace('BILL-', ''));
     
-    const bills = billReferences.length > 0
-      ? await getDB().bills.where('bill_number').anyOf(billReferences).toArray()
-      : [];
+    // Collect inventory bill IDs for suppliers
+    const inventoryBillIds = new Set<string>();
+    if (entityType === 'supplier') {
+      transactions.forEach(t => {
+        if (t.category !== TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT) {
+          const batchId = (t.metadata as any)?.batch_id;
+          if (batchId) {
+            inventoryBillIds.add(batchId);
+          }
+        }
+      });
+    }
+    
+    const inventoryBillIdsArray = Array.from(inventoryBillIds);
+    
+    // Parallelize fetching bills, bill line items, inventory bills, and inventory items
+    const [bills, inventoryBills] = await Promise.all([
+      billReferences.length > 0
+        ? getDB().bills.where('bill_number').anyOf(billReferences).toArray()
+        : Promise.resolve([]),
+      inventoryBillIdsArray.length > 0
+        ? getDB().inventory_bills.where('id').anyOf(inventoryBillIdsArray).toArray()
+        : Promise.resolve([])
+    ]);
 
     const billIds = bills.map(b => b.id);
-    const billLineItems = billIds.length > 0
-      ? await getDB().bill_line_items.where('bill_id').anyOf(billIds).toArray()
-      : [];
+    
+    // Fetch bill line items and inventory items in parallel
+    const [billLineItems, allInventoryItems] = await Promise.all([
+      billIds.length > 0
+        ? getDB().bill_line_items.where('bill_id').anyOf(billIds).toArray()
+        : Promise.resolve([]),
+      inventoryBillIdsArray.length > 0
+        ? getDB().inventory_items
+            .where('batch_id')
+            .anyOf(inventoryBillIdsArray)
+            .filter(item => !item._deleted)
+            .toArray()
+        : Promise.resolve([])
+    ]);
 
-    // Get products
-    const productIds = [...new Set(billLineItems.map(item => item.product_id))];
+    // Collect all product IDs
+    const productIdsSet = new Set<string>();
+    billLineItems.forEach(item => productIdsSet.add(item.product_id));
+    allInventoryItems.forEach(item => productIdsSet.add(item.product_id));
+    
+    const productIds = Array.from(productIdsSet);
     const products = productIds.length > 0
       ? await getDB().products.where('id').anyOf(productIds).toArray()
       : [];
 
     const productMap = new Map(products.map(p => [p.id, p]));
 
-    // Aggregate product data
+    // Aggregate product data from bill line items
     const productStats = new Map<string, {
       productName: string;
       category: string;
@@ -571,6 +900,7 @@ export class AccountStatementService {
       transactionCount: number;
     }>();
 
+    // Process bill line items
     for (const item of billLineItems) {
       const product = productMap.get(item.product_id);
       if (!product) continue;
@@ -592,6 +922,37 @@ export class AccountStatementService {
       existing.transactionCount += 1;
 
       productStats.set(item.product_id, existing);
+    }
+
+    // Process inventory items for suppliers (enhancement)
+    if (entityType === 'supplier') {
+      for (const item of allInventoryItems) {
+        const product = productMap.get(item.product_id);
+        if (!product) continue;
+
+        // Parse and translate multilingual product name
+        const parsedName = parseMultilingualString(product.name);
+        const translatedName = getTranslatedString(parsedName, language, 'en');
+
+        const existing = productStats.get(item.product_id) || {
+          productName: translatedName,
+          category: product.category || 'Uncategorized',
+          totalQuantity: 0,
+          totalValue: 0,
+          transactionCount: 0
+        };
+
+        // Use received_quantity if available, otherwise quantity
+        const itemQuantity = item.received_quantity || item.quantity || 0;
+        const itemPrice = item.price || 0;
+        const lineTotal = itemQuantity * itemPrice;
+
+        existing.totalQuantity += itemQuantity;
+        existing.totalValue += lineTotal;
+        existing.transactionCount += 1;
+
+        productStats.set(item.product_id, existing);
+      }
     }
 
     // Calculate top products
@@ -623,11 +984,12 @@ export class AccountStatementService {
   }
 
   /**
-   * Generate comprehensive account statement for a customer
-   * Uses journal entries as the single source of truth (account_code='1200' for Accounts Receivable)
+   * Unified method to generate account statement for any entity type
+   * Uses journal entries as the single source of truth
    */
-  public async generateCustomerStatement(
-    customerId: string,
+  private async generateEntityStatement(
+    entityId: string,
+    entityType: 'customer' | 'supplier' | 'employee',
     storeId: string,
     dateRange?: { start: string; end: string },
     viewMode: 'summary' | 'detailed' = 'detailed',
@@ -638,85 +1000,101 @@ export class AccountStatementService {
     const endDate = this.endOfDayISO(dateRange?.end || now);
 
     // Get entity information
-    const entity = await getDB().entities.get(customerId);
-    if (!entity || entity.entity_type !== 'customer') {
-      throw new Error(`Customer ${customerId} not found`);
+    const entity = await getDB().entities.get(entityId);
+    if (!entity || entity.entity_type !== entityType) {
+      throw new Error(`${entityType.charAt(0).toUpperCase() + entityType.slice(1)} ${entityId} not found`);
     }
 
-    // Calculate opening balance from journal entries (snapshots not implemented yet)
-    // Use existing index [store_id+account_code] and filter by entity_id
-    const startDateObj = new Date(startDate);
-    startDateObj.setHours(0, 0, 0, 0);
+    // Determine account code based on entity type
+    const accountCode = entityType === 'supplier' ? '2100' : '1200'; // AP for suppliers, AR for customers/employees
+    const statementEntityType = entityType === 'employee' ? 'customer' : entityType; // Employees use customer logic
+
+    // Optimize: Use string comparison for date filtering (faster than Date objects)
+    const startDateStr = startDate.split('T')[0]; // YYYY-MM-DD format
+    const endDateStr = endDate.split('T')[0];
     
-    // Get all journal entries for this account and entity, then filter by date
+    // Optimize: Try to use indexed query with date range filtering
+    // First, get entries for the entity and account
     const allAccountEntries = await getDB().journal_entries
       .where('[store_id+account_code]')
-      .equals([storeId, '1200'])
+      .equals([storeId, accountCode])
       .filter(entry => 
-        entry.entity_id === customerId && 
+        entry.entity_id === entityId && 
         entry.is_posted === true
       )
       .toArray();
     
-    // Calculate opening balance (all entries before start date)
-    const prePeriodEntries = allAccountEntries.filter(entry => {
-      const entryDate = new Date(entry.posted_date);
-      return entryDate < startDateObj;
-    });
+    // Optimize: Use string comparison for date filtering (faster)
+    const prePeriodEntries = allAccountEntries.filter(entry => 
+      entry.posted_date < startDateStr
+    );
     
     const openingBalance = {
       USD: prePeriodEntries.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
       LBP: prePeriodEntries.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
     };
 
-    // Get journal entries for the period (account_code='1200' for Accounts Receivable)
-    // Use existing index [store_id+account_code] and filter by entity_id and date
-    const endDateObj = new Date(endDate);
-    endDateObj.setHours(23, 59, 59, 999);
-    
-    const journalEntries = allAccountEntries.filter(entry => {
-      const entryDate = new Date(entry.posted_date);
-      return entryDate >= startDateObj && entryDate <= endDateObj;
-    });
+    // Get journal entries for the period using string comparison
+    const journalEntries = allAccountEntries.filter(entry => 
+      entry.posted_date >= startDateStr && entry.posted_date <= endDateStr
+    );
 
     // Map journal entries to statement transactions
-    // Note: Sorting happens inside mapJournalEntriesToStatementTransactions by transaction_id
     const { statementTransactions, ending, totals } = await this.mapJournalEntriesToStatementTransactions(
       journalEntries,
       openingBalance,
       viewMode,
-      'customer',
+      statementEntityType,
       language
     );
 
     // Calculate product summary for detailed view
     const productSummary = viewMode === 'detailed' 
-      ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'customer', language)
+      ? await this.calculateProductSummaryFromJournalEntries(journalEntries, statementEntityType, language)
       : undefined;
 
-    // Use ending balance from date range as current balance for the statement period
-    // This shows the balance as of the end date, not the current balance
+    // Build financial summary based on entity type
+    const financialSummary = {
+      openingBalance,
+      currentBalance: { USD: ending.USD, LBP: ending.LBP },
+      totalSales: entityType === 'supplier' 
+        ? { USD: 0, LBP: 0 } 
+        : { USD: totals.salesUSD, LBP: totals.salesLBP },
+      totalPayments: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP },
+      totalReceivings: entityType === 'supplier'
+        ? { USD: totals.salesUSD, LBP: totals.salesLBP } // Received bills are "sales" in the totals
+        : { USD: 0, LBP: 0 },
+      netChange: { 
+        USD: ending.USD - openingBalance.USD, 
+        LBP: ending.LBP - openingBalance.LBP 
+      }
+    };
+
     return {
-      entityId: customerId,
+      entityId,
       entityName: entity.name,
-      entityType: 'customer',
+      entityType,
       statementDate: now.toISOString(),
       dateRange: { start: startDate, end: endDate },
       viewMode,
       transactions: statementTransactions,
-      financialSummary: {
-        openingBalance,
-        currentBalance: { USD: ending.USD, LBP: ending.LBP },
-        totalSales: { USD: totals.salesUSD, LBP: totals.salesLBP },
-        totalPayments: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP },
-        totalReceivings: { USD: 0, LBP: 0 },
-        netChange: { 
-          USD: ending.USD - openingBalance.USD, 
-          LBP: ending.LBP - openingBalance.LBP 
-        }
-      },
+      financialSummary,
       productSummary
     };
+  }
+
+  /**
+   * Generate comprehensive account statement for a customer
+   * Uses journal entries as the single source of truth (account_code='1200' for Accounts Receivable)
+   */
+  public async generateCustomerStatement(
+    customerId: string,
+    storeId: string,
+    dateRange?: { start: string; end: string },
+    viewMode: 'summary' | 'detailed' = 'detailed',
+    language: SupportedLanguage = 'en'
+  ): Promise<AccountStatement> {
+    return this.generateEntityStatement(customerId, 'customer', storeId, dateRange, viewMode, language);
   }
 
   /**
@@ -730,90 +1108,7 @@ export class AccountStatementService {
     viewMode: 'summary' | 'detailed' = 'detailed',
     language: SupportedLanguage = 'en'
   ): Promise<AccountStatement> {
-    const now = new Date();
-    const startDate = this.startOfDayISO(dateRange?.start || new Date(now.getFullYear(), 0, 1));
-    const endDate = this.endOfDayISO(dateRange?.end || now);
-
-    // Get entity information
-    const entity = await getDB().entities.get(supplierId);
-    if (!entity || entity.entity_type !== 'supplier') {
-      throw new Error(`Supplier ${supplierId} not found`);
-    }
-
-    // Calculate opening balance from journal entries (snapshots not implemented yet)
-    // Use existing index [store_id+account_code] and filter by entity_id
-    const startDateObj = new Date(startDate);
-    startDateObj.setHours(0, 0, 0, 0);
-    
-    // Get all journal entries for this account and entity, then filter by date
-    const allAccountEntries = await getDB().journal_entries
-      .where('[store_id+account_code]')
-      .equals([storeId, '2100'])
-      .filter(entry => 
-        entry.entity_id === supplierId && 
-        entry.is_posted === true
-      )
-      .toArray();
-    
-    // Calculate opening balance (all entries before start date)
-    const prePeriodEntries = allAccountEntries.filter(entry => {
-      const entryDate = new Date(entry.posted_date);
-      return entryDate < startDateObj;
-    });
-    
-    const openingBalance = {
-      USD: prePeriodEntries.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
-      LBP: prePeriodEntries.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
-    };
-
-    // Get journal entries for the period (account_code='2100' for Accounts Payable)
-    // Use existing index [store_id+account_code] and filter by entity_id and date
-    const endDateObj = new Date(endDate);
-    endDateObj.setHours(23, 59, 59, 999);
-    
-    const journalEntries = allAccountEntries.filter(entry => {
-      const entryDate = new Date(entry.posted_date);
-      return entryDate >= startDateObj && entryDate <= endDateObj;
-    });
-
-    // Map journal entries to statement transactions
-    // Note: Sorting happens inside mapJournalEntriesToStatementTransactions by transaction_id
-    const { statementTransactions, ending, totals } = await this.mapJournalEntriesToStatementTransactions(
-      journalEntries,
-      openingBalance,
-      viewMode,
-      'supplier',
-      language
-    );
-
-    // Calculate product summary for detailed view
-    const productSummary = viewMode === 'detailed' 
-      ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'supplier', language)
-      : undefined;
-
-    // Use ending balance from date range as current balance for the statement period
-    // This shows the balance as of the end date, not the current balance
-    return {
-      entityId: supplierId,
-      entityName: entity.name,
-      entityType: 'supplier',
-      statementDate: now.toISOString(),
-      dateRange: { start: startDate, end: endDate },
-      viewMode,
-      transactions: statementTransactions,
-      financialSummary: {
-        openingBalance,
-        currentBalance: { USD: ending.USD, LBP: ending.LBP },
-        totalSales: { USD: 0, LBP: 0 }, // Not applicable for suppliers
-        totalPayments: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP },
-        totalReceivings: { USD: totals.salesUSD, LBP: totals.salesLBP }, // Received bills are "sales" in the totals
-        netChange: { 
-          USD: ending.USD - openingBalance.USD, 
-          LBP: ending.LBP - openingBalance.LBP 
-        }
-      },
-      productSummary
-    };
+    return this.generateEntityStatement(supplierId, 'supplier', storeId, dateRange, viewMode, language);
   }
 
   /**
@@ -828,91 +1123,7 @@ export class AccountStatementService {
     viewMode: 'summary' | 'detailed' = 'detailed',
     language: SupportedLanguage = 'en'
   ): Promise<AccountStatement> {
-    const now = new Date();
-    const startDate = this.startOfDayISO(dateRange?.start || new Date(now.getFullYear(), 0, 1));
-    const endDate = this.endOfDayISO(dateRange?.end || now);
-
-    // Get entity information
-    const entity = await getDB().entities.get(employeeId);
-    if (!entity || entity.entity_type !== 'employee') {
-      throw new Error(`Employee ${employeeId} not found`);
-    }
-
-    // Calculate opening balance from journal entries (snapshots not implemented yet)
-    // Use existing index [store_id+account_code] and filter by entity_id
-    const startDateObj = new Date(startDate);
-    startDateObj.setHours(0, 0, 0, 0);
-    
-    // Get all journal entries for this account and entity, then filter by date
-    // Employees use Accounts Receivable (1200) like customers
-    const allAccountEntries = await getDB().journal_entries
-      .where('[store_id+account_code]')
-      .equals([storeId, '1200'])
-      .filter(entry => 
-        entry.entity_id === employeeId && 
-        entry.is_posted === true
-      )
-      .toArray();
-    
-    // Calculate opening balance (all entries before start date)
-    const prePeriodEntries = allAccountEntries.filter(entry => {
-      const entryDate = new Date(entry.posted_date);
-      return entryDate < startDateObj;
-    });
-    
-    const openingBalance = {
-      USD: prePeriodEntries.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
-      LBP: prePeriodEntries.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
-    };
-
-    // Get journal entries for the period (account_code='1200' for Accounts Receivable)
-    // Use existing index [store_id+account_code] and filter by entity_id and date
-    const endDateObj = new Date(endDate);
-    endDateObj.setHours(23, 59, 59, 999);
-    
-    const journalEntries = allAccountEntries.filter(entry => {
-      const entryDate = new Date(entry.posted_date);
-      return entryDate >= startDateObj && entryDate <= endDateObj;
-    });
-
-    // Map journal entries to statement transactions
-    // Note: Sorting happens inside mapJournalEntriesToStatementTransactions by transaction_id
-    const { statementTransactions, ending, totals } = await this.mapJournalEntriesToStatementTransactions(
-      journalEntries,
-      openingBalance,
-      viewMode,
-      'customer', // Use customer logic for employees (same as customers)
-      language
-    );
-
-    // Calculate product summary for detailed view
-    const productSummary = viewMode === 'detailed' 
-      ? await this.calculateProductSummaryFromJournalEntries(journalEntries, 'customer', language) // Use customer logic
-      : undefined;
-
-    // Use ending balance from date range as current balance for the statement period
-    // This shows the balance as of the end date, not the current balance
-    return {
-      entityId: employeeId,
-      entityName: entity.name,
-      entityType: 'employee',
-      statementDate: now.toISOString(),
-      dateRange: { start: startDate, end: endDate },
-      viewMode,
-      transactions: statementTransactions,
-      financialSummary: {
-        openingBalance,
-        currentBalance: { USD: ending.USD, LBP: ending.LBP },
-        totalSales: { USD: totals.salesUSD, LBP: totals.salesLBP },
-        totalPayments: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP },
-        totalReceivings: { USD: 0, LBP: 0 }, // Not applicable for employees
-        netChange: { 
-          USD: ending.USD - openingBalance.USD, 
-          LBP: ending.LBP - openingBalance.LBP 
-        }
-      },
-      productSummary
-    };
+    return this.generateEntityStatement(employeeId, 'employee', storeId, dateRange, viewMode, language);
   }
 
   /**

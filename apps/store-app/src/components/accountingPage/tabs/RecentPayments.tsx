@@ -1,19 +1,15 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useI18n } from '../../../i18n';
-import { useCurrency } from '../../../hooks/useCurrency';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
-import { PaymentService, PaymentTransaction } from '../../../services/paymentService';
 import { transactionService } from '../../../services/transactionService';
 import { accountBalanceService } from '../../../services/accountBalanceService';
 import { transactionValidationService } from '../../../services/transactionValidationService';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import { getDB } from '../../../lib/db';
+import { isPaymentCategory } from '../../../constants/paymentCategories';
 import { 
   Search, 
-  Filter, 
-  Download, 
-  Calendar,
   User,
   DollarSign,
   RefreshCw,
@@ -75,13 +71,11 @@ const getPaymentTypeTranslationKey = (type: PaymentType): string => {
 };
 
 export default function RecentPayments({
-  formatCurrency,
   formatCurrencyWithSymbol
 }: RecentPaymentsProps) {
   const { t } = useI18n();
   const raw = useOfflineData();
   const { userProfile } = useSupabaseAuth();
-  const paymentService = PaymentService.getInstance();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -184,39 +178,57 @@ export default function RecentPayments({
     }
   }, [transactions]);
 
-  // Get employees for employee payment lookups
-  const employees = raw.employees || [];
-
   // Filter and process payment transactions
   const paymentRows = useMemo(() => {
-    // Filter payment transactions (includes customer and supplier payments)
-    const paymentTransactions = paymentService.filterPaymentTransactions(transactions, {
-      startDate: dateRange.start || undefined,
-      endDate: dateRange.end || undefined,
-      currency: currencyFilter !== 'all' ? (currencyFilter as 'USD' | 'LBP') : undefined
+    // Filter payment transactions that have entity_id for customer, supplier, or employee
+    // This unified approach uses entity_id instead of separate customer_id/supplier_id/employee_id fields
+    let allPaymentTransactions = transactions.filter(t => {
+      // Must be a payment category
+      if (!isPaymentCategory(t.category)) {
+        return false;
+      }
+
+      // Must have an entity_id (unified field)
+      if (!t.entity_id) {
+        return false;
+      }
+
+      // Apply date range filter
+      if (dateRange.start && t.created_at && new Date(t.created_at) < new Date(dateRange.start)) {
+        return false;
+      }
+      if (dateRange.end && t.created_at && new Date(t.created_at) > new Date(dateRange.end)) {
+        return false;
+      }
+
+      // Apply currency filter
+      if (currencyFilter !== 'all' && t.currency !== currencyFilter) {
+        return false;
+      }
+
+      return true;
     });
-    console.log(paymentTransactions,753353);
 
-    // Also include employee payments
-    const employeePayments = transactions.filter(t => 
-      (t.category === TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT || 
-       t.category === TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT_RECEIVED) &&
-      (!dateRange.start || (t.created_at && new Date(t.created_at) >= new Date(dateRange.start))) &&
-      (!dateRange.end || (t.created_at && new Date(t.created_at) <= new Date(dateRange.end))) &&
-      (currencyFilter === 'all' || t.currency === currencyFilter)
-    );
+    // Create a map of entity_id to entity for quick lookups
+    const entityMap = new Map<string, typeof entities[0]>();
+    entities.forEach(e => {
+      if (!e._deleted) {
+        entityMap.set(e.id, e);
+      }
+    });
 
-    // Combine all payment transactions
-    let allPaymentTransactions = [...paymentTransactions, ...employeePayments];
+    // Filter to only include transactions with valid entity types (customer, supplier, employee)
+    // We'll check entity types asynchronously in the mapping step below
 
     // Build a map of corrected transaction IDs to their original amounts and currencies
     // This helps us identify which transactions are corrections and what their original amounts were
     const correctedTransactionMap = new Map<string, { amount: number; currency: 'USD' | 'LBP' }>();
     transactions.forEach(t => {
-      if (t.metadata?.corrected === true && t.metadata?.correctedTransactionId) {
+      const transactionWithMetadata = t as any;
+      if (transactionWithMetadata.metadata?.corrected === true && transactionWithMetadata.metadata?.correctedTransactionId) {
         // This is the original transaction that was corrected
         // Store the original amount and currency for the corrected transaction
-        const correctedTransactionId = t.metadata.correctedTransactionId as string;
+        const correctedTransactionId = transactionWithMetadata.metadata.correctedTransactionId as string;
         correctedTransactionMap.set(correctedTransactionId, {
           amount: t.amount,
           currency: t.currency as 'USD' | 'LBP'
@@ -227,88 +239,100 @@ export default function RecentPayments({
     // Filter out original transactions that were corrected (metadata.corrected === true)
     // These should not appear in the list
     allPaymentTransactions = allPaymentTransactions.filter(t => {
+      const transactionWithMetadata = t as any;
       // Hide original transactions that were corrected
-      if (t.metadata?.corrected === true) {
+      if (transactionWithMetadata.metadata?.corrected === true) {
         return false;
       }
       return true;
     });
 
     // Map to rows with entity and user names
-    const rows: PaymentRow[] = allPaymentTransactions.map((transaction: any) => {
-      // Determine payment type
-      let type: PaymentType = 'Customer Payment';
-      let entityType: 'customer' | 'supplier' | 'employee' = 'customer';
-      
-      if (transaction.category === TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT ||
-          transaction.category === TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT_RECEIVED) {
-        type = 'Employee Payment';
-        entityType = 'employee';
-      } else if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT || 
-          transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT_RECEIVED) {
-        type = 'Supplier Payment';
-        entityType = 'supplier';
-      } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND ||
-                 transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND) {
-        type = 'Refund';
-        entityType = transaction.customer_id ? 'customer' : 'supplier';
-      } else if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT ||
-                 transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED) {
-        type = 'Customer Payment';
-        entityType = 'customer';
-      }
+    // Note: We filter by entity type here since we need to check entities table
+    const rows = allPaymentTransactions
+      .map((transaction: any): PaymentRow | null => {
+        // Get entity from entity_id
+        const entityId = transaction.entity_id;
+        if (!entityId) {
+          return null; // Skip transactions without entity_id
+        }
 
-      // Get entity name
-      const entityId = transaction.customer_id || transaction.supplier_id || transaction.employee_id;
-      let entityName = 'Unknown';
-      
-      if (entityType === 'employee') {
-        const employee = entityId ? employees.find((e: any) => e.id === entityId) : null;
-        entityName = employee?.name || 'Unknown';
-      } else {
-        const entity = entityId ? entities.find(e => e.id === entityId) : null;
-        entityName = entity?.name || 'Unknown';
-      }
+        const entity = entityMap.get(entityId);
+        if (!entity) {
+          return null; // Skip if entity not found
+        }
 
-      // Determine status: canceled (metadata.deleted) > reversed (_deleted) > completed
-      const status: PaymentStatus = (transaction.metadata as any)?.deleted === true
-        ? 'canceled'
-        : transaction._deleted
-          ? 'reversed'
-          : 'completed';
+        // Only include customer, supplier, or employee entities (exclude cash/internal)
+        const entityType = entity.entity_type;
+        if (entityType !== 'customer' && entityType !== 'supplier' && entityType !== 'employee') {
+          return null; // Skip cash drawer and internal entities
+        }
 
-      // Get created by name
-      const createdByName = transaction.created_by 
-        ? (userNameCache[transaction.created_by] || 'Unknown')
-        : 'System';
+        // Determine payment type based on category and entity type
+        let type: PaymentType = 'Customer Payment';
+        
+        if (entityType === 'employee') {
+          type = 'Employee Payment';
+        } else if (entityType === 'supplier') {
+          if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND ||
+              transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND) {
+            type = 'Refund';
+          } else {
+            type = 'Supplier Payment';
+          }
+        } else if (entityType === 'customer') {
+          if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND ||
+              transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND) {
+            type = 'Refund';
+          } else {
+            type = 'Customer Payment';
+          }
+        }
 
-      // Check if this is a corrected transaction
-      const isCorrected = correctedTransactionMap.has(transaction.id);
-      const originalData = isCorrected ? correctedTransactionMap.get(transaction.id) : undefined;
-      const originalAmount = originalData?.amount;
-      const originalCurrency = originalData?.currency;
+        // Get entity name from entity object
+        const entityName = entity.name || 'Unknown';
 
-      return {
-        id: transaction.id,
-        date: transaction.created_at || transaction.updated_at || '',
-        type,
-        entityName,
-        entityType,
-        entityId: entityId || undefined,
-        amount: transaction.amount,
-        currency: transaction.currency || 'USD',
-        status,
-        reference: transaction.reference,
-        createdByName,
-        createdById: transaction.created_by || '',
-        isReversal: transaction.is_reversal || false,
-        reversalOfTransactionId: transaction.reversal_of_transaction_id || null,
-        reversalTransactions: [],
-        originalAmount,
-        originalCurrency,
-        isCorrected: isCorrected || false
-      };
-    });
+        // Determine status: canceled (metadata.deleted) > reversed (_deleted) > completed
+        const transactionWithMetadata = transaction as any;
+        const status: PaymentStatus = transactionWithMetadata.metadata?.deleted === true
+          ? 'canceled'
+          : transaction._deleted
+            ? 'reversed'
+            : 'completed';
+
+        // Get created by name
+        const createdByName = transaction.created_by 
+          ? (userNameCache[transaction.created_by] || 'Unknown')
+          : 'System';
+
+        // Check if this is a corrected transaction
+        const isCorrected = correctedTransactionMap.has(transaction.id);
+        const originalData = isCorrected ? correctedTransactionMap.get(transaction.id) : undefined;
+        const originalAmount = originalData?.amount;
+        const originalCurrency = originalData?.currency;
+
+        return {
+          id: transaction.id,
+          date: transaction.created_at || transaction.updated_at || '',
+          type,
+          entityName,
+          entityType: entityType as 'customer' | 'supplier' | 'employee',
+          entityId: entityId,
+          amount: transaction.amount,
+          currency: transaction.currency || 'USD',
+          status,
+          reference: transaction.reference,
+          createdByName,
+          createdById: transaction.created_by || '',
+          isReversal: transaction.is_reversal || false,
+          reversalOfTransactionId: transaction.reversal_of_transaction_id || null,
+          reversalTransactions: [],
+          originalAmount,
+          originalCurrency,
+          isCorrected: isCorrected || false
+        };
+      })
+      .filter((row): row is PaymentRow => row !== null); // Filter out null entries
 
     // Separate non-reversal and reversal transactions
     const nonReversalRows = rows.filter(row => !row.isReversal);
@@ -389,7 +413,7 @@ export default function RecentPayments({
     });
 
     return filtered;
-  }, [transactions, entities, employees, userNameCache, searchTerm, typeFilter, statusFilter, currencyFilter, dateRange, showReversals, paymentService]);
+  }, [transactions, entities, userNameCache, searchTerm, typeFilter, statusFilter, currencyFilter, dateRange, showReversals]);
 
   // Pagination
   const totalPages = Math.ceil(paymentRows.length / ITEMS_PER_PAGE);
@@ -430,7 +454,8 @@ export default function RecentPayments({
       if (typeof transaction.description === 'string') {
         description = transaction.description;
       } else if (transaction.description && typeof transaction.description === 'object') {
-        description = transaction.description.en || transaction.description.ar || transaction.description.fr || JSON.stringify(transaction.description);
+        const descObj = transaction.description as { en?: string; ar?: string; fr?: string };
+        description = descObj.en || descObj.ar || descObj.fr || JSON.stringify(transaction.description);
       }
 
       setEditForm({
@@ -475,7 +500,7 @@ export default function RecentPayments({
       const originalDescription = typeof originalTransaction.description === 'string' 
         ? originalTransaction.description 
         : (originalTransaction.description && typeof originalTransaction.description === 'object'
-          ? (originalTransaction.description.en || originalTransaction.description.ar || originalTransaction.description.fr || JSON.stringify(originalTransaction.description))
+          ? ((originalTransaction.description as { en?: string; ar?: string; fr?: string }).en || (originalTransaction.description as { en?: string; ar?: string; fr?: string }).ar || (originalTransaction.description as { en?: string; ar?: string; fr?: string }).fr || JSON.stringify(originalTransaction.description))
           : JSON.stringify(originalTransaction.description));
       const descriptionChanged = originalDescription !== editForm.description;
       const referenceChanged = (originalTransaction.reference || '') !== (editForm.reference || '');
@@ -490,7 +515,7 @@ export default function RecentPayments({
       // This preserves history: "Mistakes are corrected, not erased. History is preserved, not rewritten"
       const reversalReason = `Correction: ${originalDescription}`;
       
-      console.log('🔄 Creating reversal transaction for payment correction...');0
+      console.log('🔄 Creating reversal transaction for payment correction...');
       const reversalTransaction = await accountBalanceService.createReversalTransaction(
         editingPayment.id,
         reversalReason,
@@ -558,9 +583,7 @@ export default function RecentPayments({
           description: correctedDescription,
           context,
           reference: editForm.reference || undefined,
-          customerId: originalTransaction.customer_id || undefined,
-          supplierId: originalTransaction.supplier_id || undefined,
-          employeeId: originalTransaction.employee_id || undefined
+          entityId: originalTransaction.entity_id || undefined
         });
       }
 
@@ -568,7 +591,8 @@ export default function RecentPayments({
         // Step 3: Mark original transaction with metadata for audit trail
         // This links the original, reversal, and correction together
         try {
-          const existingMetadata = originalTransaction.metadata || {};
+          const originalTransactionWithMetadata = originalTransaction as any;
+          const existingMetadata = originalTransactionWithMetadata.metadata || {};
           await getDB().transactions.update(editingPayment.id, {
             metadata: {
               ...existingMetadata,
