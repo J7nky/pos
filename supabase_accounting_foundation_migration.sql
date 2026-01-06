@@ -371,7 +371,7 @@ BEGIN
         
         -- LIABILITIES (2000-2999)
         (store_uuid, '2100', 'Accounts Payable', 'liability', true, true),
-        (store_uuid, '2200', 'Accrued Expenses', 'liability', false, true),
+        (store_uuid, '2200', 'Salaries Payable', 'liability', true, true),
         (store_uuid, '2300', 'Short-term Loans', 'liability', true, true),
         
         -- EQUITY (3000-3999)

@@ -11,7 +11,7 @@ import { normalizeNameForComparison } from '../utils/nameNormalization';
 
 export default function Employees() {
   const { userProfile } = useSupabaseAuth();
-  const { storeId, employees, updateEmployee, deleteEmployee } = useOfflineData();
+  const { storeId, employees, updateEmployee, deleteEmployee, refreshData } = useOfflineData();
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
@@ -45,7 +45,6 @@ export default function Employees() {
 
   // Check if user is admin
   const isAdmin = userProfile?.role === 'admin';
-console.log(userProfile,123123123);
   useEffect(() => {
     if (!isAdmin) {
       setToast({ message: t('employees.accessDenied'), type: 'error', visible: true });
@@ -144,14 +143,9 @@ console.log(userProfile,123123123);
     }
 
     try {
-      // NOTE: Employee balance fields (lbp_balance/usd_balance) store monthly salary configuration,
-      // NOT running balances like customers/suppliers. Employees don't have AR/AP accounts.
-      // Employee payments are tracked via journal entries (account 5200 - Salaries Expense).
-      const balanceValue = salaryValue && salaryValue.trim() !== '' ? parseFloat(salaryValue) : null;
-      const balanceData = {
-        lbp_balance: salaryCurrency === 'LBP' ? balanceValue : null,
-        usd_balance: salaryCurrency === 'USD' ? balanceValue : null,
-      };
+      // NOTE: Employee running balances are now calculated from journal entries (account 2200 - Salaries Payable).
+      // Monthly salary configuration is stored in monthly_salary field (string).
+      // Employee payments create journal entries: Dr 2200 (Salaries Payable) / Cr 1100 (Cash)
 
       // Clean formData - convert empty strings to null for optional fields
       const cleanedFormData: any = {};
@@ -167,9 +161,16 @@ console.log(userProfile,123123123);
         }
       }
 
+      // Store monthly salary configuration (not running balance)
+      // Format: "500.00 USD" or "1000000 LBP"
+      if (salaryValue && salaryValue.trim() !== '') {
+        cleanedFormData.monthly_salary = `${salaryValue} ${salaryCurrency}`;
+      } else {
+        cleanedFormData.monthly_salary = null;
+      }
+
       const employeeData = {
         ...cleanedFormData,
-        ...balanceData,
       };
 
       console.log('📝 Submitting employee data:', {
@@ -243,12 +244,15 @@ console.log(userProfile,123123123);
         console.log('🚀 Creating employee with auth...', { storeId, email: employeeData.email, name: employeeData.name });
         const createdEmployee = await EmployeeService.createEmployeeWithAuth(storeId, employeeData as any, password);
         console.log('✅ Employee created successfully:', createdEmployee);
+        
+        // Refresh data to update UI with the new employee
+        await refreshData();
+        
         setToast({ message: t('employees.employeeCreatedSuccessfullyWithLoginCredentials'), type: 'success', visible: true });
         setShowForm(false); // Close the form after successful creation
       }
       
       resetForm();
-      // No need to reload, context will auto-update
     } catch (error) {
       console.error('❌ Error saving employee:', error);
       const errorMessage = error instanceof Error ? error.message : t('employees.employeeCreatedFailed');
@@ -280,13 +284,20 @@ console.log(userProfile,123123123);
     });
     setNameValidationError(null);
     
-    // Set currency and value based on existing balance
-    if (employee.lbp_balance !== null && employee.lbp_balance !== undefined) {
-      setSalaryCurrency('LBP');
-      setSalaryValue(employee.lbp_balance.toString());
-    } else if (employee.usd_balance !== null && employee.usd_balance !== undefined) {
-      setSalaryCurrency('USD');
-      setSalaryValue(employee.usd_balance.toString());
+    // Set currency and value based on monthly_salary field
+    // Format: "500.00 USD" or "1000000 LBP"
+    if (employee.monthly_salary) {
+      const parts = employee.monthly_salary.trim().split(' ');
+      if (parts.length >= 2) {
+        const value = parts.slice(0, -1).join(' '); // Handle values with spaces
+        const currency = parts[parts.length - 1].toUpperCase();
+        setSalaryValue(value);
+        setSalaryCurrency(currency === 'USD' ? 'USD' : 'LBP');
+      } else {
+        // Fallback: try to parse as number, default to LBP
+        setSalaryValue(employee.monthly_salary);
+        setSalaryCurrency('LBP');
+      }
     } else {
       setSalaryCurrency('LBP');
       setSalaryValue('');
@@ -855,15 +866,10 @@ console.log(userProfile,123123123);
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     {/* Display monthly salary configuration (not a running balance) */}
-                    {employee.lbp_balance !== null && employee.lbp_balance !== undefined ? (
+                    {employee.monthly_salary ? (
                       <div className="flex items-center text-sm text-gray-900">
                         <DollarSign className="w-4 h-4  text-gray-400" />
-                        {employee.lbp_balance.toLocaleString()} LBP
-                      </div>
-                    ) : employee.usd_balance !== null && employee.usd_balance !== undefined ? (
-                      <div className="flex items-center text-sm text-gray-900">
-                        <DollarSign className="w-4 h-4  text-gray-400" />
-                        {employee.usd_balance.toLocaleString()} USD
+                        {employee.monthly_salary}
                       </div>
                     ) : (
                       <span className="text-sm text-gray-400">{t('employees.notSet')}</span>

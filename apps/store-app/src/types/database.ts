@@ -151,9 +151,8 @@ export interface Database {
           updated_at: string;
           phone?: string | null;
           address?: string | null;
-          monthly_salary?: string | null;
-          lbp_balance?: number | null;
-          usd_balance?: number | null;
+          monthly_salary?: string | null; // Monthly salary configuration (e.g., "500.00 USD" or "1000000 LBP")
+          // Note: Running balances are calculated from journal entries (account 2200 - Salaries Payable)
           working_hours_start?: string | null;
           working_hours_end?: string | null;
           working_days?: string | null;
@@ -164,8 +163,6 @@ export interface Database {
           phone?: string | null;
           address?: string | null;
           monthly_salary?: string | null;
-          lbp_balance?: number | null;
-          usd_balance?: number | null;
           working_hours_start?: string | null;
           working_hours_end?: string | null;
           working_days?: string | null;
@@ -185,8 +182,6 @@ export interface Database {
           phone?: string | null;
           address?: string | null;
           monthly_salary?: string | null;
-          lbp_balance?: number | null;
-          usd_balance?: number | null;
           working_hours_start?: string | null;
           working_hours_end?: string | null;
           working_days?: string | null;

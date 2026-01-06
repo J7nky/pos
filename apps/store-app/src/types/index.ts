@@ -21,9 +21,9 @@ export interface Employee {
   branch_id: string | null; // null for admin (can access all branches), branch ID for manager/cashier
   phone?: string | null;
   address?: string | null;
-  monthly_salary?: string | null; // Stored as string to match database schema
-  lbp_balance?: number | null; // Monthly salary in LBP
-  usd_balance?: number | null; // Monthly salary in USD
+  monthly_salary?: string | null; // Monthly salary configuration (e.g., "500.00 USD" or "1000000 LBP")
+  // Note: Running balances are calculated from journal entries (account 2200 - Salaries Payable)
+  // Use entityBalanceService.getEmployeeBalance() to get current balance
   working_hours_start?: string | null; // Format: "HH:mm" (e.g., "09:00")
   working_hours_end?: string | null; // Format: "HH:mm" (e.g., "17:00")
   working_days?: string | null; // Comma-separated days (e.g., "Monday,Tuesday,Wednesday,Thursday,Friday")

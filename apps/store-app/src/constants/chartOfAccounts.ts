@@ -55,9 +55,9 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Omit<ChartOfAccounts, 'id' | 'store_id'>
   },
   {
     account_code: '2200',
-    account_name: 'Accrued Expenses',
+    account_name: 'Salaries Payable',
     account_type: 'liability',
-    requires_entity: false,
+    requires_entity: true,  // Salaries Payable always tied to specific employee
     is_active: true
   },
   {

@@ -197,40 +197,41 @@ export async function createUser(input: CreateUserInput): Promise<StoreUser> {
     throw new Error(`Failed to create user: ${error.message}`);
   }
 
-  // Create corresponding entity record in Supabase
+  // Create corresponding entity record for the employee
   try {
+    const now = new Date().toISOString();
     const entityData = {
-      id: data.id, // Use same ID as user for backward compatibility
-      store_id: data.store_id,
-      branch_id: data.branch_id || null,
+      id: authData.user.id, // Use same ID as user for consistency
+      store_id: input.store_id,
+      branch_id: input.branch_id || null,
       entity_type: 'employee' as const,
-      entity_code: `EMP-${data.id.slice(0, 8).toUpperCase()}`,
-      name: data.name,
-      phone: data.phone || null,
+      entity_code: `EMP-${authData.user.id.slice(0, 8).toUpperCase()}`,
+      name: input.name,
+      phone: input.phone || null,
       is_system_entity: false,
-      is_active: data.is_active ?? true,
+      is_active: true,
       customer_data: null,
       supplier_data: null,
-      created_at: data.created_at,
-      updated_at: data.updated_at,
+      created_at: now,
+      updated_at: now,
     };
 
-    const { error: entityError } = await supabase
+    // Use supabaseAdmin to bypass RLS (similar to auth operations)
+    const { error: entityError } = await supabaseAdmin
       .from('entities')
       .insert(entityData);
 
     if (entityError) {
-      console.error('Failed to create employee entity in Supabase:', entityError);
-      // Don't fail the whole operation - entity can be created later via migration
-      // Log warning but continue
-      console.warn(`⚠️ User ${data.id} created but entity creation failed. Entity can be created later.`);
+      console.error('Failed to create employee entity:', entityError);
+      // Don't fail the whole operation - entity can be created later if needed
+      // But log it for debugging
+      console.warn('⚠️ User created but entity record creation failed. Entity can be created later.');
     } else {
-      console.log(`✅ Created entity record for user: ${data.name}`);
+      console.log(`✅ Created entity record for user: ${input.name}`);
     }
   } catch (error) {
     console.error('Error creating employee entity:', error);
-    // Don't fail the whole operation - entity can be created later via migration
-    console.warn(`⚠️ User ${data.id} created but entity creation failed. Entity can be created later.`);
+    // Don't fail the whole operation - entity can be created later if needed
   }
 
   return data;

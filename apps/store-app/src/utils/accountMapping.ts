@@ -158,7 +158,7 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
   
   // Employee Transactions
   [TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT]: {
-    debitAccount: '5200', // Salaries Expense (increases)
+    debitAccount: '2200', // Salaries Payable (decreases - we pay what we owe)
     creditAccount: '1100', // Cash (decreases)
     description: 'Salary payment to employee',
     requiresEntity: true

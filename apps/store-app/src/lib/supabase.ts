@@ -3,6 +3,7 @@ import { Database } from '../types/database';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Missing Supabase environment variables. App will run in offline mode.');
@@ -27,6 +28,7 @@ const isOnline = () => navigator.onLine;
 // Use placeholder values if environment variables are missing
 const safeSupabaseUrl = supabaseUrl || 'https://placeholder.supabase.co';
 const safeSupabaseAnonKey = supabaseAnonKey || 'placeholder-key';
+const safeSupabaseServiceRoleKey = supabaseServiceRoleKey || 'placeholder-service-role-key';
 
 // Determine if we should enable auto token refresh (only when online)
 // Note: We can't dynamically change this, but we'll block refresh attempts in the fetch interceptor
@@ -79,7 +81,13 @@ export const supabase = createClient<Database>(safeSupabaseUrl, safeSupabaseAnon
   }
 });
 
-
+// Admin client with service role key for admin operations (like creating users)
+export const supabaseAdmin = createClient<Database>(safeSupabaseUrl, safeSupabaseServiceRoleKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+});
 
 // Helper function to handle Supabase errors
 export const handleSupabaseError = (error: any) => {
