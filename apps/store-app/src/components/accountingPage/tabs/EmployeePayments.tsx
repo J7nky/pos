@@ -3,10 +3,8 @@ import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { EmployeeAttendanceService } from '../../../services/employeeAttendanceService';
 import { EmployeeAttendance, Employee } from '../../../types';
-import { Clock, DollarSign, User, LogIn, LogOut, Calendar, TrendingUp, FileText } from 'lucide-react';
-import { useCurrency } from '../../../hooks/useCurrency';
+import { DollarSign, User, LogIn, LogOut, Calendar, FileText } from 'lucide-react';
 import { Pagination } from '../../../components/common/Pagination';
-import SearchableSelect from '../../../components/common/SearchableSelect';
 import { useI18n } from '../../../i18n';
 import { rtlTableHeaderClasses, rtlTableCellClasses, rtlFlexClasses, rtlSpacingClasses } from '../../../utils/rtl';
 import { useEntityBalances } from '../../../hooks/useEntityBalances';
@@ -34,8 +32,6 @@ export default function EmployeePayments({
   showToast,
   refreshData,
   processEmployeePayment,
-  formatCurrency,
-  formatCurrencyWithSymbol,
   onViewAccountStatement
 }: EmployeePaymentsProps) {
   const { userProfile } = useSupabaseAuth();
@@ -54,7 +50,6 @@ export default function EmployeePayments({
 
   const isAdmin = userProfile?.role === 'admin';
   const isManager = userProfile?.role === 'manager';
-  const isCashier = userProfile?.role === 'cashier';
 
   // Filter employees based on role
   const visibleEmployees = useMemo(() => {
@@ -70,7 +65,7 @@ export default function EmployeePayments({
 
   // Get employee balances from journal entries (account 2200)
   const employeeIds = useMemo(() => visibleEmployees.map(e => e.id), [visibleEmployees]);
-  const { balances: employeeBalances, isLoading: balancesLoading } = useEntityBalances(
+  const { balances: employeeBalances, refreshBalance } = useEntityBalances(
     employeeIds,
     'employee',
     true
@@ -93,16 +88,6 @@ export default function EmployeePayments({
     loadAttendance();
   }, [raw.storeId]);
 
-  // Get current check-in status for an employee
-  const getCurrentStatus = async (employeeId: string) => {
-    try {
-      return await EmployeeAttendanceService.getCurrentStatus(employeeId);
-    } catch (error) {
-      console.error('Failed to get current status:', error);
-      return null;
-    }
-  };
-
   // Get attendance history for an employee
   const getEmployeeAttendance = (employeeId: string) => {
     return attendanceRecords
@@ -122,6 +107,52 @@ export default function EmployeePayments({
       const hours = EmployeeAttendanceService.calculateHoursWorked(att);
       return total + (hours || 0);
     }, 0);
+  };
+
+  // Format balance display for employees
+  // For employees: Positive balance = we owe them (unpaid salary), Negative = overpaid
+  const formatBalanceDisplay = (balance: number, currency: 'USD' | 'LBP') => {
+    if (balance > 0) {
+      // We owe them (unpaid salary)
+      const amountText = currency === 'USD' 
+        ? `$${balance.toFixed(2)}` 
+        : `${Math.round(balance).toLocaleString()} ل.ل`;
+      return {
+        text: `+${amountText}`,
+        label: t('customers.weOwe') || 'We Owe',
+        color: 'text-blue-700',
+        bgColor: 'bg-blue-50',
+        borderColor: 'border-blue-200',
+        icon: '💰',
+        type: 'owed' as const
+      };
+    } else if (balance < 0) {
+      // They overpaid (we paid more than owed)
+      const amountText = currency === 'USD' 
+        ? `$${Math.abs(balance).toFixed(2)}` 
+        : `${Math.round(Math.abs(balance)).toLocaleString()} ل.ل`;
+      return {
+        text: `-${amountText}`,
+        label: t('customers.overpaid') || 'Overpaid',
+        color: 'text-green-700',
+        bgColor: 'bg-green-50',
+        borderColor: 'border-green-200',
+        icon: '✅',
+        type: 'overpaid' as const
+      };
+    } else {
+      // Paid up
+      const amountText = currency === 'USD' ? '$0.00' : '0 ل.ل';
+      return {
+        text: amountText,
+        label: t('customers.paid') || 'Paid',
+        color: 'text-gray-700',
+        bgColor: 'bg-gray-50',
+        borderColor: 'border-gray-200',
+        icon: '✓',
+        type: 'paid' as const
+      };
+    }
   };
 
   // Handle payment
@@ -150,10 +181,16 @@ export default function EmployeePayments({
 
     if (result.success) {
       showToast(t('customers.paymentProcessedSuccessfully'), 'success');
+      // Refresh balances for the employee who received payment before clearing selection
+      if (selectedEmployee) {
+        await refreshBalance(selectedEmployee);
+      }
+      // Also refresh all data
+      await refreshData();
+      // Clear form and selection after refresh
       setShowPaymentForm(false);
       setPaymentForm({ amount: '', currency: 'USD', description: '' });
       setSelectedEmployee(null);
-      await refreshData();
     } else {
       showToast(result.error || t('customers.failedToProcessPayment'), 'error');
     }
@@ -207,12 +244,6 @@ const { t } = useI18n();
                   const balanceData = employeeBalances.get(employee.id);
                   const usdBalance = balanceData?.USD || 0;
                   const lbpBalance = balanceData?.LBP || 0;
-                  
-                  // Determine which currency to display (prefer non-zero balance, default to USD)
-                  const hasLBPBalance = Math.abs(lbpBalance) > 0.01;
-                  const hasUSDBalance = Math.abs(usdBalance) > 0.01;
-                  const displayBalance = hasLBPBalance ? lbpBalance : (hasUSDBalance ? usdBalance : 0);
-                  const balanceCurrency = hasLBPBalance ? 'LBP' : 'USD';
 
                   return (
                     <tr key={employee.id} className="hover:bg-gray-50">
@@ -232,13 +263,35 @@ const { t } = useI18n();
                         {balanceData?.isLoading ? (
                           <div className="text-sm text-gray-400">Loading...</div>
                         ) : (
-                          <div className="text-sm text-gray-900">
-                            {formatCurrencyWithSymbol(displayBalance, balanceCurrency)}
-                            {(hasLBPBalance && hasUSDBalance) && (
-                              <div className="text-xs text-gray-500 mt-1">
-                                {formatCurrency(usdBalance, 'USD')}
-                              </div>
-                            )}
+                          <div className="space-y-1">
+                            {(() => {
+                              const lbpBalanceDisplay = formatBalanceDisplay(lbpBalance, 'LBP');
+                              return (
+                                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${lbpBalanceDisplay.bgColor} ${lbpBalanceDisplay.borderColor}`}>
+                                  <span className="text-base">{lbpBalanceDisplay.icon}</span>
+                                  <span className={`text-xs font-semibold ${lbpBalanceDisplay.color}`}>
+                                    {lbpBalanceDisplay.label}:
+                                  </span>
+                                  <span className={`text-sm font-bold ${lbpBalanceDisplay.color}`}>
+                                    {lbpBalanceDisplay.text}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+                            {(() => {
+                              const usdBalanceDisplay = formatBalanceDisplay(usdBalance, 'USD');
+                              return (
+                                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${usdBalanceDisplay.bgColor} ${usdBalanceDisplay.borderColor}`}>
+                                  <span className="text-base">{usdBalanceDisplay.icon}</span>
+                                  <span className={`text-xs font-semibold ${usdBalanceDisplay.color}`}>
+                                    {usdBalanceDisplay.label}:
+                                  </span>
+                                  <span className={`text-sm font-bold ${usdBalanceDisplay.color}`}>
+                                    {usdBalanceDisplay.text}
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                       </td>

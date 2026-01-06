@@ -53,41 +53,95 @@ export function calculateBothCurrencies(entries: JournalEntry[]): { USD: number;
 }
 
 /**
+ * Calculate both USD and LBP balances for LIABILITY accounts (credit - debit)
+ * For liability accounts like Salaries Payable (2200):
+ * - Credits increase liability (we owe more) → positive balance
+ * - Debits decrease liability (we pay) → negative balance
+ * 
+ * @param entries - Journal entries to calculate balance from
+ * @returns Object with USD and LBP balances
+ */
+export function calculateBothCurrenciesLiability(entries: JournalEntry[]): { USD: number; LBP: number } {
+  return entries.reduce(
+    (acc, e) => {
+      // For liabilities: credit - debit (opposite of assets)
+      acc.USD += e.credit_usd - e.debit_usd;
+      acc.LBP += e.credit_lbp - e.debit_lbp;
+      return acc;
+    },
+    { USD: 0, LBP: 0 }
+  );
+}
+
+/**
  * Calculate employee balance from journal entries (TRUTH)
  * 
- * For employees (Salaries Payable account 2200):
- * - Positive balance = we owe employee (unpaid salary)
- * - Negative balance = employee overpaid (we paid more than owed)
+ * Employees can have entries in TWO accounts:
+ * 1. Account 1200 (Accounts Receivable) - for credit sales (Dr 1200 Cr 4100)
+ * 2. Account 2200 (Salaries Payable) - for salary payments (Dr 2200 Cr 1100)
+ * 
+ * Combined balance = Account 1200 balance - Account 2200 balance
+ * - Positive = they owe us more than we owe them (net receivable)
+ * - Negative = we owe them more than they owe us (net payable)
  * 
  * @param employeeId - Employee ID (same as user ID)
  * @param currency - Currency to filter by
- * @returns True balance from journal entries
+ * @returns True balance from journal entries (combined from both accounts)
  */
 export async function calculateEmployeeBalance(
   employeeId: string,
   currency: 'USD' | 'LBP'
 ): Promise<number> {
+  let entries1200: any[] = [];
+  let entries2200: any[] = [];
+  
   try {
-    // Get all journal entries for this employee and account 2200 (Salaries Payable)
-    const entries = await getDB().journal_entries
+    // Fetch account 1200 entries (Accounts Receivable - asset account)
+    entries1200 = await getDB().journal_entries
+      .where('[entity_id+account_code]')
+      .equals([employeeId, '1200'])
+      .and(e => e.is_posted === true)
+      .toArray();
+    
+    // Fetch account 2200 entries (Salaries Payable - liability account)
+    entries2200 = await getDB().journal_entries
       .where('[entity_id+account_code]')
       .equals([employeeId, '2200'])
       .and(e => e.is_posted === true)
       .toArray();
-
-    return calculateBalance(entries, currency);
   } catch (error) {
     // Fallback: If compound index doesn't exist, filter manually
     console.warn('Compound index not available, using fallback query:', error);
-    
-    const entries = await getDB().journal_entries
+    const allEntries = await getDB().journal_entries
       .where('entity_id')
       .equals(employeeId)
-      .and(e => e.account_code === '2200' && e.is_posted === true)
+      .and(e => e.is_posted === true)
       .toArray();
-
-    return calculateBalance(entries, currency);
+    
+    entries1200 = allEntries.filter(e => e.account_code === '1200');
+    entries2200 = allEntries.filter(e => e.account_code === '2200');
   }
+
+  // Calculate balance for account 1200 (AR - asset): debit - credit
+  const balance1200 = entries1200.reduce((sum, e) => {
+    if (currency === 'USD') {
+      return sum + (e.debit_usd || 0) - (e.credit_usd || 0);
+    } else {
+      return sum + (e.debit_lbp || 0) - (e.credit_lbp || 0);
+    }
+  }, 0);
+
+  // Calculate balance for account 2200 (Salaries Payable - liability): credit - debit
+  const balance2200 = entries2200.reduce((sum, e) => {
+    if (currency === 'USD') {
+      return sum + (e.credit_usd || 0) - (e.debit_usd || 0);
+    } else {
+      return sum + (e.credit_lbp || 0) - (e.debit_lbp || 0);
+    }
+  }, 0);
+
+  // Combined balance: AR - Salaries Payable
+  return balance1200 - balance2200;
 }
 
 /**

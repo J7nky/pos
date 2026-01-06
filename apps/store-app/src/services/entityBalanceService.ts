@@ -325,17 +325,69 @@ export class EntityBalanceService {
     }
 
     // Direct calculation from journal entries (source of truth)
-    // Get all journal entries for this employee and account 2200
-    const entries = await getDB().journal_entries
-      .where('[entity_id+account_code]')
-      .equals([employeeId, '2200'])
-      .and(e => e.is_posted === true)
-      .toArray();
+    // Employees can have entries in TWO accounts:
+    // 1. Account 1200 (Accounts Receivable) - for credit sales (Dr 1200 Cr 4100)
+    // 2. Account 2200 (Salaries Payable) - for salary payments (Dr 2200 Cr 1100)
+    // We need to fetch BOTH and combine them
+    
+    let entries1200: any[] = [];
+    let entries2200: any[] = [];
+    
+    try {
+      // Fetch account 1200 entries (Accounts Receivable - asset account)
+      entries1200 = await getDB().journal_entries
+        .where('[entity_id+account_code]')
+        .equals([employeeId, '1200'])
+        .and(e => e.is_posted === true)
+        .toArray();
+      
+      // Fetch account 2200 entries (Salaries Payable - liability account)
+      entries2200 = await getDB().journal_entries
+        .where('[entity_id+account_code]')
+        .equals([employeeId, '2200'])
+        .and(e => e.is_posted === true)
+        .toArray();
+    } catch (error) {
+      // Fallback: If compound index doesn't exist, filter manually
+      console.warn('Compound index [entity_id+account_code] not available, using fallback query:', error);
+      const allEntries = await getDB().journal_entries
+        .where('entity_id')
+        .equals(employeeId)
+        .and(e => e.is_posted === true)
+        .toArray();
+      
+      entries1200 = allEntries.filter(e => e.account_code === '1200');
+      entries2200 = allEntries.filter(e => e.account_code === '2200');
+    }
 
-    const balances = calculateBothCurrencies(entries);
+    console.log(`[ENTITY_BALANCE_SERVICE] Found ${entries1200.length} journal entries for employee ${employeeId}, account 1200`);
+    console.log(`[ENTITY_BALANCE_SERVICE] Found ${entries2200.length} journal entries for employee ${employeeId}, account 2200`);
+
+    // Calculate balances for each account
+    // Account 1200 (AR - asset): balance = debit - credit (positive = they owe us)
+    const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
+    const balance1200 = calculateBothCurrencies(entries1200);
+    
+    // Account 2200 (Salaries Payable - liability): balance = credit - debit (positive = we owe them)
+    const { calculateBothCurrenciesLiability } = await import('../utils/balanceCalculation');
+    const balance2200 = calculateBothCurrenciesLiability(entries2200);
+
+    // Combine balances: Net = AR balance - Salaries Payable balance
+    // Positive = they owe us more than we owe them (net receivable)
+    // Negative = we owe them more than they owe us (net payable)
+    const combinedBalances = {
+      USD: balance1200.USD - balance2200.USD,
+      LBP: balance1200.LBP - balance2200.LBP
+    };
+
+    console.log(`[ENTITY_BALANCE_SERVICE] Combined balances for employee ${employeeId}:`, {
+      account1200: balance1200,
+      account2200: balance2200,
+      combined: combinedBalances
+    });
 
     return {
-      ...balances,
+      ...combinedBalances,
       lastCalculated: new Date().toISOString(),
       source: 'journal'
     };
@@ -352,56 +404,10 @@ export class EntityBalanceService {
     employeeId: string,
     currency: 'USD' | 'LBP'
   ): Promise<number> {
-    // Get employee entity to determine store_id
-    const entity = await getDB().entities.get(employeeId);
-    if (!entity) {
-      // Fall back to direct calculation if entity doesn't exist
-      return await calculateEmployeeBalance(employeeId, currency);
-    }
-
-    const today = getLocalDateString(new Date().toISOString());
-    
-    // Try to get most recent snapshot for account 2200
-    const snapshot = await snapshotService.getHistoricalBalance(
-      entity.store_id,
-      '2200',
-      employeeId,
-      today
-    );
-
-    // If snapshot exists and is current, return it directly
-    if (snapshot && snapshot.snapshotDate === today) {
-      return currency === 'USD' ? snapshot.balanceUSD : snapshot.balanceLBP;
-    }
-
-    // If snapshot is from yesterday or earlier, get entries since snapshot date
-    if (snapshot) {
-      const snapshotDate = new Date(snapshot.snapshotDate);
-      snapshotDate.setHours(23, 59, 59, 999); // End of snapshot day
-      
-      const incrementalEntries = await getDB().journal_entries
-        .where('[entity_id+account_code]')
-        .equals([employeeId, '2200'])
-        .and(e => {
-          const entryDate = new Date(e.posted_date);
-          return e.is_posted === true && entryDate > snapshotDate;
-        })
-        .toArray();
-
-      const openingBalance = currency === 'USD' ? snapshot.balanceUSD : snapshot.balanceLBP;
-      const incrementalBalance = incrementalEntries.reduce((sum, e) => {
-        if (currency === 'USD') {
-          return sum + (e.debit_usd - e.credit_usd);
-        } else {
-          return sum + (e.debit_lbp - e.credit_lbp);
-        }
-      }, 0);
-
-      return openingBalance + incrementalBalance;
-    }
-
-    // No snapshot available, fall back to full calculation
-    return await calculateEmployeeBalance(employeeId, currency);
+    // Employees have entries in TWO accounts (1200 and 2200)
+    // Use the combined balances method and extract the requested currency
+    const balances = await this.getEmployeeBalancesWithSnapshot(employeeId);
+    return currency === 'USD' ? balances.USD : balances.LBP;
   }
 
   /**
@@ -413,76 +419,60 @@ export class EntityBalanceService {
   private async getEmployeeBalancesWithSnapshot(
     employeeId: string
   ): Promise<{ USD: number; LBP: number; lastCalculated: string }> {
+    // Employees have entries in TWO accounts (1200 and 2200)
+    // Snapshots are account-specific, so combining them is complex
+    // For now, fall back to direct calculation which handles both accounts correctly
+    // TODO: Optimize with snapshots for both accounts if performance becomes an issue
+    
     // Get employee entity to determine store_id
     const entity = await getDB().entities.get(employeeId);
     if (!entity) {
       // Fall back to direct calculation if entity doesn't exist
-      const entries = await getDB().journal_entries
+      // This will be handled by the main getEmployeeBalances method
+      throw new Error(`Entity not found: ${employeeId}`);
+    }
+
+    // Fetch both accounts directly (same logic as getEmployeeBalances)
+    let entries1200: any[] = [];
+    let entries2200: any[] = [];
+    
+    try {
+      entries1200 = await getDB().journal_entries
+        .where('[entity_id+account_code]')
+        .equals([employeeId, '1200'])
+        .and(e => e.is_posted === true)
+        .toArray();
+      
+      entries2200 = await getDB().journal_entries
         .where('[entity_id+account_code]')
         .equals([employeeId, '2200'])
         .and(e => e.is_posted === true)
         .toArray();
-
-      const balances = calculateBothCurrencies(entries);
-      return {
-        ...balances,
-        lastCalculated: new Date().toISOString()
-      };
-    }
-
-    const today = getLocalDateString(new Date().toISOString());
-    
-    // Try to get most recent snapshot for account 2200
-    const snapshot = await snapshotService.getHistoricalBalance(
-      entity.store_id,
-      '2200',
-      employeeId,
-      today
-    );
-
-    // If snapshot exists and is current, return it directly
-    if (snapshot && snapshot.snapshotDate === today) {
-      return {
-        USD: snapshot.balanceUSD,
-        LBP: snapshot.balanceLBP,
-        lastCalculated: snapshot.snapshotDate
-      };
-    }
-
-    // If snapshot is from yesterday or earlier, get entries since snapshot date
-    if (snapshot) {
-      const snapshotDate = new Date(snapshot.snapshotDate);
-      snapshotDate.setHours(23, 59, 59, 999); // End of snapshot day
-      
-      const incrementalEntries = await getDB().journal_entries
-        .where('[entity_id+account_code]')
-        .equals([employeeId, '2200'])
-        .and(e => {
-          const entryDate = new Date(e.posted_date);
-          return e.is_posted === true && entryDate > snapshotDate;
-        })
+    } catch (error) {
+      // Fallback: If compound index doesn't exist, filter manually
+      const allEntries = await getDB().journal_entries
+        .where('entity_id')
+        .equals(employeeId)
+        .and(e => e.is_posted === true)
         .toArray();
-
-      const incremental = calculateBothCurrencies(incrementalEntries);
-
-      return {
-        USD: snapshot.balanceUSD + incremental.USD,
-        LBP: snapshot.balanceLBP + incremental.LBP,
-        lastCalculated: new Date().toISOString()
-      };
+      
+      entries1200 = allEntries.filter(e => e.account_code === '1200');
+      entries2200 = allEntries.filter(e => e.account_code === '2200');
     }
 
-    // No snapshot available, fall back to full calculation
-    const entries = await getDB().journal_entries
-      .where('[entity_id+account_code]')
-      .equals([employeeId, '2200'])
-      .and(e => e.is_posted === true)
-      .toArray();
+    // Calculate balances for each account
+    const { calculateBothCurrencies, calculateBothCurrenciesLiability } = await import('../utils/balanceCalculation');
+    const balance1200 = calculateBothCurrencies(entries1200); // Asset: debit - credit
+    const balance2200 = calculateBothCurrenciesLiability(entries2200); // Liability: credit - debit
 
-    const balances = calculateBothCurrencies(entries);
+    // Combine balances: Net = AR balance - Salaries Payable balance
+    const combinedBalances = {
+      USD: balance1200.USD - balance2200.USD,
+      LBP: balance1200.LBP - balance2200.LBP
+    };
 
     return {
-      ...balances,
+      ...combinedBalances,
       lastCalculated: new Date().toISOString()
     };
   }

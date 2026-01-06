@@ -76,7 +76,9 @@ export function useEntityBalances(
           let balance;
           if (entityType === 'employee') {
             // Use employee-specific balance method
+            console.log(`[USE_ENTITY_BALANCES] Fetching balance for employee: ${entityId}`);
             balance = await entityBalanceService.getEmployeeBalances(entityId, useSnapshot);
+            console.log(`[USE_ENTITY_BALANCES] Balance result for employee ${entityId}:`, balance);
           } else {
             balance = await entityBalanceService.getEntityBalances(
               entityId,
@@ -95,6 +97,7 @@ export function useEntityBalances(
             });
           }
         } catch (error) {
+          console.error(`[USE_ENTITY_BALANCES] Error fetching balance for ${entityId}:`, error);
           if (!cancelled) {
             newBalances.set(entityId, {
               entityId,

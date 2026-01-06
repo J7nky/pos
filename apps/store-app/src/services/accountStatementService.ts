@@ -156,7 +156,7 @@ export class AccountStatementService {
     journalEntries: any[],
     openingBalance: { USD: number; LBP: number },
     viewMode: 'summary' | 'detailed',
-    entityType: 'customer' | 'supplier',
+    entityType: 'customer' | 'supplier' | 'employee',
     language: SupportedLanguage = 'en'
   ): Promise<{
     statementTransactions: StatementTransaction[];
@@ -403,14 +403,17 @@ export class AccountStatementService {
     const sortedTransactionIds = Array.from(entriesByTransaction.entries())
       .sort(([transactionIdA, entriesA], [transactionIdB, entriesB]) => {
         // Get account entries for both transactions
+        // For employees, prefer account 1200 entries, fall back to 2200 if not found
         const accountEntryA = entriesA.find(e => 
           (entityType === 'customer' && e.account_code === '1200') ||
-          (entityType === 'supplier' && e.account_code === '2100')
-        );
+          (entityType === 'supplier' && e.account_code === '2100') ||
+          (entityType === 'employee' && (e.account_code === '1200' || e.account_code === '2200'))
+        ) || entriesA.find(e => entityType === 'employee' && e.account_code === '2200');
         const accountEntryB = entriesB.find(e => 
           (entityType === 'customer' && e.account_code === '1200') ||
-          (entityType === 'supplier' && e.account_code === '2100')
-        );
+          (entityType === 'supplier' && e.account_code === '2100') ||
+          (entityType === 'employee' && (e.account_code === '1200' || e.account_code === '2200'))
+        ) || entriesB.find(e => entityType === 'employee' && e.account_code === '2200');
         
         if (!accountEntryA || !accountEntryB) return 0;
         
@@ -436,11 +439,18 @@ export class AccountStatementService {
       const entries = entriesByTransaction.get(transactionId);
       if (!entries) continue;
 
-      // Get the entry for the account we're querying (AR for customers, AP for suppliers)
-      const accountEntry = entries.find(e => 
+      // Get the entry for the account we're querying
+      // For employees, prefer account 1200 (credit sales), fall back to 2200 (payments)
+      let accountEntry = entries.find(e => 
         (entityType === 'customer' && e.account_code === '1200') ||
-        (entityType === 'supplier' && e.account_code === '2100')
+        (entityType === 'supplier' && e.account_code === '2100') ||
+        (entityType === 'employee' && e.account_code === '1200')
       );
+      
+      // For employees, if no 1200 entry found, use 2200 entry (salary payments)
+      if (!accountEntry && entityType === 'employee') {
+        accountEntry = entries.find(e => e.account_code === '2200');
+      }
 
       if (!accountEntry) continue;
       const transaction = transactionMap.get(transactionId);
@@ -456,18 +466,53 @@ export class AccountStatementService {
       const isCorrectedOriginal = transaction && (transaction.metadata as any)?.corrected === true;
       const isDeleted = transaction && (transaction.metadata as any)?.deleted === true;
       
+      // Calculate amounts based on account type
+      // For employees: net balance = Account 1200 balance - Account 2200 balance
+      // Account 1200 (AR - asset): debit - credit (increases net balance)
+      // Account 2100 (AP - liability): credit - debit (increases net balance for suppliers)
+      // Account 2200 (Salaries Payable - liability): credit - debit (but DECREASES net balance for employees)
+      // 
+      // Opening balance = Account 1200 - Account 2200
+      // When processing account 2200 entries, we need to subtract (credit - debit) from running balance
+      // Subtracting (credit - debit) = adding -(credit - debit) = adding (debit - credit)
+      
+      let amountUSD: number;
+      let amountLBP: number;
+      
+      if (entityType === 'employee') {
+        // For employees: net balance = Account 1200 - Account 2200
+        if (accountEntry.account_code === '1200') {
+          // Account 1200: debit - credit (increases net balance)
+          amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
+          amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
+        } else if (accountEntry.account_code === '2200') {
+          // Account 2200: since opening balance = Account 1200 - Account 2200,
+          // when we process a new account 2200 entry, we need to subtract (credit - debit) from running balance
+          // Subtracting (credit - debit) = adding -(credit - debit) = adding (debit - credit)
+          amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
+          amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
+        } else {
+          // Fallback (shouldn't happen)
+          amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
+          amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
+        }
+      } else {
+        // For customers/suppliers: standard calculation
+        const isLiabilityAccount = accountEntry.account_code === '2100';
+        amountUSD = isLiabilityAccount 
+          ? accountEntry.credit_usd - accountEntry.debit_usd
+          : accountEntry.debit_usd - accountEntry.credit_usd;
+        amountLBP = isLiabilityAccount
+          ? accountEntry.credit_lbp - accountEntry.debit_lbp
+          : accountEntry.debit_lbp - accountEntry.credit_lbp;
+      }
+      
       if (isReversalTransaction || isReversalEntry || isCorrectedOriginal || isDeleted) {
         // Still update running balance because reversal/corrected/deleted entries affect the balance
-        const amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
-        const amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
         runningUSD += amountUSD;
         runningLBP += amountLBP;
         continue; // Skip adding to statementTransactions but keep balance updated
       }
-      
-      // Calculate amounts for both currencies
-      const amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
-      const amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
       
       // Determine which currency has the transaction (prefer USD if both exist)
       const hasUSD = Math.abs(amountUSD) > 0.01;
@@ -504,6 +549,28 @@ export class AccountStatementService {
           type = 'payment';
         } else if (hasDebit && !hasCredit) {
           type = 'sale';
+        }
+        // If both debit and credit exist, fall through to transaction category check
+      } else if (entityType === 'employee') {
+        // For employees:
+        // - Account 1200 (AR): Credit = payment received, Debit = credit sale
+        // - Account 2200 (Salaries Payable - liability): Debit = payment made (salary), Credit = salary accrued
+        if (accountEntry.account_code === '1200') {
+          // Account 1200: same logic as customers
+          if (hasCredit && !hasDebit) {
+            type = 'payment';
+          } else if (hasDebit && !hasCredit) {
+            type = 'sale';
+          }
+        } else if (accountEntry.account_code === '2200') {
+          // Account 2200 (Salaries Payable - liability):
+          // - Debit to 2200 = payment made to employee (reduces what we owe)
+          // - Credit to 2200 = salary accrued (increases what we owe)
+          if (hasDebit && !hasCredit) {
+            type = 'payment'; // Payment made to employee
+          } else if (hasCredit && !hasDebit) {
+            type = 'expense'; // Salary accrued/expense
+          }
         }
         // If both debit and credit exist, fall through to transaction category check
       } else if (entityType === 'supplier') {
@@ -1005,34 +1072,89 @@ export class AccountStatementService {
       throw new Error(`${entityType.charAt(0).toUpperCase() + entityType.slice(1)} ${entityId} not found`);
     }
 
-    // Determine account code based on entity type
-    const accountCode = entityType === 'supplier' ? '2100' : '1200'; // AP for suppliers, AR for customers/employees
+    // Determine account code(s) based on entity type
+    // Employees have entries in TWO accounts: 1200 (credit sales) and 2200 (salary payments)
+    const accountCodes = entityType === 'supplier' 
+      ? ['2100'] 
+      : entityType === 'employee' 
+        ? ['1200', '2200'] // Both AR and Salaries Payable for employees
+        : ['1200']; // AR for customers
     const statementEntityType = entityType === 'employee' ? 'customer' : entityType; // Employees use customer logic
 
     // Optimize: Use string comparison for date filtering (faster than Date objects)
     const startDateStr = startDate.split('T')[0]; // YYYY-MM-DD format
     const endDateStr = endDate.split('T')[0];
     
-    // Optimize: Try to use indexed query with date range filtering
-    // First, get entries for the entity and account
-    const allAccountEntries = await getDB().journal_entries
-      .where('[store_id+account_code]')
-      .equals([storeId, accountCode])
-      .filter(entry => 
-        entry.entity_id === entityId && 
-        entry.is_posted === true
-      )
-      .toArray();
+    // Fetch entries for all relevant accounts
+    // For employees, we need to combine entries from both accounts
+    let allAccountEntries: any[] = [];
+    
+    for (const accountCode of accountCodes) {
+      try {
+        const entries = await getDB().journal_entries
+          .where('[store_id+account_code]')
+          .equals([storeId, accountCode])
+          .filter(entry => 
+            entry.entity_id === entityId && 
+            entry.is_posted === true
+          )
+          .toArray();
+        allAccountEntries.push(...entries);
+      } catch (error) {
+        // Fallback: If compound index doesn't exist, filter manually
+        console.warn(`Compound index [store_id+account_code] not available for account ${accountCode}, using fallback query:`, error);
+        const allStoreEntries = await getDB().journal_entries
+          .where('store_id')
+          .equals(storeId)
+          .filter(entry => 
+            entry.entity_id === entityId && 
+            entry.account_code === accountCode &&
+            entry.is_posted === true
+          )
+          .toArray();
+        allAccountEntries.push(...allStoreEntries);
+      }
+    }
+    
+    console.log(`[ACCOUNT_STATEMENT] Found ${allAccountEntries.length} journal entries for ${entityType} ${entityId}, accounts: ${accountCodes.join(', ')}`);
     
     // Optimize: Use string comparison for date filtering (faster)
     const prePeriodEntries = allAccountEntries.filter(entry => 
       entry.posted_date < startDateStr
     );
     
-    const openingBalance = {
-      USD: prePeriodEntries.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
-      LBP: prePeriodEntries.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
-    };
+    // Calculate opening balance based on entity type
+    let openingBalance: { USD: number; LBP: number };
+    
+    if (entityType === 'employee') {
+      // For employees: combine balances from both accounts
+      // Account 1200 (AR - asset): debit - credit
+      // Account 2200 (Salaries Payable - liability): credit - debit
+      // Net opening balance = AR balance - Salaries Payable balance
+      const prePeriod1200 = prePeriodEntries.filter(e => e.account_code === '1200');
+      const prePeriod2200 = prePeriodEntries.filter(e => e.account_code === '2200');
+      
+      const opening1200 = {
+        USD: prePeriod1200.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
+        LBP: prePeriod1200.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
+      };
+      
+      const opening2200 = {
+        USD: prePeriod2200.reduce((sum, e) => sum + (e.credit_usd - e.debit_usd), 0), // Liability: credit - debit
+        LBP: prePeriod2200.reduce((sum, e) => sum + (e.credit_lbp - e.debit_lbp), 0)
+      };
+      
+      openingBalance = {
+        USD: opening1200.USD - opening2200.USD,
+        LBP: opening1200.LBP - opening2200.LBP
+      };
+    } else {
+      // For customers/suppliers: standard calculation
+      openingBalance = {
+        USD: prePeriodEntries.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
+        LBP: prePeriodEntries.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
+      };
+    }
 
     // Get journal entries for the period using string comparison
     const journalEntries = allAccountEntries.filter(entry => 
@@ -1040,11 +1162,12 @@ export class AccountStatementService {
     );
 
     // Map journal entries to statement transactions
+    // Pass the actual entityType (not statementEntityType) so the method knows it's an employee
     const { statementTransactions, ending, totals } = await this.mapJournalEntriesToStatementTransactions(
       journalEntries,
       openingBalance,
       viewMode,
-      statementEntityType,
+      entityType, // Pass actual entityType so method can handle employees correctly
       language
     );
 

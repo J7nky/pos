@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 interface MoneyInputProps {
   value: string | number;
@@ -155,13 +155,16 @@ export default function MoneyInput({
         onChange={handleInputChange}
         onFocus={handleInputFocus}
         onBlur={handleInputBlur}
-        className={`w-full border border-gray-300 rounded px-3 py-1.5 mb-2 pr-16 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${className}`}
+        className={`w-full border border-gray-300 rounded px-3 py-1.5 mb-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
+          showRecommendation && recommendedValue ? 'pr-20' : 'pr-3'
+        } ${className}`}
         placeholder={placeholder}
         disabled={disabled}
         required={required}
         tabIndex={tabIndex}
         autoFocus={autoFocus}
         aria-label={ariaLabel || label}
+        style={{ boxSizing: 'border-box' }}
       />
 
       {/* Inline recommendation pill */}
