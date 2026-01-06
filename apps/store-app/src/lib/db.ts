@@ -151,7 +151,7 @@ class POSDatabase extends Dexie {
       
       // Core tables
       products: 'id, store_id, branch_id, name, category, is_global, updated_at, _synced, _deleted',
-      users: 'id, store_id, branch_id, email, name, role, updated_at, lbp_balance, usd_balance, working_hours_start, working_hours_end, working_days, _synced, _deleted',
+      users: 'id, store_id, branch_id, email, name, role, updated_at, monthly_salary, working_hours_start, working_hours_end, working_days, _synced, _deleted',
 
       // Inventory tables
       inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, [store_id+branch_id], _synced, _deleted',

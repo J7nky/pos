@@ -6147,27 +6147,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Cash drawer balance validation removed - negative balances are now allowed
 
-      // Get current balances (read-only operation outside transaction)
-      const currentLbBalance = employee.lbp_balance || 0;
-      const currentUsdBalance = employee.usd_balance || 0;
-
       console.log(`💳 [ATOMIC] Employee Payment - Employee: ${employee.name}, Currency: ${currency}`);
-      console.log(`💳 [ATOMIC] Current Balances - LBP: ${currentLbBalance}, USD: ${currentUsdBalance}`);
       console.log(`💳 [ATOMIC] Payment Amount: ${numAmount}`);
-
-      // Calculate new balance
-      let newBalance: number;
-      let balanceField: string;
-      
-      if (currency === 'LBP') {
-        newBalance = currentLbBalance - numAmount; // We pay them → we owe them less
-        balanceField = 'lbp_balance';
-      } else {
-        newBalance = currentUsdBalance - numAmount; // We pay them → we owe them less
-        balanceField = 'usd_balance';
-      }
-
-      console.log(`💳 [ATOMIC] Payment sent to employee: ${currency} balance ${currency === 'LBP' ? currentLbBalance : currentUsdBalance} → ${newBalance}`);
+      console.log(`💳 [ATOMIC] Balance will be calculated from journal entries (account 2200)`);
 
       // Prepare transaction data with multilingual description
       const descriptionPart = description ? `: ${description}` : '';
@@ -6235,16 +6217,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             console.log(`💳 [ATOMIC] Created entity record for employee: ${employee.name}`);
           }
 
-          // 2. Update employee balance atomically
-          const updateData = { 
-            [balanceField]: newBalance, 
-            updated_at: new Date().toISOString(),
-            _synced: false 
-          };
-          await getDB().users.update(employeeId, updateData);
-          console.log(`💳 [ATOMIC] Employee balance updated: ${balanceField} = ${newBalance}`);
-
-          // 3. Create transaction record atomically
+          // 2. Create transaction record atomically
+          // Note: Employee balance is now calculated from journal entries, not stored
           const transactionRecord = {
             id: transactionId,
             store_id: storeId,
@@ -6275,12 +6249,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
           await getDB().transactions.add(transactionRecord);
 
-          // 4. Create journal entries atomically
-          // Employee payment: Debit Salaries Expense (5200) / Credit Cash (1100)
+          // 3. Create journal entries atomically
+          // Employee payment: Debit Salaries Payable (2200) / Credit Cash (1100)
+          // This reduces what we owe the employee (debit liability decreases it)
           await journalService.createJournalEntry({
             transactionId,
-            debitAccount: '5200', // Salaries Expense
-            creditAccount: '1100', // Cash
+            debitAccount: '2200', // Salaries Payable (decreases what we owe)
+            creditAccount: '1100', // Cash (decreases)
             amountUSD: currency === 'USD' ? numAmount : 0,
             amountLBP: currency === 'LBP' ? numAmount : 0,
             entityId: employeeId,

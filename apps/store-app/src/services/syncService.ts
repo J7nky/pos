@@ -1967,9 +1967,25 @@ export class SyncService {
       return await this.resolveBalanceConflict(tableName, localRecord, normalizedRemote);
     }
 
-    // Employee balance conflict resolution
+    // Employee conflict resolution (no balance fields - balances calculated from journals)
+    // Use timestamp-based resolution for users table
     if (tableName === 'users') {
-      return await this.resolveEmployeeBalanceConflict(localRecord, normalizedRemote);
+      const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
+      const remoteTimestamp = new Date(normalizedRemote.updated_at || normalizedRemote.created_at);
+      
+      if (remoteTimestamp >= localTimestamp) {
+        await getDB().users.put({
+          ...normalizedRemote,
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      } else {
+        await getDB().users.update(localRecord.id, {
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString()
+        });
+      }
+      return false; // No special conflict handling needed
     }
 
     // Transaction conflict resolution (immutable - remote always wins)
@@ -2103,49 +2119,9 @@ export class SyncService {
     return false;
   }
 
-  private async resolveEmployeeBalanceConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
-    const localUsdBalance = Number(localRecord.usd_balance || 0);
-    const remoteUsdBalance = Number(remoteRecord.usd_balance || 0);
-    const localLbpBalance = Number(localRecord.lbp_balance || 0);
-    const remoteLbpBalance = Number(remoteRecord.lbp_balance || 0);
-
-    if (Math.abs(localUsdBalance - remoteUsdBalance) > 0.01 || Math.abs(localLbpBalance - remoteLbpBalance) > 0.01) {
-      console.warn(`💰 Employee balance conflict: Local USD: $${localUsdBalance.toFixed(2)}, Remote USD: $${remoteUsdBalance.toFixed(2)}`);
-
-      // For employees, use max balance (similar to entities)
-      const finalUsdBalance = Math.max(localUsdBalance, remoteUsdBalance);
-      const finalLbpBalance = Math.max(localLbpBalance, remoteLbpBalance);
-
-      await getDB().users.put({
-        ...remoteRecord,
-        usd_balance: finalUsdBalance,
-        lbp_balance: finalLbpBalance,
-        _synced: true,
-        _lastSyncedAt: new Date().toISOString()
-      });
-
-      return true;
-    }
-
-    // No conflict, use timestamp-based resolution
-    const localTimestamp = new Date(localRecord.updated_at || localRecord.created_at);
-    const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
-
-    if (remoteTimestamp >= localTimestamp) {
-      await getDB().users.put({
-        ...remoteRecord,
-        _synced: true,
-        _lastSyncedAt: new Date().toISOString()
-      });
-    } else {
-      await getDB().users.update(localRecord.id, {
-        _synced: true,
-        _lastSyncedAt: new Date().toISOString()
-      });
-    }
-
-    return false;
-  }
+  // Note: Employee balance conflict resolution removed
+  // Employee balances are now calculated from journal entries (account 2200)
+  // No balance fields to conflict - balances are always derived from journals
 
   private async resolveTransactionConflict(localRecord: any, remoteRecord: any): Promise<boolean> {
     // Transactions are immutable - remote version is authoritative

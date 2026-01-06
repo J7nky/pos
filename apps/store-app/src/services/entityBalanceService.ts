@@ -8,7 +8,7 @@
  */
 
 import { getDB } from '../lib/db';
-import { calculateEntityBalance, calculateBothCurrencies } from '../utils/balanceCalculation';
+import { calculateEntityBalance, calculateBothCurrencies, calculateEmployeeBalance } from '../utils/balanceCalculation';
 import { snapshotService } from './snapshotService';
 import { getLocalDateString } from '../utils/dateUtils';
 
@@ -266,6 +266,225 @@ export class EntityBalanceService {
     accountCode: '1200' | '2100' = '1200'
   ): Promise<number> {
     return await calculateEntityBalance(entityId, currency, accountCode);
+  }
+
+  /**
+   * Get employee balance for a specific currency
+   * Uses account 2200 (Salaries Payable) for calculation
+   * 
+   * For employees:
+   * - Positive balance = we owe employee (unpaid salary)
+   * - Negative balance = employee overpaid (we paid more than owed)
+   * 
+   * @param employeeId - Employee ID (same as user ID)
+   * @param currency - Currency ('USD' or 'LBP')
+   * @param useSnapshot - Whether to use snapshot optimization (default: true)
+   * @returns Balance amount
+   */
+  async getEmployeeBalance(
+    employeeId: string,
+    currency: 'USD' | 'LBP',
+    useSnapshot: boolean = true
+  ): Promise<number> {
+    if (useSnapshot) {
+      try {
+        return await this.getEmployeeBalanceWithSnapshot(employeeId, currency);
+      } catch (error) {
+        console.warn('Snapshot lookup failed for employee balance, falling back to direct calculation:', error);
+        // Fall through to direct calculation
+      }
+    }
+
+    // Direct calculation from journal entries (source of truth)
+    return await calculateEmployeeBalance(employeeId, currency);
+  }
+
+  /**
+   * Get both USD and LBP balances for an employee
+   * More efficient than calling getEmployeeBalance twice
+   * 
+   * @param employeeId - Employee ID (same as user ID)
+   * @param useSnapshot - Whether to use snapshot optimization (default: true)
+   * @returns Object with USD and LBP balances
+   */
+  async getEmployeeBalances(
+    employeeId: string,
+    useSnapshot: boolean = true
+  ): Promise<EntityBalance> {
+    if (useSnapshot) {
+      try {
+        const balances = await this.getEmployeeBalancesWithSnapshot(employeeId);
+        return {
+          ...balances,
+          source: 'snapshot'
+        };
+      } catch (error) {
+        console.warn('Snapshot lookup failed for employee balances, falling back to direct calculation:', error);
+        // Fall through to direct calculation
+      }
+    }
+
+    // Direct calculation from journal entries (source of truth)
+    // Get all journal entries for this employee and account 2200
+    const entries = await getDB().journal_entries
+      .where('[entity_id+account_code]')
+      .equals([employeeId, '2200'])
+      .and(e => e.is_posted === true)
+      .toArray();
+
+    const balances = calculateBothCurrencies(entries);
+
+    return {
+      ...balances,
+      lastCalculated: new Date().toISOString(),
+      source: 'journal'
+    };
+  }
+
+  /**
+   * Get employee balance using snapshot + incremental entries
+   * 
+   * @param employeeId - Employee ID
+   * @param currency - Currency
+   * @returns Balance amount
+   */
+  private async getEmployeeBalanceWithSnapshot(
+    employeeId: string,
+    currency: 'USD' | 'LBP'
+  ): Promise<number> {
+    // Get employee entity to determine store_id
+    const entity = await getDB().entities.get(employeeId);
+    if (!entity) {
+      // Fall back to direct calculation if entity doesn't exist
+      return await calculateEmployeeBalance(employeeId, currency);
+    }
+
+    const today = getLocalDateString(new Date().toISOString());
+    
+    // Try to get most recent snapshot for account 2200
+    const snapshot = await snapshotService.getHistoricalBalance(
+      entity.store_id,
+      '2200',
+      employeeId,
+      today
+    );
+
+    // If snapshot exists and is current, return it directly
+    if (snapshot && snapshot.snapshotDate === today) {
+      return currency === 'USD' ? snapshot.balanceUSD : snapshot.balanceLBP;
+    }
+
+    // If snapshot is from yesterday or earlier, get entries since snapshot date
+    if (snapshot) {
+      const snapshotDate = new Date(snapshot.snapshotDate);
+      snapshotDate.setHours(23, 59, 59, 999); // End of snapshot day
+      
+      const incrementalEntries = await getDB().journal_entries
+        .where('[entity_id+account_code]')
+        .equals([employeeId, '2200'])
+        .and(e => {
+          const entryDate = new Date(e.posted_date);
+          return e.is_posted === true && entryDate > snapshotDate;
+        })
+        .toArray();
+
+      const openingBalance = currency === 'USD' ? snapshot.balanceUSD : snapshot.balanceLBP;
+      const incrementalBalance = incrementalEntries.reduce((sum, e) => {
+        if (currency === 'USD') {
+          return sum + (e.debit_usd - e.credit_usd);
+        } else {
+          return sum + (e.debit_lbp - e.credit_lbp);
+        }
+      }, 0);
+
+      return openingBalance + incrementalBalance;
+    }
+
+    // No snapshot available, fall back to full calculation
+    return await calculateEmployeeBalance(employeeId, currency);
+  }
+
+  /**
+   * Get both employee balances using snapshot + incremental entries
+   * 
+   * @param employeeId - Employee ID
+   * @returns Object with USD and LBP balances
+   */
+  private async getEmployeeBalancesWithSnapshot(
+    employeeId: string
+  ): Promise<{ USD: number; LBP: number; lastCalculated: string }> {
+    // Get employee entity to determine store_id
+    const entity = await getDB().entities.get(employeeId);
+    if (!entity) {
+      // Fall back to direct calculation if entity doesn't exist
+      const entries = await getDB().journal_entries
+        .where('[entity_id+account_code]')
+        .equals([employeeId, '2200'])
+        .and(e => e.is_posted === true)
+        .toArray();
+
+      const balances = calculateBothCurrencies(entries);
+      return {
+        ...balances,
+        lastCalculated: new Date().toISOString()
+      };
+    }
+
+    const today = getLocalDateString(new Date().toISOString());
+    
+    // Try to get most recent snapshot for account 2200
+    const snapshot = await snapshotService.getHistoricalBalance(
+      entity.store_id,
+      '2200',
+      employeeId,
+      today
+    );
+
+    // If snapshot exists and is current, return it directly
+    if (snapshot && snapshot.snapshotDate === today) {
+      return {
+        USD: snapshot.balanceUSD,
+        LBP: snapshot.balanceLBP,
+        lastCalculated: snapshot.snapshotDate
+      };
+    }
+
+    // If snapshot is from yesterday or earlier, get entries since snapshot date
+    if (snapshot) {
+      const snapshotDate = new Date(snapshot.snapshotDate);
+      snapshotDate.setHours(23, 59, 59, 999); // End of snapshot day
+      
+      const incrementalEntries = await getDB().journal_entries
+        .where('[entity_id+account_code]')
+        .equals([employeeId, '2200'])
+        .and(e => {
+          const entryDate = new Date(e.posted_date);
+          return e.is_posted === true && entryDate > snapshotDate;
+        })
+        .toArray();
+
+      const incremental = calculateBothCurrencies(incrementalEntries);
+
+      return {
+        USD: snapshot.balanceUSD + incremental.USD,
+        LBP: snapshot.balanceLBP + incremental.LBP,
+        lastCalculated: new Date().toISOString()
+      };
+    }
+
+    // No snapshot available, fall back to full calculation
+    const entries = await getDB().journal_entries
+      .where('[entity_id+account_code]')
+      .equals([employeeId, '2200'])
+      .and(e => e.is_posted === true)
+      .toArray();
+
+    const balances = calculateBothCurrencies(entries);
+
+    return {
+      ...balances,
+      lastCalculated: new Date().toISOString()
+    };
   }
 }
 

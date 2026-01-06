@@ -9,6 +9,7 @@ import { Pagination } from '../../../components/common/Pagination';
 import SearchableSelect from '../../../components/common/SearchableSelect';
 import { useI18n } from '../../../i18n';
 import { rtlTableHeaderClasses, rtlTableCellClasses, rtlFlexClasses, rtlSpacingClasses } from '../../../utils/rtl';
+import { useEntityBalances } from '../../../hooks/useEntityBalances';
 
 interface EmployeePaymentsProps {
   employees: Employee[];
@@ -25,6 +26,7 @@ interface EmployeePaymentsProps {
   }) => Promise<{ success: boolean; error?: string }>;
   formatCurrency: (amount: number, currency: 'USD' | 'LBP') => string;
   formatCurrencyWithSymbol: (amount: number, currency: 'USD' | 'LBP') => string;
+  onViewAccountStatement?: (employee: Employee) => void;
 }
 
 export default function EmployeePayments({
@@ -65,6 +67,14 @@ export default function EmployeePayments({
       return employees.filter(e => e.id === userProfile?.id);
     }
   }, [employees, isAdmin, isManager, userProfile?.id]);
+
+  // Get employee balances from journal entries (account 2200)
+  const employeeIds = useMemo(() => visibleEmployees.map(e => e.id), [visibleEmployees]);
+  const { balances: employeeBalances, isLoading: balancesLoading } = useEntityBalances(
+    employeeIds,
+    'employee',
+    true
+  );
 
   // Load attendance records
   useEffect(() => {
@@ -192,8 +202,17 @@ const { t } = useI18n();
                     att => att.employee_id === employee.id && att.check_out_at === null
                   );
                   const todayHours = getTodayHours(employee.id);
-                  const employeeBalance = employee.lbp_balance || employee.usd_balance || 0;
-                  const balanceCurrency = employee.lbp_balance !== null && employee.lbp_balance !== undefined ? 'LBP' : 'USD';
+                  
+                  // Get calculated balance from journal entries (account 2200)
+                  const balanceData = employeeBalances.get(employee.id);
+                  const usdBalance = balanceData?.USD || 0;
+                  const lbpBalance = balanceData?.LBP || 0;
+                  
+                  // Determine which currency to display (prefer non-zero balance, default to USD)
+                  const hasLBPBalance = Math.abs(lbpBalance) > 0.01;
+                  const hasUSDBalance = Math.abs(usdBalance) > 0.01;
+                  const displayBalance = hasLBPBalance ? lbpBalance : (hasUSDBalance ? usdBalance : 0);
+                  const balanceCurrency = hasLBPBalance ? 'LBP' : 'USD';
 
                   return (
                     <tr key={employee.id} className="hover:bg-gray-50">
@@ -210,9 +229,18 @@ const { t } = useI18n();
                         </div>
                       </td>
                       <td className={`${rtlTableCellClasses} whitespace-nowrap`}>
-                        <div className="text-sm text-gray-900">
-                          {formatCurrencyWithSymbol(employeeBalance, balanceCurrency)}
-                        </div>
+                        {balanceData?.isLoading ? (
+                          <div className="text-sm text-gray-400">Loading...</div>
+                        ) : (
+                          <div className="text-sm text-gray-900">
+                            {formatCurrencyWithSymbol(displayBalance, balanceCurrency)}
+                            {(hasLBPBalance && hasUSDBalance) && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                {formatCurrency(usdBalance, 'USD')}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className={`${rtlTableCellClasses} whitespace-nowrap`}>
                         {currentStatus ? (

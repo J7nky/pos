@@ -42,7 +42,7 @@ export function useEntityBalances(
   const [isLoading, setIsLoading] = useState(true);
 
   // Determine account code based on entity type
-  const accountCode = entityType === 'supplier' ? '2100' : '1200';
+  const accountCode = entityType === 'supplier' ? '2100' : entityType === 'employee' ? '2200' : '1200';
 
   // Fetch balances for all entities
   useEffect(() => {
@@ -73,11 +73,17 @@ export function useEntityBalances(
       // Fetch balances in parallel
       const balancePromises = entityIds.map(async (entityId) => {
         try {
-          const balance = await entityBalanceService.getEntityBalances(
-            entityId,
-            accountCode as '1200' | '2100',
-            useSnapshot
-          );
+          let balance;
+          if (entityType === 'employee') {
+            // Use employee-specific balance method
+            balance = await entityBalanceService.getEmployeeBalances(entityId, useSnapshot);
+          } else {
+            balance = await entityBalanceService.getEntityBalances(
+              entityId,
+              accountCode as '1200' | '2100',
+              useSnapshot
+            );
+          }
 
           if (!cancelled) {
             newBalances.set(entityId, {
@@ -137,11 +143,16 @@ export function useEntityBalances(
   // Refresh a single entity's balance
   const refreshBalance = async (entityId: string) => {
     try {
-      const balance = await entityBalanceService.getEntityBalances(
-        entityId,
-        accountCode as '1200' | '2100',
-        useSnapshot
-      );
+      let balance;
+      if (entityType === 'employee') {
+        balance = await entityBalanceService.getEmployeeBalances(entityId, useSnapshot);
+      } else {
+        balance = await entityBalanceService.getEntityBalances(
+          entityId,
+          accountCode as '1200' | '2100',
+          useSnapshot
+        );
+      }
 
       setBalances(prev => {
         const newMap = new Map(prev);
@@ -175,11 +186,17 @@ export function useEntityBalances(
 
     const balancePromises = entityIds.map(async (entityId) => {
       try {
-        const balance = await entityBalanceService.getEntityBalances(
-          entityId,
-          accountCode as '1200' | '2100',
-          useSnapshot
-        );
+        let balance;
+        if (entityType === 'employee') {
+          // Use employee-specific balance method
+          balance = await entityBalanceService.getEmployeeBalances(entityId, useSnapshot);
+        } else {
+          balance = await entityBalanceService.getEntityBalances(
+            entityId,
+            accountCode as '1200' | '2100',
+            useSnapshot
+          );
+        }
 
         newBalances.set(entityId, {
           entityId,
@@ -235,7 +252,7 @@ export function useEntityBalance(
     error: null
   });
 
-  const accountCode = entityType === 'supplier' ? '2100' : '1200';
+  const accountCode = entityType === 'supplier' ? '2100' : entityType === 'employee' ? '2200' : '1200';
 
   useEffect(() => {
     if (!entityId) {
@@ -255,11 +272,17 @@ export function useEntityBalance(
       setBalance(prev => ({ ...prev, isLoading: true, error: null }));
 
       try {
-        const result = await entityBalanceService.getEntityBalances(
-          entityId,
-          accountCode as '1200' | '2100',
-          useSnapshot
-        );
+        let result;
+        if (entityType === 'employee') {
+          // Use employee-specific balance method
+          result = await entityBalanceService.getEmployeeBalances(entityId, useSnapshot);
+        } else {
+          result = await entityBalanceService.getEntityBalances(
+            entityId,
+            accountCode as '1200' | '2100',
+            useSnapshot
+          );
+        }
 
         if (!cancelled) {
           setBalance({
@@ -296,11 +319,17 @@ export function useEntityBalance(
     setBalance(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      const result = await entityBalanceService.getEntityBalances(
-        entityId,
-        accountCode as '1200' | '2100',
-        useSnapshot
-      );
+      let result;
+      if (entityType === 'employee') {
+        // Use employee-specific balance method
+        result = await entityBalanceService.getEmployeeBalances(entityId, useSnapshot);
+      } else {
+        result = await entityBalanceService.getEntityBalances(
+          entityId,
+          accountCode as '1200' | '2100',
+          useSnapshot
+        );
+      }
 
       setBalance({
         entityId,

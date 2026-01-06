@@ -53,6 +53,44 @@ export function calculateBothCurrencies(entries: JournalEntry[]): { USD: number;
 }
 
 /**
+ * Calculate employee balance from journal entries (TRUTH)
+ * 
+ * For employees (Salaries Payable account 2200):
+ * - Positive balance = we owe employee (unpaid salary)
+ * - Negative balance = employee overpaid (we paid more than owed)
+ * 
+ * @param employeeId - Employee ID (same as user ID)
+ * @param currency - Currency to filter by
+ * @returns True balance from journal entries
+ */
+export async function calculateEmployeeBalance(
+  employeeId: string,
+  currency: 'USD' | 'LBP'
+): Promise<number> {
+  try {
+    // Get all journal entries for this employee and account 2200 (Salaries Payable)
+    const entries = await getDB().journal_entries
+      .where('[entity_id+account_code]')
+      .equals([employeeId, '2200'])
+      .and(e => e.is_posted === true)
+      .toArray();
+
+    return calculateBalance(entries, currency);
+  } catch (error) {
+    // Fallback: If compound index doesn't exist, filter manually
+    console.warn('Compound index not available, using fallback query:', error);
+    
+    const entries = await getDB().journal_entries
+      .where('entity_id')
+      .equals(employeeId)
+      .and(e => e.account_code === '2200' && e.is_posted === true)
+      .toArray();
+
+    return calculateBalance(entries, currency);
+  }
+}
+
+/**
  * Calculate entity balance from journal entries (TRUTH)
  * 
  * For customers (AR account 1200):
