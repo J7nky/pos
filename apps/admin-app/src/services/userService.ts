@@ -197,6 +197,43 @@ export async function createUser(input: CreateUserInput): Promise<StoreUser> {
     throw new Error(`Failed to create user: ${error.message}`);
   }
 
+  // Create corresponding entity record for the employee
+  try {
+    const now = new Date().toISOString();
+    const entityData = {
+      id: authData.user.id, // Use same ID as user for consistency
+      store_id: input.store_id,
+      branch_id: input.branch_id || null,
+      entity_type: 'employee' as const,
+      entity_code: `EMP-${authData.user.id.slice(0, 8).toUpperCase()}`,
+      name: input.name,
+      phone: input.phone || null,
+      is_system_entity: false,
+      is_active: true,
+      customer_data: null,
+      supplier_data: null,
+      created_at: now,
+      updated_at: now,
+    };
+
+    // Use supabaseAdmin to bypass RLS (similar to auth operations)
+    const { error: entityError } = await supabaseAdmin
+      .from('entities')
+      .insert(entityData);
+
+    if (entityError) {
+      console.error('Failed to create employee entity:', entityError);
+      // Don't fail the whole operation - entity can be created later if needed
+      // But log it for debugging
+      console.warn('⚠️ User created but entity record creation failed. Entity can be created later.');
+    } else {
+      console.log(`✅ Created entity record for user: ${input.name}`);
+    }
+  } catch (error) {
+    console.error('Error creating employee entity:', error);
+    // Don't fail the whole operation - entity can be created later if needed
+  }
+
   return data;
 }
 
