@@ -197,6 +197,42 @@ export async function createUser(input: CreateUserInput): Promise<StoreUser> {
     throw new Error(`Failed to create user: ${error.message}`);
   }
 
+  // Create corresponding entity record in Supabase
+  try {
+    const entityData = {
+      id: data.id, // Use same ID as user for backward compatibility
+      store_id: data.store_id,
+      branch_id: data.branch_id || null,
+      entity_type: 'employee' as const,
+      entity_code: `EMP-${data.id.slice(0, 8).toUpperCase()}`,
+      name: data.name,
+      phone: data.phone || null,
+      is_system_entity: false,
+      is_active: data.is_active ?? true,
+      customer_data: null,
+      supplier_data: null,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+    };
+
+    const { error: entityError } = await supabase
+      .from('entities')
+      .insert(entityData);
+
+    if (entityError) {
+      console.error('Failed to create employee entity in Supabase:', entityError);
+      // Don't fail the whole operation - entity can be created later via migration
+      // Log warning but continue
+      console.warn(`⚠️ User ${data.id} created but entity creation failed. Entity can be created later.`);
+    } else {
+      console.log(`✅ Created entity record for user: ${data.name}`);
+    }
+  } catch (error) {
+    console.error('Error creating employee entity:', error);
+    // Don't fail the whole operation - entity can be created later via migration
+    console.warn(`⚠️ User ${data.id} created but entity creation failed. Entity can be created later.`);
+  }
+
   return data;
 }
 
