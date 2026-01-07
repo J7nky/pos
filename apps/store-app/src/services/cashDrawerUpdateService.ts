@@ -269,6 +269,8 @@ export class CashDrawerUpdateService {
    * Get current cash drawer balances for both USD and LBP - PURE GETTER
    * 
    * ✅ Calculates balances from journal entries (account_code = 1100) - single source of truth
+   * ✅ Only includes journal entries from the current active session
+   * ✅ Adds opening amount from session based on account currency
    * ✅ Uses calculateBothCurrencies() for efficient single-query calculation
    * ✅ Zero side effects - never writes to database
    * ✅ Fast and safe - no database writes during reads
@@ -279,7 +281,7 @@ export class CashDrawerUpdateService {
    * 
    * @param storeId - Store ID
    * @param branchId - Branch ID
-   * @returns Object with USD and LBP balances
+   * @returns Object with USD and LBP balances (returns zeros if no active session)
    */
   public async getCurrentCashDrawerBalances(storeId: string, branchId: string): Promise<{ USD: number; LBP: number }> {
     return PerformanceMonitor.withTracking(
@@ -292,6 +294,14 @@ export class CashDrawerUpdateService {
           CacheManager.TTL.MEDIUM, // 5 seconds
           async () => {
             try {
+              // Get current active session
+              const session = await getDB().getCurrentCashDrawerSession(storeId, branchId);
+              
+              // If no active session exists, return zeros (UI handles closed status separately)
+              if (!session || session.status !== 'open') {
+                return { USD: 0, LBP: 0 };
+              }
+
               // Verify cash drawer account exists
               const account = await this.getCashDrawerAccount(storeId, branchId);
               if (!account) {
@@ -299,29 +309,56 @@ export class CashDrawerUpdateService {
                 return { USD: 0, LBP: 0 };
               }
 
-              // ✅ Calculate balances from journal entries (single source of truth)
-              // Balance cache fields are never read - always calculate from journal entries
+              // Get account currency to determine which currency the opening amount applies to
+              const accountCurrency = (account as any)?.currency || 'USD';
+
+              // ✅ Calculate balances from journal entries within session time range (single source of truth)
+              // Filter entries by session time: created_at between opened_at and closed_at (or now if still open)
+              const openedAt = new Date(session.opened_at);
+              const closedAt = session.closed_at ? new Date(session.closed_at) : new Date();
+              
               let entries;
               try {
                 entries = await getDB().journal_entries
                   .where('[store_id+account_code]')
                   .equals([storeId, '1100'])
-                  .and(e => e.is_posted === true && e.branch_id === branchId)
+                  .and(e => {
+                    if (e.is_posted !== true || e.branch_id !== branchId) {
+                      return false;
+                    }
+                    // Filter by session time range
+                    const entryDate = new Date(e.created_at);
+                    return entryDate >= openedAt && entryDate <= closedAt;
+                  })
                   .toArray();
               } catch (error) {
                 // Fallback if compound index doesn't exist
                 entries = await getDB().journal_entries
                   .where('[store_id+branch_id]')
                   .equals([storeId, branchId])
-                  .and(e => 
-                    e.account_code === '1100' &&
-                    e.is_posted === true
-                  )
+                  .and(e => {
+                    if (e.account_code !== '1100' || e.is_posted !== true) {
+                      return false;
+                    }
+                    // Filter by session time range
+                    const entryDate = new Date(e.created_at);
+                    return entryDate >= openedAt && entryDate <= closedAt;
+                  })
                   .toArray();
               }
 
+              // Calculate net change from journal entries
               const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
-              return calculateBothCurrencies(entries);
+              const netChange = calculateBothCurrencies(entries);
+
+              // Add opening amount based on account currency
+              const openingAmount = session.opening_amount || 0;
+              const balances = {
+                USD: netChange.USD + (accountCurrency === 'USD' ? openingAmount : 0),
+                LBP: netChange.LBP + (accountCurrency === 'LBP' ? openingAmount : 0)
+              };
+
+              return balances;
             } catch (error) {
               console.error('Error getting cash drawer balances:', error);
               return { USD: 0, LBP: 0 };

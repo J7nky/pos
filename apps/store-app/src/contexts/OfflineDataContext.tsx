@@ -1173,10 +1173,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await notificationService.deleteExpiredNotifications(storeId);
 
       // Check if we should switch to a synced branch from Supabase
+      // Only switch if current branch is truly local-only (never synced before)
+      // Don't switch if branch was synced before but is temporarily unsynced due to an update
       if (currentBranchId) {
         const currentBranch = await getDB().branches.get(currentBranchId);
-        if (currentBranch && !currentBranch._synced) {
-          // Current branch is local-only, check for synced branch
+        if (currentBranch && !currentBranch._synced && !currentBranch._lastSyncedAt) {
+          // Current branch is local-only (never synced), check for synced branch
           const syncedBranch = await getDB().branches
             .where('store_id')
             .equals(storeId)
@@ -1198,13 +1200,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   }, [storeId, currentBranchId, refreshCashDrawerStatus]);
 
   // Update to synced branch when it becomes available (after sync completes)
+  // Only switch if current branch is truly local-only (never synced before)
+  // Don't switch if branch was synced before but is temporarily unsynced due to an update
   useEffect(() => {
     const checkForSyncedBranch = async () => {
       if (!storeId || !currentBranchId) return;
       
-      // Check if current branch is local-only (not synced)
+      // Check if current branch is local-only (never synced before)
       const currentBranch = await getDB().branches.get(currentBranchId);
-      if (currentBranch && !currentBranch._synced) {
+      if (currentBranch && !currentBranch._synced && !currentBranch._lastSyncedAt) {
         // Look for a synced branch from Supabase
         const syncedBranch = await getDB().branches
           .where('store_id')
@@ -4156,11 +4160,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!originalBranch) throw new Error('Branch not found');
     
     // Prepare update payload - merge with existing data to preserve all fields
+    // CRITICAL: Preserve _lastSyncedAt to prevent branch switching after update
     const updatePayload: any = {
       ...originalBranch,
       ...updates,
       updated_at: new Date().toISOString(),
-      _synced: false
+      _synced: false,
+      _lastSyncedAt: originalBranch._lastSyncedAt // Explicitly preserve sync history
     };
     
     // Use put() instead of update() to ensure all fields (including non-indexed ones like logo, address, phone) are saved
@@ -4183,6 +4189,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         });
       }
     }
+    
+    // Debug: Log sync status to help diagnose branch switching issues
+    console.log('✅ Branch update saved:', {
+      id: updatedBranch.id,
+      name: updatedBranch.name,
+      _synced: updatedBranch._synced,
+      _lastSyncedAt: updatedBranch._lastSyncedAt,
+      updated_at: updatedBranch.updated_at
+    });
     
     // Store undo data with original values
     const undoChanges: any = {};

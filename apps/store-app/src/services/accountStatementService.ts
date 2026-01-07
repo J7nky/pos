@@ -147,7 +147,6 @@ export class AccountStatementService {
     return d.toISOString();
   }
 
-
   /**
    * Map journal entries to statement transactions, grouping by transaction_id
    * This creates one StatementTransaction per transaction (not per journal entry)
