@@ -85,16 +85,34 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
     return supplier.name;
   };
 
-  // Filter receives based on search term
+  // Filter receives based on search term and exclude items older than 24 hours with quantity 0
   const filteredReceives = useMemo(() => {
+    const now = new Date().getTime();
+    const twentyFourHoursInMs = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+    // First, filter out items that are older than 24 hours and have quantity 0
+    const filteredByTimeAndQuantity = recentReceives.filter((item: any) => {
+      // Exclude if quantity is 0 AND item is older than 24 hours
+      if (item.quantity === 0) {
+        const itemCreatedAt = new Date(item.created_at).getTime();
+        const timeDiff = now - itemCreatedAt;
+        // Exclude if more than 24 hours old
+        if (timeDiff > twentyFourHoursInMs) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // Then apply search filter if search term exists
     if (!searchTerm.trim()) {
-      return recentReceives;
+      return filteredByTimeAndQuantity;
     }
 
     // Normalize search term for Arabic text (handles أ = ا normalization)
     const normalizedSearchTerm = normalizeNameForComparison(searchTerm);
 
-    return recentReceives.filter((item: any) => {
+    return filteredByTimeAndQuantity.filter((item: any) => {
       // Search by product name (multilingual)
       const product = products.find((p: any) => p.id === item.product_id);
       if (product) {

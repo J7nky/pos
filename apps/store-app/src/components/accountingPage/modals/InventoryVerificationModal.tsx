@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle, AlertTriangle } from 'lucide-react';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
-import { missedProductsService, MissedProductData } from '../../../services/missedProductsService';
+import { MissedProductData } from '../../../services/missedProductsService';
+import { useProductMultilingual } from '../../../hooks/useMultilingual';
 
 interface InventoryVerificationModalProps {
   isOpen: boolean;
@@ -11,7 +12,7 @@ interface InventoryVerificationModalProps {
 }
 
 interface InventoryVerificationData {
-  verifiedItems: MissedProductData[];
+  verifiedItems: (MissedProductData & { product?: { id: string; name: any } })[];
 }
 
 interface InventoryItem {
@@ -33,6 +34,7 @@ export const InventoryVerificationModal: React.FC<InventoryVerificationModalProp
   loading
 }) => {
   const { inventory, products } = useOfflineData();
+  const { getProductName } = useProductMultilingual();
   
   const [verificationData, setVerificationData] = useState<InventoryVerificationData>({
     verifiedItems: []
@@ -42,13 +44,30 @@ export const InventoryVerificationModal: React.FC<InventoryVerificationModalProp
   const getInventoryItems = (): InventoryItem[] => {
     if (!inventory || !products) return [];
     
-    return inventory.map(item => ({
-      id: item.id,
-      product_id: item.product_id,
-      quantity: item.quantity,
-      unit: item.unit,
-      product: products.find(p => p.id === item.product_id)
-    })).filter(item => item.product); // Only include items with valid products
+    const now = new Date().getTime();
+    const twentyFourHoursInMs = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    
+    return inventory
+      .filter((item: any) => {
+        // Exclude if quantity is 0 AND item is older than 24 hours
+        if (item.quantity === 0 && item.created_at) {
+          const itemCreatedAt = new Date(item.created_at).getTime();
+          const timeDiff = now - itemCreatedAt;
+          // Exclude if more than 24 hours old
+          if (timeDiff > twentyFourHoursInMs) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .map(item => ({
+        id: item.id,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit: item.unit,
+        product: products.find(p => p.id === item.product_id)
+      }))
+      .filter(item => item.product); // Only include items with valid products
   };
 
   // Initialize verification data when modal opens
@@ -57,12 +76,13 @@ export const InventoryVerificationModal: React.FC<InventoryVerificationModalProp
       const items = getInventoryItems();
       const verifiedItems = items.map(item => ({
         itemId: item.id,
-        productName: item.product?.name || 'Unknown Product',
+        productName: item.product?.name || 'Unknown Product', // Keep for backward compatibility
         systemQuantity: item.quantity,
         physicalQuantity: item.quantity, // Default to system quantity
         unit: item.unit,
         isVerified: false,
-        notes: ''
+        notes: '',
+        product: item.product // Store product object for multilingual display
       }));
 
       setVerificationData({ verifiedItems });
@@ -165,7 +185,9 @@ export const InventoryVerificationModal: React.FC<InventoryVerificationModalProp
                         />
                       </td>
                       <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-gray-900">{item.productName}</div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {item.product ? getProductName(item.product) : item.productName}
+                        </div>
                         <div className="text-sm text-gray-500">{item.unit}</div>
                       </td>
                       <td className="px-4 py-3">

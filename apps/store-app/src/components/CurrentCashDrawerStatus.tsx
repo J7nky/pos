@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Clock, User, AlertTriangle, CheckCircle, Wallet, X } from 'lucide-react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
@@ -23,7 +23,8 @@ const CashBalanceModal: React.FC<{
   expectedAmount: number;
   loading: boolean;
   error?: string;
-}> = ({ isOpen, onClose, onConfirm, expectedAmount, loading, error }) => {
+  storePreferredCurrency?: 'USD' | 'LBP';
+}> = ({ isOpen, onClose, onConfirm, expectedAmount, loading, error, storePreferredCurrency = 'USD' }) => {
   const { t } = useI18n();
   const [actualAmount, setActualAmount] = useState(expectedAmount);
 
@@ -34,10 +35,11 @@ const CashBalanceModal: React.FC<{
   }, [isOpen, expectedAmount]);
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
+    if (storePreferredCurrency === 'LBP') {
+      return `${Math.round(amount).toLocaleString()} ل.ل`;
+    }
+    // For USD, show 2 decimal places
+    return `$${amount.toFixed(2)}`;
   };
 
   if (!isOpen) return null;
@@ -88,11 +90,7 @@ const CashBalanceModal: React.FC<{
               }`}
               placeholder={t('cashDrawer.enterActualAmount')}
             />
-            {actualAmount <= 0 && (
-              <p className="mt-1 text-sm text-red-600 rtl:text-right">
-                {t('cashDrawer.validAmountRequired')}
-              </p>
-            )}
+           
           </div>
 
           {actualAmount !== expectedAmount && (
@@ -121,11 +119,9 @@ const CashBalanceModal: React.FC<{
           </button>
           <button
             onClick={() => onConfirm(actualAmount)}
-            disabled={loading || actualAmount <= 0}
+            disabled={loading }
             className={`px-4 py-2 rounded-md text-sm ${
-              actualAmount <= 0 
-                ? 'bg-gray-400 text-gray-600 cursor-not-allowed' 
-                : 'bg-red-600 text-white hover:bg-red-700'
+             'bg-red-600 text-white hover:bg-red-700'
             }`}
           >
             {loading ? t('cashDrawer.closing') : t('cashDrawer.closeDrawer')}
@@ -149,19 +145,36 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
   const [error, setError] = useState<string | null>(null);
   const [inventoryVerificationData, setInventoryVerificationData] = useState<any>(null);
   const [openedByEmployee, setOpenedByEmployee] = useState<Employee | null>(null);
+  const [cashDrawerBalances, setCashDrawerBalances] = useState<{ USD: number; LBP: number } | null>(null);
   const { userProfile } = useSupabaseAuth();
-  const { closeCashDrawer: contextCloseCashDrawer } = useOfflineData();
+  const { closeCashDrawer: contextCloseCashDrawer, currency: storePreferredCurrency, exchangeRate, currentBranchId } = useOfflineData();
 
   useEffect(() => {
     loadStatus();
-  }, [storeId]);
+  }, [storeId, currentBranchId]);
 
   const loadStatus = async () => {
     setLoading(true);
     try {
       const currentStatus = await getCurrentStatus();
-      console.log(currentStatus,12312312);
       setStatus(currentStatus);
+      
+      // Get balances from the same source as Home.tsx
+      if (currentStatus?.status === 'active' && currentBranchId) {
+        try {
+          const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
+          const balances = await cashDrawerUpdateService.getCurrentCashDrawerBalances(
+            storeId,
+            currentBranchId
+          );
+          setCashDrawerBalances(balances);
+        } catch (error) {
+          console.error('Error loading cash drawer balances:', error);
+          setCashDrawerBalances(null);
+        }
+      } else {
+        setCashDrawerBalances(null);
+      }
       
       // Fetch employee information if session is active and openedBy exists
       if (currentStatus?.status === 'active' && currentStatus?.openedBy) {
@@ -187,6 +200,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
       console.error('Error loading cash drawer status:', error);
       setStatus({ status: 'error', message: 'Error loading status' });
       setOpenedByEmployee(null);
+      setCashDrawerBalances(null);
     } finally {
       setLoading(false);
     }
@@ -271,11 +285,29 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
     setInventoryVerificationData(null);
   };
 
+  // Calculate combined amount using the same logic as Home.tsx
+  const combinedAmount = useMemo(() => {
+    if (!cashDrawerBalances) return status?.currentBalance || 0;
+    
+    const { USD, LBP } = cashDrawerBalances;
+    const rate = exchangeRate || 89500;
+    
+    // Use the same calculation as Home.tsx
+    if (storePreferredCurrency === 'USD') {
+      // Convert LBP to USD and add to USD balance
+      return USD + (LBP / rate);
+    } else {
+      // Convert USD to LBP and add to LBP balance
+      return LBP + (USD * rate);
+    }
+  }, [cashDrawerBalances, storePreferredCurrency, exchangeRate, status?.currentBalance]);
+
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
+    if (storePreferredCurrency === 'LBP') {
+      return `${Math.round(amount).toLocaleString()} ل.ل`;
+    }
+    // For USD, show 2 decimal places
+    return `$${amount.toFixed(2)}`;
   };
 
   const formatDuration = (milliseconds: number) => {
@@ -322,7 +354,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
                   <span className="text-sm font-medium text-green-800 rtl:text-right">{t('cashDrawer.activeSession')}</span>
                 </div>
                 <div className="mt-2 text-2xl font-bold text-green-900 rtl:text-right">
-                  {formatCurrency(status.currentBalance)}
+                  {formatCurrency(combinedAmount)}
                 </div>
                 <div className="text-sm text-green-600 rtl:text-right">{t('cashDrawer.currentBalance')}</div>
               </div>
@@ -473,9 +505,10 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
         isOpen={showCashBalanceModal}
         onClose={handleCashBalanceModalClose}
         onConfirm={handleCashBalanceComplete}
-        expectedAmount={status.currentBalance || 0}
+        expectedAmount={combinedAmount}
         loading={closingLoading}
         error={error || undefined}
+        storePreferredCurrency={storePreferredCurrency}
       />
     </>
   );

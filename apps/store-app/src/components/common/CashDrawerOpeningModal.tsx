@@ -29,18 +29,29 @@ export default function CashDrawerOpeningModal({
   const [error, setError] = useState<string | null>(null);
 
   // Get currency display
-  const currencyDisplay = currency === 'LBP' ? 'ل.ل' : '$';
   const currencyName = t(`common.currency.${currency}`) || currency;
 
   // Use provided title/description or fallback to translations
   const modalTitle = title || t('pos.openCashDrawer') || 'Open Cash Drawer';
   const modalDescription = description || t('pos.enterOpeningCashAmount') || 'Enter the opening cash amount in the cash drawer.';
 
-  // Reset form when modal opens/closes
+  // Reset form when modal opens/closes and focus input
   useEffect(() => {
     if (isOpen) {
       setAmount('');
       setError(null);
+      // Focus the input field after modal opens
+      // Use requestAnimationFrame twice to ensure DOM is fully rendered and after focus management hook runs
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const input = document.getElementById('cash-drawer-opening-amount-input');
+          if (input) {
+            (input as HTMLInputElement).focus();
+            // Also select the text if there's any
+            (input as HTMLInputElement).select();
+          }
+        });
+      });
     }
   }, [isOpen]);
 
@@ -79,17 +90,20 @@ export default function CashDrawerOpeningModal({
         <p className="text-gray-600 text-sm">{modalDescription}</p>
         
         <div>
-          <MoneyInput
-            label={`${t('pos.openingAmount') || 'Opening Amount'} (${currencyName})`}
-            value={amount}
-            onChange={setAmount}
-            placeholder={suggestedAmount > 0 ? suggestedAmount.toFixed(currency === 'USD' ? 2 : 0) : "0.00"}
-            step={currency === 'USD' ? '0.01' : '1000'}
-            min="0"
-            className="focus:ring-2 focus:ring-blue-500"
-            tabIndex={1}
-            autoFocus={true}
-          />
+          <div data-initial-focus="true">
+            <MoneyInput
+              id="cash-drawer-opening-amount-input"
+              label={`${t('pos.openingAmount') || 'Opening Amount'} (${currencyName})`}
+              value={amount}
+              onChange={setAmount}
+              placeholder={suggestedAmount > 0 ? suggestedAmount.toFixed(currency === 'USD' ? 2 : 0) : "0.00"}
+              step={currency === 'USD' ? '0.01' : '1000'}
+              min="0"
+              className="focus:ring-2 focus:ring-blue-500"
+              tabIndex={0}
+              autoFocus={true}
+            />
+          </div>
           {suggestedAmount > 0 && (
             <button
               type="button"

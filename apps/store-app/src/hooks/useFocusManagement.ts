@@ -39,9 +39,18 @@ export function useFocusManagement(
 
     // Auto-focus first focusable element
     if (autoFocus) {
-      const firstFocusable = getFocusableElements(container)[0];
-      if (firstFocusable) {
-        setTimeout(() => firstFocusable.focus(), 0);
+      // First, check for a focusable element inside a container with data-initial-focus attribute
+      const initialFocusContainer = container.querySelector('[data-initial-focus="true"]');
+      if (initialFocusContainer) {
+        const focusableInContainer = getFocusableElements(initialFocusContainer as HTMLElement)[0];
+        if (focusableInContainer) {
+          setTimeout(() => focusableInContainer.focus(), 0);
+        }
+      } else {
+        const firstFocusable = getFocusableElements(container)[0];
+        if (firstFocusable) {
+          setTimeout(() => firstFocusable.focus(), 0);
+        }
       }
     }
 
@@ -100,7 +109,28 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
     '[contenteditable="true"]'
   ].join(', ');
 
-  return Array.from(container.querySelectorAll(focusableSelectors));
+  const allElements = Array.from(container.querySelectorAll(focusableSelectors)) as HTMLElement[];
+  
+  // Prioritize inputs and textareas over buttons for better UX
+  // Also exclude buttons with tabIndex={-1} from initial focus
+  const prioritized = allElements.sort((a, b) => {
+    const aIsInput = a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT';
+    const bIsInput = b.tagName === 'INPUT' || b.tagName === 'TEXTAREA' || b.tagName === 'SELECT';
+    const aTabIndex = a.getAttribute('tabindex');
+    const bTabIndex = b.getAttribute('tabindex');
+    
+    // Exclude elements with tabIndex={-1} from being first
+    if (aTabIndex === '-1' && bTabIndex !== '-1') return 1;
+    if (bTabIndex === '-1' && aTabIndex !== '-1') return -1;
+    
+    // Prioritize inputs
+    if (aIsInput && !bIsInput) return -1;
+    if (!aIsInput && bIsInput) return 1;
+    
+    return 0;
+  });
+  
+  return prioritized;
 }
 
 export function useKeyboardShortcuts(shortcuts: Record<string, () => void>) {
