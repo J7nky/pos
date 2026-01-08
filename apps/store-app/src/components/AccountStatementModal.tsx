@@ -493,7 +493,7 @@ export default function AccountStatementModal({
                       <>
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-500">{t('common.totalReceivedBills')}</div>
+                            <div className="text-sm font-medium text-gray-500">{t('customers.totalReceivedBills')}</div>
                             <TrendingUp className="w-4 h-4 text-purple-400" />
                           </div>
                           <div className="text-2xl font-bold text-purple-600">
@@ -506,7 +506,7 @@ export default function AccountStatementModal({
 
                         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                           <div className="flex items-center justify-between mb-2">
-                            <div className="text-sm font-medium text-gray-500">{t('common.totalPayments')}</div>
+                            <div className="text-sm font-medium text-gray-500">{t('customers.totalPayments')}</div>
                             <TrendingDown className="w-4 h-4 text-red-400" />
                           </div>
                           <div className="text-2xl font-bold text-red-600">

@@ -517,6 +517,9 @@ const ar = {
     generatedOn: 'تم إنشاؤه في'
   },
   customers: {
+    initialBalance: 'الرصيد الافتتاحي',
+    initialUSDBalance: 'الرصيد الافتتاحي بالدولار',
+    initialLBPBalance: 'الرصيد الافتتاحي بالليرة اللبنانية',
     paymentDescriptionPlaceholder: 'مثال: دفعة للمنتجات, دفعة للعمولة, etc.',
     tryAdjustingTheDateRangeOrCheckingBackLater: 'حاول ضبط الفترة الزمنية أو التحقق مرة أخرى لاحقا',
     addPaymentReceived: 'إضافة دفعة مستلمة',
@@ -738,6 +741,13 @@ const ar = {
     amountRange: 'المبلغ'
   },
   payments: {
+    creditSaleBill: 'فاتورة بيع دين',
+    billCancellation: 'إلغاء الفاتورة',
+    billCancellationRefund: 'إلغاء الفاتورة المستردة',
+    billReactivation: 'إعادة تنشيط الفاتورة',
+    reversalUpdatedAdvancePayment: 'إلغاء الدفعة المعدلة',
+    advancePayment: 'دفعة مقدمة',
+    supplierAdvance: 'دفعة مورد',
     recentPayments: 'المدفوعات الأخيرة'
     ,
     supplierPayment: 'دفعة مورد',

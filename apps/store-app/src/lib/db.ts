@@ -466,7 +466,7 @@ class POSDatabase extends Dexie {
         branch_id: branchId,
         account_code: '1100', // Cash account code
         name: 'Main Cash Drawer',
-        currency: store.preferred_currency || 'USD',
+        currency: store.preferred_currency || 'LBP',
         is_active: true,
         current_balance: 0, // For backward compatibility
         usd_balance: 0, // Performance cache: USD balance
@@ -498,6 +498,7 @@ class POSDatabase extends Dexie {
   }
 
   async getCurrentCashDrawerSession(storeId: string, branchId: string): Promise<CashDrawerSession | null> {
+
     return this.withDb(async () => {
       // Validate inputs to prevent IDBKeyRange errors
       if (!storeId || !branchId || typeof storeId !== 'string' || typeof branchId !== 'string') {
@@ -505,11 +506,26 @@ class POSDatabase extends Dexie {
         return null;
       }
       
-      // Fetch all sessions for the store and branch
-      const all = await this.cash_drawer_sessions
-        .where(['store_id', 'branch_id'])
-        .equals([storeId, branchId])
-        .toArray();
+      // Fetch all sessions for the store and branch using compound index
+      // Use bracket notation for compound index: '[store_id+branch_id]'
+      let all: CashDrawerSession[];
+      try {
+        all = await this.cash_drawer_sessions
+          .where('[store_id+branch_id]')
+          .equals([storeId, branchId])
+          .toArray();
+      } catch (error) {
+        // Fallback: if compound index query fails, use store_id index and filter manually
+        console.warn('Compound index query failed, using fallback:', error);
+        const allSessions = await this.cash_drawer_sessions
+          .where('store_id')
+          .equals(storeId)
+          .filter(sess => sess.branch_id === branchId )
+          .toArray();
+        all = allSessions;
+      }
+      console.log('DEBUG: Current session:',all);
+
       // Find open sessions, robust to whitespace/case issues
       const open = all.filter(sess => String(sess.status).trim().toLowerCase() === 'open');
       return open[0] || null;

@@ -66,20 +66,6 @@ export const MissedProductsSummary: React.FC<MissedProductsSummaryProps> = memo(
     );
   }
 
-  if (missedProducts.length === 0) {
-    return (
-      <div className="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
-        <div className="flex items-center">
-          <Package className="w-5 h-5 text-green-600 mr-2" />
-          <div>
-            <p className="text-sm font-medium text-green-800">No Inventory Discrepancies</p>
-            <p className="text-xs text-green-600">All inventory items match system records</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
       <div className="mt-6 p-4 bg-red-50 rounded-lg border border-red-200">

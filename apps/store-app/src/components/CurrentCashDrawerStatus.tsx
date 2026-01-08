@@ -403,7 +403,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
             </div>
 
             {/* Missed Products Summary */}
-            <MissedProductsSummary sessionId={status.sessionId} storeId={storeId} />
+            {/* <MissedProductsSummary sessionId={status.sessionId} storeId={storeId} /> */}
             
             {/* Process Status Indicator */}
             <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">

@@ -5,6 +5,7 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { useEntityBalances } from '../hooks/useEntityBalances';
+import { getDB } from '../lib/db';
 import { 
   DollarSign, 
   Package, 
@@ -139,13 +140,9 @@ export default function Home() {
     return amount;
   }, [storePreferredCurrency, exchangeRate]);
 
-  // Helper function to get local cash drawer session from context
-  const getLocalCurrentSession = useCallback(() => {
-    return cashDrawer; // Already available in context
-  }, [cashDrawer]);
-
   // Note: calculateLocalCashDrawerBalance is no longer used - balance is computed from journal entries
   // via cashDrawerUpdateService.getCurrentCashDrawerBalance()
+  // We now query the database directly for the current session instead of relying on context state
 
   // Helper function to get cash drawer transaction history from local data
   const getLocalCashDrawerHistory = useCallback((limit: number = 50): any[] => {
@@ -172,11 +169,11 @@ export default function Home() {
       // ✅ Get balance computed from journal entries (single source of truth)
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
       
-      // Get current session
-      const currentSession = getLocalCurrentSession();
+      // ✅ Query database directly for current session (not relying on stale context state)
+      const currentSession = await getDB().getCurrentCashDrawerSession(raw.storeId, raw.currentBranchId);
       
       // If there's no active session, set status to null
-      if (!currentSession) {
+      if (!currentSession || currentSession.status !== 'open') {
         setCashDrawerStatus((prev) => {
           // Only update if status actually changed to prevent unnecessary re-renders
           if (prev === null) return prev;
@@ -226,7 +223,7 @@ export default function Home() {
             lbpBalance: balances.LBP,
             lastUpdated: new Date().toISOString(),
             transactionCount: localHistory.length,
-            openedAt: currentSession?.opened_at || currentSession?.lastUpdated || ''
+            openedAt: currentSession.opened_at || ''
           };
         });
       }
@@ -238,7 +235,7 @@ export default function Home() {
     } finally {
       setIsLoadingCashDrawer(false);
     }
-  }, [raw.storeId, raw.currentBranchId, getLocalCurrentSession, getLocalCashDrawerHistory, storePreferredCurrency, exchangeRate, isInitialLoad]);
+  }, [raw.storeId, raw.currentBranchId, getLocalCashDrawerHistory, storePreferredCurrency, exchangeRate, isInitialLoad]);
 
   // Debounced update function to prevent excessive reloading
   const debouncedLoadCashDrawerStatus = useCallback(() => {
