@@ -13,11 +13,14 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
+import { useOfflineData } from '../contexts/OfflineDataContext';
 import { AccessControlService } from '../services/accessControlService';
 import { ModuleName, OperationName } from '../types';
 
 export function useAccessControl() {
   const { userProfile } = useSupabaseAuth();
+  // ✅ FIX 1: Wait for data to be ready before loading module access
+  const { isDataReady } = useOfflineData();
   const [moduleAccess, setModuleAccess] = useState<Record<ModuleName, boolean>>({
     pos: false,
     inventory: false,
@@ -28,11 +31,17 @@ export function useAccessControl() {
   });
   const [loading, setLoading] = useState(true);
 
-  // Load module access on mount or when user changes
+  // ✅ FIX 1: Load module access only after data is ready
+  // This prevents queries to role_permissions/user_permissions tables before they're synced
   useEffect(() => {
     const loadModuleAccess = async () => {
       if (!userProfile) {
         setLoading(false);
+        return;
+      }
+      
+      // Wait for data to be ready before loading module access
+      if (!isDataReady) {
         return;
       }
 
@@ -52,7 +61,7 @@ export function useAccessControl() {
     };
 
     loadModuleAccess();
-  }, [userProfile]);
+  }, [userProfile, isDataReady]); // ✅ FIX 1: Include isDataReady in dependencies
 
   /**
    * Check if user can access a specific module

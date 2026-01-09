@@ -373,6 +373,10 @@ const en = {
     generatedOn: 'Generated on'
   },
   customers: {
+    initialBalance: 'Initial Balance',
+    initialUSDBalance: 'Initial USD Balance',
+    initialLBPBalance: 'Initial LBP Balance',
+
     tryAdjustingTheDateRangeOrCheckingBackLater: 'Try adjusting the date range or checking back later',
     paymentDescriptionPlaceholder: 'e.g., Payment for goods, Commission payment, etc.',
     addPaymentReceived: 'Add Payment Received',
@@ -594,7 +598,14 @@ const en = {
     amountRange: 'Amount'
   },
   payments: {
+    creditSaleBill: 'Credit sale Bill',
+    billCancellation: 'Bill Cancellation',
+    billCancellationRefund: 'Bill Cancellation Refund',
+    billReactivation: 'Bill Reactivation',
+    reversalUpdatedAdvancePayment: 'Reversal Updated Advance Payment',
     completed: 'Completed',
+    advancePayment: 'Advance Payment',
+    supplierAdvance: 'Supplier Advance',
     reversed: 'Reversed',
     canceled: 'Canceled',
     paymentCanceled: 'Payment Canceled',

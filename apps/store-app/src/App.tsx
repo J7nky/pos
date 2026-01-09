@@ -59,18 +59,59 @@ function AppContent() {
 // Wrapper component to handle branch selection for admin users
 function BranchAwareAppContent() {
   const { userProfile } = useSupabaseAuth();
-  const { currentBranchId, setCurrentBranchId, loading } = useOfflineData();
+  const { currentBranchId, setCurrentBranchId, branchSyncStatus, initializationError, isInitializing } = useOfflineData();
   const { t } = useI18n();
+
+  // ✅ FIX 5: Show error UI if initialization failed (e.g., empty database + offline)
+  if (initializationError && !isInitializing) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full text-center">
+          <div className="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+            <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Unable to Load Data</h2>
+          <p className="text-gray-600 mb-6">{initializationError}</p>
+          <div className="space-y-3">
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+            >
+              Retry
+            </button>
+            <p className="text-sm text-gray-500">
+              If this persists, please check your internet connection and try again.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Check if admin user needs to select a branch
   const isAdmin = userProfile?.role === 'admin' && userProfile?.branch_id === null;
   const needsBranchSelection = isAdmin && !currentBranchId;
 
-  // If admin user needs branch selection, show it immediately
-  // The BranchSelectionScreen has its own retry logic to wait for branch data
-  // Don't wait for loading.sync here - that creates a chicken-and-egg problem
-  // (sync won't start until branch is selected, per OfflineDataContext logic)
+  // ✅ FIX 2: Wait for branch sync to complete before showing BranchSelectionScreen
+  // This ensures branches are available when the selection screen loads
   if (needsBranchSelection) {
+    // Show loading spinner while branch sync is in progress
+    if (branchSyncStatus.isSyncing) {
+      return (
+        <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Syncing branch data from server...</p>
+            <p className="mt-2 text-sm text-gray-500">This usually takes just a few seconds</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // Show BranchSelectionScreen only after sync completes (or if sync failed)
+    // BranchSelectionScreen has its own retry logic for edge cases
     return (
       <BranchSelectionScreen 
         onBranchSelected={(branchId) => {

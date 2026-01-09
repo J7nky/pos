@@ -65,6 +65,12 @@ interface OfflineDataContextType {
     isComplete: boolean;
     error: string | null;
   };
+  // Data readiness state - true when initial data sync is complete
+  isDataReady: boolean;
+  // Initialization state - true when data initialization is in progress
+  isInitializing: boolean;
+  // Initialization error - error message if initialization fails
+  initializationError: string | null;
   // Data - matching exact structure
   products: Tables['products']['Row'][];
   branches: Branch[]; // Store branches for multi-branch support
@@ -513,6 +519,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+  
+  // ✅ FIX 1: Data readiness state - tracks when initial data sync is complete
+  // This ensures module access queries don't run before data is available
+  const [isDataReady, setIsDataReady] = useState(false);
+  
+  // ✅ FIX 4: Initialization state - tracks when data initialization is in progress
+  // This provides clear indication when data is being loaded vs ready
+  const [isInitializing, setIsInitializing] = useState(false);
+  
+  // ✅ FIX 5: Error state for initialization failures
+  const [initializationError, setInitializationError] = useState<string | null>(null);
 
   // Debounced sync to prevent excessive sync calls during rapid changes
   const [debouncedSyncTimeout, setDebouncedSyncTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -647,21 +664,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // CRITICAL: Wait for both storeId AND currentBranchId before loading data
     // Admin users must select a branch first, manager/cashier get auto-assigned
-    console.log('🔍 [INIT-CHECK] Checking initialization conditions:', {
-      hasStoreId: !!storeId,
-      storeId,
-      hasCurrentBranchId: !!currentBranchId,
-      currentBranchId,
-      isOnline,
-      userRole: userProfile?.role
-    });
-    
     if (storeId && currentBranchId) {
       console.log('✅ Both storeId and currentBranchId available, initializing data...', {
         storeId,
         currentBranchId,
-        userRole: userProfile?.role,
-        isOnline
+        userRole: userProfile?.role
       });
       loadStoreData();
       initializeData();
@@ -672,8 +679,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.log('⏳ Waiting for branch selection before loading data...', {
         hasStoreId: !!storeId,
         hasCurrentBranchId: !!currentBranchId,
-        userRole: userProfile?.role,
-        isOnline
+        userRole: userProfile?.role
       });
     }
     
@@ -897,7 +903,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             }
           }
           
-          // No valid stored preference - admin must select branch via BranchSelectionScreen
+          // No valid stored preference - check if branches are being synced
+          // If sync is complete, try to auto-select default branch
+          if (branchSyncStatus.isComplete && !branchSyncStatus.isSyncing) {
+            // Branches have been synced, try to get default branch
+            console.log('🔄 Admin: Branch sync complete, attempting to auto-select default branch...');
+            try {
+              const branchId = await ensureDefaultBranch(storeId);
+              if (branchId) {
+                setCurrentBranchId(branchId);
+                console.log('✅ Admin: Auto-selected default branch after sync:', branchId);
+                return;
+              }
+            } catch (error) {
+              console.warn('⚠️ Admin: Failed to auto-select default branch:', error);
+            }
+          }
+          
           // If sync is still in progress, wait for it to complete
           // The useEffect will re-run when branchSyncStatus changes
           if (branchSyncStatus.isSyncing) {
@@ -905,8 +927,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             return;
           }
           
-          // Admin needs to select branch manually via BranchSelectionScreen
-          // DO NOT auto-select - let the admin choose which branch to work with
+          // No valid stored preference and sync is complete but no branch found
+          // Admin needs to select branch manually
           console.log('⏳ Admin: Waiting for branch selection via BranchSelectionScreen');
           return;
         }
@@ -1233,6 +1255,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     debug('🔄 Initializing data for store:', storeId);
     
+    // ✅ FIX 1: Mark data as not ready at start of initialization
+    setIsDataReady(false);
+    // ✅ FIX 4: Mark initialization as in progress
+    setIsInitializing(true);
+    // ✅ FIX 5: Clear any previous errors
+    setInitializationError(null);
+    
     let didFullResync = false; // Track if we did a full resync
 
     try {
@@ -1288,25 +1317,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const productCount = storeProductCount + globalProductCount;
 
       debug(`📈 Local data counts: ${productCount} products, ${supplierEntityCount} supplier entities, ${customerEntityCount} customer entities`);
-      console.log('🔍 [INIT-DATA] Local counts:', { productCount, supplierEntityCount, customerEntityCount, isOnline });
 
       const isLocalDatabaseEmpty = productCount === 0 && supplierEntityCount === 0 && customerEntityCount === 0;
-      console.log('🔍 [INIT-DATA] Is local database empty?', isLocalDatabaseEmpty, 'isOnline?', isOnline);
 
       // If local database is empty and we're online, sync from cloud
       if (isLocalDatabaseEmpty && isOnline) {
-        console.log('📥 [INIT-DATA] Starting full sync from cloud...');
         debug('📥 Local database is empty, syncing from cloud...');
         setLoading(prev => ({ ...prev, sync: true }));
 
         try {
-          console.log('📥 [INIT-DATA] Calling syncService.fullResync...');
           const syncResult = await syncService.fullResync(storeId);
-          console.log('📥 [INIT-DATA] fullResync result:', syncResult);
 
           if (syncResult.success) {
             debug(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
-            console.log(`✅ [INIT-DATA] Sync successful: ${syncResult.synced.downloaded} records downloaded`);
             await refreshDataAndUpdateCount();
             
             // Invalidate permission cache after full resync (user data and permissions may have changed)
@@ -1326,20 +1349,33 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               } catch (error) {
                 console.warn('⚠️ Failed to ensure cash drawer accounts after sync:', error);
               }
+              
+              // ✅ FIX 3: Initialize sync state after fullResync completes
+              // This ensures event stream doesn't replay all historical events
+              try {
+                const { eventStreamService } = await import('../services/eventStreamService');
+                await eventStreamService.initializeSyncState(currentBranchId);
+                debug('✅ Sync state initialized after fullResync');
+              } catch (syncStateError) {
+                console.warn('⚠️ Failed to initialize sync state after fullResync:', syncStateError);
+                // Don't fail initialization if sync state init fails
+              }
             }
           } else {
-            console.error('❌ [INIT-DATA] Initial sync failed:', syncResult.errors);
+            console.error('❌ Initial sync failed:', syncResult.errors);
           }
         } catch (error) {
-          console.error('❌ [INIT-DATA] Initial sync error:', error);
+          console.error('❌ Initial sync error:', error);
         } finally {
           setLoading(prev => ({ ...prev, sync: false }));
         }
       } else if (isLocalDatabaseEmpty && !isOnline) {
-        console.log('📴 [INIT-DATA] Local database is empty but OFFLINE - cannot sync');
+        // ✅ FIX 5: Set explicit error for empty database + offline scenario
+        const errorMessage = 'Cannot load data: Database is empty and you are offline. Please connect to the internet to sync data.';
+        setInitializationError(errorMessage);
         debug('📴 Local database is empty but offline - will sync when connection is restored');
+        console.error('❌', errorMessage);
       } else if (!isLocalDatabaseEmpty) {
-        console.log(`📊 [INIT-DATA] Local database has data: ${productCount} products, ${supplierEntityCount} suppliers, ${customerEntityCount} customers`);
         debug(`📊 Local database loaded: ${productCount} products, ${supplierEntityCount} supplier entities, ${customerEntityCount} customer entities`);
 
         // If we have local data and we're online, perform a regular sync to get updates
@@ -1351,8 +1387,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     } catch (error) {
       console.error('❌ Data initialization failed:', error);
+      // ✅ FIX 5: Set error state for initialization failures
+      const errorMessage = error instanceof Error ? error.message : 'Failed to initialize data. Please try refreshing the page.';
+      setInitializationError(errorMessage);
       // Still try to load what we can from local storage
       await refreshDataAndUpdateCount();
+    } finally {
+      // ✅ FIX 4: Always mark initialization as complete, even on error
+      setIsInitializing(false);
     }
 
 
@@ -1375,6 +1417,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       receivedBillMonitoringService.startMonitoring(storeId);
       reminderMonitoringService.startMonitoring(storeId);
     }
+    
+    // ✅ FIX 1: Mark data as ready after initialization completes
+    // This ensures module access queries only run after data is available
+    setIsDataReady(true);
+    // ✅ FIX 4: Mark initialization as complete
+    setIsInitializing(false);
+    debug('✅ Data initialization complete - isDataReady set to true, isInitializing set to false');
   };
 
   // Helper function to ensure cash drawer accounts are synced from Supabase
@@ -1387,7 +1436,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Check if account already exists locally (direct DB query to avoid auto-creation)
       const localAccounts = await getDB().cash_drawer_accounts
-        .where('[store_id+branch_id]')
+        .where(['store_id', 'branch_id'])
         .equals([storeId, branchId])
         .filter(acc => !acc._deleted && (acc.is_active !== false))
         .toArray();
@@ -1796,6 +1845,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       return { success: false, errors: ['No store ID, branch ID, or sync in progress'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
     }
 
+    // ✅ FIX 6: Check if event stream is processing before starting sync
+    // This prevents conflicts between performSync() and eventStreamService
+    try {
+      const { eventStreamService } = await import('../services/eventStreamService');
+      // Wait for event stream to finish processing if it's currently active
+      let waitCount = 0;
+      const maxWait = 10; // Maximum 1 second wait (10 * 100ms)
+      while (eventStreamService.isProcessingEvents(currentBranchId) && waitCount < maxWait) {
+        console.log(`⏳ [SYNC] Waiting for event stream to finish processing (attempt ${waitCount + 1}/${maxWait})...`);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        waitCount++;
+      }
+      if (waitCount > 0) {
+        console.log(`✅ [SYNC] Event stream finished processing, proceeding with sync`);
+      }
+    } catch (error) {
+      console.warn('⚠️ [SYNC] Could not check event stream status, proceeding anyway:', error);
+    }
+
     console.log(`🔄 [SYNC] Starting ${isAutomatic ? 'AUTO' : 'MANUAL'} sync at ${new Date().toLocaleTimeString()}`);
     setIsSyncing(true);
     setIsAutoSyncing(isAutomatic);
@@ -1826,6 +1894,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           const { AccessControlService } = await import('../services/accessControlService');
           AccessControlService.clearCache(userProfile.id, userProfile.store_id);
           console.log('🔄 [SYNC] Permission cache invalidated');
+        }
+        
+        // ✅ FIX 3: Initialize sync state after performSync completes
+        // This ensures event stream doesn't replay events that were just synced
+        if (currentBranchId) {
+          try {
+            const { eventStreamService } = await import('../services/eventStreamService');
+            await eventStreamService.initializeSyncState(currentBranchId);
+            console.log('✅ [SYNC] Sync state initialized after performSync');
+          } catch (syncStateError) {
+            console.warn('⚠️ [SYNC] Failed to initialize sync state after performSync:', syncStateError);
+            // Don't fail sync if sync state init fails
+          }
         }
         
         console.log('✅ [SYNC] Local data refreshed');
@@ -2632,7 +2713,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           credit_usd: 0,
           debit_lbp: !isUSD ? customerBalanceUpdate.amountDue : 0,
           credit_lbp: 0,
-          description: `Credit sale - Bill ${bill.bill_number}`,
+          description: `payments.creditSaleBill`,
           posted_date: postedDate,
           fiscal_period: fiscalPeriod,
           is_posted: true,
@@ -2656,7 +2737,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           credit_usd: isUSD ? customerBalanceUpdate.amountDue : 0,
           debit_lbp: 0,
           credit_lbp: !isUSD ? customerBalanceUpdate.amountDue : 0,
-          description: `Credit sale - Bill ${bill.bill_number}`,
+          description: `payments.creditSaleBill`,
           posted_date: postedDate,
           fiscal_period: fiscalPeriod,
           is_posted: true,
@@ -3082,7 +3163,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             credit_usd: entry.debit_usd, // Swap: original debit becomes credit
             debit_lbp: entry.credit_lbp,
             credit_lbp: entry.debit_lbp,
-            description: `Bill cancellation - ${bill.bill_number}`, // No "Reversal:" prefix needed
+            description: `payments.billCancellation`, // No "Reversal:" prefix needed
             posted_date: postedDate,
             fiscal_period: fiscalPeriod,
             is_posted: true,
@@ -3128,7 +3209,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               category: TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
               amount: bill.amount_paid,
               currency: 'LBP', // TODO: Get actual currency from bill
-              description: createMultilingualFromString(`Bill cancellation refund - ${bill.bill_number}`),
+              description: `payments.billCancellationRefund`,
               reference: bill.bill_number, // Use bill number instead of REVERSAL- prefix
               entity_id: cashTransaction.entity_id || null,
               created_at: now,
@@ -3333,7 +3414,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             credit_usd: reversalEntry.debit_usd, // Swap back: reversal debit becomes original credit
             debit_lbp: reversalEntry.credit_lbp,
             credit_lbp: reversalEntry.debit_lbp,
-            description: `Bill reactivation - ${bill.bill_number}`, // No "Reactivation:" prefix needed
+            description: `payments.billReactivation`, // No "Reactivation:" prefix needed
             posted_date: postedDate,
             fiscal_period: fiscalPeriod,
             is_posted: true,
@@ -3374,7 +3455,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               category: TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
               amount: bill.amount_paid,
               currency: 'LBP', // TODO: Get actual currency from bill
-              description: createMultilingualFromString(`Bill reactivation - ${bill.bill_number}`),
+              description: `payments.billReactivation`,
               reference: bill.bill_number,
               entity_id: cashReversalTransaction.entity_id || null,
               created_at: now,
@@ -3798,7 +3879,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             amountUSD: Math.abs(initialUSDBalance),
             amountLBP: Math.abs(initialLBPBalance),
             entityId: supplierId,
-            description: `Initial balance for ${supplierData.name}`,
+            description: `customers.initialBalance`,
             postedDate,
             createdBy: userProfile?.id || null,
             branchId: currentBranchId
@@ -3814,7 +3895,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               amountUSD: Math.abs(initialUSDBalance),
               amountLBP: 0,
               entityId: supplierId,
-              description: `Initial USD balance for ${supplierData.name}`,
+              description: `customers.initialUSDBalance`,
               postedDate,
               createdBy: userProfile?.id || null,
               branchId: currentBranchId
@@ -3830,7 +3911,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               amountUSD: 0,
               amountLBP: Math.abs(initialLBPBalance),
               entityId: supplierId,
-              description: `Initial LBP balance for ${supplierData.name}`,
+              description: `customers.initialLBPBalance`,
               postedDate,
               createdBy: userProfile?.id || null,
               branchId: currentBranchId
@@ -3931,7 +4012,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             amountUSD: Math.abs(initialUSDBalance),
             amountLBP: Math.abs(initialLBPBalance),
             entityId: customerId,
-            description: `Initial balance for ${customerData.name}`,
+            description: `customers.initialBalance`,
             postedDate,
             createdBy: userProfile?.id || null,
             branchId: currentBranchId
@@ -3947,7 +4028,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               amountUSD: Math.abs(initialUSDBalance),
               amountLBP: 0,
               entityId: customerId,
-              description: `Initial USD balance for ${customerData.name}`,
+              description: `customers.initialUSDBalance`,
               postedDate,
               createdBy: userProfile?.id || null,
               branchId: currentBranchId
@@ -3963,7 +4044,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               amountUSD: 0,
               amountLBP: Math.abs(initialLBPBalance),
               entityId: customerId,
-              description: `Initial LBP balance for ${customerData.name}`,
+              description: `customers.initialLBPBalance`,
               postedDate,
               createdBy: userProfile?.id || null,
               branchId: currentBranchId
@@ -5145,7 +5226,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                 : TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE, // Use customer credit sale for employees
               amount: amountDueIncrease,
               currency: currency as 'USD' | 'LBP', // Use store's currency
-              description: `Credit sale - Bill ${bill.bill_number} (${entityType}) - Item priced`,
+              description: `payments.creditSaleBill`,
               reference: `BILL-${bill.bill_number}`, // ✅ Ensure reference includes BILL- prefix for consistency
               entity_id: bill.entity_id,
               created_at: now,
@@ -5186,7 +5267,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               debit: amountDueIncrease,
               credit: 0,
               currency: currency as 'USD' | 'LBP',
-              description: `Credit sale - Bill ${bill.bill_number} - Item priced`,
+              description: `payments.creditSaleBill`,
               posted_date: postedDate,
               fiscal_period: fiscalPeriod,
               is_posted: true,
@@ -5207,7 +5288,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               debit: 0,
               credit: amountDueIncrease,
               currency: currency as 'USD' | 'LBP',
-              description: `Credit sale - Bill ${bill.bill_number} - Item priced`,
+              description: `payments.creditSaleBill`,
               posted_date: postedDate,
               fiscal_period: fiscalPeriod,
               is_posted: true,
@@ -6241,7 +6322,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             id: transactionId,
             store_id: storeId,
             type: 'expense' as 'expense',
-            category: 'Employee Payment',
+            category: TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT,
             amount: numAmount,
             currency: currency,
             description: transactionDescription,
@@ -6897,7 +6978,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           type: 'payment',
           amount: oldAmountInLBP,
           currency: 'LBP',
-          description: `Reversal: Updated advance payment to ${oldSupplier.name}`,
+          description: `payments.reversalUpdatedAdvancePayment`,
           reference: generateReversalReference(),
           supplierId: oldTransaction.entity_id!,
           storeId: userProfile?.store_id || '',
@@ -6969,7 +7050,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           type: 'expense',
           amount: newAmountInLBP,
           currency: 'LBP',
-          description: `Advance payment to ${newSupplier.name}${updates.currency === 'USD' ? ` ($${updates.amount.toFixed(2)} USD)` : ''}`,
+          description: `payments.advancePayment`,
           reference: generateAdvanceReference(),
           supplierId: updates.supplierId,
           storeId: userProfile?.store_id || '',
@@ -6983,10 +7064,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const reviewDateNote = updates.reviewDate ? ` [Review: ${new Date(updates.reviewDate).toLocaleDateString()}]` : '';
       const transactionUpdate: any = {
         type: newIsGiveAdvance ? 'expense' : 'income',
-        category: 'Supplier Advance',
+        category: TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN,
         amount: updates.amount,
         currency: updates.currency,
-        description: `${updates.description || `Supplier advance ${updates.type === 'give' ? 'payment' : 'deduction'} - ${newSupplier.name}`}${reviewDateNote}`,
+        description: `${updates.description || `payments.supplierAdvance`.replace('{{supplierName}}', newSupplier.name)}`,
         supplier_id: updates.supplierId,
         created_at: updates.date,
         _synced: false,
@@ -7781,6 +7862,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           isComplete: false,
           error: null
         },
+        isDataReady: false,
+        isInitializing: false,
+        initializationError: null,
         products: [],
         branches: [],
         suppliers: [],
@@ -7920,7 +8004,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       storeId,
       currentBranchId,
       setCurrentBranchId,
-      branchSyncStatus,
+        branchSyncStatus,
+        isDataReady,
+        isInitializing,
+        initializationError,
       products,
       branches,
       suppliers,

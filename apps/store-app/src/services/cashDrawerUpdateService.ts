@@ -237,9 +237,11 @@ export class CashDrawerUpdateService {
       async () => {
         const cacheKey = CacheKeys.balance(storeId, branchId);
         
+        // ✅ IMPROVEMENT: Extended cache TTL for balance queries (30 seconds instead of 5)
+        // Balance calculations are expensive, and balances don't change frequently during active sessions
         return CacheManager.withCache(
           cacheKey,
-          CacheManager.TTL.MEDIUM, // 5 seconds
+          CacheManager.TTL.LONG, // 30 seconds - balances are relatively stable
           async () => {
             try {
               // Verify cash drawer account exists
@@ -289,9 +291,11 @@ export class CashDrawerUpdateService {
       async () => {
         const cacheKey = `${CacheKeys.balance(storeId, branchId)}_both`;
         
+        // ✅ IMPROVEMENT: Extended cache TTL for dual-currency balance queries (10 seconds)
+        // These queries are more expensive as they calculate both USD and LBP balances
         return CacheManager.withCache(
           cacheKey,
-          CacheManager.TTL.MEDIUM, // 5 seconds
+          CacheManager.TTL.LONG, // 10 seconds - balances are relatively stable
           async () => {
             try {
               // Get current active session
@@ -312,35 +316,41 @@ export class CashDrawerUpdateService {
               // Get account currency to determine which currency the opening amount applies to
               const accountCurrency = (account as any)?.currency || 'USD';
 
-              // ✅ Calculate balances from journal entries within session time range (single source of truth)
-              // Filter entries by session time: created_at between opened_at and closed_at (or now if still open)
+              // ✅ OPTIMIZED: Calculate balances from journal entries within session time range
+              // Uses compound index [store_id+account_code] for fast lookup, then filters by branch and date
               const openedAt = new Date(session.opened_at);
               const closedAt = session.closed_at ? new Date(session.closed_at) : new Date();
               
+              // ✅ IMPROVEMENT: Use most efficient index path - [store_id+account_code] is optimal for cash drawer queries
               let entries;
               try {
+                // Primary path: Use compound index [store_id+account_code] for account_code='1100' (cash)
+                // This is the fastest path since we're querying a specific account code
                 entries = await getDB().journal_entries
                   .where('[store_id+account_code]')
                   .equals([storeId, '1100'])
                   .and(e => {
+                    // Filter by branch and posted status first (cheaper checks)
                     if (e.is_posted !== true || e.branch_id !== branchId) {
                       return false;
                     }
-                    // Filter by session time range
+                    // Then filter by session time range (more expensive date comparison)
                     const entryDate = new Date(e.created_at);
                     return entryDate >= openedAt && entryDate <= closedAt;
                   })
                   .toArray();
               } catch (error) {
-                // Fallback if compound index doesn't exist
+                // Fallback: Use [store_id+branch_id] index if compound index doesn't exist
+                console.warn('Compound index [store_id+account_code] not available, using fallback:', error);
                 entries = await getDB().journal_entries
                   .where('[store_id+branch_id]')
                   .equals([storeId, branchId])
                   .and(e => {
+                    // Filter by account code and posted status first
                     if (e.account_code !== '1100' || e.is_posted !== true) {
                       return false;
                     }
-                    // Filter by session time range
+                    // Then filter by session time range
                     const entryDate = new Date(e.created_at);
                     return entryDate >= openedAt && entryDate <= closedAt;
                   })

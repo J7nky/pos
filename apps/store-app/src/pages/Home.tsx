@@ -5,7 +5,6 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { useEntityBalances } from '../hooks/useEntityBalances';
-import { getDB } from '../lib/db';
 import { 
   DollarSign, 
   Package, 
@@ -140,9 +139,13 @@ export default function Home() {
     return amount;
   }, [storePreferredCurrency, exchangeRate]);
 
+  // Helper function to get local cash drawer session from context
+  const getLocalCurrentSession = useCallback(() => {
+    return cashDrawer; // Already available in context
+  }, [cashDrawer]);
+
   // Note: calculateLocalCashDrawerBalance is no longer used - balance is computed from journal entries
   // via cashDrawerUpdateService.getCurrentCashDrawerBalance()
-  // We now query the database directly for the current session instead of relying on context state
 
   // Helper function to get cash drawer transaction history from local data
   const getLocalCashDrawerHistory = useCallback((limit: number = 50): any[] => {
@@ -169,11 +172,11 @@ export default function Home() {
       // ✅ Get balance computed from journal entries (single source of truth)
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
       
-      // ✅ Query database directly for current session (not relying on stale context state)
-      const currentSession = await getDB().getCurrentCashDrawerSession(raw.storeId, raw.currentBranchId);
+      // Get current session
+      const currentSession = getLocalCurrentSession();
       
       // If there's no active session, set status to null
-      if (!currentSession || currentSession.status !== 'open') {
+      if (!currentSession) {
         setCashDrawerStatus((prev) => {
           // Only update if status actually changed to prevent unnecessary re-renders
           if (prev === null) return prev;
@@ -223,7 +226,7 @@ export default function Home() {
             lbpBalance: balances.LBP,
             lastUpdated: new Date().toISOString(),
             transactionCount: localHistory.length,
-            openedAt: currentSession.opened_at || ''
+            openedAt: currentSession?.opened_at || currentSession?.lastUpdated || ''
           };
         });
       }
@@ -235,7 +238,7 @@ export default function Home() {
     } finally {
       setIsLoadingCashDrawer(false);
     }
-  }, [raw.storeId, raw.currentBranchId, getLocalCashDrawerHistory, storePreferredCurrency, exchangeRate, isInitialLoad]);
+  }, [raw.storeId, raw.currentBranchId, getLocalCurrentSession, getLocalCashDrawerHistory, storePreferredCurrency, exchangeRate, isInitialLoad]);
 
   // Debounced update function to prevent excessive reloading
   const debouncedLoadCashDrawerStatus = useCallback(() => {
@@ -260,37 +263,34 @@ export default function Home() {
     return `$${amount.toFixed(2)}`;
   }, [storePreferredCurrency]);
 
+  // Track previous cash drawer session ID to detect changes
+  const prevCashDrawerIdRef = useRef<string | null>(null);
+  
+  // ✅ IMPROVEMENT 1: React directly to context changes (cashDrawer state)
+  // This ensures we always reflect the latest session state from context
   useEffect(() => {
+    if (!raw.storeId || !raw.currentBranchId) return;
+    
+    const currentSessionId = raw.cashDrawer?.id || null;
+    const sessionChanged = prevCashDrawerIdRef.current !== currentSessionId;
+    
+    if (sessionChanged) {
+      prevCashDrawerIdRef.current = currentSessionId;
+      // Session changed - reload status (debounced to avoid rapid updates)
+      debouncedLoadCashDrawerStatus();
+    }
+  }, [raw.cashDrawer?.id, raw.storeId, raw.currentBranchId, debouncedLoadCashDrawerStatus]);
+
+  // ✅ IMPROVEMENT 2: Consolidated refresh triggers
+  // Combines: initial load, sync completion, transaction changes, and periodic refresh
+  useEffect(() => {
+    if (!raw.storeId || !raw.currentBranchId) return;
+    
     // Initial load with loading spinner
     loadCashDrawerStatus(true);
 
-    // Live update on cash drawer changes (local changes) - use debounced version
-    const handleCashDrawerUpdated = (e: any) => {
-      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
-      debouncedLoadCashDrawerStatus();
-    };
-    
-    // Handle undo completion events - use debounced version
-    const handleUndoCompleted = (e: any) => {
-      if (!raw.storeId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
-      debouncedLoadCashDrawerStatus();
-    };
-    
-    // Handle data synced events (from event stream) - refresh cash drawer when remote changes arrive
-    const handleDataSynced = () => {
-      // Only refresh if not already loading to prevent excessive reloads
-      if (!isLoadingCashDrawer) {
-        debouncedLoadCashDrawerStatus();
-      }
-    };
-    
-    window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
-    window.addEventListener('undo-completed', handleUndoCompleted as any);
-    window.addEventListener('data-synced', handleDataSynced as any);
-
-    // Refresh every 60 seconds as a fallback (reduced frequency)
+    // Periodic refresh every 60 seconds as a fallback
     const interval = setInterval(() => {
-      // Only refresh if not currently loading
       if (!isLoadingCashDrawer) {
         loadCashDrawerStatus();
       }
@@ -303,14 +303,10 @@ export default function Home() {
         clearTimeout(debounceTimeoutRef.current);
         debounceTimeoutRef.current = null;
       }
-      window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
-      window.removeEventListener('undo-completed', handleUndoCompleted as any);
-      window.removeEventListener('data-synced', handleDataSynced as any);
     };
-  }, [raw.storeId, loadCashDrawerStatus, debouncedLoadCashDrawerStatus, isLoadingCashDrawer]);
+  }, [raw.storeId, raw.currentBranchId, loadCashDrawerStatus, isLoadingCashDrawer]);
 
-  // Re-fetch after initial sync completes, to avoid showing 0 before cloud data arrives
-  // Only trigger once when sync completes, not on every transaction change
+  // ✅ IMPROVEMENT 3: Sync completion detection (only when sync transitions to complete)
   useEffect(() => {
     if (!raw.storeId || !raw.transactions || isLoadingCashDrawer) return;
     // Only trigger when sync transitions from loading to complete
@@ -323,8 +319,7 @@ export default function Home() {
     }
   }, [raw.storeId, raw.loading?.sync, debouncedLoadCashDrawerStatus, isLoadingCashDrawer]);
 
-  // Track transaction count to detect actual cash drawer transaction changes
-  // Only reload if transaction count changes AND we're not already loading
+  // ✅ IMPROVEMENT 4: Track cash drawer transaction changes (consolidated with context reactivity)
   const prevTransactionCountRef = useRef(transactions.length);
   useEffect(() => {
     if (!raw.storeId || isLoadingCashDrawer) return;
@@ -339,6 +334,47 @@ export default function Home() {
       debouncedLoadCashDrawerStatus();
     }
   }, [raw.storeId, transactions, debouncedLoadCashDrawerStatus, isLoadingCashDrawer]);
+
+  // ✅ IMPROVEMENT 5: Event listeners for external updates (hybrid approach)
+  // 
+  // Event-driven pattern is still valuable for:
+  // 1. Cross-tab communication (multiple browser tabs open)
+  // 2. Real-time updates from eventStreamService (remote changes)
+  // 3. Undo operations that bypass normal context updates
+  // 4. Updates from other components that don't go through context
+  //
+  // Primary mechanism: React reactivity (raw.cashDrawer?.id changes)
+  // Secondary mechanism: Event listeners (for cross-tab/external updates)
+  // Fallback: Periodic refresh (60 seconds)
+  useEffect(() => {
+    if (!raw.storeId) return;
+    
+    const handleCashDrawerUpdated = (e: any) => {
+      if (e?.detail?.storeId && e.detail.storeId !== raw.storeId) return;
+      debouncedLoadCashDrawerStatus();
+    };
+    
+    const handleUndoCompleted = (e: any) => {
+      if (e?.detail?.storeId && e.detail.storeId !== raw.storeId) return;
+      debouncedLoadCashDrawerStatus();
+    };
+    
+    const handleDataSynced = () => {
+      if (!isLoadingCashDrawer) {
+        debouncedLoadCashDrawerStatus();
+      }
+    };
+    
+    window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+    window.addEventListener('undo-completed', handleUndoCompleted as any);
+    window.addEventListener('data-synced', handleDataSynced as any);
+    
+    return () => {
+      window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
+      window.removeEventListener('undo-completed', handleUndoCompleted as any);
+      window.removeEventListener('data-synced', handleDataSynced as any);
+    };
+  }, [raw.storeId, debouncedLoadCashDrawerStatus, isLoadingCashDrawer]);
 
   const lowStockItems = lowStockAlertsEnabled 
     ? stockLevels.filter(item => item.currentStock < lowStockThreshold)

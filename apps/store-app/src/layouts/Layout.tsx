@@ -121,8 +121,16 @@ export default function Layout() {
     }
   };
 
-  // Load permissions on mount or when user changes
+  // ✅ FIX 1: Load permissions only after data is ready
+  // This prevents queries to role_permissions/user_permissions tables before they're synced
+  const { isDataReady } = useOfflineData();
+  
   useEffect(() => {
+    // Wait for data to be ready before loading module access
+    if (!isDataReady || !userProfile) {
+      return;
+    }
+    
     loadModuleAccess();
     
     // Also check after a delay in case sync completes quickly
@@ -159,7 +167,7 @@ export default function Layout() {
     }, 3000); // Check after 3 seconds
     
     return () => clearTimeout(delayedCheck);
-  }, [userProfile]);
+  }, [userProfile, isDataReady]); // ✅ FIX 1: Include isDataReady in dependencies
 
   // Reload permissions when sync completes (isSyncing changes from true to false)
   useEffect(() => {

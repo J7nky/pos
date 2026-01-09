@@ -150,11 +150,17 @@ export async function createUser(input: CreateUserInput): Promise<StoreUser> {
   }
 
   // Check if email already exists
-  const { data: existingUser } = await supabase
+  // Use supabaseAdmin to bypass RLS for admin operations
+  const { data: existingUser, error: checkError } = await supabaseAdmin
     .from('users')
     .select('id')
     .eq('email', input.email)
-    .single();
+    .maybeSingle();
+
+  if (checkError) {
+    console.error('Error checking existing user:', checkError);
+    throw new Error(`Failed to check if user exists: ${checkError.message}`);
+  }
 
   if (existingUser) {
     throw new Error('A user with this email already exists');
@@ -173,6 +179,7 @@ export async function createUser(input: CreateUserInput): Promise<StoreUser> {
   }
 
   // Create user in users table
+  // Use supabaseAdmin to bypass RLS for admin operations
   const userData = {
     id: authData.user.id,
     store_id: input.store_id,
@@ -184,7 +191,7 @@ export async function createUser(input: CreateUserInput): Promise<StoreUser> {
     is_active: true,
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('users')
     .insert(userData)
     .select()

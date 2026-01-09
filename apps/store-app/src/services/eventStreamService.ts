@@ -248,8 +248,8 @@ export class EventStreamService {
       const syncState = await this.getSyncState(branchId);
       let lastVersion = syncState?.last_seen_event_version || 0;
 
-      // 2. OPTIMIZATION: If no sync state exists but database has data,
-      //    initialize with current max version to avoid replaying all events
+      // ✅ FIX 3: Enhanced sync state initialization
+      // If no sync state exists, check if database has data and initialize accordingly
       if (!syncState && lastVersion === 0) {
         console.log(`[EventStream] No sync state found for branch ${branchId}, checking if database has data...`);
         
@@ -259,13 +259,20 @@ export class EventStreamService {
                         await getDB().transactions.limit(1).count() > 0;
 
         if (hasData) {
+          // Database has data but no sync state - initialize to current max version
+          // This prevents replaying all historical events when event stream starts
           console.log(`[EventStream] Database has data but no sync state - initializing to current max version to avoid replaying all events`);
-          await this.initializeSyncState(branchId);
-          
-          // Fetch the newly initialized sync state
-          const newSyncState = await this.getSyncState(branchId);
-          lastVersion = newSyncState?.last_seen_event_version || 0;
-          console.log(`[EventStream] Initialized sync state to version ${lastVersion} for branch ${branchId}`);
+          try {
+            await this.initializeSyncState(branchId);
+            
+            // Fetch the newly initialized sync state
+            const newSyncState = await this.getSyncState(branchId);
+            lastVersion = newSyncState?.last_seen_event_version || 0;
+            console.log(`[EventStream] ✅ Initialized sync state to version ${lastVersion} for branch ${branchId}`);
+          } catch (initError) {
+            console.warn(`[EventStream] ⚠️ Failed to initialize sync state, will start from version 0:`, initError);
+            // Continue with lastVersion = 0 if initialization fails
+          }
         } else {
           console.log(`[EventStream] Database is empty - will start from version 0 (expected on first sync)`);
         }
@@ -903,6 +910,14 @@ export class EventStreamService {
    */
   isActive(branchId: string): boolean {
     return this.channels.has(branchId);
+  }
+
+  /**
+   * ✅ FIX 6: Check if event stream is currently processing events for a branch
+   * Used for sync coordination to prevent conflicts with performSync()
+   */
+  isProcessingEvents(branchId: string): boolean {
+    return this.isProcessing.get(branchId) === true;
   }
 }
 
