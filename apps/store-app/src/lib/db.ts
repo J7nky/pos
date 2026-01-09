@@ -386,7 +386,7 @@ class POSDatabase extends Dexie {
       
       // First, check if any accounts exist for this store/branch (for debugging)
       const allAccounts = await this.cash_drawer_accounts
-        .where(['store_id', 'branch_id'])
+        .where('[store_id+branch_id]')
         .equals([storeId, branchId])
         .toArray();
       
@@ -394,7 +394,7 @@ class POSDatabase extends Dexie {
       
       // Prefer an explicitly active account; treat undefined as active to support older records
       let account = await this.cash_drawer_accounts
-        .where(['store_id', 'branch_id'])
+        .where('[store_id+branch_id]')
         .equals([storeId, branchId])
         .filter(acc => {
           // Don't include deleted accounts
@@ -524,7 +524,7 @@ class POSDatabase extends Dexie {
           .toArray();
         all = allSessions;
       }
-      console.log('DEBUG: Current session:',all);
+      // console.log('DEBUG: Current session:',all);
 
       // Find open sessions, robust to whitespace/case issues
       const open = all.filter(sess => String(sess.status).trim().toLowerCase() === 'open');
@@ -735,7 +735,7 @@ class POSDatabase extends Dexie {
 
       // Get account for currency info
       const account = await this.cash_drawer_accounts
-        .where(['store_id', 'branch_id'])
+        .where('[store_id+branch_id]')
         .equals([storeId, branchId])
         .first();
 
@@ -842,7 +842,7 @@ class POSDatabase extends Dexie {
   async getCashDrawerBalanceReport(storeId: string, branchId: string, startDate?: string, endDate?: string): Promise<any> {
     try {
       let sessions = await this.cash_drawer_sessions
-        .where(['store_id', 'branch_id'])
+        .where('[store_id+branch_id]')
         .equals([storeId, branchId])
         .filter(sess => sess.status === 'closed')
         .toArray();

@@ -647,11 +647,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // CRITICAL: Wait for both storeId AND currentBranchId before loading data
     // Admin users must select a branch first, manager/cashier get auto-assigned
+    console.log('🔍 [INIT-CHECK] Checking initialization conditions:', {
+      hasStoreId: !!storeId,
+      storeId,
+      hasCurrentBranchId: !!currentBranchId,
+      currentBranchId,
+      isOnline,
+      userRole: userProfile?.role
+    });
+    
     if (storeId && currentBranchId) {
       console.log('✅ Both storeId and currentBranchId available, initializing data...', {
         storeId,
         currentBranchId,
-        userRole: userProfile?.role
+        userRole: userProfile?.role,
+        isOnline
       });
       loadStoreData();
       initializeData();
@@ -662,7 +672,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.log('⏳ Waiting for branch selection before loading data...', {
         hasStoreId: !!storeId,
         hasCurrentBranchId: !!currentBranchId,
-        userRole: userProfile?.role
+        userRole: userProfile?.role,
+        isOnline
       });
     }
     
@@ -886,23 +897,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             }
           }
           
-          // No valid stored preference - check if branches are being synced
-          // If sync is complete, try to auto-select default branch
-          if (branchSyncStatus.isComplete && !branchSyncStatus.isSyncing) {
-            // Branches have been synced, try to get default branch
-            console.log('🔄 Admin: Branch sync complete, attempting to auto-select default branch...');
-            try {
-              const branchId = await ensureDefaultBranch(storeId);
-              if (branchId) {
-                setCurrentBranchId(branchId);
-                console.log('✅ Admin: Auto-selected default branch after sync:', branchId);
-                return;
-              }
-            } catch (error) {
-              console.warn('⚠️ Admin: Failed to auto-select default branch:', error);
-            }
-          }
-          
+          // No valid stored preference - admin must select branch via BranchSelectionScreen
           // If sync is still in progress, wait for it to complete
           // The useEffect will re-run when branchSyncStatus changes
           if (branchSyncStatus.isSyncing) {
@@ -910,8 +905,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             return;
           }
           
-          // No valid stored preference and sync is complete but no branch found
-          // Admin needs to select branch manually
+          // Admin needs to select branch manually via BranchSelectionScreen
+          // DO NOT auto-select - let the admin choose which branch to work with
           console.log('⏳ Admin: Waiting for branch selection via BranchSelectionScreen');
           return;
         }
@@ -1293,19 +1288,25 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const productCount = storeProductCount + globalProductCount;
 
       debug(`📈 Local data counts: ${productCount} products, ${supplierEntityCount} supplier entities, ${customerEntityCount} customer entities`);
+      console.log('🔍 [INIT-DATA] Local counts:', { productCount, supplierEntityCount, customerEntityCount, isOnline });
 
       const isLocalDatabaseEmpty = productCount === 0 && supplierEntityCount === 0 && customerEntityCount === 0;
+      console.log('🔍 [INIT-DATA] Is local database empty?', isLocalDatabaseEmpty, 'isOnline?', isOnline);
 
       // If local database is empty and we're online, sync from cloud
       if (isLocalDatabaseEmpty && isOnline) {
+        console.log('📥 [INIT-DATA] Starting full sync from cloud...');
         debug('📥 Local database is empty, syncing from cloud...');
         setLoading(prev => ({ ...prev, sync: true }));
 
         try {
+          console.log('📥 [INIT-DATA] Calling syncService.fullResync...');
           const syncResult = await syncService.fullResync(storeId);
+          console.log('📥 [INIT-DATA] fullResync result:', syncResult);
 
           if (syncResult.success) {
             debug(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
+            console.log(`✅ [INIT-DATA] Sync successful: ${syncResult.synced.downloaded} records downloaded`);
             await refreshDataAndUpdateCount();
             
             // Invalidate permission cache after full resync (user data and permissions may have changed)
@@ -1327,16 +1328,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               }
             }
           } else {
-            console.error('❌ Initial sync failed:', syncResult.errors);
+            console.error('❌ [INIT-DATA] Initial sync failed:', syncResult.errors);
           }
         } catch (error) {
-          console.error('❌ Initial sync error:', error);
+          console.error('❌ [INIT-DATA] Initial sync error:', error);
         } finally {
           setLoading(prev => ({ ...prev, sync: false }));
         }
       } else if (isLocalDatabaseEmpty && !isOnline) {
+        console.log('📴 [INIT-DATA] Local database is empty but OFFLINE - cannot sync');
         debug('📴 Local database is empty but offline - will sync when connection is restored');
       } else if (!isLocalDatabaseEmpty) {
+        console.log(`📊 [INIT-DATA] Local database has data: ${productCount} products, ${supplierEntityCount} suppliers, ${customerEntityCount} customers`);
         debug(`📊 Local database loaded: ${productCount} products, ${supplierEntityCount} supplier entities, ${customerEntityCount} customer entities`);
 
         // If we have local data and we're online, perform a regular sync to get updates
@@ -1384,7 +1387,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Check if account already exists locally (direct DB query to avoid auto-creation)
       const localAccounts = await getDB().cash_drawer_accounts
-        .where(['store_id', 'branch_id'])
+        .where('[store_id+branch_id]')
         .equals([storeId, branchId])
         .filter(acc => !acc._deleted && (acc.is_active !== false))
         .toArray();

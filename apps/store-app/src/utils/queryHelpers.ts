@@ -41,7 +41,7 @@ export class QueryHelpers {
    * Usage: QueryHelpers.byStoreBranch(db.cash_drawer_sessions, storeId, branchId)
    */
   static byStoreBranch<T>(table: Table<T, any>, storeId: string, branchId: string) {
-    return table.where(['store_id', 'branch_id']).equals([storeId, branchId]);
+    return table.where('[store_id+branch_id]').equals([storeId, branchId]);
   }
 
   /**

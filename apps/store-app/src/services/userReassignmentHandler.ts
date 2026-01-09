@@ -59,7 +59,7 @@ export class UserReassignmentHandler {
     // Close any active cash drawer sessions in old branch
     if (oldBranchId) {
       const activeSessions = await getDB().cash_drawer_sessions
-        .where(['store_id', 'branch_id'])
+        .where('[store_id+branch_id]')
         .equals([storeId, oldBranchId])
         .filter(s => s.status === 'open' && s.opened_by === userId)
         .toArray();
@@ -189,7 +189,7 @@ export class UserReassignmentHandler {
     status: string;
   }>> {
     const sessions = await getDB().cash_drawer_sessions
-      .where(['store_id', 'branch_id'])
+      .where('[store_id+branch_id]')
       .equals([storeId, branchId])
       .filter(s => s.status === 'open' && s.opened_by === userId)
       .toArray();

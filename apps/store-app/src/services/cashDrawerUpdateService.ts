@@ -655,7 +655,7 @@ export class CashDrawerUpdateService {
       try {
         // Get all accounts for this store AND branch
         const allAccounts = await getDB().cash_drawer_accounts
-          .where(['store_id', 'branch_id'])
+          .where('[store_id+branch_id]')
           .equals([storeId, branchId])
           .toArray();
 
