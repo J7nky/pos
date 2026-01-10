@@ -8004,7 +8004,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       storeId,
       currentBranchId,
       setCurrentBranchId,
-        branchSyncStatus,
+      branchSyncStatus,
         isDataReady,
         isInitializing,
         initializationError,

@@ -263,11 +263,11 @@ export class EventStreamService {
           // This prevents replaying all historical events when event stream starts
           console.log(`[EventStream] Database has data but no sync state - initializing to current max version to avoid replaying all events`);
           try {
-            await this.initializeSyncState(branchId);
-            
-            // Fetch the newly initialized sync state
-            const newSyncState = await this.getSyncState(branchId);
-            lastVersion = newSyncState?.last_seen_event_version || 0;
+          await this.initializeSyncState(branchId);
+          
+          // Fetch the newly initialized sync state
+          const newSyncState = await this.getSyncState(branchId);
+          lastVersion = newSyncState?.last_seen_event_version || 0;
             console.log(`[EventStream] ✅ Initialized sync state to version ${lastVersion} for branch ${branchId}`);
           } catch (initError) {
             console.warn(`[EventStream] ⚠️ Failed to initialize sync state, will start from version 0:`, initError);
