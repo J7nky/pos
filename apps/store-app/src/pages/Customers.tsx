@@ -30,22 +30,28 @@ export default function Customers() {
   // Get calculated balances from journal entries (source of truth)
   const customerBalances = useEntityBalances(customerIds, 'customer', true);
   
-  const customers = customerEntities.map(c => {
-    const customerData = (c.customer_data as any) || {};
-    // Get calculated balances from journal entries
-    const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
-    return {
-      ...c, 
-      is_active: c.is_active ?? true, 
-      createdAt: c.created_at, 
-      lb_balance: balances.LBP,  // From journal entries
-      usd_balance: balances.USD,  // From journal entries
-      email: customerData.email || '', 
-      address: customerData.address || '',
-      lb_max_balance: customerData.lb_max_balance ?? undefined,
-      usd_max_balance: customerData.usd_max_balance ?? undefined
-    };
-  });
+  const customers = useMemo(() => {
+    const mappedCustomers = customerEntities.map(c => {
+      const customerData = (c.customer_data as any) || {};
+      // Get calculated balances from journal entries
+      const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+      return {
+        ...c, 
+        is_active: c.is_active ?? true, 
+        createdAt: c.created_at, 
+        lb_balance: balances.LBP,  // From journal entries
+        usd_balance: balances.USD,  // From journal entries
+        email: customerData.email || '', 
+        address: customerData.address || '',
+        lb_max_balance: customerData.lb_max_balance ?? undefined,
+        usd_max_balance: customerData.usd_max_balance ?? undefined
+      };
+    });
+    // Sort alphabetically (A-Z or ا-ي)
+    return mappedCustomers.sort((a, b) => 
+      a.name.localeCompare(b.name, ['ar', 'en'], { sensitivity: 'base' })
+    );
+  }, [customerEntities, customerBalances]);
   
   // Get supplier entities
   const supplierEntities = raw.entities.filter(e => e.entity_type === 'supplier');
@@ -54,22 +60,28 @@ export default function Customers() {
   // Get calculated balances from journal entries (source of truth)
   const supplierBalances = useEntityBalances(supplierIds, 'supplier', true);
   
-  const suppliers = supplierEntities.map(s => {
-    const supplierData = (s.supplier_data as any) || {};
-    // Get calculated balances from journal entries
-    const balances = supplierBalances.getBalances(s.id) || { USD: 0, LBP: 0 };
-    return {
-      ...s, 
-      createdAt: s.created_at || 'commission', 
-      email: supplierData.email || '', 
-      address: supplierData.address || '', 
-      lb_balance: balances.LBP,  // From journal entries
-      usd_balance: balances.USD,  // From journal entries
-      type: supplierData.type || 'standard',
-      advance_lb_balance: supplierData.advance_lb_balance || 0,
-      advance_usd_balance: supplierData.advance_usd_balance || 0
-    };
-  });
+  const suppliers = useMemo(() => {
+    const mappedSuppliers = supplierEntities.map(s => {
+      const supplierData = (s.supplier_data as any) || {};
+      // Get calculated balances from journal entries
+      const balances = supplierBalances.getBalances(s.id) || { USD: 0, LBP: 0 };
+      return {
+        ...s, 
+        createdAt: s.created_at || 'commission', 
+        email: supplierData.email || '', 
+        address: supplierData.address || '', 
+        lb_balance: balances.LBP,  // From journal entries
+        usd_balance: balances.USD,  // From journal entries
+        type: supplierData.type || 'standard',
+        advance_lb_balance: supplierData.advance_lb_balance || 0,
+        advance_usd_balance: supplierData.advance_usd_balance || 0
+      };
+    });
+    // Sort alphabetically (A-Z or ا-ي)
+    return mappedSuppliers.sort((a, b) => 
+      a.name.localeCompare(b.name, ['ar', 'en'], { sensitivity: 'base' })
+    );
+  }, [supplierEntities, supplierBalances]);
   const addCustomer = raw.addCustomer;
   const updateCustomer = raw.updateCustomer;
   const addSupplier = raw.addSupplier;

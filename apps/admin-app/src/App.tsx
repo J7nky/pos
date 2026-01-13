@@ -12,6 +12,7 @@ import Payments from './pages/Payments';
 import Analytics from './pages/Analytics';
 import RolePermissions from './pages/RolePermissions';
 import Settings from './pages/Settings';
+import BalanceMigration from './pages/BalanceMigration';
 import Login from './pages/Login';
 
 function AppRoutes() {
@@ -34,6 +35,7 @@ function AppRoutes() {
         <Route path="/global-logos" element={<GlobalLogos />} />
         <Route path="/stores" element={<Stores />} />
         <Route path="/stores/:storeId" element={<StoreDetail />} />
+        <Route path="/balance-migration" element={<BalanceMigration />} />
         <Route path="/subscriptions" element={<Subscriptions />} />
         <Route path="/payments" element={<Payments />} />
         <Route path="/analytics" element={<Analytics />} />

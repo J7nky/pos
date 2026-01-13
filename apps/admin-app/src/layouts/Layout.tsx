@@ -1,15 +1,16 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Package, 
+import {
+  LayoutDashboard,
+  Package,
   Image as ImageIcon,
-  Store, 
-  CreditCard, 
-  DollarSign, 
-  BarChart3, 
+  Store,
+  CreditCard,
+  DollarSign,
+  BarChart3,
   Settings,
   Shield,
+  FileSpreadsheet,
   LogOut
 } from 'lucide-react';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
@@ -27,6 +28,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Global Products', href: '/global-products', icon: Package },
     { name: 'Global Logos', href: '/global-logos', icon: ImageIcon },
     { name: 'Stores', href: '/stores', icon: Store },
+    { name: 'Balance Migration', href: '/balance-migration', icon: FileSpreadsheet },
     { name: 'Subscriptions', href: '/subscriptions', icon: CreditCard },
     { name: 'Payments', href: '/payments', icon: DollarSign },
     { name: 'Analytics', href: '/analytics', icon: BarChart3 },

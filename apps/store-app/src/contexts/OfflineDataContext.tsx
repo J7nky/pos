@@ -887,44 +887,30 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Admin users (branch_id: null) - Don't auto-initialize
         // They should select a branch via BranchSelectionScreen
         if (userProfile.role === 'admin' && userProfile.branch_id === null) {
-          // Check if there's a stored preference
-          const storedBranchId = localStorage.getItem(`branch_preference_${storeId}`);
-          if (storedBranchId) {
-            // Validate the stored branch exists and is accessible
-            const branch = await getDB().branches.get(storedBranchId);
-            if (branch && !branch._deleted && branch.store_id === storeId) {
-              setCurrentBranchId(storedBranchId);
-              console.log('✅ Admin: Restored preferred branch:', storedBranchId);
-              return;
-            } else {
-              // Stored preference is invalid, clear it
-              localStorage.removeItem(`branch_preference_${storeId}`);
-              console.log('⚠️ Admin: Stored branch preference was invalid, cleared');
-            }
-          }
-          
-          // No valid stored preference - check if branches are being synced
-          // If sync is complete, try to auto-select default branch
-          if (branchSyncStatus.isComplete && !branchSyncStatus.isSyncing) {
-            // Branches have been synced, try to get default branch
-            console.log('🔄 Admin: Branch sync complete, attempting to auto-select default branch...');
-            try {
-              const branchId = await ensureDefaultBranch(storeId);
-              if (branchId) {
-                setCurrentBranchId(branchId);
-                console.log('✅ Admin: Auto-selected default branch after sync:', branchId);
-                return;
-              }
-            } catch (error) {
-              console.warn('⚠️ Admin: Failed to auto-select default branch:', error);
-            }
-          }
-          
-          // If sync is still in progress, wait for it to complete
-          // The useEffect will re-run when branchSyncStatus changes
-          if (branchSyncStatus.isSyncing) {
-            console.log('⏳ Admin: Waiting for branch sync to complete...');
+        // Check if there's a stored preference
+        const storedBranchId = localStorage.getItem(`branch_preference_${storeId}`);
+        if (storedBranchId) {
+          // Validate the stored branch exists and is accessible
+          const branch = await getDB().branches.get(storedBranchId);
+          if (branch && !branch._deleted && branch.store_id === storeId) {
+            setCurrentBranchId(storedBranchId);
+            console.log('✅ Admin: Restored preferred branch:', storedBranchId);
             return;
+          } else {
+            // Stored preference is invalid, clear it
+            localStorage.removeItem(`branch_preference_${storeId}`);
+            console.log('⚠️ Admin: Stored branch preference was invalid, cleared');
+          }
+        }
+        
+        // No valid stored preference - check if branches are being synced
+        // If sync is complete, try to auto-select default branch
+        
+        // If sync is still in progress, wait for it to complete
+        // The useEffect will re-run when branchSyncStatus changes
+        if (branchSyncStatus.isSyncing) {
+          console.log('⏳ Admin: Waiting for branch sync to complete...');
+          return;
           }
           
           // No valid stored preference and sync is complete but no branch found
@@ -1469,13 +1455,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const remoteAccount = supabaseAccounts[0] as Tables['cash_drawer_accounts']['Row'];
         debug(`📥 Found cash drawer account in Supabase (${remoteAccount.id}), syncing to local DB...`);
         
+        // Get store's preferred currency to ensure currency matches store preference
+        const store = await getDB().stores.get(storeId);
+        const storePreferredCurrency = store?.preferred_currency || 'LBP';
+        
         const localAccountData: CashDrawerAccount = {
           id: remoteAccount.id,
           store_id: remoteAccount.store_id,
           branch_id: (remoteAccount as any).branch_id || '',
           account_code: remoteAccount.account_code,
           name: remoteAccount.name,
-          currency: remoteAccount.currency,
+          currency: storePreferredCurrency, // Use store's preferred currency instead of remote currency
           is_active: remoteAccount.is_active,
           current_balance: remoteAccount.current_balance || 0,
           created_at: remoteAccount.created_at,
@@ -1485,7 +1475,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         };
 
         await getDB().cash_drawer_accounts.put(localAccountData);
-        debug(`✅ Synced cash drawer account from Supabase to local DB`);
+        debug(`✅ Synced cash drawer account from Supabase to local DB (currency set to store preferred: ${storePreferredCurrency})`);
       } else {
         debug('ℹ️ No cash drawer account found in Supabase - will be created on-demand');
       }

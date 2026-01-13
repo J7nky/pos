@@ -2037,11 +2037,16 @@ export class SyncService {
       console.warn(`💰 Cash drawer account conflict detected in non-balance fields`);
       // Use remote record for non-balance fields (balance is computed from journals, not synced)
       try {
+        // Get store's preferred currency to ensure currency matches store preference
+        const storeId = localRecord.store_id || remoteRecord.store_id;
+        const store = storeId ? await getDB().stores.get(storeId) : null;
+        const storePreferredCurrency = store?.preferred_currency || 'LBP';
+        
         // Update non-balance fields only
         // Balance fields (current_balance, usd_balance, lbp_balance) are NEVER synced - computed from journal entries only
         const updateData: any = {
           name: remoteRecord.name,
-          currency: remoteRecord.currency,
+          currency: storePreferredCurrency, // Use store's preferred currency instead of remote currency
           is_active: remoteRecord.is_active,
           account_code: remoteRecord.account_code,
           updated_at: new Date().toISOString(),
@@ -2061,9 +2066,15 @@ export class SyncService {
         const remoteTimestamp = new Date(remoteRecord.updated_at || remoteRecord.created_at);
 
         if (remoteTimestamp >= localTimestamp) {
+          // Get store's preferred currency to ensure currency matches store preference
+          const storeId = localRecord.store_id || remoteRecord.store_id;
+          const store = storeId ? await getDB().stores.get(storeId) : null;
+          const storePreferredCurrency = store?.preferred_currency || 'LBP';
+          
           // Update non-balance fields only (balance is computed from journals)
           const updateData: any = {
             ...remoteRecord,
+            currency: storePreferredCurrency, // Use store's preferred currency instead of remote currency
             _synced: true,
             _lastSyncedAt: new Date().toISOString()
           };

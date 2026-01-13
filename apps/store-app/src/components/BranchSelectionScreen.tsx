@@ -305,7 +305,7 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
                   getDB().branches
                     .where('store_id')
                     .equals(userProfile?.store_id || '')
-                    .filter(b => !b.is_deleted)
+                    .filter(b => !(b._deleted === true))
                     .first()
                     .then(branch => {
                       if (branch) {
