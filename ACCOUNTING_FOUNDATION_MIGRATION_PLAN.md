@@ -1,6 +1,6 @@
 # Accounting Foundation Migration Plan
 ## Journal/Ledger + Snapshots + Entity Abstraction
-
+http://youtube.com/watch?v=em3vIT9aUsg
 **Date:** November 23, 2025  
 **Priority:** 🔥 CRITICAL - Foundation for SaaS Scale  
 **Estimated Effort:** 4-6 weeks  
