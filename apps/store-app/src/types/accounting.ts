@@ -147,6 +147,7 @@ export interface CreateJournalEntryParams {
   // Legacy support - if currency/amount provided, will be converted
   amount?: number;                 // Legacy: single amount
   currency?: 'USD' | 'LBP';       // Legacy: single currency
+  skipVerification?: boolean;      // Skip verification queries when called within a transaction (prevents PrematureCommitError)
 }
 
 /**

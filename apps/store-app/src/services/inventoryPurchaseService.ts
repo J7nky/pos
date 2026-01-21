@@ -3,6 +3,8 @@ import { cashDrawerUpdateService } from './cashDrawerUpdateService';
 import { TransactionService } from './transactionService';
 import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
 import { currencyService } from './currencyService';
+import { journalService } from './journalService';
+import { accountingInitService } from './accountingInitService';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 const transactionService = TransactionService.getInstance();
 export interface InventoryPurchaseItem {
@@ -94,10 +96,10 @@ export class InventoryPurchaseService {
   private calculatePurchaseAmounts(data: InventoryPurchaseData) {
     const items = data.items.map(item => {
       // Calculate item value: weight * price or quantity * price (if no weight)
-      const itemValue = item.weight && item.price 
-        ? item.weight * item.price 
+      const itemValue = item.weight && item.price
+        ? item.weight * item.price
         : item.quantity * (item.price || 0);
-      
+
       return {
         ...item,
         totalValue: itemValue
@@ -105,7 +107,7 @@ export class InventoryPurchaseService {
     });
 
     const itemsTotal = items.reduce((sum, item) => sum + item.totalValue, 0);
-    
+
     const fees = {
       porterage: data.porterage_fee || 0,
       transfer: data.transfer_fee || 0,
@@ -166,14 +168,14 @@ export class InventoryPurchaseService {
       if (feeType.amount > 0) {
         try {
           let result;
-          
+
           // Add a delay between transactions to ensure each completes fully
           // This prevents "Transaction committed too early" errors in Dexie
           // when multiple transactions are created in quick succession
           if (transactionIds.length > 0) {
             await new Promise(resolve => setTimeout(resolve, 50));
           }
-          
+
           if (billType === 'commission' && supplierId) {
             // Commission fees: Use supplier entity
             console.log(`[FEES] Creating commission fee transaction for ${feeType.label}:`, {
@@ -182,7 +184,7 @@ export class InventoryPurchaseService {
               supplierId,
               billType
             });
-            
+
             result = await transactionService.createTransaction({
               category: TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
               amount: feeType.amount,
@@ -200,7 +202,7 @@ export class InventoryPurchaseService {
               currency,
               billType
             });
-            
+
             result = await transactionService.createCashDrawerExpense(
               feeType.amount,
               currency,
@@ -265,13 +267,13 @@ export class InventoryPurchaseService {
    * Separates inventory cost from fees - both deduct from cash drawer
    */
   private async processCashPurchase(
-    data: InventoryPurchaseData, 
-    items: any[], 
-    itemsTotal: number, 
+    data: InventoryPurchaseData,
+    items: any[],
+    itemsTotal: number,
     fees: any
   ): Promise<PurchaseTransactionResult> {
     const transactionId = createId();
-    
+
     console.log(`[CASH_PURCHASE] Starting cash purchase processing:`, {
       transactionId,
       storeId: data.store_id,
@@ -281,20 +283,20 @@ export class InventoryPurchaseService {
       itemsCount: items.length,
       createdBy: data.created_by
     });
-    
+
     try {
       // For cash purchases, always use "Trade" as supplier
       console.log(`[CASH_PURCHASE] Getting/creating Trade supplier for store: ${data.store_id}`);
       const tradeSupplierId = await this.getOrCreateTradeSupplier(data.store_id);
       console.log(`[CASH_PURCHASE] ✅ Trade supplier ID: ${tradeSupplierId}`);
-      
+
       // Verify session is open
       console.log(`[CASH_PURCHASE] Verifying cash drawer session:`, {
         storeId: data.store_id,
         branchId: data.branch_id,
         allowAutoOpen: true
       });
-      
+
       const session = await cashDrawerUpdateService.verifySessionOpen(
         data.store_id,
         data.branch_id,
@@ -307,7 +309,7 @@ export class InventoryPurchaseService {
         console.error(`[CASH_PURCHASE] ❌ No active cash drawer session found`);
         throw new Error('No active cash drawer session');
       }
-      
+
       console.log(`[CASH_PURCHASE] ✅ Cash drawer session verified:`, {
         sessionId: session.id,
         status: session.status
@@ -320,7 +322,7 @@ export class InventoryPurchaseService {
         currency: data.currency,
         reference: `INV-PURCH-${transactionId.substring(0, 8)}`
       });
-      
+
       const inventoryResult = await transactionService.createInventoryCashPurchase(
         itemsTotal,
         data.currency,
@@ -357,7 +359,7 @@ export class InventoryPurchaseService {
           .where('transaction_id')
           .equals(inventoryResult.transactionId)
           .toArray();
-        
+
         console.log(`[CASH_PURCHASE] Inventory journal entries created:`, {
           transactionId: inventoryResult.transactionId,
           entryCount: journalEntries.length,
@@ -371,31 +373,42 @@ export class InventoryPurchaseService {
             is_posted: e.is_posted
           }))
         });
-        
+
         // Verify correct accounts: Inventory (1300) and Cash (1100)
         const inventoryEntries = journalEntries.filter(e => e.account_code === '1300');
         const cashEntries = journalEntries.filter(e => e.account_code === '1100');
-        
+
         if (journalEntries.length === 0) {
           console.error(`[CASH_PURCHASE] ❌ CRITICAL: No journal entries found for transaction ${inventoryResult.transactionId}`);
           throw new Error('Journal entries were not created for cash purchase transaction');
         }
-        
+
         if (inventoryEntries.length === 0) {
           console.error(`[CASH_PURCHASE] ❌ CRITICAL: No inventory account (1300) journal entries found!`);
           throw new Error('Inventory journal entries were not created correctly');
         }
-        
+
         if (cashEntries.length === 0) {
           console.error(`[CASH_PURCHASE] ❌ CRITICAL: No cash account (1100) journal entries found!`);
           throw new Error('Cash journal entries were not created correctly');
         }
-        
+
         console.log(`[CASH_PURCHASE] ✅ Inventory journal entries verified:`, {
           inventoryEntries: inventoryEntries.length,
           cashEntries: cashEntries.length,
           totalEntries: journalEntries.length
         });
+
+        // Update journal entries to include bill_id (batch_id) if available
+        if (data.batch_id) {
+          for (const entry of journalEntries) {
+            await getDB().journal_entries.update(entry.id, {
+              bill_id: data.batch_id,
+              _synced: false
+            });
+          }
+          console.log(`[CASH_PURCHASE] ✅ Updated journal entries with bill_id: ${data.batch_id}`);
+        }
       } else {
         console.error(`[CASH_PURCHASE] ❌ CRITICAL: No transaction ID returned from transaction service`);
         throw new Error('Inventory transaction was not created successfully');
@@ -404,13 +417,13 @@ export class InventoryPurchaseService {
       // Create separate fee journal entries (with internal entity)
       let feeTransactionIds: string[] = [];
       let totalCashDrawerImpact = inventoryResult.cashDrawerImpact?.newBalance || 0;
-      
+
       if (fees.total > 0) {
         console.log(`[CASH_PURCHASE] Creating fee journal entries:`, {
           fees,
           currency: data.currency
         });
-        
+
         feeTransactionIds = await this.createFeeJournalEntries(
           fees,
           data.currency,
@@ -420,7 +433,7 @@ export class InventoryPurchaseService {
           data.branch_id,
           data.created_by
         );
-        
+
         // Get final cash drawer balance after fees
         if (feeTransactionIds.length > 0) {
           const finalBalance = await calculateCashDrawerBalance(
@@ -439,7 +452,7 @@ export class InventoryPurchaseService {
           previousBalance: inventoryResult.cashDrawerImpact.previousBalance,
           balanceChange: totalCashDrawerImpact - inventoryResult.cashDrawerImpact.previousBalance
         });
-        
+
         cashDrawerUpdateService.notifyCashDrawerUpdate(
           data.store_id,
           totalCashDrawerImpact,
@@ -449,7 +462,7 @@ export class InventoryPurchaseService {
 
       const totalAmount = itemsTotal + fees.total;
       console.log(`[CASH_PURCHASE] ✅ Cash purchase processed successfully`);
-      
+
       return {
         success: true,
         transactionId: inventoryResult.transactionId || transactionId,
@@ -478,13 +491,13 @@ export class InventoryPurchaseService {
    * Fees are our expense and deduct from cash drawer
    */
   private async processCreditPurchase(
-    data: InventoryPurchaseData, 
-    items: any[], 
-    itemsTotal: number, 
+    data: InventoryPurchaseData,
+    items: any[],
+    itemsTotal: number,
     fees: any
   ): Promise<PurchaseTransactionResult> {
     const transactionId = createId();
-    
+
     console.log(`[CREDIT_PURCHASE] Starting credit purchase processing:`, {
       transactionId,
       storeId: data.store_id,
@@ -495,14 +508,14 @@ export class InventoryPurchaseService {
       supplierId: data.supplier_id,
       createdBy: data.created_by
     });
-    
+
     try {
       // Get supplier entity
       const supplierEntity = await getDB().entities.get(data.supplier_id);
       const supplierName = supplierEntity?.name || 'Supplier';
 
       let creditPurchaseResult: any = { success: true, transactionId: undefined };
-      
+
       // Only create credit purchase transaction if itemsTotal > 0
       // If items don't have prices yet, skip the transaction (will be created when prices are added)
       if (itemsTotal > 0) {
@@ -515,7 +528,7 @@ export class InventoryPurchaseService {
           supplierId: data.supplier_id,
           reference: `CBILL-${transactionId.substring(0, 8)}`
         });
-        
+
         creditPurchaseResult = await transactionService.createSupplierCreditPurchase(
           data.supplier_id,
           itemsTotal,
@@ -552,7 +565,7 @@ export class InventoryPurchaseService {
             .where('transaction_id')
             .equals(creditPurchaseResult.transactionId)
             .toArray();
-          
+
           console.log(`[CREDIT_PURCHASE] Credit purchase journal entries created:`, {
             transactionId: creditPurchaseResult.transactionId,
             entryCount: journalEntries.length,
@@ -566,31 +579,42 @@ export class InventoryPurchaseService {
               is_posted: e.is_posted
             }))
           });
-          
+
           // Verify correct accounts: Inventory (1300) and Accounts Payable (2100)
           const inventoryEntries = journalEntries.filter(e => e.account_code === '1300');
           const apEntries = journalEntries.filter(e => e.account_code === '2100');
-          
+
           if (journalEntries.length === 0) {
             console.error(`[CREDIT_PURCHASE] ❌ CRITICAL: No journal entries found for transaction ${creditPurchaseResult.transactionId}`);
             throw new Error('Journal entries were not created for credit purchase transaction');
           }
-          
+
           if (inventoryEntries.length === 0) {
             console.error(`[CREDIT_PURCHASE] ❌ CRITICAL: No inventory account (1300) journal entries found!`);
             throw new Error('Inventory journal entries were not created correctly');
           }
-          
+
           if (apEntries.length === 0) {
             console.error(`[CREDIT_PURCHASE] ❌ CRITICAL: No accounts payable account (2100) journal entries found!`);
             throw new Error('Accounts payable journal entries were not created correctly');
           }
-          
+
           console.log(`[CREDIT_PURCHASE] ✅ Credit purchase journal entries verified:`, {
             inventoryEntries: inventoryEntries.length,
             apEntries: apEntries.length,
             totalEntries: journalEntries.length
           });
+
+          // Update journal entries to include bill_id (batch_id) if available
+          if (data.batch_id) {
+            for (const entry of journalEntries) {
+              await getDB().journal_entries.update(entry.id, {
+                bill_id: data.batch_id,
+                _synced: false
+              });
+            }
+            console.log(`[CREDIT_PURCHASE] ✅ Updated journal entries with bill_id: ${data.batch_id}`);
+          }
         }
       } else {
         console.log(`[CREDIT_PURCHASE] Skipping inventory transaction (itemsTotal = 0, items may not have prices yet)`);
@@ -600,13 +624,13 @@ export class InventoryPurchaseService {
       // Fees deduct from cash drawer
       let feeTransactionIds: string[] = [];
       let cashDrawerImpact = 0;
-      
+
       if (fees.total > 0) {
         console.log(`[CREDIT_PURCHASE] Creating fee journal entries:`, {
           fees,
           currency: data.currency
         });
-        
+
         feeTransactionIds = await this.createFeeJournalEntries(
           fees,
           data.currency,
@@ -616,17 +640,17 @@ export class InventoryPurchaseService {
           data.branch_id,
           data.created_by
         );
-        
+
         if (feeTransactionIds.length > 0) {
           cashDrawerImpact = -fees.total;
-          
+
           // Get final cash drawer balance after fees
           const finalBalance = await calculateCashDrawerBalance(
             data.store_id,
             data.branch_id,
             data.currency
           );
-          
+
           // Notify UI of cash drawer update
           cashDrawerUpdateService.notifyCashDrawerUpdate(
             data.store_id,
@@ -638,7 +662,7 @@ export class InventoryPurchaseService {
 
       const totalAmount = itemsTotal + fees.total;
       console.log(`[CREDIT_PURCHASE] ✅ Credit purchase processed successfully`);
-      
+
       return {
         success: true,
         transactionId: creditPurchaseResult.transactionId || transactionId,
@@ -667,12 +691,12 @@ export class InventoryPurchaseService {
    * Only fees are deducted from cash drawer, recorded on supplier entity (recoverable)
    */
   private async processCommissionPurchase(
-    data: InventoryPurchaseData, 
-    items: any[], 
+    data: InventoryPurchaseData,
+    items: any[],
     fees: any
   ): Promise<PurchaseTransactionResult> {
     const transactionId = createId();
-    
+
     console.log(`[COMMISSION_PURCHASE] Starting commission purchase processing:`, {
       transactionId,
       storeId: data.store_id,
@@ -682,23 +706,23 @@ export class InventoryPurchaseService {
       supplierId: data.supplier_id,
       createdBy: data.created_by
     });
-    
+
     try {
       // For commission purchases:
       // - No inventory cost journal entry (COGS = 0, we're acting as agent)
       // - Only fees are deducted from cash drawer
       // - Fees are recorded on supplier entity (we'll recover them when closing bill)
-      
+
       let feeTransactionIds: string[] = [];
       let cashDrawerImpact = 0;
-      
+
       if (fees.total > 0) {
         console.log(`[COMMISSION_PURCHASE] Creating fee journal entries with supplier entity:`, {
           fees,
           currency: data.currency,
           supplierId: data.supplier_id
         });
-        
+
         feeTransactionIds = await this.createFeeJournalEntries(
           fees,
           data.currency,
@@ -708,17 +732,17 @@ export class InventoryPurchaseService {
           data.branch_id,
           data.created_by
         );
-        
+
         if (feeTransactionIds.length > 0) {
           cashDrawerImpact = -fees.total;
-          
+
           // Get final cash drawer balance after fees
           const finalBalance = await calculateCashDrawerBalance(
             data.store_id,
             data.branch_id,
             data.currency
           );
-          
+
           // Notify UI of cash drawer update
           cashDrawerUpdateService.notifyCashDrawerUpdate(
             data.store_id,
@@ -731,7 +755,7 @@ export class InventoryPurchaseService {
       }
 
       console.log(`[COMMISSION_PURCHASE] ✅ Commission purchase processed successfully`);
-      
+
       return {
         success: true,
         transactionId: feeTransactionIds.length > 0 ? feeTransactionIds[0] : undefined,
@@ -759,7 +783,7 @@ export class InventoryPurchaseService {
    */
   public async getOrCreateTradeSupplier(storeId: string): Promise<string> {
     console.log(`[TRADE_SUPPLIER] Getting/creating Trade supplier for store: ${storeId}`);
-    
+
     try {
       // Look for existing "Trade" supplier entity
       const existingSupplier = await getDB().entities
@@ -805,7 +829,7 @@ export class InventoryPurchaseService {
         entityCode: tradeSupplier.entity_code,
         storeId: tradeSupplier.store_id
       });
-      
+
       return tradeSupplierId;
     } catch (error) {
       console.error(`[TRADE_SUPPLIER] ❌ Error getting/creating Trade supplier:`, {
@@ -851,7 +875,7 @@ export class InventoryPurchaseService {
       errors
     };
   }
-  
+
   /**
    * Validate cash drawer balance for cash purchases
    * NOTE: Balance validation removed - negative balances are now allowed
@@ -902,11 +926,11 @@ export class InventoryPurchaseService {
         .where('store_id')
         .equals(storeId)
         .toArray();
-      
-      const transactions = allTransactions.filter(t => 
+
+      const transactions = allTransactions.filter(t =>
         !(t._deleted ?? false) &&
         (t.category === TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE ||
-         t.category === TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE) &&
+          t.category === TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE) &&
         t.metadata &&
         typeof t.metadata === 'object' &&
         (t.metadata as any).batch_id === batchId &&
@@ -976,8 +1000,8 @@ export class InventoryPurchaseService {
 
       // Calculate old batch total: sum of all item prices (using old price for the edited item)
       const oldBatchTotal = batchItems.reduce((total, item) => {
-        const itemPrice = item.id === inventoryItemId 
-          ? (oldPrice ?? 0) 
+        const itemPrice = item.id === inventoryItemId
+          ? (oldPrice ?? 0)
           : (item.price ?? 0);
         const itemValue = item.weight && itemPrice
           ? item.weight * itemPrice
@@ -987,8 +1011,8 @@ export class InventoryPurchaseService {
 
       // Calculate new batch total: sum of all item prices (using new price for the edited item)
       const newBatchTotal = batchItems.reduce((total, item) => {
-        const itemPrice = item.id === inventoryItemId 
-          ? (newPrice ?? 0) 
+        const itemPrice = item.id === inventoryItemId
+          ? (newPrice ?? 0)
           : (item.price ?? 0);
         const itemValue = item.weight && itemPrice
           ? item.weight * itemPrice
@@ -1035,6 +1059,34 @@ export class InventoryPurchaseService {
 
       // Cash drawer balance validation removed - negative balances are now allowed
 
+      // Pre-fetch all data needed for writes BEFORE entering transaction
+      // This prevents PrematureCommitError by ensuring all reads happen outside transaction
+      // Imports moved to top-level to avoid async pauses within transaction
+
+
+      let internalEntity: any = null;
+      let supplierEntity: any = null;
+
+      if (isCashPurchase) {
+        // Get internal entity for cash drawer (read outside transaction)
+        internalEntity = await accountingInitService.getSystemEntityByType(storeId, 'internal');
+        if (!internalEntity) {
+          throw new Error('Internal entity not found');
+        }
+      } else if (isCreditPurchase) {
+        // Get supplier entity (read outside transaction)
+        const supplierId = batch.supplier_id;
+        if (!supplierId) {
+          throw new Error('Supplier ID not found in batch');
+        }
+        supplierEntity = await getDB().entities.get(supplierId);
+        if (!supplierEntity) {
+          throw new Error(`Supplier entity not found: ${supplierId}`);
+        }
+      }
+
+
+
       let adjustmentResult: any;
       const adjustmentTransactionId = createId();
 
@@ -1042,14 +1094,6 @@ export class InventoryPurchaseService {
         if (difference > 0) {
           // Increase: Debit Inventory (1300), Credit Cash (1100) - same as original
           // Use journal service directly to create correct entries with INVENTORY_PRICE_ADJUSTMENT category
-          const { journalService } = await import('./journalService');
-          const { accountingInitService } = await import('./accountingInitService');
-          
-          // Get internal entity for cash drawer
-          const internalEntity = await accountingInitService.getSystemEntityByType(storeId, 'internal');
-          if (!internalEntity) {
-            throw new Error('Internal entity not found');
-          }
 
           // Create transaction record first
           const transaction = {
@@ -1091,7 +1135,8 @@ export class InventoryPurchaseService {
             description: description,
             postedDate: new Date().toISOString().split('T')[0],
             createdBy: userId,
-            branchId
+            branchId,
+            skipVerification: true  // Skip verification when called within transaction
           });
 
           adjustmentResult = {
@@ -1103,15 +1148,8 @@ export class InventoryPurchaseService {
           // Use CASH_DRAWER_EXPENSE category which creates: Debit Expense, Credit Cash
           // But we need: Debit Cash, Credit Inventory
           // So we'll use the journal service directly to create the correct entries
-          const { journalService } = await import('./journalService');
-          const { accountingInitService } = await import('./accountingInitService');
-          
-          // Get internal entity for cash drawer
-          const internalEntity = await accountingInitService.getSystemEntityByType(storeId, 'internal');
-          if (!internalEntity) {
-            throw new Error('Internal entity not found');
-          }
-          
+          // internalEntity already fetched above
+
           // Create transaction record first
           const transaction = {
             id: adjustmentTransactionId,
@@ -1151,7 +1189,8 @@ export class InventoryPurchaseService {
             description: `${description} - Reverse adjustment`,
             postedDate: new Date().toISOString().split('T')[0],
             createdBy: userId,
-            branchId
+            branchId,
+            skipVerification: true  // Skip verification when called within transaction
           });
 
           adjustmentResult = {
@@ -1161,19 +1200,11 @@ export class InventoryPurchaseService {
         }
       } else {
         // Credit purchase adjustment
-        const supplierId = batch.supplier_id;
-        if (!supplierId) {
-          throw new Error('Supplier ID not found in batch');
-        }
+        // supplierEntity already fetched above
 
         if (difference > 0) {
           // Increase: Debit Inventory (1300), Credit Accounts Payable (2100) - same as original
           // Use journal service directly to create correct entries with INVENTORY_PRICE_ADJUSTMENT category
-          const { journalService } = await import('./journalService');
-          const supplierEntity = await getDB().entities.get(supplierId);
-          if (!supplierEntity) {
-            throw new Error(`Supplier entity not found: ${supplierId}`);
-          }
 
           // Create transaction record first
           const transaction = {
@@ -1186,7 +1217,7 @@ export class InventoryPurchaseService {
             currency,
             description,
             reference: `PRICE-ADJ-${adjustmentTransactionId.substring(0, 8)}`,
-            entity_id: supplierId,
+            entity_id: supplierEntity.id,
             created_at: new Date().toISOString(),
             created_by: userId,
             _synced: false,
@@ -1210,11 +1241,12 @@ export class InventoryPurchaseService {
             creditAccount: '2100', // Accounts Payable
             amountUSD: currency === 'USD' ? adjustmentAmount : 0,
             amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
-            entityId: supplierId,
+            entityId: supplierEntity.id,
             description: description,
             postedDate: new Date().toISOString().split('T')[0],
             createdBy: userId,
-            branchId
+            branchId,
+            skipVerification: true  // Skip verification when called within transaction
           });
 
           adjustmentResult = {
@@ -1224,11 +1256,7 @@ export class InventoryPurchaseService {
         } else {
           // Decrease: Debit Accounts Payable (2100), Credit Inventory (1300) - reverse direction
           // Use journal service directly to create reverse entries
-          const { journalService } = await import('./journalService');
-          const supplierEntity = await getDB().entities.get(supplierId);
-          if (!supplierEntity) {
-            throw new Error(`Supplier entity not found: ${supplierId}`);
-          }
+          // supplierEntity already fetched above
 
           // Create transaction record first
           const transaction = {
@@ -1241,7 +1269,7 @@ export class InventoryPurchaseService {
             currency,
             description,
             reference: `PRICE-ADJ-${adjustmentTransactionId.substring(0, 8)}`,
-            entity_id: supplierId,
+            entity_id: supplierEntity.id,
             created_at: new Date().toISOString(),
             created_by: userId,
             _synced: false,
@@ -1265,11 +1293,12 @@ export class InventoryPurchaseService {
             creditAccount: '1300', // Inventory
             amountUSD: currency === 'USD' ? adjustmentAmount : 0,
             amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
-            entityId: supplierId,
+            entityId: supplierEntity.id,
             description: `${description} - Reverse adjustment`,
             postedDate: new Date().toISOString().split('T')[0],
             createdBy: userId,
-            branchId
+            branchId,
+            skipVerification: true  // Skip verification when called within transaction
           });
 
           adjustmentResult = {

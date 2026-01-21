@@ -1,7 +1,7 @@
 {
   "name": "vite-react-typescript-starter",
   "private": true,
-  "version": "0.0.20",
+  "version": "3.0.0",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
@@ -14,8 +14,8 @@
     "dev:electron": "wait-on http://localhost:5178 && npm run build:electron && npx electron-reloader dist-electron/main.cjs --watch dist-electron --exec \"node_modules\\electron\\dist\\electron.exe .\"",
     "dev:electron:watch": "nodemon --watch electron --ext ts --exec \"npm run build:electron\"",
     "pack": "electron-builder --dir",
-    "dist": "npm run build && electron-builder --publish=always",
-    "dist:publish": "electron-builder --publish=always",
+    "dist": "npm run build && electron-builder --win --publish=always",
+    "dist:publish": "electron-builder --win --publish=always",
     "electron": "node_modules\\electron\\dist\\electron.exe .",
     "build:electron": "tsc -p tsconfig_electron.json && node -e \"require('fs').copyFileSync('dist-electron/main.js','dist-electron/main.cjs');require('fs').copyFileSync('dist-electron/preload.js','dist-electron/preload.cjs')\"",
     "build": "vite build && npm run build:electron",

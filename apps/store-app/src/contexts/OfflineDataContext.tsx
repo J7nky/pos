@@ -10,7 +10,7 @@ import {
 import { InventoryPurchaseService } from '../services/inventoryPurchaseService';
 import { syncService, SyncResult } from '../services/syncService';
 import { eventStreamService } from '../services/eventStreamService';
-import { 
+import {
   emitProductEvent,
   emitProductsBulkEvent,
   emitEntityEvent,
@@ -25,9 +25,9 @@ import { crudHelperService } from '../services/crudHelperService';
 import { notificationService } from '../services/notificationService';
 import { receivedBillMonitoringService } from '../services/receivedBillMonitoringService';
 import { reminderMonitoringService } from '../services/reminderMonitoringService';
-import { 
-  generatePaymentReference, 
-  generateSaleReference, 
+import {
+  generatePaymentReference,
+  generateSaleReference,
   generateAdvanceReference,
   generateReversalReference
 } from '../utils/referenceGenerator';
@@ -44,6 +44,7 @@ import arLocale from '../i18n/locales/ar';
 import type { MultilingualString } from '../utils/multilingual';
 import { createMultilingualFromString, getTranslatedString } from '../utils/multilingual';
 import { journalService } from '../services/journalService';
+import { receivedItemsJournalService } from '../services/receivedItemsJournalService';
 import { getAccountMapping, getEntityCodeForTransaction, getJournalDescription } from '../utils/accountMapping';
 import { getSystemEntity } from '../constants/systemEntities';
 import { currencyService } from '../services/currencyService';
@@ -86,7 +87,7 @@ interface OfflineDataContextType {
   billLineItems: any[]; // Bill line items data
   billAuditLogs: any[]; // Bill audit logs data
   missedProducts: any[]; // Missed products data
-  
+
   // NEW: Accounting foundation data
   journalEntries: any[]; // Journal entries for double-entry bookkeeping
   entities: any[]; // Unified customer/supplier/employee entities
@@ -172,6 +173,7 @@ interface OfflineDataContextType {
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   addExpenseCategory: (category: any) => Promise<void>;
   updateInventoryBatch: (id: string, updates: Partial<Tables['inventory_bills']['Update']>) => Promise<void>;
+  deleteInventoryBatch: (id: string) => Promise<void>;
   applyCommissionRateToBatch: (batchId: string, commissionRate: number) => Promise<void>;
 
   // Bill management operations
@@ -253,12 +255,12 @@ interface OfflineDataContextType {
       steps: Array<{ op: string; table: string; id: string; changes?: any }>;
     }
   ) => any;
-  
+
   // Utility functions
   createId: () => string;
   getCurrentCashDrawerBalance: (storeId: string) => Promise<number>;
   refreshCashDrawerBalance: (storeId: string) => Promise<number>;
-  
+
   // Unified payment processing
   processPayment: (params: {
     entityType: 'customer' | 'supplier';
@@ -381,19 +383,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         try {
           // Close the database
           await getDB().close();
-          
+
           // Delete the entire database
           await getDB().delete();
-          
+
           // Update localStorage with new store ID
           try {
             localStorage.setItem(LAST_STORE_ID_KEY, storeId);
           } catch (error) {
             console.warn('⚠️ Failed to update last store ID in localStorage:', error);
           }
-          
+
           console.log('✅ IndexedDB cleared successfully. Reloading page...');
-          
+
           // Reload the page to recreate the database with fresh schema
           window.location.reload();
         } catch (error) {
@@ -449,7 +451,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Tables['transactions']['Row'][]>([]);
   const [expenseCategories] = useState<any[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  
+
   // Branch sync status - tracks when branches are being synced for admin users
   const [branchSyncStatus, setBranchSyncStatus] = useState<{
     isSyncing: boolean;
@@ -470,7 +472,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [missedProducts, setMissedProducts] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences | null>(null);
-  
+
   // NEW: Accounting foundation data states
   const [journalEntries, setJournalEntries] = useState<any[]>([]);
   const [entities, setEntities] = useState<any[]>([]);
@@ -489,13 +491,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // Filter entities by type
   const customers = useMemo(() => {
-    return entities.filter((e): e is Tables['entities']['Row'] => 
+    return entities.filter((e): e is Tables['entities']['Row'] =>
       e.entity_type === 'customer' && !e._deleted
     );
   }, [entities]);
 
   const suppliers = useMemo(() => {
-    return entities.filter((e): e is Tables['entities']['Row'] => 
+    return entities.filter((e): e is Tables['entities']['Row'] =>
       e.entity_type === 'supplier' && !e._deleted
     );
   }, [entities]);
@@ -519,15 +521,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isAutoSyncing, setIsAutoSyncing] = useState(false);
-  
+
   // ✅ FIX 1: Data readiness state - tracks when initial data sync is complete
   // This ensures module access queries don't run before data is available
   const [isDataReady, setIsDataReady] = useState(false);
-  
+
   // ✅ FIX 4: Initialization state - tracks when data initialization is in progress
   // This provides clear indication when data is being loaded vs ready
   const [isInitializing, setIsInitializing] = useState(false);
-  
+
   // ✅ FIX 5: Error state for initialization failures
   const [initializationError, setInitializationError] = useState<string | null>(null);
 
@@ -552,10 +554,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<'en' | 'ar' | 'fr'>('ar');
   const [cashDrawer, setCashDrawer] = useState<any>(null);
   const [stockLevels, setStockLevels] = useState<any[]>([]);
-  
+
   // Branch state - automatically determined (no manual selection)
   const [currentBranchId, setCurrentBranchId] = useState<string | null>(null);
-  
+
   const [receiptSettings, setReceiptSettings] = useState<any>(() => {
     const stored = localStorage.getItem('receiptSettings');
     return stored ? JSON.parse(stored) : {
@@ -622,7 +624,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
         if (existingStore.exchange_rate !== undefined) {
           setExchangeRate(existingStore.exchange_rate);
-          
+
           // Initialize CurrencyService with store's exchange rate
           const { CurrencyService } = await import('../services/currencyService');
           await CurrencyService.getInstance().refreshExchangeRate(storeId);
@@ -635,7 +637,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const currentReceiptSettings = receiptSettings;
         const mergedSettings = mergeStoreDataIntoReceiptSettings(existingStore, currentReceiptSettings);
         setReceiptSettings(mergedSettings);
-        
+
         // Save merged settings to localStorage
         localStorage.setItem('receiptSettings', JSON.stringify(mergedSettings));
 
@@ -682,7 +684,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         userRole: userProfile?.role
       });
     }
-    
+
     // Cleanup real-time sync when storeId changes or component unmounts
     return () => {
       if (storeId) {
@@ -699,29 +701,29 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.log('⏭️ Branch sync already in progress, skipping');
         return;
       }
-      
+
       // Guard: Check if sync is already complete or in progress
       if (branchSyncStatus.isSyncing || branchSyncStatus.isComplete) {
         return;
       }
-      
+
       // Only sync for admin users who need branch selection
       if (!storeId || !userProfile || !isOnline) {
         return;
       }
-      
+
       // Only for admin users without a branch selected yet
       if (userProfile.role !== 'admin' || userProfile.branch_id !== null || currentBranchId) {
         return;
       }
-      
+
       // Check if branches already exist locally
       const existingBranches = await getDB().branches
         .where('store_id')
         .equals(storeId)
         .filter(b => !(b._deleted === true))
         .count();
-      
+
       if (existingBranches > 0) {
         console.log(`✅ Branches already synced (${existingBranches} branches found)`);
         setBranchSyncStatus({
@@ -731,10 +733,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         });
         return;
       }
-      
+
       // Branches not available - sync them immediately
       console.log('🔄 Admin user detected - syncing branches immediately for branch selection...');
-      
+
       // Set guard flag
       isBranchSyncInProgressRef.current = true;
       setBranchSyncStatus({
@@ -742,15 +744,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         isComplete: false,
         error: null
       });
-      
+
       try {
         const syncResult = await syncService.syncStoresAndBranches(storeId);
         if (syncResult.success) {
           console.log(`✅ Branches synced successfully: ${syncResult.synced.downloaded} branches downloaded`);
-          
+
           // Wait a bit more to ensure IndexedDB transaction is fully committed and visible
           await new Promise(resolve => setTimeout(resolve, 300));
-          
+
           // Verify branches are actually queryable before marking sync as complete
           try {
             await getDB().ensureOpen();
@@ -759,7 +761,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               .equals(storeId)
               .filter(b => !(b._deleted === true))
               .count();
-            
+
             if (branchCount > 0 || syncResult.synced.downloaded === 0) {
               // Branches are queryable or no branches to sync
               setBranchSyncStatus({
@@ -771,13 +773,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               // Branches synced but not yet queryable - wait a bit more
               console.log('⏳ Waiting for branches to become queryable...');
               await new Promise(resolve => setTimeout(resolve, 500));
-              
+
               const retryCount = await getDB().branches
                 .where('store_id')
                 .equals(storeId)
                 .filter(b => !(b._deleted === true))
                 .count();
-              
+
               setBranchSyncStatus({
                 isSyncing: false,
                 isComplete: retryCount > 0,
@@ -813,7 +815,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         isBranchSyncInProgressRef.current = false;
       }
     };
-    
+
     syncBranchesForAdmin();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId, userProfile?.role, userProfile?.branch_id, isOnline, currentBranchId]);
@@ -826,32 +828,32 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (!storeId || !userProfile || !isOnline) {
         return;
       }
-      
+
       // Only for cashier/manager users with assigned branch_id
       if ((userProfile.role !== 'cashier' && userProfile.role !== 'manager') || !userProfile.branch_id || currentBranchId) {
         return;
       }
-      
+
       // Check if the assigned branch exists locally
       const assignedBranch = await getDB().branches.get(userProfile.branch_id);
-      
+
       if (assignedBranch && !assignedBranch._deleted && assignedBranch.store_id === storeId) {
         // Branch already exists and is valid
         console.log(`✅ Assigned branch already synced: ${userProfile.branch_id}`);
         return;
       }
-      
+
       // Branch not available - sync branches immediately
       console.log(`🔄 ${userProfile.role} user detected - syncing branches to ensure assigned branch is available...`);
-      
+
       try {
         const syncResult = await syncService.syncStoresAndBranches(storeId);
         if (syncResult.success) {
           console.log(`✅ Branches synced successfully for ${userProfile.role}: ${syncResult.synced.downloaded} branches downloaded`);
-          
+
           // Wait a bit to ensure IndexedDB transaction is fully committed
           await new Promise(resolve => setTimeout(resolve, 300));
-          
+
           // Verify the assigned branch is now available
           const branchAfterSync = await getDB().branches.get(userProfile.branch_id);
           if (branchAfterSync && !branchAfterSync._deleted && branchAfterSync.store_id === storeId) {
@@ -866,7 +868,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.error(`❌ Error syncing branches for ${userProfile.role}:`, error);
       }
     };
-    
+
     syncBranchesForCashierManager();
   }, [storeId, userProfile, isOnline, currentBranchId]);
 
@@ -877,53 +879,53 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (!storeId || !userProfile) {
         return;
       }
-      
+
       // Only initialize if we don't have a branch yet
       if (currentBranchId) {
         return;
       }
-      
+
       try {
         // Admin users (branch_id: null) - Don't auto-initialize
         // They should select a branch via BranchSelectionScreen
         if (userProfile.role === 'admin' && userProfile.branch_id === null) {
-        // Check if there's a stored preference
-        const storedBranchId = localStorage.getItem(`branch_preference_${storeId}`);
-        if (storedBranchId) {
-          // Validate the stored branch exists and is accessible
-          const branch = await getDB().branches.get(storedBranchId);
-          if (branch && !branch._deleted && branch.store_id === storeId) {
-            setCurrentBranchId(storedBranchId);
-            console.log('✅ Admin: Restored preferred branch:', storedBranchId);
+          // Check if there's a stored preference
+          const storedBranchId = localStorage.getItem(`branch_preference_${storeId}`);
+          if (storedBranchId) {
+            // Validate the stored branch exists and is accessible
+            const branch = await getDB().branches.get(storedBranchId);
+            if (branch && !branch._deleted && branch.store_id === storeId) {
+              setCurrentBranchId(storedBranchId);
+              console.log('✅ Admin: Restored preferred branch:', storedBranchId);
+              return;
+            } else {
+              // Stored preference is invalid, clear it
+              localStorage.removeItem(`branch_preference_${storeId}`);
+              console.log('⚠️ Admin: Stored branch preference was invalid, cleared');
+            }
+          }
+
+          // No valid stored preference - check if branches are being synced
+          // If sync is complete, try to auto-select default branch
+
+          // If sync is still in progress, wait for it to complete
+          // The useEffect will re-run when branchSyncStatus changes
+          if (branchSyncStatus.isSyncing) {
+            console.log('⏳ Admin: Waiting for branch sync to complete...');
             return;
-          } else {
-            // Stored preference is invalid, clear it
-            localStorage.removeItem(`branch_preference_${storeId}`);
-            console.log('⚠️ Admin: Stored branch preference was invalid, cleared');
           }
-        }
-        
-        // No valid stored preference - check if branches are being synced
-        // If sync is complete, try to auto-select default branch
-        
-        // If sync is still in progress, wait for it to complete
-        // The useEffect will re-run when branchSyncStatus changes
-        if (branchSyncStatus.isSyncing) {
-          console.log('⏳ Admin: Waiting for branch sync to complete...');
-          return;
-          }
-          
+
           // No valid stored preference and sync is complete but no branch found
           // Admin needs to select branch manually
           console.log('⏳ Admin: Waiting for branch selection via BranchSelectionScreen');
           return;
         }
-        
+
         // Manager/Cashier - Use their assigned branch_id
         if ((userProfile.role === 'manager' || userProfile.role === 'cashier') && userProfile.branch_id) {
           // Validate their assigned branch - with retry logic if branch is not synced yet
           let branch = await getDB().branches.get(userProfile.branch_id);
-          
+
           // If branch not found, wait a bit for sync to complete and retry
           if (!branch && isOnline) {
             console.log(`⏳ ${userProfile.role}: Assigned branch not found in IndexedDB, waiting for sync...`);
@@ -937,7 +939,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               }
             }
           }
-          
+
           if (branch && !branch._deleted && branch.store_id === storeId) {
             setCurrentBranchId(userProfile.branch_id);
             console.log(`✅ ${userProfile.role}: Auto-assigned to branch:`, userProfile.branch_id);
@@ -951,7 +953,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           }
           return;
         }
-        
+
         // Fallback: Only for users without proper role setup or missing branch assignment
         // This should rarely be reached in normal operation
         console.warn('⚠️ User does not match expected role patterns, attempting fallback branch initialization');
@@ -963,35 +965,35 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         console.error('❌ Failed to initialize branch:', error);
       }
     };
-    
+
     initializeBranch();
   }, [storeId, currentBranchId, userProfile, branchSyncStatus]);
 
   // Helper functions defined before they're used
   const refreshCashDrawerStatus = useCallback(async () => {
-  if (!storeId || !currentBranchId) return;
+    if (!storeId || !currentBranchId) return;
 
-  try {
-    const status = await getDB().getCurrentCashDrawerStatus(storeId, currentBranchId);
-    if (status && status.status === 'active') {
-      // Update local state with current session info
-      setCashDrawer({
-        id: status.sessionId,
-        accountId: status.accountId,
-        status: 'open',
-        currentBalance: status.currentBalance,
-        currency: currency,
-        lastUpdated: new Date().toISOString()
-      });
+    try {
+      const status = await getDB().getCurrentCashDrawerStatus(storeId, currentBranchId);
+      if (status && status.status === 'active') {
+        // Update local state with current session info
+        setCashDrawer({
+          id: status.sessionId,
+          accountId: status.accountId,
+          status: 'open',
+          currentBalance: status.currentBalance,
+          currency: currency,
+          lastUpdated: new Date().toISOString()
+        });
 
-    } else {
-      // No active session
-      setCashDrawer(null);
+      } else {
+        // No active session
+        setCashDrawer(null);
+      }
+    } catch (error) {
+      console.error('Error refreshing cash drawer status:', error);
     }
-  } catch (error) {
-    console.error('Error refreshing cash drawer status:', error);
-  }
-}, [storeId, currentBranchId, currency]);
+  }, [storeId, currentBranchId, currency]);
   const refreshData = useCallback(async () => {
     if (!storeId) return;
 
@@ -1026,7 +1028,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         chartOfAccountsData,
         balanceSnapshotsData,
       } = await crudHelperService.loadAllStoreData(storeId, currentBranchId);
-      
+
       // Filter entities by type for logging
       const customerEntities = (entitiesData || []).filter((e: any) => e.entity_type === 'customer');
       const supplierEntities = (entitiesData || []).filter((e: any) => e.entity_type === 'supplier');
@@ -1042,7 +1044,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       console.log('🔄 refreshData: About to set products in state, count:', productsData.length);
       setProducts(productsData as Tables['products']['Row'][]);
       console.log('🔄 refreshData: Products state updated');
-      
+
       console.log(`🔄 refreshData: Loaded ${billsData.length} bills for branch ${currentBranchId || 'all'}`);
       // Note: customers and suppliers are now computed from entities (see computed properties below)
       setEmployees(employeesData.map((e: any) => ({ ...e, lbp_balance: e.lbp_balance || 0, usd_balance: e.usd_balance || 0 })) as Tables['users']['Row'][]);
@@ -1051,15 +1053,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Store raw data
       setInventoryItems(inventoryData);
       setInventoryBills(batchesData);
-      
+
       // NEW: Set accounting foundation data
       setJournalEntries(journalEntriesData || []);
       setEntities(entitiesData || []);
       setChartOfAccounts(chartOfAccountsData || []);
       setBalanceSnapshots(balanceSnapshotsData || []);
-      
+
       // Note: customers and suppliers are computed from entities (see computed properties below)
-      
+
       console.log(`🔄 refreshData: Loaded ${journalEntriesData?.length || 0} journal entries, ${entitiesData?.length || 0} entities, ${chartOfAccountsData?.length || 0} chart accounts, ${balanceSnapshotsData?.length || 0} balance snapshots`);
 
       // Transform bill line items to unified SaleItem interface for backward compatibility
@@ -1101,7 +1103,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Load notifications and preferences
       const notificationsData = await notificationService.getNotifications(storeId, { limit: 100 });
       setNotifications(notificationsData);
-      
+
       const preferencesData = await notificationService.getPreferences(storeId);
       setNotificationPreferences(preferencesData);
 
@@ -1159,12 +1161,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           console.log(`🔄 refreshData: Setting language to ${storeData.preferred_language}`);
           setLanguage(storeData.preferred_language);
         }
-        
+
         // Merge store data into receipt settings
         const currentReceiptSettings = receiptSettings;
         const mergedSettings = mergeStoreDataIntoReceiptSettings(storeData, currentReceiptSettings);
         setReceiptSettings(mergedSettings);
-        
+
         // Save merged settings to localStorage
         localStorage.setItem('receiptSettings', JSON.stringify(mergedSettings));
         console.log(`✅ refreshData: Store settings and receipt settings reloaded successfully`);
@@ -1187,7 +1189,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             .equals(storeId)
             .and(b => !b._deleted && b._synced === true)
             .first();
-          
+
           if (syncedBranch && syncedBranch.id !== currentBranchId) {
             console.log(`🔄 Switching from local branch ${currentBranchId.substring(0, 8)}... to synced branch ${syncedBranch.id.substring(0, 8)}...`);
             setCurrentBranchId(syncedBranch.id);
@@ -1208,7 +1210,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const checkForSyncedBranch = async () => {
       if (!storeId || !currentBranchId) return;
-      
+
       // Check if current branch is local-only (never synced before)
       const currentBranch = await getDB().branches.get(currentBranchId);
       if (currentBranch && !currentBranch._synced && !currentBranch._lastSyncedAt) {
@@ -1218,14 +1220,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           .equals(storeId)
           .and(b => !b._deleted && b._synced === true)
           .first();
-        
+
         if (syncedBranch && syncedBranch.id !== currentBranchId) {
           console.log(`🔄 Switching from local branch ${currentBranchId} to synced branch ${syncedBranch.id}`);
           setCurrentBranchId(syncedBranch.id);
         }
       }
     };
-    
+
     // Check after data refresh (when sync might have completed)
     const timeoutId = setTimeout(checkForSyncedBranch, 2000);
     return () => clearTimeout(timeoutId);
@@ -1240,14 +1242,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) return;
 
     debug('🔄 Initializing data for store:', storeId);
-    
+
     // ✅ FIX 1: Mark data as not ready at start of initialization
     setIsDataReady(false);
     // ✅ FIX 4: Mark initialization as in progress
     setIsInitializing(true);
     // ✅ FIX 5: Clear any previous errors
     setInitializationError(null);
-    
+
     let didFullResync = false; // Track if we did a full resync
 
     try {
@@ -1264,14 +1266,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Clean up duplicate cash drawer accounts for all branches
       try {
         const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-        
+
         // Get all branches for this store
         const branches = await getDB().branches
           .where('store_id')
           .equals(storeId)
           .filter(b => !b._deleted)
           .toArray();
-        
+
         // Clean up duplicates for each branch
         let totalDuplicatesRemoved = 0;
         for (const branch of branches) {
@@ -1280,7 +1282,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             totalDuplicatesRemoved += cleanupResult.duplicatesRemoved;
           }
         }
-        
+
         if (totalDuplicatesRemoved > 0) {
           debug(`🧹 Cleaned up ${totalDuplicatesRemoved} duplicate cash drawer accounts across all branches`);
         }
@@ -1317,14 +1319,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           if (syncResult.success) {
             debug(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
             await refreshDataAndUpdateCount();
-            
+
             // Invalidate permission cache after full resync (user data and permissions may have changed)
             if (userProfile) {
               const { AccessControlService } = await import('../services/accessControlService');
               AccessControlService.clearCache(userProfile.id, userProfile.store_id);
               debug('🔄 Permission cache invalidated after full resync');
             }
-            
+
             // ✅ AFTER full resync completes, ensure cash drawer accounts are available
             // This is called AFTER sync so getCashDrawerAccount() can safely access synced data
             didFullResync = true;
@@ -1335,7 +1337,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               } catch (error) {
                 console.warn('⚠️ Failed to ensure cash drawer accounts after sync:', error);
               }
-              
+
               // ✅ FIX 3: Initialize sync state after fullResync completes
               // This ensures event stream doesn't replay all historical events
               try {
@@ -1403,7 +1405,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       receivedBillMonitoringService.startMonitoring(storeId);
       reminderMonitoringService.startMonitoring(storeId);
     }
-    
+
     // ✅ FIX 1: Mark data as ready after initialization completes
     // This ensures module access queries only run after data is available
     setIsDataReady(true);
@@ -1426,7 +1428,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         .equals([storeId, branchId])
         .filter(acc => !acc._deleted && (acc.is_active !== false))
         .toArray();
-      
+
       if (localAccounts.length > 0) {
         debug(`✅ Cash drawer account already exists locally (${localAccounts.length} account(s))`);
         return;
@@ -1435,7 +1437,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Account doesn't exist locally - check Supabase before creating
       debug('🔍 Checking Supabase for existing cash drawer account...');
       const { supabase } = await import('../lib/supabase');
-      
+
       const { data: supabaseAccounts, error } = await supabase
         .from('cash_drawer_accounts')
         .select('*')
@@ -1454,11 +1456,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Account exists in Supabase - sync it down to local DB
         const remoteAccount = supabaseAccounts[0] as Tables['cash_drawer_accounts']['Row'];
         debug(`📥 Found cash drawer account in Supabase (${remoteAccount.id}), syncing to local DB...`);
-        
+
         // Get store's preferred currency to ensure currency matches store preference
         const store = await getDB().stores.get(storeId);
         const storePreferredCurrency = store?.preferred_currency || 'LBP';
-        
+
         const localAccountData: CashDrawerAccount = {
           id: remoteAccount.id,
           store_id: remoteAccount.store_id,
@@ -1485,9 +1487,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   };
 
- 
 
- 
+
+
 
   // Auto-sync when connection is restored
   useEffect(() => {
@@ -1625,7 +1627,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     updateStockLevels();
   }, [updateStockLevels]);
 
- 
+
 
   const checkUndoValidity = useCallback(async () => {
     const undoData = localStorage.getItem('last_undo_action');
@@ -1661,22 +1663,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const updateUnsyncedCount = useCallback(async () => {
     try {
       const { total, byTable } = await crudHelperService.getUnsyncedCount();
-      
+
       // Log unsynced records by table (only non-zero counts)
       const unsyncedTables = Object.entries(byTable)
         .filter(([_, count]) => count > 0)
         .map(([table, count]) => ({ table, count }));
-      
+
       if (unsyncedTables.length > 0) {
         debug('🔍 Unsynced records by table:', unsyncedTables);
-        
+
         // Get detailed breakdown for debugging sync discrepancies
         const detailedCount = await crudHelperService.getDetailedUnsyncedCount();
         if (total > 0) {
           console.log('🔍 [COUNT-DEBUG] Detailed breakdown:', detailedCount.summary);
         }
       }
-      
+
       setUnsyncedCount(total);
     } catch (error) {
       console.error('Error counting unsynced records:', error);
@@ -1716,18 +1718,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // 
     // This timer is now only for uploading unsynced local changes after a delay
     // (in case debounced sync missed something or network was temporarily down)
-    
+
     if (isOnline && storeId && currentBranchId && !isSyncing && unsyncedCount > 0) {
       // Only set timer if there are unsynced local changes to upload
       const syncDelay = 30000; // 30 seconds safety net for upload
       console.log(`⏰ [AUTO-SYNC] Setting upload safety timer (${syncDelay}ms delay, ${unsyncedCount} unsynced records)`);
-      
+
       autoSyncTimerRef.current = setTimeout(async () => {
         console.log('⏰ [AUTO-SYNC] Safety timer fired - uploading local changes');
 
         // Get fresh unsynced count
         const currentUnsyncedCount = await getCurrentUnsyncedCount();
-        
+
         // Only sync if there are still unsynced records
         if (currentUnsyncedCount > 0 && !syncService.isCurrentlyRunning()) {
           console.log(`📤 [AUTO-SYNC] Uploading ${currentUnsyncedCount} local changes`);
@@ -1764,7 +1766,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (storeId && currentBranchId && isOnline) {
       console.log(`🎯 [EventStream] Starting event stream for branch ${currentBranchId}`);
-      
+
       // Set up callback to refresh data when events are processed
       // IMPORTANT: Set callback BEFORE starting event stream to ensure it's available
       const callback = async (result: any) => {
@@ -1774,18 +1776,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           try {
             console.log(`🔄 [EventStream] Calling refreshData() to update UI...`);
             await refreshData();
-            
+
             // Also refresh cash drawer status (important for real-time balance updates)
             await refreshCashDrawerStatus();
-            
+
             // Trigger custom event for UI components that listen to data changes
             window.dispatchEvent(new CustomEvent('data-synced', {
-              detail: { 
+              detail: {
                 processed: result.processed,
                 timestamp: new Date().toISOString()
               }
             }));
-            
+
             console.log(`✅ [EventStream] Data and cash drawer status refreshed`);
           } catch (error) {
             console.error('[EventStream] ❌ Error refreshing data after events:', error);
@@ -1797,10 +1799,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           console.log(`🔄 [EventStream] Callback invoked but no events processed (processed=${result.processed})`);
         }
       };
-      
+
       console.log(`🎯 [EventStream] Setting callback before starting event stream`);
       eventStreamService.setOnEventsProcessed(callback);
-      
+
       // Start event stream service
       eventStreamService.start(currentBranchId, storeId).catch((error) => {
         console.error('[EventStream] ❌ Failed to start event stream:', error);
@@ -1823,14 +1825,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     }
   }, [storeId, currentBranchId, isOnline, refreshData, refreshCashDrawerStatus]);
 
- 
+
   const performSync = useCallback(async (isAutomatic = false): Promise<SyncResult> => {
     // CRITICAL: Require BOTH storeId AND currentBranchId before syncing
     if (!storeId || !currentBranchId || isSyncing) {
-      console.log('⏭️  [SYNC] Skipping sync:', { 
-        hasStoreId: !!storeId, 
-        hasCurrentBranchId: !!currentBranchId, 
-        isSyncing 
+      console.log('⏭️  [SYNC] Skipping sync:', {
+        hasStoreId: !!storeId,
+        hasCurrentBranchId: !!currentBranchId,
+        isSyncing
       });
       return { success: false, errors: ['No store ID, branch ID, or sync in progress'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
     }
@@ -1863,7 +1865,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const syncStartTime = Date.now();
       const result = await syncService.sync(storeId, currentBranchId);
       const syncDuration = Date.now() - syncStartTime;
-      
+
       setLastSync(new Date());
       console.log(`✅ [SYNC] Sync completed in ${syncDuration}ms:`, {
         success: result.success,
@@ -1878,14 +1880,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         await refreshData();
         await updateUnsyncedCount();
         await checkUndoValidity();
-        
+
         // Invalidate permission cache after sync (user data and permissions may have changed)
         if (userProfile) {
           const { AccessControlService } = await import('../services/accessControlService');
           AccessControlService.clearCache(userProfile.id, userProfile.store_id);
           console.log('🔄 [SYNC] Permission cache invalidated');
         }
-        
+
         // ✅ FIX 3: Initialize sync state after performSync completes
         // This ensures event stream doesn't replay events that were just synced
         if (currentBranchId) {
@@ -1898,7 +1900,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             // Don't fail sync if sync state init fails
           }
         }
-        
+
         console.log('✅ [SYNC] Local data refreshed');
       }
 
@@ -1933,7 +1935,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     const timeout = setTimeout(async () => {
       // Update unsynced count first to ensure we have the latest count
       await updateUnsyncedCount();
-      
+
       // Re-check conditions after updating count
       if (isOnline && !isSyncing) {
         // Get fresh unsynced count directly from database (not from state)
@@ -2000,7 +2002,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Get entity code for cash drawer expense
     const entityCode = getEntityCodeForTransaction(TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE, supplierId);
-    
+
     // Get system entity or supplier entity
     let entity;
     if (supplierId) {
@@ -2080,7 +2082,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     for (const entry of cashJournalEntries) {
       const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
       const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-      
+
       if (usdChange !== 0) {
         const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
         balanceChange += usdInLbp;
@@ -2130,7 +2132,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Get entity code for customer/supplier payment
     const entityCode = getEntityCodeForTransaction(TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT, supplierId);
-    
+
     // Get supplier entity
     let entity;
     if (supplierId) {
@@ -2209,7 +2211,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     for (const entry of cashJournalEntries) {
       const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
       const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-      
+
       if (usdChange !== 0) {
         const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
         balanceChange += usdInLbp;
@@ -2260,7 +2262,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Get entity code for cash drawer sale
     const entityCode = getEntityCodeForTransaction(TRANSACTION_CATEGORIES.CASH_DRAWER_SALE, customerId);
-    
+
     // Get system entity for cash drawer (CASH-CUST or similar)
     const entity = await getSystemEntity(getDB(), storeId, entityCode);
     if (!entity) {
@@ -2335,13 +2337,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Calculate net change: (debit - credit) for each currency
       const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
       const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-      
+
       // Convert USD to LBP and add to LBP change
       if (usdChange !== 0) {
         const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
         balanceChange += usdInLbp;
       }
-      
+
       // Add LBP change directly
       balanceChange += lbpChange;
     }
@@ -2375,7 +2377,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!currentBranchId) {
       throw new Error('No branch selected. Please select a branch before creating a bill.');
     }
-    
+
     try {
       await BranchAccessValidationService.validateBranchAccess(
         currentUserId,
@@ -2404,24 +2406,24 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     let entityType: 'customer' | 'supplier' | 'employee' | null = null;
     let debitAccountInfo = null;
     let creditAccountInfo = null;
-    
+
     if (customerBalanceUpdate) {
       preFetchedEntity = await getDB().entities.get(customerBalanceUpdate.customerId);
       if (!preFetchedEntity || (preFetchedEntity.entity_type !== 'customer' && preFetchedEntity.entity_type !== 'supplier' && preFetchedEntity.entity_type !== 'employee')) {
         throw new Error('Invalid entity for balance update');
       }
       entityType = preFetchedEntity.entity_type;
-      
+
       // Pre-fetch account information to avoid async operations inside transaction
       const debitAccountCode = (entityType === 'customer' || entityType === 'employee') ? '1200' : '2100';
       const creditAccountCode = '4100'; // Revenue
-      
+
       const { accountingInitService } = await import('../services/accountingInitService');
       [debitAccountInfo, creditAccountInfo] = await Promise.all([
         accountingInitService.getAccount(storeId, debitAccountCode),
         accountingInitService.getAccount(storeId, creditAccountCode)
       ]);
-      
+
       if (!debitAccountInfo || !creditAccountInfo) {
         throw new Error(`Invalid account codes: ${debitAccountCode} or ${creditAccountCode}. Please ensure chart of accounts is initialized.`);
       }
@@ -2472,13 +2474,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Use transaction to ensure atomicity for all operations including inventory, cash drawer, customer balance, and audit logs
     // ✅ OPTIMIZED: Added journal_entries, chart_of_accounts, cash_drawer_sessions, and cash_drawer_accounts to avoid nested transaction
     await getDB().transaction('rw', [
-      getDB().bills, 
-      getDB().bill_line_items, 
-      getDB().inventory_items, 
-      getDB().entities, 
-      getDB().transactions, 
-      getDB().journal_entries, 
-      getDB().chart_of_accounts, 
+      getDB().bills,
+      getDB().bill_line_items,
+      getDB().inventory_items,
+      getDB().entities,
+      getDB().transactions,
+      getDB().journal_entries,
+      getDB().chart_of_accounts,
       getDB().bill_audit_logs,
       getDB().cash_drawer_sessions,
       getDB().cash_drawer_accounts
@@ -2492,7 +2494,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // ==================== CREATE AUDIT LOG ====================
       // Create ONE audit log entry for bill creation with human-readable information
       const generatedReason = `Creating bill #${bill.bill_number} with total amount ${bill.total_amount || 0}`;
-      
+
       await getDB().bill_audit_logs.add({
         id: createId(),
         branch_id: currentBranchId || '',
@@ -2514,24 +2516,24 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Deduct inventory quantities for all line items (regardless of payment method)
       // ✅ OPTIMIZED: Use bulk operations for items with inventory_item_id
       const itemsWithInventoryId = mappedLineItems.filter(item => item.inventory_item_id);
-      
+
       if (itemsWithInventoryId.length > 0) {
         // Bulk fetch all inventory items at once
         const inventoryIds = itemsWithInventoryId.map(item => item.inventory_item_id!);
         const inventoryItems = await getDB().inventory_items.bulkGet(inventoryIds);
-        
+
         // Create a map for efficient lookup
         const inventoryMap = new Map(inventoryItems
           .filter((item): item is NonNullable<typeof item> => item !== undefined)
           .map(item => [item.id, item])
         );
-        
+
         // Process updates and prepare bulk update data
         const inventoryUpdatesToSave: any[] = [];
-        
+
         for (const item of itemsWithInventoryId) {
           const inventoryItem = inventoryMap.get(item.inventory_item_id!);
-          
+
           if (inventoryItem && inventoryItem.quantity >= item.quantity) {
             // Store original state for undo
             inventoryStates.push({
@@ -2540,7 +2542,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             });
 
             const newQuantity = Math.max(0, inventoryItem.quantity - item.quantity);
-            
+
             // Prepare full inventory item object for bulkPut
             inventoryUpdatesToSave.push({
               ...inventoryItem,
@@ -2549,13 +2551,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             });
           }
         }
-        
+
         // Bulk update all inventory items at once
         if (inventoryUpdatesToSave.length > 0) {
           await getDB().inventory_items.bulkPut(inventoryUpdatesToSave);
         }
       }
-      
+
       // Process items without inventory_item_id (FIFO fallback - not optimized yet)
       for (const item of mappedLineItems) {
         if (!item.inventory_item_id) {
@@ -2565,7 +2567,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             console.error('Invalid product_id in line item:', item);
             throw new Error(`Invalid product_id: ${item.product_id}. Product ID must be a string or number.`);
           }
-          
+
           const inventoryRecords = await getDB().inventory_items
             .where('product_id')
             .equals(item.product_id)
@@ -2613,42 +2615,42 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           amountDue: customerBalanceUpdate.amountDue,
           billNumber: bill.bill_number
         });
-        
+
         const entity = preFetchedEntity;
         const transactionId = createId();
         creditSaleTransactionId = transactionId; // Store for undo data
-        
+
         // 1. Create transaction record directly (avoiding nested transaction)
         // Create multilingual description for credit sale
         const creditSaleDescription: MultilingualString = {
-          en: (entityType === 'customer' 
-            ? enLocale.payments.creditSaleDescriptionCustomer 
+          en: (entityType === 'customer'
+            ? enLocale.payments.creditSaleDescriptionCustomer
             : entityType === 'supplier'
-            ? enLocale.payments.creditSaleDescriptionSupplier
-            : enLocale.payments.creditSaleDescriptionCustomer) // Use customer description for employees
+              ? enLocale.payments.creditSaleDescriptionSupplier
+              : enLocale.payments.creditSaleDescriptionCustomer) // Use customer description for employees
             .replace('{{billNumber}}', bill.bill_number),
-          ar: (entityType === 'customer' 
-            ? arLocale.payments.creditSaleDescriptionCustomer 
+          ar: (entityType === 'customer'
+            ? arLocale.payments.creditSaleDescriptionCustomer
             : entityType === 'supplier'
-            ? arLocale.payments.creditSaleDescriptionSupplier
-            : arLocale.payments.creditSaleDescriptionCustomer) // Use customer description for employees
+              ? arLocale.payments.creditSaleDescriptionSupplier
+              : arLocale.payments.creditSaleDescriptionCustomer) // Use customer description for employees
             .replace('{{billNumber}}', bill.bill_number),
         };
-        
+
         const creditSaleTransaction: Transaction = {
           id: transactionId,
           store_id: storeId,
           branch_id: currentBranchId,
           type: 'income',
-          category: entityType === 'customer' 
-            ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
+          category: entityType === 'customer'
+            ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE
             : entityType === 'supplier'
-            ? TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE
-            : TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE, // Use customer credit sale for employees
+              ? TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE
+              : TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE, // Use customer credit sale for employees
           amount: customerBalanceUpdate.amountDue,
           currency: currency as 'USD' | 'LBP', // Use store's currency
           description: creditSaleDescription,
-          reference:bill.bill_number, // ✅ Ensure reference includes BILL- prefix for consistency
+          reference: bill.bill_number, // ✅ Ensure reference includes BILL- prefix for consistency
           entity_id: customerBalanceUpdate.customerId,
           created_at: now,
           created_by: currentUserId,
@@ -2662,34 +2664,34 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             module: 'billing'
           }
         };
-        
+
         await getDB().transactions.add(creditSaleTransaction);
-        
+
         // 2. Create journal entries directly (double-entry bookkeeping)
         // ✅ IMPORTANT: Each entry must have ONLY debit OR credit, not both (database constraint)
         // ✅ FIX: Use transactionId (not a separate journalTransactionId) so account statements can find the transaction
         const postedDate = getLocalDateString(now);
         const fiscalPeriod = getFiscalPeriodForDate(now).period; // Extract the period string
-        
+
         // For credit sales:
         // Customer: Debit AR (1200) / Credit Revenue (4100)
         // Supplier: Debit AP (2100) / Credit Revenue (4100) - rare case
         // Employee: Debit AR (1200) / Credit Revenue (4100) - same as customer
         const debitAccountCode = (entityType === 'customer' || entityType === 'employee') ? '1200' : '2100';
         const creditAccountCode = '4100'; // Revenue
-        
+
         // Use pre-fetched account information (fetched before transaction to avoid async operations inside)
         if (!debitAccountInfo || !creditAccountInfo) {
           throw new Error(`Account information not available. Please ensure chart of accounts is initialized.`);
         }
-        
+
         const debitAccountName = debitAccountInfo.account_name;
         const creditAccountName = creditAccountInfo.account_name;
-        
+
         // Create journal entries using new base currency schema
         const transactionCurrency = creditSaleTransaction.currency;
         const isUSD = transactionCurrency === 'USD';
-        
+
         const debitEntry = {
           id: createId(),
           store_id: storeId,
@@ -2713,7 +2715,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           bill_id: billId, // Direct link to bill
           entry_type: 'original' as const // Explicit type
         };
-        
+
         const creditEntry = {
           id: createId(),
           store_id: storeId,
@@ -2737,18 +2739,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           bill_id: billId, // Direct link to bill
           entry_type: 'original' as const // Explicit type
         };
-        
+
         console.log('💳 [CREDIT_SALE] Adding journal entries:', {
           debitAccount: debitAccountCode,
           creditAccount: creditAccountCode,
           amountDue: customerBalanceUpdate.amountDue,
           currency: transactionCurrency
         });
-        
+
         await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);
-        
+
         console.log('💳 [CREDIT_SALE] ✅ Journal entries created successfully');
-        
+
         // Balances are now calculated from journal entries - no need to update
         // The journal entries created above will automatically reflect the correct balance
       }
@@ -2779,7 +2781,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             .where('transaction_id')
             .equals(cashDrawerTransactionId)
             .toArray();
-          
+
           for (const entry of cashJournalEntries) {
             await getDB().journal_entries.update(entry.id, {
               bill_id: billId,
@@ -2909,12 +2911,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Get original bill for undo and comparison
     const originalBill = await getDB().bills.get(billId);
     if (!originalBill) throw new Error('Bill not found');
-    
+
     // ✅ Validate branch access before updating bill
     if (!originalBill.branch_id) {
       throw new Error('Bill does not have a branch assigned');
     }
-    
+
     try {
       await BranchAccessValidationService.validateBranchAccess(
         changedBy,
@@ -2926,7 +2928,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         error instanceof Error ? error.message : 'Access denied to this branch'
       );
     }
-    
+
     const now = new Date().toISOString();
 
     // Pure offline-first approach - update local database only
@@ -2960,7 +2962,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               } else {
                 oldValueDisplay = 'Walk-in Customer';
               }
-              
+
               if (newValue) {
                 const newEntity = await getDB().entities.get(newValue);
                 newValueDisplay = newEntity?.name || newValue as string;
@@ -2970,8 +2972,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             }
 
             // Format numeric values for better readability
-            if (field === 'total_amount' || field === 'amount_paid' || field === 'amount_due' || 
-                field === 'subtotal' || field === 'tax_amount' || field === 'discount_amount') {
+            if (field === 'total_amount' || field === 'amount_paid' || field === 'amount_due' ||
+              field === 'subtotal' || field === 'tax_amount' || field === 'discount_amount') {
               if (oldValue != null) oldValueDisplay = Number(oldValue).toLocaleString();
               if (newValue != null) newValueDisplay = Number(newValue).toLocaleString();
             }
@@ -3015,7 +3017,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         undoChanges[key] = (originalBill as any)[key];
       }
     }
-    
+
     pushUndo({
       type: 'update_bill',
       affected: [
@@ -3046,7 +3048,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Get bill and line items for undo and audit trail
     const bill = await getDB().bills.get(billId);
     if (!bill) throw new Error('Bill not found');
-    
+
     const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
 
     // Find transactions related to this bill
@@ -3056,9 +3058,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       .where('store_id')
       .equals(storeId)
       .filter(t => {
-        const matchesReference = t.reference === bill.bill_number || 
-         t.reference === `BILL-${bill.bill_number}` ||
-         (bill.bill_number.startsWith('BILL-') && t.reference === bill.bill_number.replace('BILL-', ''));
+        const matchesReference = t.reference === bill.bill_number ||
+          t.reference === `BILL-${bill.bill_number}` ||
+          (bill.bill_number.startsWith('BILL-') && t.reference === bill.bill_number.replace('BILL-', ''));
         const isNotReversal = !t.is_reversal; // Use explicit field instead of reference parsing
         const notDeleted = !t._deleted;
         return Boolean(matchesReference && isNotReversal && notDeleted);
@@ -3067,19 +3069,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Collect all transaction IDs for batch query
     const transactionIds = allBillTransactions.map(t => t.id);
-    
+
     // Batch fetch all journal entries for these transactions at once
     // Use explicit entry_type field instead of description parsing
     const allJournalEntries = transactionIds.length > 0
       ? await getDB().journal_entries
-          .where('transaction_id')
-          .anyOf(transactionIds)
-          .and(e => {
-            // Use explicit entry_type field - only include original entries
-            const isOriginal = !e.entry_type || e.entry_type === 'original';
-            return e.is_posted === true && isOriginal;
-          })
-          .toArray()
+        .where('transaction_id')
+        .anyOf(transactionIds)
+        .and(e => {
+          // Use explicit entry_type field - only include original entries
+          const isOriginal = !e.entry_type || e.entry_type === 'original';
+          return e.is_posted === true && isOriginal;
+        })
+        .toArray()
       : [];
 
     // Filter out transactions whose journal entries are all reactivations
@@ -3100,15 +3102,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     });
 
     // Get journal entries for the filtered transactions
-    const journalEntries = allJournalEntries.filter(e => 
+    const journalEntries = allJournalEntries.filter(e =>
       billTransactions.some(t => t.id === e.transaction_id)
     );
 
     // Pure offline-first approach - delete from local database only
     // Include journal_entries and transactions in transaction scope
     await getDB().transaction('rw', [
-      getDB().bills, 
-      getDB().bill_line_items, 
+      getDB().bills,
+      getDB().bill_line_items,
       getDB().bill_audit_logs,
       getDB().journal_entries,
       getDB().transactions,
@@ -3130,7 +3132,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const reversalTransactionId = createId();
       const postedDate = getLocalDateString(now);
       const fiscalPeriod = getFiscalPeriodForDate(now).period;
-      
+
       // Helper function to create reversal journal entries
       const createReversalJournalEntries = (entries: any[], transactionId: string, includeCashDrawer: boolean = true): any[] => {
         const reversalEntries: any[] = [];
@@ -3139,7 +3141,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           if (!includeCashDrawer && entry.account_code === '1100') {
             continue;
           }
-          
+
           const reversalEntry = {
             id: createId(),
             store_id: entry.store_id,
@@ -3183,7 +3185,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if ((bill.payment_method === 'cash' || bill.payment_method === 'card') && bill.amount_paid > 0) {
         try {
           // Find cash drawer transaction for this bill
-          const cashTransaction = billTransactions.find(t => 
+          const cashTransaction = billTransactions.find(t =>
             t.category === TRANSACTION_CATEGORIES.CASH_DRAWER_SALE
           );
 
@@ -3220,7 +3222,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             // Create reversal journal entries for cash drawer (account_code 1100)
             const cashJournalEntries = journalEntries.filter(e => e.account_code === '1100');
             const cashReversalEntries = createReversalJournalEntries(cashJournalEntries, cashReversalTransactionId, true);
-            
+
             if (cashReversalEntries.length > 0) {
               await getDB().journal_entries.bulkAdd(cashReversalEntries);
             }
@@ -3251,8 +3253,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Create ONE audit log with descriptive reason
       // Always soft delete (set status to cancelled) to allow reactivation
       const deleteAction = 'cancelled';
-      const generatedReason = bill 
-        ? `Deleting bill #${bill.bill_number} (${deleteAction})` 
+      const generatedReason = bill
+        ? `Deleting bill #${bill.bill_number} (${deleteAction})`
         : `Deleting bill (${deleteAction})`;
 
       const auditLog = {
@@ -3282,15 +3284,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       { table: 'bills', id: billId },
       { table: 'bill_audit_logs', id: auditLogId }
     ];
-    
+
     // Restore bill status
     undoSteps.push({ op: 'update', table: 'bills', id: billId, changes: { status: bill.status, _synced: false } });
     for (const item of lineItems) {
       affectedRecords.push({ table: 'bill_line_items', id: item.id });
     }
-    
+
     undoSteps.push({ op: 'delete', table: 'bill_audit_logs', id: auditLogId });
-    
+
     pushUndo({
       type: 'delete_bill',
       affected: affectedRecords,
@@ -3311,7 +3313,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Get bill and verify it's cancelled
     const bill = await getDB().bills.get(billId);
     if (!bill) throw new Error('Bill not found');
-    
+
     if (bill.status !== 'cancelled') {
       throw new Error('Bill is not cancelled. Only cancelled bills can be reactivated.');
     }
@@ -3324,43 +3326,43 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       .where('store_id')
       .equals(storeId)
       .filter(t => {
-        const matchesBill = t.reference === bill.bill_number || 
-                          t.reference === `BILL-${bill.bill_number}` ||
-                          (bill.bill_number.startsWith('BILL-') && t.reference === bill.bill_number.replace('BILL-', ''));
+        const matchesBill = t.reference === bill.bill_number ||
+          t.reference === `BILL-${bill.bill_number}` ||
+          (bill.bill_number.startsWith('BILL-') && t.reference === bill.bill_number.replace('BILL-', ''));
         return matchesBill && !t.is_reversal && !t._deleted;
       })
       .toArray();
-    
+
     // Find all reversal transactions for these original transactions
     // Use reversal_of_transaction_id for deterministic linking (replaces time-based grouping)
     const originalTransactionIds = originalTransactions.map(t => t.id);
     const reversalTransactions = originalTransactionIds.length > 0
       ? await getDB().transactions
-          .where('reversal_of_transaction_id')
-          .anyOf(originalTransactionIds)
-          .and(t => !t._deleted)
-          .toArray()
+        .where('reversal_of_transaction_id')
+        .anyOf(originalTransactionIds)
+        .and(t => !t._deleted)
+        .toArray()
       : [];
 
     // Batch fetch all reversal journal entries at once
     const reversalTransactionIds = reversalTransactions.map(t => t.id);
     const reversalJournalEntries = reversalTransactionIds.length > 0
       ? await getDB().journal_entries
-          .where('transaction_id')
-          .anyOf(reversalTransactionIds)
-          .and(e => e.is_posted === true && e.entry_type === 'reversal')
-          .toArray()
+        .where('transaction_id')
+        .anyOf(reversalTransactionIds)
+        .and(e => e.is_posted === true && e.entry_type === 'reversal')
+        .toArray()
       : [];
-    
+
     // Find cash drawer reversal transaction (if exists)
-    const cashReversalTransaction = reversalTransactions.find(t => 
+    const cashReversalTransaction = reversalTransactions.find(t =>
       t.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE
     ) || null;
 
     // Pure offline-first approach - reactivate in local database only
     await getDB().transaction('rw', [
-      getDB().bills, 
-      getDB().bill_line_items, 
+      getDB().bills,
+      getDB().bill_line_items,
       getDB().bill_audit_logs,
       getDB().journal_entries,
       getDB().transactions,
@@ -3381,7 +3383,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const reactivationTransactionId = createId();
       const postedDate = getLocalDateString(now);
       const fiscalPeriod = getFiscalPeriodForDate(now).period;
-      
+
       // Helper function to create reactivation journal entries
       const createReactivationJournalEntries = (entries: any[], transactionId: string, includeCashDrawer: boolean = true): any[] => {
         const reactivationEntries: any[] = [];
@@ -3390,7 +3392,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           if (!includeCashDrawer && reversalEntry.account_code === '1100') {
             continue;
           }
-          
+
           const reactivationEntry = {
             id: createId(),
             store_id: reversalEntry.store_id,
@@ -3466,7 +3468,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             // Create restoration journal entries for cash drawer (account_code 1100)
             const cashReversalEntries = reversalJournalEntries.filter(e => e.account_code === '1100');
             const cashReactivationEntries = createReactivationJournalEntries(cashReversalEntries, cashRestorationTransactionId, true);
-            
+
             if (cashReactivationEntries.length > 0) {
               await getDB().journal_entries.bulkAdd(cashReactivationEntries);
             }
@@ -3546,14 +3548,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Handle both dateFrom/dateTo and date_from/date_to naming
       const dateFrom = filters.dateFrom || filters.date_from;
       const dateTo = filters.dateTo || filters.date_to;
-      
+
       // Normalize date filters to handle date-only strings (YYYY-MM-DD)
       // Compare dates by extracting the date portion only (YYYY-MM-DD)
       if (dateFrom) {
         query = query.and(bill => {
           if (!bill.bill_date) return false;
           // Extract date portion from bill_date (handles both ISO strings and date-only formats)
-          const billDateStr = typeof bill.bill_date === 'string' 
+          const billDateStr = typeof bill.bill_date === 'string'
             ? getLocalDateString(bill.bill_date)
             : getLocalDateString(new Date(bill.bill_date).toISOString());
           return billDateStr >= dateFrom;
@@ -3563,7 +3565,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         query = query.and(bill => {
           if (!bill.bill_date) return false;
           // Extract date portion from bill_date (handles both ISO strings and date-only formats)
-          const billDateStr = typeof bill.bill_date === 'string' 
+          const billDateStr = typeof bill.bill_date === 'string'
             ? getLocalDateString(bill.bill_date)
             : getLocalDateString(new Date(bill.bill_date).toISOString());
           return billDateStr <= dateTo;
@@ -3594,12 +3596,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Support searching with or without "Bill-" prefix
         // e.g., searching "12345678" will match "Bill-12345678"
         const billNumberWithoutPrefix = billNumberLower.replace(/^bill-/, '');
-        const billNumberMatch = normalizeNameForComparison(billNumberLower).includes(normalizedSearchTerm) || 
-                                normalizeNameForComparison(billNumberWithoutPrefix).includes(normalizedSearchTerm);
+        const billNumberMatch = normalizeNameForComparison(billNumberLower).includes(normalizedSearchTerm) ||
+          normalizeNameForComparison(billNumberWithoutPrefix).includes(normalizedSearchTerm);
         const notesMatch = bill.notes ? normalizeNameForComparison(bill.notes).includes(normalizedSearchTerm) : false;
         const customerName = bill.entity_id ? customersMap.get(bill.entity_id) : '';
         const customerMatch = customerName ? customerName.includes(normalizedSearchTerm) : false;
-        
+
         return billNumberMatch || notesMatch || customerMatch;
       });
     }
@@ -3696,18 +3698,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       const branch = await getDB().branches.get(branchId);
       if (!branch) return null;
-      
+
       // 1. Priority: Branch logo (can be custom base64 or global logo URL)
       if (branch.logo) {
         return branch.logo;
       }
-      
+
       // 2. Fallback: Store logo (store-specific, optional)
       const store = await getDB().stores.get(storeId);
       if (store?.logo) {
         return store.logo;
       }
-      
+
       // 3. Return null (no logo)
       return null;
     } catch (error) {
@@ -3721,7 +3723,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     try {
       // Import supabase client
       const { supabase } = await import('../lib/supabase');
-      
+
       // List all files in the global-logos bucket
       const { data, error } = await supabase.storage
         .from('global-logos')
@@ -3778,21 +3780,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addProduct = async (productData: Omit<Tables['products']['Insert'], 'store_id'>): Promise<void> => {
     const productId = productData.id || createId();
     const dataWithId = { ...productData, id: productId };
-    
+
     await crudHelperService.addEntity('products', storeId!, dataWithId);
-    
+
     // NEW: Emit event after successful creation (event emission happens in sync)
     // Event will be emitted when syncService uploads the record
-    
+
     // Store undo data
     pushUndo({
       type: 'add_product',
       affected: [{ table: 'products', id: productId }],
       steps: [{ op: 'delete', table: 'products', id: productId }]
     });
-    
+
     resetAutoSyncTimer();
-    
+
     // NEW: Emit event for real-time sync to other devices
     await emitProductEvent(
       productId,
@@ -3803,11 +3805,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addSupplier = async (supplierData: Omit<Tables['suppliers']['Insert'], 'store_id'>): Promise<void> => {
     const supplierId = supplierData.id || createId();
     const now = new Date().toISOString();
-    
+
     // Get initial balance values (if provided)
     const initialLBPBalance = (supplierData as any).lb_balance || 0;
     const initialUSDBalance = (supplierData as any).usd_balance || 0;
-    
+
     // Create entity instead of legacy supplier table
     // Note: Balances are calculated from journal entries, not stored on the entity
     const entity = {
@@ -3833,9 +3835,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _synced: false,
       _deleted: false
     };
-    
+
     await getDB().entities.add(entity);
-    
+
     // Create journal entries for initial balance if provided
     // For suppliers: 
     // - Positive balance = we owe them (liability): Credit AP (2100), Debit Equity (3100)
@@ -3844,22 +3846,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if ((initialLBPBalance !== 0 || initialUSDBalance !== 0) && currentBranchId) {
       const transactionId = createId();
       const postedDate = getLocalDateString(now);
-      
+
       try {
         // Create separate journal entries for USD and LBP if they have different signs
         // Otherwise create one entry for both
-        
+
         // Determine sign: use USD if non-zero, otherwise use LBP
         const primaryAmount = initialUSDBalance !== 0 ? initialUSDBalance : initialLBPBalance;
         const isPositive = primaryAmount >= 0;
         const debitAccount = isPositive ? '3100' : '2100'; // Owner's Equity or AP
         const creditAccount = isPositive ? '2100' : '3100'; // AP or Owner's Equity
-        
+
         // If both currencies have the same sign (or one is zero), create one entry
-        const sameSign = (initialUSDBalance >= 0 && initialLBPBalance >= 0) || 
-                         (initialUSDBalance <= 0 && initialLBPBalance <= 0) ||
-                         initialUSDBalance === 0 || initialLBPBalance === 0;
-        
+        const sameSign = (initialUSDBalance >= 0 && initialLBPBalance >= 0) ||
+          (initialUSDBalance <= 0 && initialLBPBalance <= 0) ||
+          initialUSDBalance === 0 || initialLBPBalance === 0;
+
         if (sameSign) {
           // Single entry for both currencies
           await journalService.createJournalEntry({
@@ -3891,7 +3893,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               branchId: currentBranchId
             });
           }
-          
+
           if (initialLBPBalance !== 0) {
             const lbpIsPositive = initialLBPBalance >= 0;
             await journalService.createJournalEntry({
@@ -3913,18 +3915,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Continue even if journal entry creation fails - entity is already created
       }
     }
-    
+
     // Store undo data
     pushUndo({
       type: 'add_supplier',
       affected: [{ table: 'entities', id: supplierId }],
       steps: [{ op: 'update', table: 'entities', id: supplierId, changes: { _deleted: true, _synced: false } }]
     });
-    
+
     // Refresh entities data
     await refreshData();
     resetAutoSyncTimer();
-    
+
     // NEW: Emit event for real-time sync to other devices
     await emitEntityEvent(
       supplierId,
@@ -3937,11 +3939,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const addCustomer = async (customerData: Omit<Tables['customers']['Insert'], 'store_id'>): Promise<void> => {
     const customerId = customerData.id || createId();
     const now = new Date().toISOString();
-    
+
     // Get initial balance values (if provided)
     const initialLBPBalance = (customerData as any).lb_balance || 0;
     const initialUSDBalance = (customerData as any).usd_balance || 0;
-    
+
     // Create entity instead of legacy customer table
     // Note: Balances are calculated from journal entries, not stored on the entity
     const entity = {
@@ -3966,9 +3968,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _synced: false,
       _deleted: false
     };
-    
+
     await getDB().entities.add(entity);
-    
+
     // Create journal entries for initial balance if provided
     // For customers: 
     // - Positive balance = they owe us (asset): Debit AR (1200), Credit Equity (3100)
@@ -3977,22 +3979,22 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if ((initialLBPBalance !== 0 || initialUSDBalance !== 0) && currentBranchId) {
       const transactionId = createId();
       const postedDate = getLocalDateString(now);
-      
+
       try {
         // Create separate journal entries for USD and LBP if they have different signs
         // Otherwise create one entry for both
-        
+
         // Determine sign: use USD if non-zero, otherwise use LBP
         const primaryAmount = initialUSDBalance !== 0 ? initialUSDBalance : initialLBPBalance;
         const isPositive = primaryAmount >= 0;
         const debitAccount = isPositive ? '1200' : '3100'; // Accounts Receivable or Owner's Equity
         const creditAccount = isPositive ? '3100' : '1200'; // Owner's Equity or Accounts Receivable
-        
+
         // If both currencies have the same sign (or one is zero), create one entry
-        const sameSign = (initialUSDBalance >= 0 && initialLBPBalance >= 0) || 
-                         (initialUSDBalance <= 0 && initialLBPBalance <= 0) ||
-                         initialUSDBalance === 0 || initialLBPBalance === 0;
-        
+        const sameSign = (initialUSDBalance >= 0 && initialLBPBalance >= 0) ||
+          (initialUSDBalance <= 0 && initialLBPBalance <= 0) ||
+          initialUSDBalance === 0 || initialLBPBalance === 0;
+
         if (sameSign) {
           // Single entry for both currencies
           await journalService.createJournalEntry({
@@ -4024,7 +4026,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               branchId: currentBranchId
             });
           }
-          
+
           if (initialLBPBalance !== 0) {
             const lbpIsPositive = initialLBPBalance >= 0;
             await journalService.createJournalEntry({
@@ -4046,18 +4048,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         // Continue even if journal entry creation fails - entity is already created
       }
     }
-    
+
     // Store undo data
     pushUndo({
       type: 'add_customer',
       affected: [{ table: 'entities', id: customerId }],
       steps: [{ op: 'update', table: 'entities', id: customerId, changes: { _deleted: true, _synced: false } }]
     });
-    
+
     // Refresh entities data
     await refreshData();
     resetAutoSyncTimer();
-    
+
     // NEW: Emit event for real-time sync to other devices
     await emitEntityEvent(
       customerId,
@@ -4073,7 +4075,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!originalEntity || originalEntity.entity_type !== 'customer') {
       throw new Error('Customer entity not found');
     }
-    
+
     // Convert customer updates to entity updates
     // Note: Balances are calculated from journal entries, not stored on the entity
     // Remove balance fields from updates if they exist
@@ -4084,11 +4086,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updated_at: new Date().toISOString(),
       _synced: false
     };
-    
+
     // Remove balance fields if they were passed (they shouldn't be updated directly)
     if ('lb_balance' in entityUpdates) delete entityUpdates.lb_balance;
     if ('usd_balance' in entityUpdates) delete entityUpdates.usd_balance;
-    
+
     // Update customer_data if needed
     if (updates.lb_max_balance !== undefined || (updates as any).email !== undefined || (updates as any).address !== undefined) {
       const customerData = originalEntity.customer_data || {};
@@ -4100,9 +4102,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         address: (updates as any).address ?? (customerData as any).address ?? null
       };
     }
-    
+
     await getDB().entities.update(id, entityUpdates);
-    
+
     // Store undo data with original values
     // Note: Balances are calculated from journal entries, not stored on the entity
     const undoChanges: any = {
@@ -4111,17 +4113,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       is_active: originalEntity.is_active,
       customer_data: originalEntity.customer_data
     };
-    
+
     pushUndo({
       type: 'update_customer',
       affected: [{ table: 'entities', id }],
       steps: [{ op: 'update', table: 'entities', id, changes: undoChanges }]
     });
-    
+
     // Refresh entities data
     await refreshData();
     resetAutoSyncTimer();
-    
+
     // NEW: Emit event for real-time sync to other devices
     await emitEntityEvent(
       id,
@@ -4138,7 +4140,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!originalEntity || originalEntity.entity_type !== 'supplier') {
       throw new Error('Supplier entity not found');
     }
-    
+
     // Convert supplier updates to entity updates
     // Note: Balances are calculated from journal entries, not stored on the entity
     // Remove balance fields from updates if they exist
@@ -4148,11 +4150,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updated_at: new Date().toISOString(),
       _synced: false
     };
-    
+
     // Remove balance fields if they were passed (they shouldn't be updated directly)
     if ('lb_balance' in entityUpdates) delete entityUpdates.lb_balance;
     if ('usd_balance' in entityUpdates) delete entityUpdates.usd_balance;
-    
+
     // Update supplier_data if needed
     if ((updates as any).type !== undefined || (updates as any).advance_lb_balance !== undefined || (updates as any).advance_usd_balance !== undefined || (updates as any).email !== undefined || (updates as any).address !== undefined) {
       const supplierData = originalEntity.supplier_data || {};
@@ -4165,9 +4167,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         address: (updates as any).address ?? (supplierData as any).address ?? null
       };
     }
-    
+
     await getDB().entities.update(id, entityUpdates);
-    
+
     // Store undo data with original values
     // Note: Balances are calculated from journal entries, not stored on the entity
     const undoChanges: any = {
@@ -4175,17 +4177,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       phone: originalEntity.phone,
       supplier_data: originalEntity.supplier_data
     };
-    
+
     pushUndo({
       type: 'update_supplier',
       affected: [{ table: 'entities', id }],
       steps: [{ op: 'update', table: 'entities', id, changes: undoChanges }]
     });
-    
+
     // Refresh entities data
     await refreshData();
     resetAutoSyncTimer();
-    
+
     // NEW: Emit event for real-time sync to other devices
     await emitEntityEvent(
       id,
@@ -4200,9 +4202,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Get original data for undo
     const originalProduct = await getDB().products.get(id);
     if (!originalProduct) throw new Error('Product not found');
-    
+
     await crudHelperService.updateEntity('products', id, updates);
-    
+
     // Store undo data with original values
     const undoChanges: any = {};
     for (const key of Object.keys(updates)) {
@@ -4210,15 +4212,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         undoChanges[key] = (originalProduct as any)[key];
       }
     }
-    
+
     pushUndo({
       type: 'update_product',
       affected: [{ table: 'products', id }],
       steps: [{ op: 'update', table: 'products', id, changes: undoChanges }]
     });
-    
+
     resetAutoSyncTimer();
-    
+
     // NEW: Emit event for real-time sync to other devices
     await emitProductEvent(
       id,
@@ -4232,7 +4234,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Get original branch data
     const originalBranch = await getDB().branches.get(id);
     if (!originalBranch) throw new Error('Branch not found');
-    
+
     // Prepare update payload - merge with existing data to preserve all fields
     // CRITICAL: Preserve _lastSyncedAt to prevent branch switching after update
     const updatePayload: any = {
@@ -4242,16 +4244,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _synced: false,
       _lastSyncedAt: originalBranch._lastSyncedAt // Explicitly preserve sync history
     };
-    
+
     // Use put() instead of update() to ensure all fields (including non-indexed ones like logo, address, phone) are saved
     await getDB().branches.put(updatePayload);
-    
+
     // Verify the update was applied
     const updatedBranch = await getDB().branches.get(id);
     if (!updatedBranch) {
       throw new Error('Branch was deleted after update');
     }
-    
+
     // Verify critical fields were saved
     for (const key of Object.keys(updates)) {
       const expectedValue = updates[key as keyof typeof updates];
@@ -4263,7 +4265,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         });
       }
     }
-    
+
     // Debug: Log sync status to help diagnose branch switching issues
     console.log('✅ Branch update saved:', {
       id: updatedBranch.id,
@@ -4272,21 +4274,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       _lastSyncedAt: updatedBranch._lastSyncedAt,
       updated_at: updatedBranch.updated_at
     });
-    
+
     // Store undo data with original values
     const undoChanges: any = {};
     for (const key of Object.keys(updates)) {
       undoChanges[key] = (originalBranch as any)[key];
     }
-    
+
     pushUndo({
       type: 'update_branch',
       affected: [{ table: 'branches', id }],
       steps: [{ op: 'update', table: 'branches', id, changes: undoChanges }]
     });
-    
+
     resetAutoSyncTimer();
-    
+
     // Emit event for real-time sync to other devices
     // Use the branch ID being updated as the branchId for the event
     await emitBranchEvent(
@@ -4294,7 +4296,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         fields_changed: Object.keys(updates)
       })
     );
-    
+
     // Refresh data to update UI, but after a small delay to ensure IndexedDB has committed
     await new Promise(resolve => setTimeout(resolve, 50));
     await refreshData();
@@ -4306,23 +4308,23 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Get original data for undo
     const originalProduct = await getDB().products.get(id);
     if (!originalProduct) throw new Error('Product not found');
-    
+
     await crudHelperService.deleteEntity('products', id);
-    
+
     // Store undo data with full record to restore
     pushUndo({
       type: 'delete_product',
       affected: [{ table: 'products', id }],
-      steps: [{ 
-        op: 'update', 
-        table: 'products', 
-        id, 
-        changes: { _deleted: false, _synced: false } 
+      steps: [{
+        op: 'update',
+        table: 'products',
+        id,
+        changes: { _deleted: false, _synced: false }
       }]
     });
-    
+
     resetAutoSyncTimer();
-    
+
     // NEW: Emit event for real-time sync to other devices
     await emitProductEvent(
       id,
@@ -4332,21 +4334,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const addEmployee = async (employeeData: Omit<Tables['users']['Insert'], 'store_id'>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
-    
+
     const employeeId = employeeData.id || createId();
     const dataWithId = { ...employeeData, id: employeeId };
-    
+
     await crudHelperService.addEntity('users', storeId, dataWithId);
-    
+
     // Store undo data
     pushUndo({
       type: 'add_employee',
       affected: [{ table: 'users', id: employeeId }],
       steps: [{ op: 'delete', table: 'users', id: employeeId }]
     });
-    
+
     resetAutoSyncTimer();
-    
+
     // NEW: Emit event for real-time sync to other devices
     await emitUserEvent(
       employeeId,
@@ -4358,9 +4360,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Get original data for undo
     const originalEmployee = await getDB().users.get(id);
     if (!originalEmployee) throw new Error('Employee not found');
-    
+
     await crudHelperService.updateEntity('users', id, updates);
-    
+
     // Store undo data with original values
     const undoChanges: any = {};
     for (const key of Object.keys(updates)) {
@@ -4368,15 +4370,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         undoChanges[key] = (originalEmployee as any)[key];
       }
     }
-    
+
     pushUndo({
       type: 'update_employee',
       affected: [{ table: 'users', id }],
       steps: [{ op: 'update', table: 'users', id, changes: undoChanges }]
     });
-    
+
     resetAutoSyncTimer();
-    
+
     // NEW: Emit event for real-time sync to other devices
     await emitUserEvent(
       id,
@@ -4390,21 +4392,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Get original data for undo
     const originalEmployee = await getDB().users.get(id);
     if (!originalEmployee) throw new Error('Employee not found');
-    
+
     await crudHelperService.deleteEntity('users', id);
-    
+
     // Store undo data
     pushUndo({
       type: 'delete_employee',
       affected: [{ table: 'users', id }],
-      steps: [{ 
-        op: 'update', 
-        table: 'users', 
-        id, 
-        changes: { _deleted: false, _synced: false } 
+      steps: [{
+        op: 'update',
+        table: 'users',
+        id,
+        changes: { _deleted: false, _synced: false }
       }]
     });
-    
+
     resetAutoSyncTimer();
   };
 
@@ -4412,7 +4414,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (!storeId) throw new Error('No store ID available');
 
     const itemId = itemData.id || createId();
-    
+
     // Prepare item with defaults - crudHelperService will add base entity fields (id, store_id, created_at, _synced)
     const preparedData = {
       id: itemId,
@@ -4430,85 +4432,54 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Use crudHelperService - it will handle all callbacks automatically
     await crudHelperService.addEntity('inventory_items', storeId, preparedData);
-    
+
     // Store undo data
     pushUndo({
       type: 'add_inventory_item',
       affected: [{ table: 'inventory_items', id: itemId }],
       steps: [{ op: 'delete', table: 'inventory_items', id: itemId }]
     });
-    
+
     resetAutoSyncTimer();
   };
 
   const updateInventoryItem = async (id: string, updates: Tables['inventory_items']['Update']): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
     if (!currentBranchId) throw new Error('No branch ID available');
-    
+
     // Get original data for undo
     const originalItem = await getDB().inventory_items.get(id);
     if (!originalItem) throw new Error('Inventory item not found');
-    
-    // Check if price changed
+
+    // Detect changes that affect journal entries
     const priceChanged = updates.price !== undefined && updates.price !== originalItem.price;
-    const oldPrice = originalItem.price;
-    const newPrice = updates.price ?? null;
-    
-    // Validate price change before updating (for cash purchases)
-    if (priceChanged && originalItem.batch_id) {
-      try {
-        const batch = await getDB().inventory_bills.get(originalItem.batch_id);
-        if (batch && batch.type === 'cash') {
-          // Find original transaction to check if it's a cash purchase
-          const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
-          const originalTransaction = await inventoryPurchaseService.findOriginalTransactionForBatch(
-            originalItem.batch_id,
-            storeId
-          );
-          
-          if (originalTransaction) {
-            // Calculate the difference to check if we need more cash
-            const batchItems = await getDB().inventory_items
-              .where('batch_id')
-              .equals(originalItem.batch_id)
-              .toArray();
-            
-            const oldBatchTotal = batchItems.reduce((total, item) => {
-              const itemPrice = item.id === id ? (oldPrice ?? 0) : (item.price ?? 0);
-              const itemValue = item.weight && itemPrice
-                ? item.weight * itemPrice
-                : (item.quantity || 0) * itemPrice;
-              return total + itemValue;
-            }, 0);
-            
-            const newBatchTotal = batchItems.reduce((total, item) => {
-              const itemPrice = item.id === id ? (newPrice ?? 0) : (item.price ?? 0);
-              const itemValue = item.weight && itemPrice
-                ? item.weight * itemPrice
-                : (item.quantity || 0) * itemPrice;
-              return total + itemValue;
-            }, 0);
-            
-            const difference = newBatchTotal - oldBatchTotal;
-            
-            // Cash drawer balance validation removed - negative balances are now allowed
-          }
-        }
-      } catch (error) {
-        // Re-throw validation errors so they can be shown to the user
-        if (error instanceof Error && error.message.includes('Insufficient cash drawer balance')) {
-          throw error;
-        }
-        // Log other errors but don't block the update
-        console.error(`[UPDATE_INVENTORY_ITEM] Error validating price change:`, error);
-      }
+    const quantityChanged = updates.quantity !== undefined && updates.quantity !== originalItem.quantity;
+    const weightChanged = updates.weight !== undefined && updates.weight !== originalItem.weight;
+
+    // Calculate old and new amounts
+    const oldAmount = receivedItemsJournalService.calculateItemAmount(originalItem);
+    const newItem = { ...originalItem, ...updates };
+    const newAmount = receivedItemsJournalService.calculateItemAmount(newItem);
+    const amountChanged = Math.abs(newAmount - oldAmount) > 0.01;
+
+    const currentUserId = userProfile?.id;
+    if (!currentUserId) {
+      throw new Error('User not authenticated');
     }
-    
-    // Update the inventory item
-    await crudHelperService.updateEntity('inventory_items', id, updates);
-    
-    // If price changed and batch exists, create adjustment transaction
-    if (priceChanged && originalItem.batch_id) {
+
+    // Prepare update payload
+    const updatePayload: any = {
+      ...updates,
+      _synced: false
+    };
+
+    // Update the inventory item directly (not using crudHelperService to avoid callback issues)
+    await getDB().inventory_items.update(id, updatePayload);
+
+    // Handle journal entry updates if amount changed and batch exists
+    // Note: createPriceAdjustmentTransaction creates its own operations but doesn't wrap in transaction
+    // We'll call it after the item update to avoid transaction conflicts
+    if (amountChanged && originalItem.batch_id) {
       try {
         const batch = await getDB().inventory_bills.get(originalItem.batch_id);
         if (batch) {
@@ -4520,27 +4491,56 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               originalItem.batch_id,
               storeId
             );
-            
+
             if (originalTransaction) {
-              // Create adjustment transaction
-              const currentUserId = userProfile?.id;
-              if (!currentUserId) {
-                throw new Error('User not authenticated');
+              // Calculate batch totals to determine adjustment amount
+              // Get updated batch items (after our update)
+              const batchItems = await getDB().inventory_items
+                .where('batch_id')
+                .equals(originalItem.batch_id)
+                .toArray();
+
+              const oldBatchTotal = batchItems.reduce((total, item) => {
+                if (item.id === id) {
+                  return total + oldAmount;
+                }
+                return total + receivedItemsJournalService.calculateItemAmount(item);
+              }, 0);
+
+              const newBatchTotal = batchItems.reduce((total, item) => {
+                return total + receivedItemsJournalService.calculateItemAmount(item);
+              }, 0);
+
+              const difference = newBatchTotal - oldBatchTotal;
+
+              if (Math.abs(difference) > 0.01) {
+                // Create adjustment transaction
+                // This function creates transaction and journal entries but doesn't wrap in its own transaction
+                // So we need to wrap it in a transaction to ensure atomicity
+                // Include chart_of_accounts since journalService.createJournalEntry accesses it
+                await getDB().transaction('rw', [
+                  getDB().inventory_items,
+                  getDB().inventory_bills,
+                  getDB().journal_entries,
+                  getDB().transactions,
+                  getDB().entities,
+                  getDB().chart_of_accounts
+                ], async () => {
+                  await inventoryPurchaseService.createPriceAdjustmentTransaction(
+                    id,
+                    oldBatchTotal,
+                    newBatchTotal,
+                    originalItem.batch_id,
+                    originalTransaction.id,
+                    batch.currency || currency,
+                    storeId,
+                    currentBranchId,
+                    currentUserId
+                  );
+                });
+
+                console.log(`[UPDATE_INVENTORY_ITEM] ✅ Adjustment transaction created for item ${id}, difference: ${difference}`);
               }
-              
-              await inventoryPurchaseService.createPriceAdjustmentTransaction(
-                id,
-                oldPrice ?? null,
-                newPrice ?? null,
-                originalItem.batch_id,
-                originalTransaction.id,
-                batch.currency || currency,
-                storeId,
-                currentBranchId,
-                currentUserId
-              );
-              
-              console.log(`[UPDATE_INVENTORY_ITEM] ✅ Price adjustment transaction created for item ${id}`);
             } else {
               console.log(`[UPDATE_INVENTORY_ITEM] No original transaction found for batch ${originalItem.batch_id}, skipping adjustment`);
             }
@@ -4549,16 +4549,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           }
         }
       } catch (error) {
-        console.error(`[UPDATE_INVENTORY_ITEM] Error creating price adjustment transaction:`, error);
+        console.error(`[UPDATE_INVENTORY_ITEM] Error creating adjustment transaction:`, error);
         // Re-throw validation errors so they can be shown to the user
         if (error instanceof Error && error.message.includes('Insufficient cash drawer balance')) {
           throw error;
         }
         // Don't throw other errors - allow the inventory item update to succeed even if adjustment fails
-        // The adjustment can be retried later if needed
       }
     }
-    
+
     // Store undo data with original values
     const undoChanges: any = {};
     for (const key of Object.keys(updates)) {
@@ -4566,13 +4565,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         undoChanges[key] = (originalItem as any)[key];
       }
     }
-    
+
     pushUndo({
       type: 'update_inventory_item',
       affected: [{ table: 'inventory_items', id }],
       steps: [{ op: 'update', table: 'inventory_items', id, changes: undoChanges }]
     });
-    
+
     resetAutoSyncTimer();
   };
 
@@ -4610,13 +4609,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteInventoryItem = async (id: string): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+    if (!currentBranchId) throw new Error('No branch ID available');
+
     try {
       console.log(`🗑️ Deleting inventory item ${id}`);
-      
+
       // Get the inventory item for undo
       const originalItem = await getDB().inventory_items.get(id);
       if (!originalItem) throw new Error('Inventory item not found');
-      
+
       // Get all related records
       const sales = await getDB().bill_line_items
         .where('inventory_item_id')
@@ -4634,36 +4636,71 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const affectedRecords: any[] = [{ table: 'inventory_items', id }];
       const undoSteps: any[] = [];
 
-      if (hasReferences) {
-        // Soft-delete when referenced
-        await crudHelperService.updateEntity('inventory_items', id, { _deleted: true } as any);
-        undoSteps.push({ op: 'update', table: 'inventory_items', id, changes: { _deleted: false, _synced: false } });
-        
-        // Track affected references
-        for (const s of sales) affectedRecords.push({ table: 'bill_line_items', id: s.id });
-        for (const m of missedProducts) affectedRecords.push({ table: 'missed_products', id: m.id });
-      } else {
-        await crudHelperService.deleteEntity('inventory_items', id);
-        undoSteps.push({ op: 'update', table: 'inventory_items', id, changes: { _deleted: false, _synced: false } });
+      const currentUserId = userProfile?.id;
+      if (!currentUserId) {
+        throw new Error('User not authenticated');
       }
-      
-      // Add inventory item restoration to undo steps (last step so it runs first on undo)
-      // Already added above per flow
-      
+
+      // Wrap in atomic transaction for journal entry reversals
+      // Include chart_of_accounts since journalService.createJournalEntry accesses it
+      await getDB().transaction('rw', [
+        getDB().inventory_items,
+        getDB().inventory_bills,
+        getDB().journal_entries,
+        getDB().transactions,
+        getDB().entities,
+        getDB().chart_of_accounts
+      ], async () => {
+        // Reverse journal entries if batch exists and item has value
+        if (originalItem.batch_id) {
+          const batch = await getDB().inventory_bills.get(originalItem.batch_id);
+          if (batch && batch.type !== 'commission') {
+            // Only reverse for cash/credit batches (commission batches don't have inventory cost journal entries)
+            const itemAmount = receivedItemsJournalService.calculateItemAmount(originalItem);
+            if (itemAmount > 0) {
+              console.log(`[DELETE_INVENTORY_ITEM] Reversing journal entries for item ${id}, amount: ${itemAmount}`);
+
+              await receivedItemsJournalService.reverseJournalEntriesForItem(
+                id,
+                originalItem.batch_id,
+                `Inventory item deleted: ${id}`,
+                currentUserId,
+                storeId,
+                currentBranchId
+              );
+            }
+          }
+        }
+
+        // Delete or soft-delete the item directly (not using crudHelperService to avoid callback issues)
+        if (hasReferences) {
+          // Soft-delete when referenced
+          await getDB().inventory_items.update(id, { _deleted: true, _synced: false });
+          undoSteps.push({ op: 'update', table: 'inventory_items', id, changes: { _deleted: false, _synced: false } });
+
+          // Track affected references
+          for (const s of sales) affectedRecords.push({ table: 'bill_line_items', id: s.id });
+          for (const m of missedProducts) affectedRecords.push({ table: 'missed_products', id: m.id });
+        } else {
+          await getDB().inventory_items.delete(id);
+          undoSteps.push({ op: 'add', table: 'inventory_items', id, changes: originalItem });
+        }
+      });
+
       // Store undo data
       pushUndo({
         type: 'delete_inventory_item',
         affected: affectedRecords,
         steps: undoSteps
       });
-      
+
       resetAutoSyncTimer();
-      
+
       console.log(`🗑️ Inventory item ${id} deleted successfully`);
-      
+
       // Force immediate data refresh to ensure UI updates
       await refreshData();
-      
+
     } catch (error) {
       console.error('Error deleting inventory item:', error);
       throw new Error(`Failed to delete inventory item: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -4700,11 +4737,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       storeId,
       branchId: currentBranchId
     });
-    
-    const actualSupplierId = supplier_id === 'trade' 
-      ? await InventoryPurchaseService.getInstance().getOrCreateTradeSupplier(storeId) 
+
+    const actualSupplierId = supplier_id === 'trade'
+      ? await InventoryPurchaseService.getInstance().getOrCreateTradeSupplier(storeId)
       : supplier_id;
-    
+
     console.log(`[ADD_INVENTORY_BATCH] Supplier ID resolved:`, {
       original: supplier_id,
       actual: actualSupplierId
@@ -4730,7 +4767,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       type,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-        branch_id: currentBranchId || '',
+      branch_id: currentBranchId || '',
 
       _synced: false
     };
@@ -4745,18 +4782,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await getDB().inventory_bills.add(batchRecord);
       debug(batchRecord, 'batchrecord')
       const now = new Date().toISOString();
-      const allowedUnits = ["box", "kg", "piece", "bag","bundle"] as const;
+      const allowedUnits = ["box", "kg", "piece", "bag", "bundle"] as const;
 
       // Use batch currency if provided, otherwise use store preferred currency
       const itemCurrencyDefault = batchCurrency || currency;
-      
+
       const mappedItems = items.map((it) => ({
         id: createId(),
         product_id: it.product_id ?? '',
         quantity: it.quantity ?? 0,
-        unit:allowedUnits.includes(it.unit as any)
-    ? (it.unit as "box" | "kg" | "piece" | "bag"|"bundle")
-    : "box", // fallback default
+        unit: allowedUnits.includes(it.unit as any)
+          ? (it.unit as "box" | "kg" | "piece" | "bag" | "bundle")
+          : "box", // fallback default
         store_id: storeId,
         created_at: now,
         _synced: false,
@@ -4773,7 +4810,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }));
 
       await getDB().inventory_items.bulkAdd(mappedItems);
-      
+
       // Generate SKU/barcode for items that don't have one
       // Format: [CATEGORY_PREFIX]-#[INVENTORY_ITEM_ID_LAST4]
       for (const item of mappedItems) {
@@ -4783,10 +4820,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           if (product) {
             // Get category prefix (first 3 letters uppercase)
             const category = product.category || 'UNK';
-            const categoryPrefix = category.length >= 3 
-              ? category.substring(0, 3).toUpperCase() 
+            const categoryPrefix = category.length >= 3
+              ? category.substring(0, 3).toUpperCase()
               : category.toUpperCase().padEnd(3, 'X');
-            
+
             // Get inventory item ID and format as #0001 (last 4 characters)
             const itemIdStr = item.id;
             let itemIdPart = '';
@@ -4795,32 +4832,32 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             } else {
               itemIdPart = itemIdStr.padStart(4, '0');
             }
-            
+
             // Format: [CATEGORY_PREFIX]-[INVENTORY_ITEM_ID_LAST4]
             const sku = `${categoryPrefix}-${itemIdPart}`;
-            
+
             // Update inventory item with generated SKU
             await getDB().inventory_items.update(item.id, { sku });
           }
         }
       }
-      
+
       // Store the created item IDs for undo
       const itemIds = mappedItems.map(item => item.id);
-      
+
       // Build undo data
       const undoSteps: any[] = [
         { op: 'delete', table: 'inventory_bills', id: batchId }
       ];
-      
+
       const affectedRecords: any[] = [{ table: 'inventory_bills', id: batchId }];
-      
+
       // Add inventory items to undo
       for (const itemId of itemIds) {
         undoSteps.push({ op: 'delete', table: 'inventory_items', id: itemId });
         affectedRecords.push({ table: 'inventory_items', id: itemId });
       }
-      
+
       // Note: Financial transactions have their own undo mechanism
       // Store undo data
       pushUndo({
@@ -4835,12 +4872,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     if (type === 'cash' || type === 'credit' || type === 'commission') {
       try {
         console.log(`[ADD_INVENTORY_BATCH] Processing financial transaction for ${type} purchase`);
-        
+
         const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
 
         // Use batch currency if provided, otherwise use store preferred currency
         const purchaseCurrency = batchCurrency || currency;
-        
+
         const purchaseData = {
           supplier_id: actualSupplierId,
           type: type as 'cash' | 'credit' | 'commission',
@@ -4870,7 +4907,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         });
 
         financialResult = await inventoryPurchaseService.processInventoryPurchase(purchaseData);
-        
+
         console.log(`[ADD_INVENTORY_BATCH] ✅ Financial transaction processed:`, {
           success: financialResult.success,
           transactionId: financialResult.transactionId,
@@ -4878,7 +4915,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           cashDrawerImpact: financialResult.cashDrawerImpact,
           fees: financialResult.fees
         });
-        
+
         debug('Financial transaction processed:', financialResult);
       } catch (error) {
         console.error(`[ADD_INVENTORY_BATCH] ❌ Error processing financial transaction:`, {
@@ -4964,7 +5001,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       received_value: item.received_value || item.unit_price * item.quantity,
       created_at: now,
       updated_at: now,
-        branch_id: currentBranchId || '',
+      branch_id: currentBranchId || '',
 
       _synced: false
     }));
@@ -5004,7 +5041,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             console.error('Invalid product_id in line item:', item);
             throw new Error(`Invalid product_id: ${item.product_id}. Product ID must be a string or number.`);
           }
-          
+
           const inventoryRecords = await getDB().inventory_items
             .where('product_id')
             .equals(item.product_id)
@@ -5123,7 +5160,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const updateSale = async (id: string, updates: Partial<BillLineItem>): Promise<void> => {
     if (!storeId) throw new Error('No store ID available');
-    
+
     const currentUserId = userProfile?.id;
     if (!currentUserId) {
       throw new Error('No user ID available - user not authenticated');
@@ -5161,7 +5198,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     // Update related bills if price-related fields changed
     if (priceChanged) {
       await getDB().updateBillsForLineItem(id);
-      
+
       // Check if we need to update customer balance for credit sales
       // This happens when pricing a non-priced item (unit_price goes from 0 to > 0)
       const bill = await getDB().bills.get(originalSale.bill_id);
@@ -5172,26 +5209,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           .equals(bill.id)
           .and(item => !item._deleted)
           .toArray();
-        
+
         // Calculate old and new bill totals
         const { calculateBillTotals } = await import('../utils/billCalculations');
-        
+
         // Calculate old totals (before update) - reconstruct with original item
-        const oldLineItems = allLineItems.map(item => 
+        const oldLineItems = allLineItems.map(item =>
           item.id === id ? originalSale : item
         );
         const oldTotals = calculateBillTotals(oldLineItems, bill.amount_paid || 0);
-        
+
         // Calculate new totals (after update)
         const newTotals = calculateBillTotals(allLineItems, bill.amount_paid || 0);
-        
+
         // Check if amount_due increased (item was just priced)
         // We need to check if the original item had unit_price = 0
         const originalItemHadZeroPrice = originalSale.unit_price === 0;
         const oldAmountDue = oldTotals.amount_due;
         const newAmountDue = newTotals.amount_due;
         const amountDueIncrease = newAmountDue - oldAmountDue;
-        
+
         // Only update balance if:
         // 1. Original item had zero price (was non-priced)
         // 2. Amount due increased (item was priced)
@@ -5202,18 +5239,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             const entityType = entity.entity_type as 'customer' | 'supplier' | 'employee';
             const now = new Date().toISOString();
             const transactionId = createId();
-            
+
             // 1. Create transaction record
             const creditSaleTransaction: Transaction = {
               id: transactionId,
               store_id: storeId,
               branch_id: currentBranchId || '',
               type: 'income',
-              category: entityType === 'customer' 
-                ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE 
+              category: entityType === 'customer'
+                ? TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE
                 : entityType === 'supplier'
-                ? TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE
-                : TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE, // Use customer credit sale for employees
+                  ? TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE
+                  : TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE, // Use customer credit sale for employees
               amount: amountDueIncrease,
               currency: currency as 'USD' | 'LBP', // Use store's currency
               description: `payments.creditSaleBill`,
@@ -5231,20 +5268,20 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                 module: 'billing'
               }
             };
-            
+
             await getDB().transactions.add(creditSaleTransaction);
-            
+
             // 2. Create journal entries (double-entry bookkeeping)
             // ✅ FIX: Use transactionId (not a separate journalTransactionId) so account statements can find the transaction
             const postedDate = getLocalDateString(now);
             const fiscalPeriod = getFiscalPeriodForDate(now).period;
-            
+
             // For credit sales:
             // Customer/Employee: Debit AR (1200) / Credit Revenue (4100)
             // Supplier: Debit AP (2100) / Credit Revenue (4100)
             const debitAccountCode = (entityType === 'customer' || entityType === 'employee') ? '1200' : '2100';
             const debitAccountName = (entityType === 'customer' || entityType === 'employee') ? 'Accounts Receivable' : 'Accounts Payable';
-            
+
             const debitEntry = {
               id: createId(),
               store_id: storeId,
@@ -5265,7 +5302,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               created_at: now,
               _synced: false
             };
-            
+
             const creditEntry = {
               id: createId(),
               store_id: storeId,
@@ -5286,18 +5323,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
               created_at: now,
               _synced: false
             };
-            
+
             await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);
-            
+
             // 3. Update entity balance (balances are now calculated from journal entries, so this is just for sync)
             // Note: Balance updates are now handled by journal entries, this is kept for backward compatibility
             const updateData: any = {
               updated_at: now,
               _synced: false
             };
-            
+
             await getDB().entities.update(bill.entity_id, updateData);
-            
+
             console.log(`✅ Updated ${entityType} balance for ${entity.name} (increase: ${amountDueIncrease})`);
           }
         }
@@ -5311,7 +5348,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         undoChanges[key] = (originalSale as any)[key];
       }
     }
-    
+
     pushUndo({
       type: 'update_sale',
       affected: [{ table: 'bill_line_items', id }],
@@ -5408,7 +5445,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     const transactionId = (transactionData as any).id || createId();
     const currentUserId = userProfile?.id || transactionData.created_by || 'system';
-    
+
     // Map old category format to new standardized categories
     const categoryMapping: Record<string, string> = {
       'Commission': TRANSACTION_CATEGORIES.SUPPLIER_COMMISSION,
@@ -5422,17 +5459,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Advance categories
       'Supplier Advance': TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN, // Default to given
     };
-    
+
     const mappedCategory = categoryMapping[transactionData.category as string] || transactionData.category as string;
-    
+
     // Validate category exists in TRANSACTION_CATEGORIES
     const isValidCategory = Object.values(TRANSACTION_CATEGORIES).includes(mappedCategory as any);
-    
+
     if (!isValidCategory) {
       // Fallback: use direct DB write for unknown categories
       console.warn(`⚠️ Unknown transaction category: ${transactionData.category}. Using direct DB write.`);
       const entityId = (transactionData as any).entity_id || null;
-      
+
       const transaction: Transaction = {
         ...transactionData,
         id: transactionId,
@@ -5469,14 +5506,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         _synced: false
       });
     }
-    
+
     // Store undo data
     pushUndo({
       type: 'add_transaction',
       affected: [{ table: 'transactions', id: transactionId }],
       steps: [{ op: 'delete', table: 'transactions', id: transactionId }]
     });
-    
+
     await refreshData();
     await updateUnsyncedCount();
 
@@ -5496,10 +5533,44 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateInventoryBatch = async (id: string, updates: Partial<Tables['inventory_bills']['Update']>): Promise<void> => {
-    // Get original data for undo
+    if (!storeId) throw new Error('No store ID available');
+    if (!currentBranchId) throw new Error('No branch ID available');
+
+    // Get original data for undo and comparison
     const originalBatch = await getDB().inventory_bills.get(id);
     if (!originalBatch) throw new Error('Inventory batch not found');
-    
+
+    // Detect changes that affect journal entries
+    const supplierChanged = updates.supplier_id !== undefined && updates.supplier_id !== originalBatch.supplier_id;
+    const typeChanged = updates.type !== undefined && updates.type !== originalBatch.type;
+
+    // Get all items in batch for journal entry calculations
+    const batchItems = await getDB().inventory_items
+      .where('batch_id')
+      .equals(id)
+      .toArray();
+
+    // Calculate old and new batch totals for amount comparison
+    const calculateBatchTotal = (items: any[], batch: any) => {
+      return items.reduce((total, item) => {
+        const itemPrice = item.price || 0;
+        const itemValue = item.weight && itemPrice
+          ? item.weight * itemPrice
+          : (item.quantity || 0) * itemPrice;
+        return total + itemValue;
+      }, 0);
+    };
+
+    const oldBatchTotal = calculateBatchTotal(batchItems, originalBatch);
+    const newBatchType = updates.type !== undefined ? updates.type : originalBatch.type;
+    const newBatchTotal = calculateBatchTotal(batchItems, { ...originalBatch, type: newBatchType });
+    const amountChanged = Math.abs(newBatchTotal - oldBatchTotal) > 0.01;
+
+    const currentUserId = userProfile?.id;
+    if (!currentUserId) {
+      throw new Error('User not authenticated');
+    }
+
     // Process updates to ensure proper data types
     const processedUpdates: any = {
       ...updates,
@@ -5508,26 +5579,26 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     // Handle numeric fields
     if (updates.commission_rate !== undefined) {
-      processedUpdates.commission_rate = typeof updates.commission_rate === 'string' 
-        ? parseFloat(updates.commission_rate) || null 
+      processedUpdates.commission_rate = typeof updates.commission_rate === 'string'
+        ? parseFloat(updates.commission_rate) || null
         : updates.commission_rate;
     }
 
     if (updates.porterage_fee !== undefined) {
-      processedUpdates.porterage_fee = typeof updates.porterage_fee === 'string' 
-        ? parseFloat(updates.porterage_fee) || null 
+      processedUpdates.porterage_fee = typeof updates.porterage_fee === 'string'
+        ? parseFloat(updates.porterage_fee) || null
         : updates.porterage_fee;
     }
 
     if (updates.transfer_fee !== undefined) {
-      processedUpdates.transfer_fee = typeof updates.transfer_fee === 'string' 
-        ? parseFloat(updates.transfer_fee) || null 
+      processedUpdates.transfer_fee = typeof updates.transfer_fee === 'string'
+        ? parseFloat(updates.transfer_fee) || null
         : updates.transfer_fee;
     }
 
     if (updates.plastic_fee !== undefined) {
-      processedUpdates.plastic_fee = typeof updates.plastic_fee === 'string' 
-        ? updates.plastic_fee 
+      processedUpdates.plastic_fee = typeof updates.plastic_fee === 'string'
+        ? updates.plastic_fee
         : (updates.plastic_fee as any)?.toString() || null;
     }
 
@@ -5558,8 +5629,74 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     delete processedUpdates.plastic_count;
     delete processedUpdates.plastic_price;
 
-    await getDB().inventory_bills.update(id, processedUpdates);
-    
+    // Wrap in atomic transaction for journal entry updates
+    // Include chart_of_accounts since journalService.createJournalEntry accesses it
+    await getDB().transaction('rw', [
+      getDB().inventory_bills,
+      getDB().inventory_items,
+      getDB().journal_entries,
+      getDB().transactions,
+      getDB().entities,
+      getDB().chart_of_accounts
+    ], async () => {
+      // Update the batch
+      await getDB().inventory_bills.update(id, processedUpdates);
+
+      // Handle journal entry updates
+      if (supplierChanged) {
+        // Supplier changed: reverse old entries and create new ones
+        const oldSupplierId = originalBatch.supplier_id;
+        const newSupplierId = updates.supplier_id!;
+        const batchCurrency = (originalBatch.currency || currency) as 'USD' | 'LBP';
+        const batchType = (processedUpdates.type || originalBatch.type) as 'cash' | 'credit' | 'commission';
+
+        console.log(`[UPDATE_INVENTORY_BATCH] Supplier changed from ${oldSupplierId} to ${newSupplierId}, updating journal entries`);
+
+        await receivedItemsJournalService.updateJournalEntriesForSupplierChange(
+          id,
+          oldSupplierId,
+          newSupplierId,
+          batchItems,
+          batchCurrency,
+          batchType,
+          storeId,
+          currentBranchId,
+          currentUserId
+        );
+      } else if (amountChanged && (originalBatch.type === 'cash' || originalBatch.type === 'credit')) {
+        // Amount changed (but supplier didn't): create adjustment entries
+        // Only for cash/credit batches (commission batches don't have inventory cost journal entries)
+        const difference = newBatchTotal - oldBatchTotal;
+        const batchCurrency = (originalBatch.currency || currency) as 'USD' | 'LBP';
+        const batchType = originalBatch.type as 'cash' | 'credit';
+
+        if (Math.abs(difference) > 0.01) {
+          console.log(`[UPDATE_INVENTORY_BATCH] Amount changed by ${difference}, creating adjustment journal entries`);
+
+          // Find original transaction for batch
+          const { inventoryPurchaseService } = await import('../services/inventoryPurchaseService');
+          const originalTransaction = await inventoryPurchaseService.findOriginalTransactionForBatch(id, storeId);
+
+          if (originalTransaction) {
+            // Use existing price adjustment logic
+            await inventoryPurchaseService.createPriceAdjustmentTransaction(
+              batchItems[0]?.id || '', // Use first item ID as reference
+              oldBatchTotal,
+              newBatchTotal,
+              id,
+              originalTransaction.id,
+              batchCurrency,
+              storeId,
+              currentBranchId,
+              currentUserId
+            );
+          } else {
+            console.warn(`[UPDATE_INVENTORY_BATCH] No original transaction found for batch ${id}, skipping adjustment`);
+          }
+        }
+      }
+    });
+
     // Check if bill was just closed - clean up notifications
     if (updates.status && typeof updates.status === 'string' && updates.status.includes('[CLOSED]')) {
       if (storeId) {
@@ -5568,7 +5705,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           .where('batch_id')
           .equals(id)
           .toArray();
-        
+
         for (const item of inventoryItems) {
           receivedBillMonitoringService.markBillAsClosed(storeId, item.id).catch(err => {
             console.error('Error marking bill as closed in monitoring:', err);
@@ -5576,7 +5713,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-    
+
     // Store undo data with original values
     const undoChanges: any = {};
     for (const key of Object.keys(updates)) {
@@ -5584,13 +5721,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         undoChanges[key] = (originalBatch as any)[key];
       }
     }
-    
+
     pushUndo({
       type: 'update_inventory_batch',
       affected: [{ table: 'inventory_bills', id }],
       steps: [{ op: 'update', table: 'inventory_bills', id, changes: undoChanges }]
     });
-    
+
     await refreshData();
     await updateUnsyncedCount();
 
@@ -5600,11 +5737,121 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     debouncedSync();
   };
 
+  const deleteInventoryBatch = async (id: string): Promise<void> => {
+    if (!storeId) throw new Error('No store ID available');
+    if (!currentBranchId) throw new Error('No branch ID available');
+
+    // Get original batch for undo
+    const originalBatch = await getDB().inventory_bills.get(id);
+    if (!originalBatch) throw new Error('Inventory batch not found');
+
+    // Get all inventory items in the batch
+    const batchItems = await getDB().inventory_items
+      .where('batch_id')
+      .equals(id)
+      .toArray();
+
+    // Check if any items have sales or references
+    const hasReferences = batchItems.some(item => {
+      // Check if item has sales (would need to query bill_line_items)
+      // For now, we'll soft-delete if any items exist
+      return item.quantity > 0 || item.received_quantity > 0;
+    });
+
+    const currentUserId = userProfile?.id;
+    if (!currentUserId) {
+      throw new Error('User not authenticated');
+    }
+
+    // Wrap in atomic transaction
+    // Include chart_of_accounts since journalService.createJournalEntry accesses it
+    await getDB().transaction('rw', [
+      getDB().inventory_bills,
+      getDB().inventory_items,
+      getDB().journal_entries,
+      getDB().transactions,
+      getDB().entities,
+      getDB().chart_of_accounts
+    ], async () => {
+      // Reverse all journal entries for the batch
+      if (originalBatch.type !== 'commission') {
+        // Only reverse for cash/credit batches (commission batches don't have inventory cost journal entries)
+        console.log(`[DELETE_INVENTORY_BATCH] Reversing journal entries for batch ${id}`);
+
+        await receivedItemsJournalService.reverseJournalEntriesForBatch(
+          id,
+          `Batch deleted: ${id}`,
+          currentUserId,
+          storeId,
+          currentBranchId
+        );
+      }
+
+      // Delete or soft-delete all items in the batch
+      for (const item of batchItems) {
+        if (hasReferences) {
+          // Soft-delete items
+          await getDB().inventory_items.update(item.id, {
+            _deleted: true,
+            _synced: false
+          });
+        } else {
+          // Hard delete items
+          await getDB().inventory_items.delete(item.id);
+        }
+      }
+
+      // Delete or soft-delete the batch
+      if (hasReferences) {
+        await getDB().inventory_bills.update(id, {
+          _deleted: true,
+          _synced: false
+        });
+      } else {
+        await getDB().inventory_bills.delete(id);
+      }
+    });
+
+    // Store undo data
+    const affectedRecords: any[] = [
+      { table: 'inventory_bills', id },
+      ...batchItems.map(item => ({ table: 'inventory_items', id: item.id }))
+    ];
+
+    const undoSteps: any[] = batchItems.map(item => ({
+      op: hasReferences ? 'update' : 'add',
+      table: 'inventory_items',
+      id: item.id,
+      changes: hasReferences ? { _deleted: false, _synced: false } : item
+    }));
+
+    undoSteps.push({
+      op: hasReferences ? 'update' : 'add',
+      table: 'inventory_bills',
+      id,
+      changes: hasReferences ? { _deleted: false, _synced: false } : originalBatch
+    });
+
+    pushUndo({
+      type: 'delete_inventory_batch',
+      affected: affectedRecords,
+      steps: undoSteps
+    });
+
+    await refreshData();
+    await updateUnsyncedCount();
+
+    resetAutoSyncTimer();
+    debouncedSync();
+
+    console.log(`🗑️ Inventory batch ${id} deleted successfully`);
+  };
+
   const applyCommissionRateToBatch = async (batchId: string, commissionRate: number): Promise<void> => {
     // Get original data for undo
     const originalBatch = await getDB().inventory_bills.get(batchId);
     if (!originalBatch) throw new Error('Inventory batch not found');
-    
+
     // Update commission rate for the batch
     await getDB().inventory_bills
       .where('id')
@@ -5617,7 +5864,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       affected: [{ table: 'inventory_bills', id: batchId }],
       steps: [{ op: 'update', table: 'inventory_bills', id: batchId, changes: { commission_rate: originalBatch.commission_rate, _synced: false } }]
     });
-    
+
     await refreshData();
     await updateUnsyncedCount();
 
@@ -5635,9 +5882,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const fullResync = async (): Promise<SyncResult> => {
     // CRITICAL: Require BOTH storeId AND currentBranchId before full resync
     if (!storeId || !currentBranchId) {
-      console.log('⏭️  [FULL-RESYNC] Skipping full resync:', { 
-        hasStoreId: !!storeId, 
-        hasCurrentBranchId: !!currentBranchId 
+      console.log('⏭️  [FULL-RESYNC] Skipping full resync:', {
+        hasStoreId: !!storeId,
+        hasCurrentBranchId: !!currentBranchId
       });
       return { success: false, errors: ['No store ID or branch ID available'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 };
     }
@@ -5678,7 +5925,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         getDB().cleanupOrphanedRecords(storeId),
         getDB().cleanupInvalidInventoryItems()
       ]);
-      
+
       const cleaned = orphanedCleaned + invalidCleaned;
 
       if (cleaned > 0) {
@@ -5752,7 +5999,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Route to appropriate transactionService method based on type
       let result;
-      
+
       if (transactionData.type === 'sale') {
         result = await transactionService.createCashDrawerSale(
           transactionData.amount,
@@ -5770,13 +6017,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         if (!entityId) {
           throw new Error('Entity ID is required for payment transactions');
         }
-        
+
         // Determine entity type
         const entity = await getDB().entities.get(entityId);
         if (!entity) {
           throw new Error(`Entity not found: ${entityId}`);
         }
-        
+
         if (entity.entity_type === 'customer') {
           result = await transactionService.createCustomerPayment(
             entityId,
@@ -5841,8 +6088,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Notify UI of cash drawer update
       if (result.cashDrawerImpact) {
         cashDrawerUpdateService.notifyCashDrawerUpdate(
-          storeId, 
-          result.cashDrawerImpact.newBalance, 
+          storeId,
+          result.cashDrawerImpact.newBalance,
           result.transactionId || ''
         );
       }
@@ -5920,7 +6167,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (!currentBranchId) {
         return 0;
       }
-      
+
       const currentAccount = await getDB().cash_drawer_accounts
         .where('store_id')
         .equals(storeId)
@@ -5960,12 +6207,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   }): Promise<{ success: boolean; error?: string }> => {
     try {
       const { entityType, entityId, amount, currency, description, reference, storeId, createdBy, paymentDirection } = params;
-      
+
       // ✅ Validate branch access before processing payment
       if (!currentBranchId) {
         return { success: false, error: 'No branch selected. Please select a branch before processing payment.' };
       }
-      
+
       try {
         await BranchAccessValidationService.validateBranchAccess(
           createdBy,
@@ -5978,7 +6225,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           error: error instanceof Error ? error.message : 'Access denied to this branch'
         };
       }
-      
+
       // Validate amount
       const numAmount = parseFloat(amount);
       if (isNaN(numAmount) || numAmount <= 0) {
@@ -5986,7 +6233,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       }
 
       // Find entity (read-only operation outside transaction)
-      const entity = entityType === 'customer' 
+      const entity = entityType === 'customer'
         ? customers.find(c => c.id === entityId)
         : suppliers.find(s => s.id === entityId);
 
@@ -6015,11 +6262,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Calculate new balance - DIFFERENT LOGIC FOR CUSTOMERS VS SUPPLIERS
       let newBalance: number;
       let balanceField: string;
-      
+
       if (currency === 'LBP') {
         if (isCustomer) {
           // CUSTOMER BALANCE: positive = customer owes us, negative = we owe customer
-          newBalance = paymentDirection === 'receive' 
+          newBalance = paymentDirection === 'receive'
             ? currentLbBalance - numAmount  // Customer pays us → they owe us less
             : currentLbBalance + numAmount; // We pay customer → we owe them more (or they owe us less)
         } else {
@@ -6048,16 +6295,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Prepare transaction context with multilingual description
       const transactionDescription: MultilingualString = {
-        en: (paymentDirection === 'receive' 
-          ? enLocale.payments.paymentReceivedFrom 
+        en: (paymentDirection === 'receive'
+          ? enLocale.payments.paymentReceivedFrom
           : enLocale.payments.paymentSentTo)
           .replace('{{entityName}}', entity.name),
-        ar: (paymentDirection === 'receive' 
-          ? arLocale.payments.paymentReceivedFrom 
+        ar: (paymentDirection === 'receive'
+          ? arLocale.payments.paymentReceivedFrom
           : arLocale.payments.paymentSentTo)
           .replace('{{entityName}}', entity.name)
       };
-      
+
       const context = {
         userId: createdBy,
         storeId,
@@ -6069,7 +6316,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // ✅ ACCOUNTING RULE: Use transactionService for ALL financial operations
       // This ensures balance updates, journal entries, and cash drawer updates happen atomically
       let result;
-      
+
       if (isCustomer) {
         if (paymentDirection === 'receive') {
           // Customer paying us: Debit Cash (1100) / Credit AR (1200)
@@ -6195,9 +6442,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     } catch (error) {
       console.error('❌ [ATOMIC] Payment processing failed - all operations rolled back:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Payment processing failed - all operations rolled back' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Payment processing failed - all operations rolled back'
       };
     }
   };
@@ -6215,7 +6462,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   }): Promise<{ success: boolean; error?: string }> => {
     try {
       const { employeeId, amount, currency, description, reference, storeId, createdBy } = params;
-      
+
       // Validate amount
       const numAmount = parseFloat(amount);
       if (isNaN(numAmount) || numAmount <= 0) {
@@ -6253,7 +6500,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           .replace('{{description}}', descriptionPart)
           .replace('{{amount}}', amountPart),
       };
-      
+
       let cashDrawerResult: any;
 
       // Get cash drawer account (read-only operation outside transaction)
@@ -6267,16 +6514,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       const postedDate = getLocalDateString(new Date().toISOString());
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK - ALL OR NOTHING ⭐⭐⭐
-      await getDB().transaction('rw', 
+      await getDB().transaction('rw',
         [
-          getDB().users, 
-          getDB().transactions, 
+          getDB().users,
+          getDB().transactions,
           getDB().journal_entries,
           getDB().entities,
           getDB().chart_of_accounts,
-          getDB().cash_drawer_accounts, 
+          getDB().cash_drawer_accounts,
           getDB().cash_drawer_sessions
-        ], 
+        ],
         async () => {
           console.log('💳 [ATOMIC] Starting atomic employee payment transaction...');
 
@@ -6348,8 +6595,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
             amountUSD: currency === 'USD' ? numAmount : 0,
             amountLBP: currency === 'LBP' ? numAmount : 0,
             entityId: employeeId,
-            description: typeof transactionDescription === 'string' 
-              ? transactionDescription 
+            description: typeof transactionDescription === 'string'
+              ? transactionDescription
               : getTranslatedString(transactionDescription, 'en', 'en'),
             postedDate,
             createdBy: createdBy,
@@ -6378,9 +6625,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
     } catch (error) {
       console.error('❌ [ATOMIC] Employee payment processing failed - all operations rolled back:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Employee payment processing failed - all operations rolled back' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Employee payment processing failed - all operations rolled back'
       };
     }
   };
@@ -6422,7 +6669,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       if (currency === 'LBP') {
         // Give advance → increase advance balance
         // Deduct advance → decrease advance balance
-        newAdvanceBalance = type === 'give' 
+        newAdvanceBalance = type === 'give'
           ? currentAdvanceLBP + amount
           : currentAdvanceLBP - amount;
 
@@ -6495,7 +6742,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           store_id: storeId,
           branch_id: currentBranchId || '',
           type: type === 'give' ? 'expense' : 'income',
-          category: type === 'give' 
+          category: type === 'give'
             ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
             : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
           amount: amount,
@@ -6533,13 +6780,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
 
         const accountMapping = getAccountMapping(
-          type === 'give' 
+          type === 'give'
             ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
             : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED
         );
 
         const journalDesc = getJournalDescription(
-          type === 'give' 
+          type === 'give'
             ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
             : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
           supplierEntity.name,
@@ -6692,21 +6939,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Store previous balances for undo
       const { advance_lb_balance: previousAdvanceLBP, advance_usd_balance: previousAdvanceUSD } = getSupplierAdvanceBalances(supplier);
-      
+
       // Reverse the advance balance changes
       const { advance_lb_balance: currentAdvanceLBP, advance_usd_balance: currentAdvanceUSD } = getSupplierAdvanceBalances(supplier);
       let updateData: any = {};
 
       if (transaction.currency === 'LBP') {
         // Reverse: if it was "give", subtract from balance; if it was "deduct", add back
-        const newBalance = wasGiveAdvance 
+        const newBalance = wasGiveAdvance
           ? currentAdvanceLBP - transaction.amount
           : currentAdvanceLBP + transaction.amount;
-        
+
         if (newBalance < 0) {
           throw new Error('Cannot delete: would result in negative advance balance');
         }
-        
+
         updateData.supplier_data = {
           ...(supplier.supplier_data as any || {}),
           advance_lb_balance: newBalance
@@ -6717,11 +6964,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const newBalance = wasGiveAdvance
           ? currentAdvanceUSD - transaction.amount
           : currentAdvanceUSD + transaction.amount;
-        
+
         if (newBalance < 0) {
           throw new Error('Cannot delete: would result in negative advance balance');
         }
-        
+
         updateData.supplier_data = {
           ...(supplier.supplier_data as any || {}),
           advance_usd_balance: newBalance
@@ -6733,8 +6980,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       let amountInLBP = 0;
       let previousCashDrawerBalance: number | undefined = undefined;
       if (wasGiveAdvance) {
-        amountInLBP = transaction.currency === 'USD' 
-          ? transaction.amount * exchangeRate 
+        amountInLBP = transaction.currency === 'USD'
+          ? transaction.amount * exchangeRate
           : transaction.amount;
         previousCashDrawerBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
       }
@@ -6911,10 +7158,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       // Store previous balances for undo
       const { advance_lb_balance: oldPreviousAdvanceLBP, advance_usd_balance: oldPreviousAdvanceUSD } = getSupplierAdvanceBalances(oldSupplier);
       const newSupplierBalances = getSupplierAdvanceBalances(newSupplier);
-      const newPreviousAdvanceLBP = updates.supplierId !== oldTransaction.entity_id 
+      const newPreviousAdvanceLBP = updates.supplierId !== oldTransaction.entity_id
         ? newSupplierBalances.advance_lb_balance
         : oldPreviousAdvanceLBP;
-      const newPreviousAdvanceUSD = updates.supplierId !== oldTransaction.entity_id 
+      const newPreviousAdvanceUSD = updates.supplierId !== oldTransaction.entity_id
         ? newSupplierBalances.advance_usd_balance
         : oldPreviousAdvanceUSD;
 
@@ -6926,11 +7173,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const reversedBalance = oldWasGiveAdvance
           ? oldCurrentAdvanceLBP - oldTransaction.amount
           : oldCurrentAdvanceLBP + oldTransaction.amount;
-        
+
         if (reversedBalance < 0) {
           throw new Error('Cannot update: reversing old transaction would result in negative balance');
         }
-        
+
         oldReverseData.supplier_data = {
           ...(oldSupplier.supplier_data as any || {}),
           advance_lb_balance: reversedBalance
@@ -6939,11 +7186,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         const reversedBalance = oldWasGiveAdvance
           ? oldCurrentAdvanceUSD - oldTransaction.amount
           : oldCurrentAdvanceUSD + oldTransaction.amount;
-        
+
         if (reversedBalance < 0) {
           throw new Error('Cannot update: reversing old transaction would result in negative balance');
         }
-        
+
         oldReverseData.supplier_data = {
           ...(oldSupplier.supplier_data as any || {}),
           advance_usd_balance: reversedBalance
@@ -6954,7 +7201,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       let oldCashDrawerResult: any = null;
       let oldPreviousCashDrawerBalance: number | undefined = undefined;
       let oldCashDrawerAccountId: string | undefined = undefined;
-      
+
       if (oldWasGiveAdvance) {
         const oldAmountInLBP = oldTransaction.currency === 'USD'
           ? oldTransaction.amount * exchangeRate
@@ -6974,16 +7221,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           storeId: userProfile?.store_id || '',
           createdBy: userProfile?.id || '',
         } as any);
-        
+
         oldCashDrawerAccountId = oldCashDrawerResult.accountId;
       }
 
       // STEP 2: Apply new transaction effects
       // Get supplier balance after reversal (if supplier changed, use new supplier's current balance)
-      const supplierToUpdate = updates.supplierId === oldTransaction.entity_id 
+      const supplierToUpdate = updates.supplierId === oldTransaction.entity_id
         ? { ...oldSupplier, ...oldReverseData }
         : newSupplier;
-      
+
       const { advance_lb_balance: newCurrentAdvanceLBP, advance_usd_balance: newCurrentAdvanceUSD } = getSupplierAdvanceBalances(supplierToUpdate);
       let newUpdateData: any = {};
 
@@ -7027,10 +7274,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       let newCashDrawerResult: any = null;
       let newPreviousCashDrawerBalance: number | undefined = undefined;
       let newCashDrawerAccountId: string | undefined = undefined;
-      
+
       if (newIsGiveAdvance) {
         const newAmountInLBP = updates.currency === 'USD' ? updates.amount * exchangeRate : updates.amount;
-        
+
         // Cash drawer balance validation removed - negative balances are now allowed
         const currentBalance = await getCurrentCashDrawerBalance(userProfile?.store_id || '');
         newPreviousCashDrawerBalance = currentBalance;
@@ -7046,7 +7293,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           storeId: userProfile?.store_id || '',
           createdBy: userProfile?.id || '',
         } as any);
-        
+
         newCashDrawerAccountId = newCashDrawerResult.accountId;
       }
 
@@ -7083,7 +7330,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         { table: 'transactions', id: transactionId },
         { table: 'entities', id: oldTransaction.entity_id! }
       ];
-      
+
       const undoSteps: any[] = [
         {
           op: 'update',
@@ -7226,7 +7473,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       for (const item of action.affected || []) {
         // Map old table names to new ones
         const tableName = tableNameMap[item.table] || item.table;
-        
+
         // Check if table exists in database
         const db = getDB() as any;
         if (!db[tableName]) {
@@ -7237,7 +7484,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         }
 
         const record = await db[tableName].get(item.id);
-        
+
         if (!record) {
           localStorage.removeItem('last_undo_action');
           setCanUndo(false);
@@ -7262,7 +7509,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                 .where('transaction_id')
                 .equals(transactionId)
                 .toArray();
-              
+
               // Delete all journal entries for this transaction
               for (const entry of journalEntries) {
                 await getDB().journal_entries.delete(entry.id);
@@ -7444,12 +7691,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Notify all components about the cash drawer being closed
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
-          detail: { 
-            storeId, 
+        window.dispatchEvent(new CustomEvent('cash-drawer-updated', {
+          detail: {
+            storeId,
             event: 'closed',
-            sessionId: cashDrawer.id 
-          } 
+            sessionId: cashDrawer.id
+          }
         }));
       }
     } catch (error) {
@@ -7474,7 +7721,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const getRecommendedOpeningAmount = async () => {
     if (!storeId) return { amount: 0, source: 'default' as const };
-    
+
     try {
       // Get the last closed session
       const closedSessions = await getDB().cash_drawer_sessions
@@ -7482,20 +7729,20 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         .equals(storeId)
         .filter(sess => sess.status === 'closed')
         .toArray();
-      
+
       if (closedSessions.length > 0) {
         // Sort by closed_at date (most recent first)
         closedSessions.sort((a, b) => new Date(b.closed_at!).getTime() - new Date(a.closed_at!).getTime());
         const lastSession = closedSessions[0];
-        
+
         // Get the actual amount from last session (stored in LBP)
         let recommendedAmount = lastSession.actual_amount || 0;
-        
+
         // Convert to preferred currency if USD is selected
         if (currency === 'USD' && exchangeRate > 0) {
           recommendedAmount = recommendedAmount / exchangeRate;
         }
-        
+
         return {
           amount: recommendedAmount,
           source: 'previous_session' as const,
@@ -7503,7 +7750,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           previousEmployee: lastSession.closed_by
         };
       }
-      
+
       return { amount: 0, source: 'default' as const };
     } catch (error) {
       console.error('Error getting recommended opening amount:', error);
@@ -7846,7 +8093,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateReceiptSettings: async () => { },
         storeId: null,
         currentBranchId: null,
-        setCurrentBranchId: () => {},
+        setCurrentBranchId: () => { },
         branchSyncStatus: {
           isSyncing: false,
           isComplete: false,
@@ -7927,6 +8174,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         addTransaction: async () => { },
         addExpenseCategory: async () => { },
         updateInventoryBatch: async () => { },
+        deleteInventoryBatch: async () => { },
+        deleteInventoryBatch: async () => { },
         applyCommissionRateToBatch: async () => { },
         createBill: async () => '',
         updateBill: async () => { },
@@ -7962,9 +8211,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         getCurrentCashDrawerBalance: async () => 0,
         refreshCashDrawerBalance: async () => 0,
         processPayment: async (params: any) => ({ success: false, error: 'No store ID available' }),
-        processSupplierAdvance: async () => {},
-        updateSupplierAdvance: async () => {},
-        deleteSupplierAdvance: async () => {},
+        processSupplierAdvance: async () => { },
+        updateSupplierAdvance: async () => { },
+        deleteSupplierAdvance: async () => { },
         processEmployeePayment: async () => ({ success: false, error: 'No store ID available' }),
         // Notification management
         notifications: [],
@@ -7977,11 +8226,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
           show_in_app: true,
           max_notifications_in_history: 1000,
         },
-        createNotification: async () => {},
-        markAsRead: async () => {},
-        markAllAsRead: async () => {},
-        deleteNotification: async () => {},
-        updateNotificationPreferences: async () => {},
+        createNotification: async () => { },
+        markAsRead: async () => { },
+        markAllAsRead: async () => { },
+        deleteNotification: async () => { },
+        updateNotificationPreferences: async () => { },
       }}>
         {children}
       </OfflineDataContext.Provider>
@@ -7995,9 +8244,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currentBranchId,
       setCurrentBranchId,
       branchSyncStatus,
-        isDataReady,
-        isInitializing,
-        initializationError,
+      isDataReady,
+      isInitializing,
+      initializationError,
       products,
       branches,
       suppliers,
@@ -8012,7 +8261,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       billLineItems,
       billAuditLogs,
       missedProducts,
-      
+
       // NEW: Accounting foundation data
       journalEntries,
       entities,
@@ -8064,6 +8313,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addTransaction,
       addExpenseCategory,
       updateInventoryBatch,
+      deleteInventoryBatch,
       applyCommissionRateToBatch,
 
       // Bill management operations

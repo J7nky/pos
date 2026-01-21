@@ -33,6 +33,7 @@ export class JournalService {
       postedDate = getLocalDateString(new Date().toISOString()),
       createdBy = null,  // Default to null for system-generated entries
       branchId,  // Branch ID from transaction - required
+      skipVerification = false,  // Skip verification queries when called within a transaction
       // Legacy support
       amount,
       currency
@@ -161,32 +162,37 @@ export class JournalService {
     
     console.log(`[JOURNAL_SERVICE] ✅ Journal entries inserted to database`);
     
-    // Verify entries were actually saved by querying them back
-    const savedEntries = await getDB().journal_entries
-      .where('transaction_id')
-      .equals(transactionId)
-      .toArray();
-    
-    console.log(`[JOURNAL_SERVICE] Verification: Found ${savedEntries.length} journal entries for transaction ${transactionId}`, {
-      entries: savedEntries.map(e => ({
-        id: e.id,
-        account_code: e.account_code,
-        debit_usd: e.debit_usd,
-        credit_usd: e.credit_usd,
-        debit_lbp: e.debit_lbp,
-        credit_lbp: e.credit_lbp
-      }))
-    });
-    
-    if (savedEntries.length !== 2) {
-      console.error(`[JOURNAL_SERVICE] ❌ Expected 2 journal entries but found ${savedEntries.length}`);
-      throw new Error(`Journal entries not saved correctly. Expected 2 entries, found ${savedEntries.length}`);
-    }
-    
-    // Verify transaction balance after insertion
-    const balanceCheck = await this.verifyTransactionBalance(transactionId);
-    if (!balanceCheck) {
-      console.warn(`⚠️ Transaction ${transactionId} is not balanced after journal entry creation`);
+    // Skip verification queries when called within a transaction to prevent PrematureCommitError
+    if (!skipVerification) {
+      // Verify entries were actually saved by querying them back
+      const savedEntries = await getDB().journal_entries
+        .where('transaction_id')
+        .equals(transactionId)
+        .toArray();
+      
+      console.log(`[JOURNAL_SERVICE] Verification: Found ${savedEntries.length} journal entries for transaction ${transactionId}`, {
+        entries: savedEntries.map(e => ({
+          id: e.id,
+          account_code: e.account_code,
+          debit_usd: e.debit_usd,
+          credit_usd: e.credit_usd,
+          debit_lbp: e.debit_lbp,
+          credit_lbp: e.credit_lbp
+        }))
+      });
+      
+      if (savedEntries.length !== 2) {
+        console.error(`[JOURNAL_SERVICE] ❌ Expected 2 journal entries but found ${savedEntries.length}`);
+        throw new Error(`Journal entries not saved correctly. Expected 2 entries, found ${savedEntries.length}`);
+      }
+      
+      // Verify transaction balance after insertion
+      const balanceCheck = await this.verifyTransactionBalance(transactionId);
+      if (!balanceCheck) {
+        console.warn(`⚠️ Transaction ${transactionId} is not balanced after journal entry creation`);
+      }
+    } else {
+      console.log(`[JOURNAL_SERVICE] Skipping verification queries (called within transaction)`);
     }
     
     const amountStr = finalAmountUSD > 0 
