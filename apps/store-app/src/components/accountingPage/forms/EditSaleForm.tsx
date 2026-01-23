@@ -19,11 +19,8 @@ export default function EditSaleForm({
   onSave,
   onCancel,
 }: EditSaleFormProps) {
-  console.log('EditSaleForm props:', { originalSale, sale, customers: customers?.length });
-  
   // Safety check for undefined originalSale
   if (!originalSale || !sale) {
-    console.log('EditSaleForm: originalSale or sale is undefined', { originalSale, sale });
     return (
       <div className="p-4 text-center text-gray-500">
         <p>Loading sale data...</p>
@@ -168,9 +165,8 @@ export default function EditSaleForm({
                   quantity: parseFloat(e.target.value) || 0,
                 })
               }
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                errors.quantity ? "border-red-500 bg-red-50" : "border-gray-300"
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${errors.quantity ? "border-red-500 bg-red-50" : "border-gray-300"
+                }`}
               required
             />
             {errors.quantity && (
@@ -215,9 +211,8 @@ export default function EditSaleForm({
                   unitPrice: parseFloat(e.target.value) || 0,
                 })
               }
-              className={`w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                errors.unitPrice ? "border-red-500 bg-red-50" : "border-gray-300"
-              }`}
+              className={`w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${errors.unitPrice ? "border-red-500 bg-red-50" : "border-gray-300"
+                }`}
               required
             />
           </div>
@@ -248,15 +243,14 @@ export default function EditSaleForm({
                 key={value}
                 type="button"
                 onClick={() => handlePaymentMethodChange(value)}
-                className={`p-3 rounded-lg border-2 transition-all ${
-                  formData.paymentMethod === value
+                className={`p-3 rounded-lg border-2 transition-all ${formData.paymentMethod === value
                     ? value === "cash"
                       ? "border-green-500 bg-green-50 text-green-700"
                       : value === "card"
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-amber-500 bg-amber-50 text-amber-700"
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-amber-500 bg-amber-50 text-amber-700"
                     : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                }`}
+                  }`}
               >
                 <Icon className="w-5 h-5 mx-auto mb-1" />
                 <span className="text-sm font-medium">{label}</span>
@@ -283,11 +277,10 @@ export default function EditSaleForm({
                   receivedValue: parseFloat(e.target.value) || 0,
                 })
               }
-              className={`w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                errors.receivedValue
+              className={`w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${errors.receivedValue
                   ? "border-red-500 bg-red-50"
                   : "border-gray-300"
-              }`}
+                }`}
               placeholder="Amount received"
             />
           </div>
@@ -298,13 +291,12 @@ export default function EditSaleForm({
 
         {/* Customer Section */}
         <div
-          className={`p-4 rounded-lg border-2 ${
-            formData.customerId
+          className={`p-4 rounded-lg border-2 ${formData.customerId
               ? "border-green-200 bg-green-50"
               : requiresCustomer
-              ? "border-amber-200 bg-amber-50"
-              : "border-gray-200 bg-gray-50"
-          }`}
+                ? "border-amber-200 bg-amber-50"
+                : "border-gray-200 bg-gray-50"
+            }`}
         >
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
@@ -392,11 +384,10 @@ export default function EditSaleForm({
         <button
           type="submit"
           disabled={!hasChanges()}
-          className={`px-6 py-2 rounded-lg transition-colors font-medium flex items-center ${
-            hasChanges()
+          className={`px-6 py-2 rounded-lg transition-colors font-medium flex items-center ${hasChanges()
               ? "bg-blue-600 text-white hover:bg-blue-700"
               : "bg-gray-300 text-gray-500 cursor-not-allowed"
-          }`}
+            }`}
         >
           <CheckCircle className="w-4 h-4 mr-2" />
           Save Changes

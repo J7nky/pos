@@ -23,11 +23,8 @@ export default function EditSaleModal({
 }: EditSaleModalProps) {
   // Filter for customers only
   const customers = entities.filter((e: any) => e.entity_type === 'customer' && !e._deleted);
-  
-  console.log('EditSaleModal props:', { isOpen, originalSale, sale, customers: customers?.length });
-  
+
   if (!sale) {
-    console.log('EditSaleModal: sale is null/undefined');
     return null;
   }
 

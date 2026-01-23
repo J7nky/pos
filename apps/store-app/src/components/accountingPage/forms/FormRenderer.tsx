@@ -1,6 +1,5 @@
 import React from "react";
-import { ReceiveForm } from "./ReceiveForm";
-import { PayForm } from "./PayForm";
+import { ReceiveForm, PayForm } from "./EntityPaymentForm";
 import { ExpenseForm } from "./ExpenseForm";
 
 interface FormRendererProps {
