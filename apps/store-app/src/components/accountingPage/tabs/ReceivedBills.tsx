@@ -10,7 +10,8 @@ import {
   X,
   Edit
 } from 'lucide-react';
-import { Bill } from '../../../lib/db';
+import { Bill } from '../../../types';
+import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import ReceiveFormModal from '../../inventory/ReceiveFormModal';
 import { useI18n } from '../../../i18n';
 import { Pagination } from '../../../components/common/Pagination';
@@ -18,7 +19,7 @@ import { useModal } from '../../../hooks/useModal';
 import { ReceivedBillDetailsModal } from './receivedBills/ReceivedBillDetailsModal';
 import { ReceivedBillSalesLogsModal } from './receivedBills/ReceivedBillSalesLogsModal';
 import { ReceivedBill } from './receivedBills/types';
-import { getLocalDateString } from '../../../utils/dateUtils';
+import { getLocalDateString, getTodayLocalDate } from '../../../utils/dateUtils';
 import { normalizeNameForComparison } from '../../../utils/nameNormalization';
 
 type ReceivedBillsProps = {
@@ -65,6 +66,7 @@ export default function ReceivedBills({
   autoExpandGroupId,
   preferredCurrency
 }: ReceivedBillsProps) {
+  const { getInventoryBatch } = useOfflineData();
   // Filter entities by type
   const suppliers = useMemo(() => 
     entities.filter((e: any) => e.entity_type === 'supplier' && !e._deleted),
@@ -162,10 +164,8 @@ export default function ReceivedBills({
       return;
     }
 
-    // Get the actual batch status from the database
-    // Access db instance to get batch status
-    const { getDB } = await import('../../../lib/db');
-    const batch = await getDB().inventory_bills.get(batchId);
+    // Get the actual batch status from context
+    const batch = await getInventoryBatch(batchId);
     console.log('[ReceivedBills] initializeBatchEdit - Batch from DB:', { batch, batchId });
     const currentBatchStatus = batch?.status || 'Created';
     const currentSupplierId = batch?.supplier_id || first?.supplierId || '';
@@ -716,7 +716,7 @@ export default function ReceivedBills({
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
-      link.setAttribute('download', `received-bills-${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute('download', `received-bills-${getTodayLocalDate()}.csv`);
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();

@@ -1,4 +1,5 @@
 import { getDB, createId } from '../lib/db';
+import { getLocalDateString } from '../utils/dateUtils';
 import { notificationService } from './notificationService';
 import { Reminder, ReminderType, ReminderStatus, NotificationType, CreateReminderInput } from '../types';
 
@@ -306,7 +307,7 @@ export class ReminderMonitoringService {
    */
   private async updateOverdueStatuses(storeId: string, today: Date): Promise<void> {
     try {
-      const todayStr = today.toISOString().split('T')[0];
+      const todayStr = getLocalDateString(today.toISOString());
 
       // Find all pending reminders past due date
       const overdueReminders = await getDB().reminders
@@ -474,11 +475,11 @@ export class ReminderMonitoringService {
   }> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = getLocalDateString(today.toISOString());
 
     const weekFromNow = new Date(today);
     weekFromNow.setDate(weekFromNow.getDate() + 7);
-    const weekStr = weekFromNow.toISOString().split('T')[0];
+    const weekStr = getLocalDateString(weekFromNow.toISOString());
 
     const allReminders = await getDB().reminders
       .where('store_id')

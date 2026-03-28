@@ -1,0 +1,73 @@
+{
+  "extras": {
+    "eventOutcome": "handled"
+  },
+  "localSnapshot": {
+    "branches": [
+      {
+        "_synced": true,
+        "address": null,
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "00000000-0000-4000-8000-000000000002",
+        "is_active": true,
+        "name": "Parity Branch",
+        "phone": null,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "products": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "category": "c",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "00000000-0000-4000-8000-000000000003",
+        "image": "",
+        "is_global": 0,
+        "name": "Event Product",
+        "price": 1,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "stores": [
+      {
+        "_synced": true,
+        "address": "",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "email": "parity@test.local",
+        "exchange_rate": 1,
+        "id": "00000000-0000-4000-8000-000000000001",
+        "low_stock_alert": false,
+        "name": "Parity Store",
+        "phone": "",
+        "preferred_commission_rate": 0,
+        "preferred_currency": "USD",
+        "preferred_language": "en",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ]
+  },
+  "scenarioId": "event_driven_reconciliation",
+  "serverSnapshot": {
+    "products": [
+      {
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "category": "c",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "00000000-0000-4000-8000-000000000003",
+        "image": "",
+        "is_global": false,
+        "name": "Event Product",
+        "price": 1,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ]
+  },
+  "syncMetadata": [],
+  "syncResult": null
+}

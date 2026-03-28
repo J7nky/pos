@@ -1,0 +1,44 @@
+{
+  "extras": {
+    "dualPath": {
+      "invariant": "localSnapshot.products and serverSnapshot.products match after sync download vs event fetch"
+    }
+  },
+  "localSnapshot": {
+    "products": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "category": "c",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "00000000-0000-4000-8000-000000000003",
+        "image": "",
+        "is_global": 0,
+        "name": "Chaos Product",
+        "price": 5,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ]
+  },
+  "scenarioId": "chaos_dropped_then_recovered",
+  "serverSnapshot": {
+    "products": [
+      {
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "category": "c",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "00000000-0000-4000-8000-000000000003",
+        "image": "",
+        "is_global": false,
+        "name": "Chaos Product",
+        "price": 5,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ]
+  },
+  "syncMetadata": [],
+  "syncResult": null
+}

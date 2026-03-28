@@ -1,4 +1,5 @@
 import { OfflineIndicator } from '../components/OfflineIndicator';
+import { ErrorToastContainer } from '../components/common/ErrorToastContainer';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import KeyboardShortcutsHelp from '../components/common/KeyboardShortcutsHelp';
 import ErrorBoundary from '../components/common/ErrorBoundary';
@@ -41,7 +42,7 @@ export default function Layout() {
     );
   }
 
-  const { isOnline, getSyncStatus } = useOfflineData();
+  const { isOnline, getSyncStatus, getUserById, getRolePermissionsByRole } = useOfflineData();
   const { unsyncedCount, isSyncing } = getSyncStatus();
   const prevIsSyncingRef = useRef(isSyncing);
   const prevIsOnlineRef = useRef(isOnline);
@@ -87,17 +88,12 @@ export default function Layout() {
       
       if (!hasAnyPermission) {
         // Check if user exists in IndexedDB - if yes, we should have permissions
-        const { getDB } = await import('../lib/db');
-        const user = await getDB().users.get(userProfile.id);
+        const user = await getUserById(userProfile.id);
         
         if (user) {
           // User exists but no permissions - this shouldn't happen, try reloading
           console.log('⚠️ User exists but no permissions found, checking role permissions...');
-          const { getDB } = await import('../lib/db');
-          const rolePerms = await getDB().role_permissions
-            .where('role')
-            .equals(user.role)
-            .toArray();
+          const rolePerms = await getRolePermissionsByRole(user.role);
           
           if (rolePerms.length > 0) {
             // Role permissions exist, force reload
@@ -139,8 +135,7 @@ export default function Layout() {
       if (!userProfile) return;
       
       try {
-        const { getDB } = await import('../lib/db');
-        const user = await getDB().users.get(userProfile.id);
+        const user = await getUserById(userProfile.id);
         
         if (user) {
           // User exists, check if we have proper permissions
@@ -199,8 +194,7 @@ export default function Layout() {
       checkCount++;
       
       try {
-        const { getDB } = await import('../lib/db');
-        const user = await getDB().users.get(userProfile.id);
+        const user = await getUserById(userProfile.id);
         
         // If user exists, check if we need to reload permissions
         if (user && !hasReloaded) {
@@ -215,10 +209,7 @@ export default function Layout() {
           
           if (!hasAnyPermission) {
             // Still no permissions, check if role permissions exist
-            const rolePerms = await getDB().role_permissions
-              .where('role')
-              .equals(user.role)
-              .toArray();
+            const rolePerms = await getRolePermissionsByRole(user.role);
             
             if (rolePerms.length > 0) {
               console.log('🔄 Role permissions exist but not loaded, forcing reload...');
@@ -395,6 +386,7 @@ export default function Layout() {
       </div>
       <OfflineIndicator />
       <UndoToastManager />
+      <ErrorToastContainer />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { useCurrency } from '../hooks/useCurrency';
+import { useErrorHandler } from '../hooks/useErrorHandler';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useProductMultilingual } from '../hooks/useMultilingual';
 import { useEntityBalances } from '../hooks/useEntityBalances';
@@ -28,15 +29,17 @@ import DeleteSaleModal from '../components/accountingPage/modals/DeleteSaleModal
 import ActionTabsBar from '../components/accountingPage/tabs/ActionTabsBar';
 import { CashDrawerBalanceReport } from '../components/CashDrawerBalanceReport';
 import { CurrentCashDrawerStatus } from '../components/CurrentCashDrawerStatus';
+import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 export default function Accounting() {
   const { t } = useI18n();
+  const { handleError } = useErrorHandler();
   const { getProductName } = useProductMultilingual();
   let raw;
   try {
     raw = useOfflineData();
   } catch (error) {
-    console.error('Error loading offline data:', error);
+    handleError(error);
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -95,7 +98,7 @@ export default function Accounting() {
     userProfile = auth.userProfile;
     storeId = userProfile?.store_id;
   } catch (error) {
-    console.error('Error loading auth data:', error);
+    handleError(error);
     userProfile = null;
     storeId = null;
   }
@@ -108,7 +111,7 @@ export default function Accounting() {
     formatCurrencyWithSymbol = currencyHook.formatCurrencyWithSymbol;
     getConvertedAmount = currencyHook.getConvertedAmount;
   } catch (error) {
-    console.error('Error loading currency data:', error);
+    handleError(error);
     // Provide fallback values
     currency = 'USD';
     formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
@@ -206,7 +209,7 @@ export default function Accounting() {
       // Find the inventory item related to this transaction
       const transaction = transactions.find(t => t.id === highlightTransactionId);
       if (transaction) {
-        const transactionDate = new Date(transaction.createdAt || transaction.created_at || '').toISOString().split('T')[0];
+        const transactionDate = getLocalDateString(new Date(transaction.createdAt || transaction.created_at || '').toISOString());
         const transactionTime = new Date(transaction.createdAt || transaction.created_at || '').getTime();
         
         // Strategy 1: Match by metadata (if batch_id or inventory_bill_id is stored)
@@ -225,7 +228,7 @@ export default function Accounting() {
             if (!item.batch_id) return false;
             const batch = inventoryBills.find(b => b.id === item.batch_id);
             if (!batch) return false;
-            const batchDate = new Date(batch.received_at || batch.created_at || '').toISOString().split('T')[0];
+            const batchDate = getLocalDateString(new Date(batch.received_at || batch.created_at || '').toISOString());
             return batch.supplier_id === transaction.supplier_id && batchDate === transactionDate;
           });
         }
@@ -242,7 +245,7 @@ export default function Accounting() {
             const batchTime = new Date(batch.received_at || batch.created_at || 0).getTime();
             const timeDiff = Math.abs(transactionTime - batchTime);
             // Match if within 1 hour and same date
-            const batchDate = new Date(batch.received_at || batch.created_at || '').toISOString().split('T')[0];
+            const batchDate = getLocalDateString(new Date(batch.received_at || batch.created_at || '').toISOString());
             return batchDate === transactionDate && timeDiff < oneHourMs;
           });
         }
@@ -253,7 +256,7 @@ export default function Accounting() {
             if (!item.batch_id) return false;
             const batch = inventoryBills.find(b => b.id === item.batch_id);
             if (!batch) return false;
-            const batchDate = new Date(batch.received_at || batch.created_at || '').toISOString().split('T')[0];
+            const batchDate = getLocalDateString(new Date(batch.received_at || batch.created_at || '').toISOString());
             return batchDate === transactionDate;
           });
         }
@@ -338,7 +341,7 @@ export default function Accounting() {
           setCurrentCashDrawerSession(status);
         }
       } catch (e) {
-        console.error('Error fetching current cash drawer session:', e);
+        handleError(e);
         setCurrentCashDrawerSession(null);
       }
     };
@@ -476,7 +479,7 @@ export default function Accounting() {
     };
   }, [transactions, dashboardPeriod, getConvertedAmount]);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayLocalDate();
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
@@ -639,11 +642,10 @@ export default function Accounting() {
         unit_price: sale.unit_price || 0
       }));
 
-      // Load non-priced inventory items (from credit/cash bills only)
-      const { getDB } = await import('../lib/db');
-      const allInventoryItems = await getDB().inventory_items.toArray();
-      const allBatches = await getDB().inventory_bills.toArray();
-      const batchMap = new Map(allBatches.map(b => [b.id, b]));
+      // Load non-priced inventory items (from credit/cash bills only) — use context data
+      const allInventoryItems = inventory || [];
+      const allBatches = inventoryBills || [];
+      const batchMap = new Map(allBatches.map((b: any) => [b.id, b]));
       
       const nonPricedInventory = allInventoryItems
         .filter(item => {
@@ -742,7 +744,7 @@ export default function Accounting() {
         showToast(t('accounting.itemUpdatedSuccessfully'), 'success');
       }
     } catch (error) {
-      console.error('Error updating non-priced item:', error);
+      handleError(error);
       showToast(t('accounting.errorUpdatingItem'), 'error');
     }
   };
@@ -788,7 +790,7 @@ export default function Accounting() {
 
       showToast(t('accounting.itemMarkedAsPriced'), 'success');
     } catch (error) {
-      console.error('Error marking item as priced:', error);
+      handleError(error);
       showToast(t('accounting.errorMarkingAsPriced'), 'error');
     }
   };
@@ -842,7 +844,7 @@ export default function Accounting() {
       setShowBulkActions(false);
       showToast(t('accounting.itemsMarkedAsPriced', { count: validItems.length }), 'success');
     }} catch (error) {
-      console.error('Error bulk marking items as priced:', error);
+      handleError(error);
       showToast(t('accounting.errorMarkingItemsAsPriced'), 'error');
     }
   };
@@ -859,7 +861,7 @@ export default function Accounting() {
         await deleteSale(item.id);
         showToast(t('accounting.itemDeletedSuccessfully'), 'success');
       } catch (error) {
-        console.error('Error deleting non-priced item:', error);
+        handleError(error);
         showToast(t('accounting.errorDeletingItem'), 'error');
       }
     }
@@ -886,7 +888,7 @@ export default function Accounting() {
         setShowBulkActions(false);
         showToast(t('accounting.itemsDeletedSuccessfully'), 'success');
       } catch (error) {
-        console.error('Error bulk deleting items:', error);
+        handleError(error);
         showToast(t('accounting.errorDeletingItems'), 'error');
       }
     }
@@ -912,7 +914,7 @@ export default function Accounting() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `non-priced-items-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `non-priced-items-${getTodayLocalDate()}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
   };
@@ -1029,8 +1031,7 @@ export default function Accounting() {
         throw new Error('Cannot close bill: Missing batch identifier');
       }
 
-      const { getDB } = await import('../lib/db');
-      const batch = await getDB().inventory_bills.get(targetBatchId);
+      const batch = await raw.getInventoryBatch(targetBatchId);
       if (!batch) {
         console.warn('⚠️ Batch not found for ID:', targetBatchId);
         throw new Error('Cannot close bill: Batch not found');
@@ -1041,10 +1042,7 @@ export default function Accounting() {
       
       // Only check for cash/credit bills (commission bills don't need prices)
       if (billType === 'cash' || billType === 'credit') {
-        const inventoryItems = await getDB().inventory_items
-          .where('batch_id')
-          .equals(targetBatchId)
-          .toArray();
+        const inventoryItems = await raw.getInventoryItemsForBatch(targetBatchId);
         
         console.log(`🔍 Found ${inventoryItems.length} inventory items for batch ${targetBatchId}`);
         
@@ -1059,16 +1057,13 @@ export default function Accounting() {
         });
         
         if (nonPricedItems.length > 0) {
-          console.error('cannotCloseBillWithNonPricedItems');
+          handleError(new Error('cannotCloseBillWithNonPricedItems'));
           
-          // Get product names for error message
+          // Get product names for error message (use in-memory products from context)
           const productIds = [...new Set(nonPricedItems.map(item => item.product_id))];
-          const products = await getDB().products
-            .where('id')
-            .anyOf(productIds)
-            .toArray();
-          
-          const productMap = new Map(products.map(p => [p.id, p]));
+          const productMap = new Map(
+            (products || []).filter((p: any) => productIds.includes(p.id)).map((p: any) => [p.id, p])
+          );
           const productNames = nonPricedItems
             .map(item => {
               const product = productMap.get(item.product_id);
@@ -1151,9 +1146,8 @@ export default function Accounting() {
         if (!targetBatchId) {
           console.warn('No batch identifier available when attempting to close bill:', bill);
         } else {
-          // Get batch and database reference
-          const { getDB } = await import('../lib/db');
-          const batch = await getDB().inventory_bills.get(targetBatchId);
+          // Get batch from context
+          const batch = await raw.getInventoryBatch(targetBatchId);
           const billType = batch?.type || bill.type || (bill as any).batchType;
           
           // Calculate P&L before closing
@@ -1162,7 +1156,7 @@ export default function Accounting() {
           try {
             plData = await profitLossService.calculateBillPL(targetBatchId);
           } catch (error) {
-            console.error(`❌ Failed to calculate P&L for bill ${targetBatchId}:`, error);
+            handleError(error);
             // For commission bills, we can still proceed with manually calculated values
             if (billType === 'commission') {
               console.warn(`⚠️ Falling back to manual P&L calculation for commission bill ${targetBatchId}`);
@@ -1191,18 +1185,11 @@ export default function Accounting() {
             
             console.log(`📊 Commission bill ${targetBatchId}: commission_rate from batch = ${commissionRate}, effective rate = ${effectiveCommissionRate}%`);
             
-            // Calculate total sales from bill_line_items
-            const inventoryItems = await getDB().inventory_items
-              .where('batch_id')
-              .equals(targetBatchId)
-              .toArray();
-            
-            const inventoryItemIds = inventoryItems.map(item => item.id);
+            // Calculate total sales from bill_line_items (via context)
+            const inventoryItems = await raw.getInventoryItemsForBatch(targetBatchId);
+            const inventoryItemIds = inventoryItems.map((item: any) => item.id);
             const billLineItems = inventoryItemIds.length > 0
-              ? await getDB().bill_line_items
-                  .where('inventory_item_id')
-                  .anyOf(inventoryItemIds)
-                  .toArray()
+              ? await raw.getBillLineItemsByInventoryItemIds(inventoryItemIds)
               : [];
             
             const totalSales = billLineItems.reduce((sum, item) => sum + (item.line_total || 0), 0);
@@ -1216,10 +1203,8 @@ export default function Accounting() {
             plData.revenue = commissionRevenue;
             
             // Calculate revenue breakdown by payment method
-            const bills = await getDB().bills
-              .where('id')
-              .anyOf([...new Set(billLineItems.map(item => item.bill_id))])
-              .toArray();
+            const billIds = [...new Set(billLineItems.map((item: any) => item.bill_id))];
+            const bills = await raw.getBillsByIds(billIds);
             const billMap = new Map(bills.map(b => [b.id, b]));
             
             let revenueCash = 0;
@@ -1279,7 +1264,7 @@ export default function Accounting() {
 
       showToast(t('accounting.billClosedSuccessfully'), 'success');
     } catch (error) {
-      console.error('Error closing received bill:', error);
+      handleError(error);
       // Preserve the original error message if it's a validation error
       if (error instanceof Error && error.message.includes('Cannot close bill')) {
         throw error; // Re-throw the original validation error
@@ -1297,7 +1282,7 @@ export default function Accounting() {
       console.log('[Accounting] handleUpdateBatch - updateInventoryBatch completed successfully');
       showToast(t('accounting.batchUpdatedSuccessfully'), 'success');
     } catch (error) {
-      console.error('[Accounting] handleUpdateBatch - Error:', error);
+      handleError(error);
       showToast(t('accounting.errorUpdatingBatch'), 'error');
     }
   };
@@ -1329,7 +1314,7 @@ export default function Accounting() {
       setShowEditSaleModal(false);
       setEditingSale(null);
     } catch (error) {
-      console.error('Error updating sale:', error);
+      handleError(error);
       showToast(t('accounting.errorUpdatingSale'), 'error');
     }
   };
@@ -1348,7 +1333,7 @@ export default function Accounting() {
       setShowDeleteSaleModal(false);
       setSaleToDelete(null);
     } catch (error) {
-      console.error('Error deleting sale:', error);
+      handleError(error);
       showToast(t('accounting.errorDeletingSale'), 'error');
     }
   };

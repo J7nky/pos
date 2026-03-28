@@ -11,6 +11,7 @@ import {
 import SalesOverviewCard from '../components/cards/SalesOverviewCard';
 import { MissedProductsHistory } from '../components/MissedProductsHistory';
 import ProfitLossReport from '../components/reports/ProfitLossReport';
+import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 export default function Reports() {
   const raw = useOfflineData();
@@ -36,14 +37,14 @@ export default function Reports() {
   const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
   const lowStockThreshold = raw.lowStockThreshold;
   const [dateRange, setDateRange] = useState({
-    startDate: new Date().toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0]
+    startDate: getTodayLocalDate(),
+    endDate: getTodayLocalDate(),
   });
   const [reportType, setReportType] = useState<'sales' | 'inventory' | 'customers' | 'profit' | 'missed-products'>('sales');
 
   const filteredSales = sales.filter(sale => {
     if (!sale.createdAt) return false;
-    const saleDate = sale.createdAt.split('T')[0];
+    const saleDate = getLocalDateString(sale.createdAt);
     return saleDate >= dateRange.startDate && saleDate <= dateRange.endDate;
   });
 

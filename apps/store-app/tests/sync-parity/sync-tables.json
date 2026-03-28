@@ -1,0 +1,22 @@
+[
+  "stores",
+  "branches",
+  "products",
+  "users",
+  "cash_drawer_accounts",
+  "chart_of_accounts",
+  "entities",
+  "inventory_bills",
+  "inventory_items",
+  "transactions",
+  "bills",
+  "journal_entries",
+  "balance_snapshots",
+  "bill_line_items",
+  "bill_audit_logs",
+  "cash_drawer_sessions",
+  "missed_products",
+  "reminders",
+  "role_permissions",
+  "user_permissions"
+]

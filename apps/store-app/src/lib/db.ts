@@ -34,7 +34,7 @@ import {
   Entity, 
   ChartOfAccounts 
 } from '../types/accounting';
-import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
+import { calculateBothCurrencies } from '../utils/balanceCalculation';
 
 
 // Base interface for all entities with sync support
@@ -528,6 +528,7 @@ class POSDatabase extends Dexie {
 
       // Find open sessions, robust to whitespace/case issues
       const open = all.filter(sess => String(sess.status).trim().toLowerCase() === 'open');
+      open.sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime());
       return open[0] || null;
     });
   }
@@ -746,9 +747,47 @@ class POSDatabase extends Dexie {
         };
       }
 
-      // Calculate balance from journal entries (single source of truth)
+      // Session-scoped balance (same formula as cashDrawerUpdateService.getCurrentCashDrawerBalances; inlined to avoid db↔service circular import)
       const currency = (account as any)?.currency || 'USD';
-      const currentBalance = await calculateCashDrawerBalance(storeId, branchId, currency);
+      const accountCurrency = currency;
+      const openedAt = new Date(currentSession.opened_at);
+      const closedAt = currentSession.closed_at ? new Date(currentSession.closed_at) : new Date();
+
+      let sessionEntries;
+      try {
+        sessionEntries = await this.journal_entries
+          .where('[store_id+account_code]')
+          .equals([storeId, '1100'])
+          .and(e => {
+            if (e.is_posted !== true || e.branch_id !== branchId) {
+              return false;
+            }
+            const entryDate = new Date(e.created_at);
+            return entryDate >= openedAt && entryDate <= closedAt;
+          })
+          .toArray();
+      } catch (error) {
+        console.warn('Compound index [store_id+account_code] not available, using fallback:', error);
+        sessionEntries = await this.journal_entries
+          .where('[store_id+branch_id]')
+          .equals([storeId, branchId])
+          .and(e => {
+            if (e.account_code !== '1100' || e.is_posted !== true) {
+              return false;
+            }
+            const entryDate = new Date(e.created_at);
+            return entryDate >= openedAt && entryDate <= closedAt;
+          })
+          .toArray();
+      }
+
+      const netChange = calculateBothCurrencies(sessionEntries);
+      const openingAmountSession = currentSession.opening_amount || 0;
+      const balances = {
+        USD: netChange.USD + (accountCurrency === 'USD' ? openingAmountSession : 0),
+        LBP: netChange.LBP + (accountCurrency === 'LBP' ? openingAmountSession : 0),
+      };
+      const currentBalance = currency === 'LBP' ? balances.LBP : balances.USD;
 
       return {
         status: 'active',
@@ -1648,6 +1687,20 @@ export function getDB(): POSDatabase {
     dbInstance = new POSDatabase();
   }
   return dbInstance;
+}
+
+/**
+ * Clears all Dexie tables without deleting the database. Used only by sync parity baseline tests
+ * (see apps/store-app/tests/sync-parity). Must not call `db.delete()` — `syncService` holds a
+ * module-scope reference from the first `getDB()`; deleting the DB would close it and break sync.
+ */
+export async function resetDbSingletonForTests(): Promise<void> {
+  const db = getDB();
+  const names = db.tables.map((t) => t.name);
+  if (names.length === 0) return;
+  await db.transaction('rw', names, async () => {
+    await Promise.all(db.tables.map((t) => t.clear()));
+  });
 }
 
 // Re-export Bill type for convenience

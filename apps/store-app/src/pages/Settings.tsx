@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
+import { useErrorHandler } from '../hooks/useErrorHandler';
 import BranchSelectionScreen from '../components/BranchSelectionScreen';
 import packageJson from '../../package.json';
 import { 
@@ -41,7 +42,7 @@ export default function Settings() {
             setAppVersion(result.version);
           }
         } catch (error) {
-          console.error('Failed to get app version from Electron:', error);
+          handleError(error);
           // Keep package.json version as fallback
         }
       }
@@ -71,6 +72,7 @@ export default function Settings() {
   const updateExchangeRate = offlineData?.updateExchangeRate ?? (() => {});
   
   const { t, language, setLanguage } = useI18n();
+  const { handleError } = useErrorHandler();
 
   const [tempThreshold, setTempThreshold] = useState(lowStockThreshold?.toString() || '10');
   const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate?.toString() || '10');
@@ -126,7 +128,7 @@ export default function Settings() {
         setSaveError(null);
         setTimeout(() => setShowSaveMessage(false), 2000);
       } catch (error) {
-        console.error('Settings: Error saving commission rate:', error);
+        handleError(error);
         setSaveError('Failed to save commission rate to database');
         setTimeout(() => setSaveError(null), 3000);
       }
@@ -140,7 +142,7 @@ export default function Settings() {
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
     } catch (error) {
-      console.error('Settings: Error saving currency:', error);
+      handleError(error);
       setSaveError('Failed to save currency preference to database');
       setTimeout(() => setSaveError(null), 3000);
       // Fallback to local storage - update the temp state to reflect the change
@@ -164,7 +166,7 @@ export default function Settings() {
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
     } catch (error) {
-      console.error('Settings: Error saving exchange rate:', error);
+      handleError(error);
       setSaveError('Failed to save exchange rate to database');
       setTimeout(() => setSaveError(null), 3000);
     }
@@ -177,7 +179,7 @@ export default function Settings() {
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
     } catch (error) {
-      console.error('Settings: Error toggling low stock alerts:', error);
+      handleError(error);
       setSaveError('Failed to save low stock alert setting to database');
       setTimeout(() => setSaveError(null), 3000);
     }
@@ -620,7 +622,6 @@ function ReceiptSettings() {
     
     if (!offlineData?.updateReceiptSettings) {
       const errorMsg = 'Update function not available. Please refresh the page.';
-      console.error('❌', errorMsg);
       setSaveError(errorMsg);
       setTimeout(() => setSaveError(null), 3000);
       return;
@@ -634,7 +635,7 @@ function ReceiptSettings() {
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
     } catch (error) {
-      console.error('❌ Error saving receipt settings:', error);
+      handleError(error);
       const errorMsg = error instanceof Error ? error.message : 'Failed to save receipt settings';
       setSaveError(errorMsg);
       setTimeout(() => setSaveError(null), 3000);
@@ -914,8 +915,7 @@ function BranchLogoUpload() {
           }
           
           // Load branch data to check logo source
-          const { getDB } = await import('../lib/db');
-          const branch = await getDB().branches.get(currentBranchId);
+          const branch = await offlineData.getBranchById(currentBranchId);
           
           if (branch) {
             // Check if branch has logo (can be custom base64 or global logo URL)
@@ -943,7 +943,7 @@ function BranchLogoUpload() {
           }
         }
       } catch (error) {
-        console.error('Error loading logos:', error);
+        handleError(error);
       }
     };
 
@@ -1005,14 +1005,12 @@ function BranchLogoUpload() {
     
     if (!currentBranchId) {
       const errorMsg = 'Branch not available. Please select a branch.';
-      console.error('❌', errorMsg);
       setError(errorMsg);
       return;
     }
     
     if (!offlineData?.updateBranch) {
       const errorMsg = 'Update function not available. Please refresh the page.';
-      console.error('❌', errorMsg);
       setError(errorMsg);
       return;
     }
@@ -1034,7 +1032,7 @@ function BranchLogoUpload() {
       setSaveMessage('Branch logo saved successfully!');
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error) {
-      console.error('❌ Error saving branch logo:', error);
+      handleError(error);
       const errorMsg = error instanceof Error ? error.message : 'Failed to save branch logo';
       setError(errorMsg);
       setTimeout(() => setError(null), 5000);
@@ -1061,7 +1059,7 @@ function BranchLogoUpload() {
       setSaveMessage('Branch logo removed successfully!');
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error) {
-      console.error('Error removing branch logo:', error);
+      handleError(error);
       setError('Failed to remove branch logo');
     } finally {
       setUploading(false);
@@ -1251,21 +1249,18 @@ function BranchInfoSection() {
     });
     
     if (!currentBranchId) {
-      console.error('❌ No current branch ID');
       setSaveError('No branch selected');
       setTimeout(() => setSaveError(null), 3000);
       return;
     }
     
     if (!isAdmin) {
-      console.error('❌ User is not admin');
       setSaveError('Only admins can update branch information');
       setTimeout(() => setSaveError(null), 3000);
       return;
     }
     
     if (!offlineData?.updateBranch) {
-      console.error('❌ updateBranch function not available');
       setSaveError('Update function not available. Please refresh the page.');
       setTimeout(() => setSaveError(null), 3000);
       return;
@@ -1292,7 +1287,7 @@ function BranchInfoSection() {
       setSaveError(null);
       setTimeout(() => setShowSaveMessage(false), 2000);
     } catch (error) {
-      console.error('❌ Error saving branch info:', error);
+      handleError(error);
       const errorMsg = error instanceof Error ? error.message : 'Failed to save branch information';
       setSaveError(errorMsg);
       setTimeout(() => setSaveError(null), 3000);

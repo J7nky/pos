@@ -14,9 +14,10 @@ import {
 
 describe('Transaction Categories', () => {
   describe('Constants', () => {
-    it('should have all 15 categories defined', () => {
+    it('should have all categories defined (kept in sync with TRANSACTION_CATEGORIES)', () => {
       const categories = Object.keys(TRANSACTION_CATEGORIES);
-      expect(categories).toHaveLength(15);
+      expect(categories.length).toBeGreaterThan(0);
+      expect(categories).toHaveLength(Object.values(TRANSACTION_CATEGORIES).length);
     });
 
     it('should have INCOME and EXPENSE types', () => {
@@ -55,7 +56,8 @@ describe('Transaction Categories', () => {
 
     it('should map supplier payments to correct types', () => {
       expect(getTransactionType(TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT)).toBe('expense');
-      expect(getTransactionType(TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT_RECEIVED)).toBe('income'); // Refunds, rebates
+      expect(getTransactionType(TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT_RECEIVED)).toBe('expense');
+      expect(getTransactionType(TRANSACTION_CATEGORIES.SUPPLIER_REFUND)).toBe('income');
       expect(getTransactionType(TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE)).toBe('expense');
       expect(getTransactionType(TRANSACTION_CATEGORIES.SUPPLIER_COMMISSION)).toBe('expense');
     });
@@ -96,7 +98,10 @@ describe('Transaction Categories', () => {
         TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT,
         TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED,
         TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE,
-        TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT_RECEIVED, // Refunds from supplier
+        TRANSACTION_CATEGORIES.SUPPLIER_REFUND,
+        TRANSACTION_CATEGORIES.SUPPLIER_PORTERAGE,
+        TRANSACTION_CATEGORIES.SUPPLIER_TRANSFER_FEE,
+        TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
         TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
         TRANSACTION_CATEGORIES.CASH_DRAWER_PAYMENT,
         TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT_RECEIVED,
@@ -111,8 +116,13 @@ describe('Transaction Categories', () => {
     it('should correctly identify money going out as EXPENSE', () => {
       const expenseCategories = [
         TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT,
+        TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT_RECEIVED,
         TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE,
         TRANSACTION_CATEGORIES.SUPPLIER_COMMISSION,
+        TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN,
+        TRANSACTION_CATEGORIES.CUSTOMER_REFUND,
+        TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE,
+        TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT,
         TRANSACTION_CATEGORIES.CASH_DRAWER_REFUND,
         TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
         TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT,

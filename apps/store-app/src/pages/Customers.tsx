@@ -4,11 +4,11 @@ import { useCustomerForm } from '../contexts/CustomerFormContext';
 
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
+import { useErrorHandler } from '../hooks/useErrorHandler';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
-import { Plus, Search, Edit, CheckCircle, Users, Truck, DollarSign, CreditCard, TrendingDown, FileText, Banknote, UserCheck } from 'lucide-react';
+import { Plus, Search, Edit, Users, Truck, DollarSign, CreditCard, FileText, Banknote, UserCheck } from 'lucide-react';
 import { Customer, Supplier } from '../types';
 import Toast from '../components/common/Toast';
-import SearchableSelect from '../components/common/SearchableSelect';
 import SupplierFormModal from '../components/common/SupplierFormModal';
 import AccountStatementModal from '../components/AccountStatementModal';
 import SupplierAdvances from '../components/accountingPage/tabs/SupplierAdvances';
@@ -16,60 +16,62 @@ import EmployeePayments from '../components/accountingPage/tabs/EmployeePayments
 import { useCurrency } from '../hooks/useCurrency';
 import { Pagination } from '../components/common/Pagination';
 import { useEntityBalances } from '../hooks/useEntityBalances';
+import { UnifiedPaymentModal } from '../components/common/UnifiedPaymentModal';
 
 export default function Customers() {
   const raw = useOfflineData();
   const { addCustomerRequestedFromPOS, clearAddCustomerRequest } = useCustomerForm();
 
   const { t } = useI18n();
-  
+  const { handleError } = useErrorHandler();
+
   // Get customer entities
   const customerEntities = raw.entities.filter(e => e.entity_type === 'customer');
   const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
-  
+
   // Get calculated balances from journal entries (source of truth)
   const customerBalances = useEntityBalances(customerIds, 'customer', true);
-  
+
   const customers = useMemo(() => {
     const mappedCustomers = customerEntities.map(c => {
       const customerData = (c.customer_data as any) || {};
       // Get calculated balances from journal entries
       const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
       return {
-        ...c, 
-        is_active: c.is_active ?? true, 
-        createdAt: c.created_at, 
+        ...c,
+        is_active: c.is_active ?? true,
+        createdAt: c.created_at,
         lb_balance: balances.LBP,  // From journal entries
         usd_balance: balances.USD,  // From journal entries
-        email: customerData.email || '', 
+        email: customerData.email || '',
         address: customerData.address || '',
         lb_max_balance: customerData.lb_max_balance ?? undefined,
         usd_max_balance: customerData.usd_max_balance ?? undefined
       };
     });
     // Sort alphabetically (A-Z or ا-ي)
-    return mappedCustomers.sort((a, b) => 
+    return mappedCustomers.sort((a, b) =>
       a.name.localeCompare(b.name, ['ar', 'en'], { sensitivity: 'base' })
     );
   }, [customerEntities, customerBalances]);
-  
+
   // Get supplier entities
   const supplierEntities = raw.entities.filter(e => e.entity_type === 'supplier');
   const supplierIds = useMemo(() => supplierEntities.map(s => s.id), [supplierEntities]);
-  
+
   // Get calculated balances from journal entries (source of truth)
   const supplierBalances = useEntityBalances(supplierIds, 'supplier', true);
-  
+
   const suppliers = useMemo(() => {
     const mappedSuppliers = supplierEntities.map(s => {
       const supplierData = (s.supplier_data as any) || {};
       // Get calculated balances from journal entries
       const balances = supplierBalances.getBalances(s.id) || { USD: 0, LBP: 0 };
       return {
-        ...s, 
-        createdAt: s.created_at || 'commission', 
-        email: supplierData.email || '', 
-        address: supplierData.address || '', 
+        ...s,
+        createdAt: s.created_at || 'commission',
+        email: supplierData.email || '',
+        address: supplierData.address || '',
         lb_balance: balances.LBP,  // From journal entries
         usd_balance: balances.USD,  // From journal entries
         type: supplierData.type || 'standard',
@@ -78,7 +80,7 @@ export default function Customers() {
       };
     });
     // Sort alphabetically (A-Z or ا-ي)
-    return mappedSuppliers.sort((a, b) => 
+    return mappedSuppliers.sort((a, b) =>
       a.name.localeCompare(b.name, ['ar', 'en'], { sensitivity: 'base' })
     );
   }, [supplierEntities, supplierBalances]);
@@ -94,8 +96,8 @@ export default function Customers() {
   const formatBalanceDisplay = (balance: number, currency: 'USD' | 'LBP') => {
     if (balance > 0) {
       // They owe us (DEBT) - show with + sign
-      const amountText = currency === 'USD' 
-        ? `$${balance.toFixed(2)}` 
+      const amountText = currency === 'USD'
+        ? `$${balance.toFixed(2)}`
         : `${Math.round(balance).toLocaleString()} ل.ل`;
       return {
         text: `+${amountText}`,
@@ -108,8 +110,8 @@ export default function Customers() {
       };
     } else if (balance < 0) {
       // We owe them (CREDIT) - show with - sign
-      const amountText = currency === 'USD' 
-        ? `$${Math.abs(balance).toFixed(2)}` 
+      const amountText = currency === 'USD'
+        ? `$${Math.abs(balance).toFixed(2)}`
         : `${Math.round(Math.abs(balance)).toLocaleString()} ل.ل`;
       return {
         text: `-${amountText}`,
@@ -161,10 +163,9 @@ export default function Customers() {
   });
 
   // Payment form states
-  const [showPaymentForm, setShowPaymentForm] = useState<'customer' | 'supplier' | null>(null);
+  const [showPaymentForm, setShowPaymentForm] = useState<{ entity: Customer | Supplier; entityType: 'customer' | 'supplier' } | null>(null);
+  const [paymentDirection, setPaymentDirection] = useState<'receive' | 'pay'>('receive');
   const [paymentForm, setPaymentForm] = useState({
-    customerId: '',
-    supplierId: '',
     amount: '',
     currency: 'USD' as 'USD' | 'LBP',
     description: '',
@@ -173,8 +174,8 @@ export default function Customers() {
 
   // Account statement modal states
   const [showAccountStatement, setShowAccountStatement] = useState<'customer' | 'supplier' | 'employee' | null>(null);
-  const [selectedEntity, setSelectedEntity] = useState<Customer | Supplier | { id: string; name: string; [key: string]: any } | null>(null);
-  
+  const [selectedEntity, setSelectedEntity] = useState<Customer | Supplier | { id: string; name: string;[key: string]: any } | null>(null);
+
   // Overpayment warning state
   const [overpaymentWarning, setOverpaymentWarning] = useState<{ show: boolean; amount: number; currency: string } | null>(null);
 
@@ -188,14 +189,14 @@ export default function Customers() {
   // Works for both USD and LBP currencies
   const getSuggestedPayments = (entity: Customer | Supplier | undefined, currency: 'USD' | 'LBP') => {
     if (!entity) return [];
-    
+
     // Get balance for the selected currency
     const balance = currency === 'LBP' ? (entity.lb_balance || 0) : (entity.usd_balance || 0);
-    
+
     // Only show suggestions if they owe us money (positive balance = debt)
     // If balance is 0 or negative (credit), don't show suggestions
     if (balance <= 0) return [];
-    
+
     // Only return suggestions if there's a positive debt (they owe us)
     if (balance > 0) {
       return [
@@ -205,7 +206,7 @@ export default function Customers() {
         { percentage: 100, amount: balance, label: '100%' }
       ];
     }
-    
+
     return [];
   };
 
@@ -246,19 +247,19 @@ export default function Customers() {
       return { isValid: false };
     }
 
-    return { isValid: true, entity  };
+    return { isValid: true, entity };
   };
 
   const resetPaymentForm = () => {
     setPaymentForm({
-      customerId: '',
-      supplierId: '',
       amount: '',
       currency: 'LBP',
       description: '',
       reference: ''
     });
     setShowPaymentForm(null);
+    setPaymentDirection('receive');
+    setOverpaymentWarning(null);
   };
 
 
@@ -270,7 +271,8 @@ export default function Customers() {
     amount: string,
     currency: 'USD' | 'LBP',
     description: string,
-    reference: string
+    reference: string,
+    direction: 'receive' | 'pay'
   ) => {
 
     // Validate payment form
@@ -281,8 +283,6 @@ export default function Customers() {
 
     try {
       // Use the unified payment processing function from context
-      // Customer payments: 'receive' (they pay us)
-      // Supplier payments: 'pay' (we pay them)
       const result = await raw.processPayment?.({
         entityType,
         entityId,
@@ -292,7 +292,7 @@ export default function Customers() {
         reference,
         storeId: userProfile?.store_id || '',
         createdBy: userProfile?.id || '',
-        paymentDirection: entityType === 'customer' ? 'receive' : 'pay'
+        paymentDirection: direction
       });
 
       if (result.success) {
@@ -313,24 +313,26 @@ export default function Customers() {
         return false;
       }
     } catch (err) {
-      console.error('Payment processing error:', err);
+      handleError(err);
       showToast('Failed to record payment.', 'error');
       return false;
     }
   };
 
   // Unified payment handler for both customers and suppliers
-  const handlePaymentSubmit = async (e: React.FormEvent, entityType: 'customer' | 'supplier') => {
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const entityId = entityType === 'customer' ? paymentForm.customerId : paymentForm.supplierId;
+    if (!showPaymentForm) return;
+
     const success = await processPaymentLocal(
-      entityType,
-      entityId,
+      showPaymentForm.entityType,
+      showPaymentForm.entity.id,
       paymentForm.amount,
       paymentForm.currency,
       paymentForm.description,
-      paymentForm.reference
+      paymentForm.reference,
+      paymentDirection
     );
 
     if (success) {
@@ -338,19 +340,21 @@ export default function Customers() {
     }
   };
 
-  const handleRecordCustomerPayment = (customer: Customer) => {
-    
-    setPaymentForm(prev => ({ ...prev, customerId: customer.id }));
-    setShowPaymentForm('customer');
-  };
+  // Open payment modal for any entity
+  const handleOpenPaymentForm = (entity: Customer | Supplier, entityType: 'customer' | 'supplier') => {
+    // Determine default direction based on entity balance
+    const usdBalance = entity.usd_balance || 0;
+    const lbBalance = entity.lb_balance || 0;
+    const defaultDirection: 'receive' | 'pay' = (usdBalance > 0 || lbBalance > 0) ? 'receive' : 'pay';
 
-  const handleRecordSupplierPayment = (supplier: Supplier) => {
-    setPaymentForm(prev => ({ ...prev, supplierId: supplier.id }));
-    setShowPaymentForm('supplier');
+    setPaymentDirection(defaultDirection);
+    setPaymentForm(prev => ({ ...prev, amount: '', description: '' }));
+    setShowPaymentForm({ entity, entityType });
+    setOverpaymentWarning(null);
   };
 
   // Account statement handlers
-  const handleViewAccountStatement = (entity: Customer | Supplier, type: 'customer' | 'supplier') => {
+  const handleViewAccountStatement = (entity: Customer | Supplier | { id: string; name: string;[key: string]: any }, type: 'customer' | 'supplier' | 'employee') => {
     setSelectedEntity(entity);
     setShowAccountStatement(type);
   };
@@ -392,7 +396,7 @@ export default function Customers() {
       ...prev,
       [name]: type === 'number' ? parseFloat(value) : value,
     }));
-    
+
     // Real-time validation for name field
     if (name === 'name' && value.trim()) {
       const normalizedInput = normalizeNameForComparison(value);
@@ -400,7 +404,7 @@ export default function Customers() {
         const normalizedExisting = normalizeNameForComparison(c.name);
         return normalizedInput === normalizedExisting && (!editingCustomer || c.id !== editingCustomer.id);
       });
-      
+
       if (duplicate) {
         setNameValidationError(t('customers.duplicateNameError') || 'A customer with this name already exists.');
       } else {
@@ -558,47 +562,43 @@ export default function Customers() {
           <nav className="-mb-px flex space-x-8">
             <button
               onClick={() => setActiveTab('customers')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'customers'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === 'customers'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
             >
               <Users className="w-5 h-5 inline mr-2" />
               {t('customers.clients')}
             </button>
             <button
               onClick={() => setActiveTab('suppliers')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'suppliers'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === 'suppliers'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
             >
               <Truck className="w-5 h-5 inline mr-2" />
               {t('customers.suppliers')}
             </button>
             <button
               onClick={() => setActiveTab('supplier-advances')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'supplier-advances'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === 'supplier-advances'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
             >
               <Banknote className="w-5 h-5 inline mr-2" />
               {t('customers.supplierAdvances') || 'Supplier Advances'}
             </button>
             <button
               onClick={() => setActiveTab('employee-payments')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'employee-payments'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === 'employee-payments'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
             >
               <UserCheck className="w-5 h-5 inline mr-2" />
-                {t('customers.employeePayments')}
+              {t('customers.employeePayments')}
             </button>
           </nav>
         </div>
@@ -688,9 +688,8 @@ export default function Customers() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          customer.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                        }`}>
+                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${customer.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
                           {customer.is_active ? t('customers.active') : t('customers.inactive')}
                         </span>
                       </td>
@@ -703,14 +702,14 @@ export default function Customers() {
                           >
                             <Edit className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={() => handleRecordCustomerPayment(customer)}
+                          <button
+                            onClick={() => handleOpenPaymentForm(customer, 'customer')}
                             className="text-green-600 hover:text-green-800"
                             title={t('customers.recordPayment')}
                           >
                             <DollarSign className="w-4 h-4" />
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleViewAccountStatement(customer, 'customer')}
                             className="text-purple-600 hover:text-purple-800"
                             title={t('customers.viewAccountStatement')}
@@ -746,29 +745,29 @@ export default function Customers() {
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
-                             <thead className="bg-gray-50">
-                 <tr>
-                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.name')}</th>
-                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.contact')}</th>
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.name')}</th>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.contact')}</th>
                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.balance')}</th>
-                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.actions')}</th>
-                 </tr>
-               </thead>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customers.actions')}</th>
+                </tr>
+              </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                                                 {filteredSuppliers.length === 0 ? (
+                {filteredSuppliers.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
                       {t('customers.noSuppliersFound')}
                     </td>
                   </tr>
-                 ) : (
-                                     paginatedSuppliers.map(supplier => (
-                     <tr key={supplier.id}>
-                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
-                         <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
-                         <div className="text-sm text-gray-500">{supplier.address}</div>
-                       </td>
-                                             <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
+                ) : (
+                  paginatedSuppliers.map(supplier => (
+                    <tr key={supplier.id}>
+                      <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
+                        <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
+                        <div className="text-sm text-gray-500">{supplier.address}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
                         <div className="text-sm text-gray-900">{supplier.phone}</div>
                         <div className="text-sm text-gray-500">{supplier.email}</div>
                       </td>
@@ -804,34 +803,34 @@ export default function Customers() {
                           })()}
                         </div>
                       </td>
-                    
-                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left text-sm font-medium">
-                         <div className="flex space-x-2 rtl:space-x-reverse">
-                           <button
-                             onClick={() => handleEditSupplierClick(supplier)}
-                             className="text-blue-600 hover:text-blue-900"
-                             title={t('customers.editSupplier')}
-                           >
-                             <Edit className="w-4 h-4" />
-                           </button>
-                            <button 
-                              onClick={() => handleRecordSupplierPayment(supplier)}
-                              className="text-red-600 hover:text-red-800"
-                              title={t('customers.makePayment')}
-                            >
-                              <CreditCard className="w-4 h-4" />
-                            </button>
-                           <button 
-                             onClick={() => handleViewAccountStatement(supplier, 'supplier')}
-                             className="text-purple-600 hover:text-purple-800"
-                             title={t('customers.viewAccountStatement')}
-                           >
-                             <FileText className="w-4 h-4" />
-                           </button>
-                         </div>
-                       </td>
-                     </tr>
-                   ))
+
+                      <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left text-sm font-medium">
+                        <div className="flex space-x-2 rtl:space-x-reverse">
+                          <button
+                            onClick={() => handleEditSupplierClick(supplier)}
+                            className="text-blue-600 hover:text-blue-900"
+                            title={t('customers.editSupplier')}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenPaymentForm(supplier, 'supplier')}
+                            className="text-red-600 hover:text-red-800"
+                            title={t('customers.makePayment')}
+                          >
+                            <CreditCard className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleViewAccountStatement(supplier, 'supplier')}
+                            className="text-purple-600 hover:text-purple-800"
+                            title={t('customers.viewAccountStatement')}
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
@@ -868,11 +867,10 @@ export default function Customers() {
                     name="name"
                     value={customerForm.name}
                     onChange={handleCustomerFormChange}
-                    className={`mt-1 block w-full border rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 ${
-                      nameValidationError 
-                        ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
-                        : 'border-gray-300 focus:border-blue-500'
-                    }`}
+                    className={`mt-1 block w-full border rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 ${nameValidationError
+                      ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                      : 'border-gray-300 focus:border-blue-500'
+                      }`}
                     required
                   />
                   {nameValidationError && (
@@ -925,11 +923,11 @@ export default function Customers() {
                   <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">{t('pos.isActive')}</label>
                 </div>
               </div>
-              
+
               {/* Balance Fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-200">
                 <h3 className="md:col-span-2 text-lg font-semibold text-gray-900">{t('customers.balanceSettings')}</h3>
-                
+
                 {/* Initial Balance Fields - Only show when adding new customer */}
                 {!editingCustomer && (
                   <>
@@ -946,7 +944,7 @@ export default function Customers() {
                         min="0"
                       />
                     </div>
-                    
+
                     <div>
                       <label htmlFor="usd_balance" className="block text-sm font-medium text-gray-700">{t('customers.initialUSDBalance')}</label>
                       <input
@@ -962,7 +960,7 @@ export default function Customers() {
                     </div>
                   </>
                 )}
-                
+
                 {/* Max Balance Fields - Always show */}
                 <div>
                   <label htmlFor="lb_max_balance" className="block text-sm font-medium text-gray-700">{t('customers.maxLBPBalance')}</label>
@@ -978,7 +976,7 @@ export default function Customers() {
                     placeholder={t('customers.noLimit')}
                   />
                 </div>
-                
+
                 <div>
                   <label htmlFor="usd_max_balance" className="block text-sm font-medium text-gray-700">{t('customers.maxUSDBalance')}</label>
                   <input
@@ -1042,347 +1040,31 @@ export default function Customers() {
         existingSuppliers={suppliers}
       />
 
-      {/* Customer Payment Form Modal */}
-      {showPaymentForm === 'customer' && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">{t('customers.addPaymentReceived')}</h2>
-            </div>
-            <form onSubmit={(e) => handlePaymentSubmit(e, 'customer')} className="p-6 space-y-6">
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-                <div className="flex items-center">
-                  <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
-                  <span className="text-green-800 font-medium">{t('customers.recordPaymentReceivedFromCustomer')}</span>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="md:col-span-2">
-                  <SearchableSelect
-                    options={customers.filter(c => c.is_active).map(customer => ({
-                      id: customer.id,
-                      label: customer.name,
-                      value: customer.id,
-                      category: 'Customer'
-                    }))}
-                    value={paymentForm.customerId}
-                    onChange={(value) => setPaymentForm(prev => ({ ...prev, customerId: value as string }))}
-                    placeholder="Select Customer *"
-                    searchPlaceholder="Search customers..."
-                    className="w-full"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentAmount')} *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={paymentForm.amount}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      const selectedCustomer = customers.find(c => c.id === paymentForm.customerId);
-                      const numValue = parseFloat(value);
-                      const currentBalance = paymentForm.currency === 'LBP' 
-                        ? (selectedCustomer?.lb_balance || 0)
-                        : (selectedCustomer?.usd_balance || 0);
-                      
-                      // Show overpayment warning if payment exceeds debt
-                      if (!isNaN(numValue) && numValue > currentBalance && currentBalance > 0) {
-                        setOverpaymentWarning({ 
-                          show: true, 
-                          amount: numValue - currentBalance, 
-                          currency: paymentForm.currency 
-                        });
-                      } else {
-                        setOverpaymentWarning(null);
-                      }
-                      
-                      setPaymentForm(prev => ({ ...prev, amount: value }));
-                    }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
-                    required
-                    placeholder="0.00"
-                  />
-                  
-                  {/* Quick pay suggestions */}
-                  {paymentForm.customerId && (() => {
-                    const selectedCustomer = customers.find(c => c.id === paymentForm.customerId);
-                    const suggestions = getSuggestedPayments(selectedCustomer, paymentForm.currency);
-                    
-                    if (suggestions.length === 0) return null;
-                    
-                    return (
-                      <div className="mt-3">
-                        <p className="text-xs text-gray-600 mb-2">💡 {t('customers.quickPay') || 'Quick Pay Suggestions'}:</p>
-                        <div className="flex flex-wrap gap-2">
-                          {suggestions.map((suggestion) => (
-                            <button
-                              key={suggestion.percentage}
-                              type="button"
-                              onClick={() => {
-                                const formattedAmount = paymentForm.currency === 'USD' 
-                                  ? suggestion.amount.toFixed(2) 
-                                  : Math.round(suggestion.amount).toString();
-                                setPaymentForm(prev => ({ ...prev, amount: formattedAmount }));
-                                setOverpaymentWarning(null);
-                              }}
-                              className="px-3 py-1.5 text-xs font-medium border-2 border-green-500 text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
-                            >
-                              {suggestion.label} ({paymentForm.currency === 'USD' 
-                                ? `$${suggestion.amount.toFixed(2)}` 
-                                : `${Math.round(suggestion.amount).toLocaleString()} ل.ل`})
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  
-                  {/* Overpayment warning */}
-                  {overpaymentWarning?.show && (
-                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                      <div className="flex items-start gap-2">
-                        <span className="text-lg">⚠️</span>
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold text-yellow-800">
-                            {t('customers.overpaymentWarning') || 'Overpayment Alert'}
-                          </p>
-                          <p className="text-xs text-yellow-700 mt-1">
-                            {t('customers.overpaymentMessage') || 'This payment exceeds the current debt. The customer will have a credit of'} {' '}
-                            <span className="font-bold">
-                              {overpaymentWarning.currency === 'USD' 
-                                ? `$${overpaymentWarning.amount.toFixed(2)}` 
-                                : `${Math.round(overpaymentWarning.amount).toLocaleString()} ل.ل`}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentCurrency')} *</label>
-                  <select
-                    value={paymentForm.currency}
-                    onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
-                  >
-                    <option value="USD">{t('customers.usd')}</option>
-                    <option value="LBP">{t('customers.lbp')}</option>
-                  </select>
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentDescription')} {t('common.placeholders.optional')}</label>
-                <input
-                  type="text"
-                  value={paymentForm.description}
-                  onChange={(e) => setPaymentForm(prev => ({ ...prev, description: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
-                  placeholder={t('customers.paymentDescriptionPlaceholder')}
-                />
-              </div>
-              
-              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={() => setShowPaymentForm(null)}
-                  className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  {t('common.labels.cancel')}
-                </button>
-
-                <button
-                  type="submit"
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-                >
-                  {t('customers.recordPayment')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Unified Payment Form Modal */}
+      {showPaymentForm && (
+        <UnifiedPaymentModal
+          entity={showPaymentForm.entity}
+          entityType={showPaymentForm.entityType}
+          paymentDirection={paymentDirection}
+          setPaymentDirection={setPaymentDirection}
+          paymentForm={paymentForm}
+          setPaymentForm={setPaymentForm}
+          overpaymentWarning={overpaymentWarning}
+          setOverpaymentWarning={setOverpaymentWarning}
+          getSuggestedPayments={getSuggestedPayments}
+          onSubmit={handlePaymentSubmit}
+          onClose={resetPaymentForm}
+        />
       )}
 
-      {/* Supplier Payment Form Modal */}
-      {showPaymentForm === 'supplier' && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">Add Payment Sent</h2>
-            </div>
-            <form onSubmit={(e) => handlePaymentSubmit(e, 'supplier')} className="p-6 space-y-6">
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-                <div className="flex items-center">
-                  <TrendingDown className="w-5 h-5 text-red-600 mr-2" />
-                  <span className="text-red-800 font-medium">Record a payment sent to a supplier</span>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="md:col-span-2">
-                  <SearchableSelect
-                    options={suppliers.map(supplier => ({
-                      id: supplier.id,
-                      label: supplier.name,
-                      value: supplier.id,
-                    }))}
-                    value={paymentForm.supplierId}
-                    onChange={(value) => setPaymentForm(prev => ({ ...prev, supplierId: value as string }))}
-                    placeholder={t('customers.selectSupplier')}
-                    searchPlaceholder={t('customers.searchSuppliers')}
-                    categories={['Commission', 'Cash']}
-                    showAddOption={true}
-                    addOptionText={t('customers.addNewSupplier')}
-                    onAddNew={() => setShowSupplierForm(true)}
-                    className="w-full"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentAmount')} *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={paymentForm.amount}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      const selectedSupplier = suppliers.find(s => s.id === paymentForm.supplierId);
-                      const numValue = parseFloat(value);
-                      const currentBalance = paymentForm.currency === 'LBP' 
-                        ? (selectedSupplier?.lb_balance || 0)
-                        : (selectedSupplier?.usd_balance || 0);
-                      
-                      // Show overpayment warning if payment exceeds debt
-                      if (!isNaN(numValue) && numValue > currentBalance && currentBalance > 0) {
-                        setOverpaymentWarning({ 
-                          show: true, 
-                          amount: numValue - currentBalance, 
-                          currency: paymentForm.currency 
-                        });
-                      } else {
-                        setOverpaymentWarning(null);
-                      }
-              
-                      setPaymentForm(prev => ({ ...prev, amount: value }));
-                    }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
-                    required
-                    placeholder="0.00"
-                  />
-                  
-                  {/* Quick pay suggestions */}
-                  {paymentForm.supplierId && (() => {
-                    const selectedSupplier = suppliers.find(s => s.id === paymentForm.supplierId);
-                    const suggestions = getSuggestedPayments(selectedSupplier, paymentForm.currency);
-                    
-                    if (suggestions.length === 0) return null;
-                    
-                    return (
-                      <div className="mt-3">
-                        <p className="text-xs text-gray-600 mb-2">💡 {t('customers.quickPay') || 'Quick Pay Suggestions'}:</p>
-                        <div className="flex flex-wrap gap-2">
-                          {suggestions.map((suggestion) => (
-                            <button
-                              key={suggestion.percentage}
-                              type="button"
-                              onClick={() => {
-                                const formattedAmount = paymentForm.currency === 'USD' 
-                                  ? suggestion.amount.toFixed(2) 
-                                  : Math.round(suggestion.amount).toString();
-                                setPaymentForm(prev => ({ ...prev, amount: formattedAmount }));
-                                setOverpaymentWarning(null);
-                              }}
-                              className="px-3 py-1.5 text-xs font-medium border-2 border-red-500 text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-                            >
-                              {suggestion.label} ({paymentForm.currency === 'USD' 
-                                ? `$${suggestion.amount.toFixed(2)}` 
-                                : `${Math.round(suggestion.amount).toLocaleString()} ل.ل`})
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  
-                  {/* Overpayment warning */}
-                  {overpaymentWarning?.show && (
-                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                      <div className="flex items-start gap-2">
-                        <span className="text-lg">⚠️</span>
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold text-yellow-800">
-                            {t('customers.overpaymentWarning') || 'Overpayment Alert'}
-                          </p>
-                          <p className="text-xs text-yellow-700 mt-1">
-                            {t('customers.overpaymentMessage') || 'This payment exceeds the current debt. The supplier will have a credit of'} {' '}
-                            <span className="font-bold">
-                              {overpaymentWarning.currency === 'USD' 
-                                ? `$${overpaymentWarning.amount.toFixed(2)}` 
-                                : `${Math.round(overpaymentWarning.amount).toLocaleString()} ل.ل`}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentCurrency')} *</label>
-                  <select
-                    value={paymentForm.currency}
-                    onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
-                  >
-                    <option value="USD">{t('customers.usd')}</option>
-                    <option value="LBP">{t('customers.lbp')}</option>
-                  </select>
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentDescription')} {t('common.labels.optional')}</label>
-                <input
-                  type="text"
-                  value={paymentForm.description}
-                  onChange={(e) => setPaymentForm(prev => ({ ...prev, description: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-red-500 focus:border-red-500"
-                  placeholder={t('common.placeholders.paymentDescription')}
-                />
-              </div>
-              
-              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={() => setShowPaymentForm(null)}
-                  className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
-                >
-                  Record Payment
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Supplier Advances Tab */}
       {activeTab === 'supplier-advances' && (
         <SupplierAdvances
           suppliers={suppliers}
-          transactions={raw.transactions || []}
+          transactions={raw.transactions as any || []}
           formatCurrency={formatCurrency}
-          formatCurrencyWithSymbol={formatCurrencyWithSymbol}
+          formatCurrencyWithSymbol={formatCurrencyWithSymbol as (amount: number, currency: string) => string}
           showToast={showToast}
           onProcessAdvance={async (data) => {
             await raw.processSupplierAdvance(data);
@@ -1401,13 +1083,13 @@ export default function Customers() {
       {/* Employee Payments Tab */}
       {activeTab === 'employee-payments' && (
         <EmployeePayments
-          employees={raw.employees || []}
+          employees={raw.employees as any || []}
           showToast={showToast}
           refreshData={raw.refreshData}
           processEmployeePayment={raw.processEmployeePayment || (async () => ({ success: false, error: 'Not available' }))}
           formatCurrency={formatCurrency}
           formatCurrencyWithSymbol={formatCurrencyWithSymbol}
-          onViewAccountStatement={(employee) => handleViewAccountStatement(employee, 'employee')}
+          onViewAccountStatement={(employee) => handleViewAccountStatement(employee as any, 'employee' as 'customer')}
         />
       )}
 
@@ -1423,7 +1105,7 @@ export default function Customers() {
           entityType={showAccountStatement}
           storeId={userProfile?.store_id || ''}
           sales={raw.sales || []}
-          transactions={raw.transactions || []}
+          transactions={raw.transactions as any || []}
           products={raw.products || []}
           inventory={raw.inventory || []}
           inventoryBills={raw.inventoryBills || []}

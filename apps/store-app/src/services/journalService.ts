@@ -7,9 +7,11 @@ import { getDB } from '../lib/db';
 import { JournalEntry, CreateJournalEntryParams } from '../types/accounting';
 import { accountingInitService } from './accountingInitService';
 import { journalValidationService } from './journalValidationService';
+import { validateJournalEntryCreation, makeAppError } from './businessValidationService';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { createId } from '../lib/db';
 import { getLocalDateString } from '../utils/dateUtils';
+import { CacheManager, CacheKeys } from '../utils/cacheManager';
 
 /**
  * Service for creating and managing journal entries
@@ -39,8 +41,11 @@ export class JournalService {
       currency
     } = params;
     
-    if (!branchId) {
-      throw new Error('branchId is required for journal entry creation');
+    // Pre-write structural validation via centralized businessValidationService
+    const bvsResult = await validateJournalEntryCreation(params);
+    if (!bvsResult.isValid) {
+      const first = bvsResult.violations[0];
+      throw makeAppError(first?.code ?? 'UNKNOWN_ERROR');
     }
     
     // Handle legacy parameters (amount + currency) - convert to new format
@@ -159,6 +164,10 @@ export class JournalService {
     // Insert both entries atomically
     // NOTE: This must be called within an IndexedDB transaction that includes journal_entries
     await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);
+
+    const balKey = CacheKeys.balance(storeId, branchId);
+    CacheManager.invalidate(balKey);
+    CacheManager.invalidate(`${balKey}_both`);
     
     console.log(`[JOURNAL_SERVICE] ✅ Journal entries inserted to database`);
     

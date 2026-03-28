@@ -1129,6 +1129,7 @@ const ar = {
     startClosingProcess: 'بدء عملية الإغلاق',
     refreshStatus: 'تحديث الحالة',
     noActiveSession: 'لا توجد جلسة نشطة',
+    closedStatus: 'الصندوق مغلق',
     mustBeOpenedMessage: 'يجب فتح الصندوق لبدء تتبع المعاملات',
     verifyCashBalance: 'التحقق من رصيد النقدية',
     expectedAmount: 'المبلغ المتوقع',
@@ -1249,7 +1250,41 @@ const ar = {
     allSynced: 'جميع العناصر متزامنة',
     noPendingItems: 'لا توجد عناصر في انتظار المزامنة.',
     offlineWarning: 'أنت غير متصل حاليًا. سيتم مزامنة العناصر عند استعادة الاتصال.'
-  }
+  },
+  errors: {
+    transaction: {
+      amount_required: 'المبلغ مطلوب.',
+      amount_non_positive: 'يجب أن يكون المبلغ أكبر من الصفر.',
+      currency_invalid: 'يجب أن تكون العملة دولارًا أمريكيًا أو ليرة لبنانية.',
+      category_invalid: 'فئة المعاملة غير صالحة.',
+      description_required: 'الوصف مطلوب.',
+      store_id_required: 'معلومات المتجر مفقودة. يرجى إعادة تحميل التطبيق.',
+      branch_id_required: 'معلومات الفرع مفقودة. يرجى إعادة تحميل التطبيق.',
+      entity_not_found: 'تعذر العثور على العميل أو المورد المحدد.',
+      cash_drawer_missing: 'لم يتم العثور على حساب درج النقد. يرجى إعداد واحد قبل معالجة هذه المعاملة.',
+    },
+    journal: {
+      branch_id_required: 'معلومات الفرع مفقودة من قيد اليومية هذا.',
+      debit_credit_mismatch: 'يجب أن تكون المدينات والدائنات في قيد اليومية متساوية.',
+      amount_non_positive: 'يجب أن يكون مبلغ قيد اليومية أكبر من الصفر.',
+      account_invalid: 'رمز حساب واحد أو أكثر في قيد اليومية هذا غير معروف.',
+    },
+    bill: {
+      supplier_required: 'يجب تحديد مورد قبل حفظ هذه الفاتورة.',
+      line_items_empty: 'يجب أن تحتوي هذه الفاتورة على بند واحد على الأقل.',
+      amount_non_positive: 'يجب أن تكون مبالغ بنود الفاتورة أكبر من الصفر.',
+    },
+    statement: {
+      token_invalid: 'رابط الكشف هذا غير صالح أو تم استخدامه بالفعل.',
+      token_expired: 'انتهت صلاحية رابط الكشف هذا. يرجى طلب رابط جديد.',
+    },
+    system: {
+      local_write_failed: 'تعذر حفظ التغييرات. يرجى المحاولة مرة أخرى.',
+      sync_upload_failed: 'تعذر مزامنة التغييرات. ستتم إعادة المحاولة تلقائيًا.',
+      network_unavailable: 'يبدو أنك غير متصل بالإنترنت. تتطلب هذه العملية اتصالًا.',
+      unknown: 'حدث خطأ ما. يرجى المحاولة مرة أخرى أو إعادة تحميل التطبيق.',
+    },
+  },
 };
 
 export default ar;

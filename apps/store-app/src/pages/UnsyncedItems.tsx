@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useI18n } from '../i18n';
-import { getDB } from '../lib/db';
+import { useErrorHandler } from '../hooks/useErrorHandler';
 import { crudHelperService } from '../services/crudHelperService';
 import { 
   RefreshCw, 
@@ -53,7 +53,8 @@ const TABLE_METADATA: Record<string, TableMetadata> = {
 
 export default function UnsyncedItems() {
   const { t } = useI18n();
-  const { sync, getSyncStatus, isOnline } = useOfflineData();
+  const { handleError } = useErrorHandler();
+  const { sync, getSyncStatus, isOnline, getUnsyncedRecords } = useOfflineData();
   const { unsyncedCount, isSyncing } = getSyncStatus();
   
   const [unsyncedData, setUnsyncedData] = useState<UnsyncedTableData[]>([]);
@@ -70,7 +71,7 @@ export default function UnsyncedItems() {
       
       for (const [tableName, count] of Object.entries(byTable)) {
         if (count > 0) {
-          const records = await getDB().getUnsyncedRecords(tableName);
+          const records = await getUnsyncedRecords(tableName);
           tablesWithData.push({
             tableName,
             count,
@@ -85,19 +86,17 @@ export default function UnsyncedItems() {
       setUnsyncedData(tablesWithData);
       setLastRefresh(new Date());
     } catch (error) {
-      console.error('Error loading unsynced data:', error);
+      handleError(error);
     } finally {
       setLoading(false);
     }
   };
 
+  // Event-driven refresh: reload when unsynced count changes (CRUD/sync elsewhere)
+  // or on mount. No periodic polling — aligns with DEVELOPER_RULES §5.
   useEffect(() => {
     loadUnsyncedData();
-    
-    // Refresh every 5 seconds
-    const interval = setInterval(loadUnsyncedData, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  }, [unsyncedCount]);
 
   const toggleTable = (tableName: string) => {
     setExpandedTables(prev => {

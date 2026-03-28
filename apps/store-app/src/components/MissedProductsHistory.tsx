@@ -13,6 +13,7 @@ import {
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { missedProductsService } from '../services/missedProductsService';
 import Toast from './common/Toast';
+import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 
 interface MissedProductsHistoryProps {
@@ -35,8 +36,8 @@ export const MissedProductsHistory: React.FC<MissedProductsHistoryProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>({
-    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0]
+    startDate: getLocalDateString(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()),
+    endDate: getTodayLocalDate(),
   });
   const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({

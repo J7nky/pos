@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Wallet, X } from 'lucide-react';
 import { useI18n } from '../i18n';
+import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 interface CashDrawerBalanceReportProps {
   storeId: string;
@@ -93,7 +94,7 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `cash-drawer-balance-report-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `cash-drawer-balance-report-${getTodayLocalDate()}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
   };
@@ -101,8 +102,8 @@ export const CashDrawerBalanceReport: React.FC<CashDrawerBalanceReportProps> = (
   const setDefaultDateRange = () => {
     const today = new Date();
     const thirtyDaysAgo = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000));
-    setStartDate(thirtyDaysAgo.toISOString().split('T')[0]);
-    setEndDate(today.toISOString().split('T')[0]);
+    setStartDate(getLocalDateString(thirtyDaysAgo.toISOString()));
+    setEndDate(getTodayLocalDate());
   };
 
   const loadSessionDetails = async (session: any) => {

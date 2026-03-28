@@ -1,4 +1,5 @@
 import { createId, getDB } from '../lib/db';
+import { getTodayLocalDate } from '../utils/dateUtils';
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
 import { TransactionService } from './transactionService';
 import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
@@ -1133,7 +1134,7 @@ export class InventoryPurchaseService {
             amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
             entityId: internalEntity.id,
             description: description,
-            postedDate: new Date().toISOString().split('T')[0],
+            postedDate: getTodayLocalDate(),
             createdBy: userId,
             branchId,
             skipVerification: true  // Skip verification when called within transaction
@@ -1187,7 +1188,7 @@ export class InventoryPurchaseService {
             amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
             entityId: internalEntity.id,
             description: `${description} - Reverse adjustment`,
-            postedDate: new Date().toISOString().split('T')[0],
+            postedDate: getTodayLocalDate(),
             createdBy: userId,
             branchId,
             skipVerification: true  // Skip verification when called within transaction
@@ -1243,7 +1244,7 @@ export class InventoryPurchaseService {
             amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
             entityId: supplierEntity.id,
             description: description,
-            postedDate: new Date().toISOString().split('T')[0],
+            postedDate: getTodayLocalDate(),
             createdBy: userId,
             branchId,
             skipVerification: true  // Skip verification when called within transaction
@@ -1295,7 +1296,7 @@ export class InventoryPurchaseService {
             amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
             entityId: supplierEntity.id,
             description: `${description} - Reverse adjustment`,
-            postedDate: new Date().toISOString().split('T')[0],
+            postedDate: getTodayLocalDate(),
             createdBy: userId,
             branchId,
             skipVerification: true  // Skip verification when called within transaction

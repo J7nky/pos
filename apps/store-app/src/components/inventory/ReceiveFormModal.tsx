@@ -10,6 +10,7 @@ import { saveProductTag, saveNote, getLastThreeNotes, getMatchingNotes, getAllNo
 import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
 import { inventoryPurchaseService } from '../../services/inventoryPurchaseService';
+import { getTodayLocalDate } from '../../utils/dateUtils';
 interface ReceiveFormModalProps {
   open: boolean;
   onClose: () => void;
@@ -97,7 +98,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   // Set today's date and auto-set currencies when modal opens
   useEffect(() => {
     if (open) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getTodayLocalDate();
       const updates: any = {};
       
       if (form.received_at !== today) {
@@ -522,7 +523,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         empty_plastic: false,
         plastic_count: '',
         plastic_price: '',
-        received_at: new Date().toISOString().split('T')[0] // Today's date in YYYY-MM-DD format
+        received_at: getTodayLocalDate() // Today's date in YYYY-MM-DD format
       });
       setBulkProducts([]);
       setBulkItems({});

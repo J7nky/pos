@@ -15,6 +15,7 @@ import SupplierFormModal from '../../common/SupplierFormModal';
 import { Pagination } from '../../../components/common/Pagination';
 import { getTranslatedString } from '../../../utils/multilingual';
 import { normalizeNameForComparison } from '../../../utils/nameNormalization';
+import { getLocalDateString, getTodayLocalDate } from '../../../utils/dateUtils';
 
 interface SupplierAdvancesProps {
   suppliers: Supplier[];
@@ -68,7 +69,7 @@ export default function SupplierAdvances({
     currency: 'USD' as 'USD' | 'LBP',
     type: 'give' as 'give' | 'deduct',
     description: '',
-    date: new Date().toISOString().split('T')[0],
+    date: getTodayLocalDate(),
     reviewDate: ''
   });
 
@@ -220,7 +221,7 @@ export default function SupplierAdvances({
         currency: 'USD',
         type: 'give',
         description: '',
-        date: new Date().toISOString().split('T')[0],
+        date: getTodayLocalDate(),
         reviewDate: ''
       });
 
@@ -251,7 +252,7 @@ export default function SupplierAdvances({
       currency: advance.currency,
       type: advance.type === 'expense' ? 'give' : 'deduct',
       description: advance.description?.replace(/ \[Review: .*?\]$/, '') || '',
-      date: advance.created_at ? new Date(advance.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      date: advance.created_at ? getLocalDateString(new Date(advance.created_at).toISOString()) : getTodayLocalDate(),
       reviewDate: reviewDate
     });
     setShowAdvanceForm(true);
@@ -265,7 +266,7 @@ export default function SupplierAdvances({
       currency: 'USD',
       type: 'give',
       description: '',
-      date: new Date().toISOString().split('T')[0],
+      date: getTodayLocalDate(),
       reviewDate: ''
     });
     setShowAdvanceForm(false);
@@ -545,7 +546,7 @@ export default function SupplierAdvances({
                   value={advanceForm.reviewDate}
                   onChange={(e) => setAdvanceForm({ ...advanceForm, reviewDate: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  min={new Date().toISOString().split('T')[0]}
+                  min={getTodayLocalDate()}
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   {t('customers.reviewDateHint') || 'Set a date to review or settle this advance'}

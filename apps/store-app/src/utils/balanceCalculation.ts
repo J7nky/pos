@@ -44,8 +44,8 @@ export function calculateBalance(entries: JournalEntry[], currency: 'USD' | 'LBP
 export function calculateBothCurrencies(entries: JournalEntry[]): { USD: number; LBP: number } {
   return entries.reduce(
     (acc, e) => {
-      acc.USD += e.debit_usd - e.credit_usd;
-      acc.LBP += e.debit_lbp - e.credit_lbp;
+      acc.USD += (e.debit_usd || 0) - (e.credit_usd || 0);
+      acc.LBP += (e.debit_lbp || 0) - (e.credit_lbp || 0);
       return acc;
     },
     { USD: 0, LBP: 0 }
@@ -279,8 +279,8 @@ export async function calculateExpectedCashInSession(
   // Calculate inflows (debits to cash) and outflows (credits from cash)
   // Note: This function needs currency parameter, but for now we'll use USD as default
   // TODO: Update this function signature to accept currency parameter
-  const inflows = entries.reduce((sum, e) => sum + e.debit_usd, 0);
-  const outflows = entries.reduce((sum, e) => sum + e.credit_usd, 0);
+  const inflows = entries.reduce((sum, e) => sum + (e.debit_usd || 0), 0);
+  const outflows = entries.reduce((sum, e) => sum + (e.credit_usd || 0), 0);
   const expectedAmount = openingAmount + inflows - outflows;
 
   return {

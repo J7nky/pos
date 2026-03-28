@@ -6,7 +6,6 @@ import { transactionService } from '../../../services/transactionService';
 import { accountBalanceService } from '../../../services/accountBalanceService';
 import { transactionValidationService } from '../../../services/transactionValidationService';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
-import { getDB } from '../../../lib/db';
 import { isPaymentCategory } from '../../../constants/paymentCategories';
 import { 
   Search, 
@@ -159,7 +158,7 @@ export default function RecentPayments({
       await Promise.all(
         Array.from(userIds).map(async (userId) => {
           try {
-            const user = await getDB().users.get(userId);
+            const user = await raw.getUserById(userId);
             if (user) {
               names[userId] = user.name || user.email || 'Unknown';
             } else {
@@ -593,7 +592,7 @@ export default function RecentPayments({
         try {
           const originalTransactionWithMetadata = originalTransaction as any;
           const existingMetadata = originalTransactionWithMetadata.metadata || {};
-          await getDB().transactions.update(editingPayment.id, {
+          await raw.updateTransaction(editingPayment.id, {
             metadata: {
               ...existingMetadata,
               corrected: true,
@@ -602,8 +601,7 @@ export default function RecentPayments({
               reversalTransactionId: reversalTransaction.id,
               correctedTransactionId: correctedResult.transactionId,
               correctionReason: 'Payment amount/currency/description/reference corrected'
-            },
-            _synced: false
+            }
           });
         } catch (metadataError) {
           console.warn('Could not update transaction metadata:', metadataError);
@@ -698,16 +696,13 @@ export default function RecentPayments({
   // Helper function to check if transaction has related reversals
   const checkForReversals = async (transactionId: string): Promise<boolean> => {
     try {
-      // Use filter instead of where to avoid index requirements
-      // Check both _deleted and metadata.deleted
-      const reversals = await getDB().transactions
-        .filter(t => 
-          t.reversal_of_transaction_id === transactionId && 
-          !t._deleted && 
-          (t.metadata as any)?.deleted !== true
-        )
-        .count();
-      return reversals > 0;
+      // Use in-memory transactions from context
+      const reversalsCount = (transactions || []).filter((t: any) =>
+        t.reversal_of_transaction_id === transactionId &&
+        !t._deleted &&
+        (t.metadata as any)?.deleted !== true
+      ).length;
+      return reversalsCount > 0;
     } catch (error) {
       console.error('Error checking for reversals:', error);
       return false;
@@ -717,7 +712,7 @@ export default function RecentPayments({
   // Helper function to check if transaction affects cash drawer
   const checkCashDrawerImpact = async (payment: PaymentRow): Promise<boolean> => {
     try {
-      const transaction = await getDB().transactions.get(payment.id);
+      const transaction = (transactions || []).find((t: any) => t.id === payment.id);
       if (!transaction) return false;
       
       // Check if this is a cash transaction category
@@ -743,7 +738,7 @@ export default function RecentPayments({
       const [balanceImpact, hasReversals, transaction, cashDrawerImpact] = await Promise.all([
         getBalanceImpact(payment),
         checkForReversals(payment.id),
-        getDB().transactions.get(payment.id),
+        Promise.resolve((transactions || []).find((t: any) => t.id === payment.id)),
         checkCashDrawerImpact(payment)
       ]);
 

@@ -18,15 +18,17 @@ import {
   QrCode
 } from 'lucide-react';
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
+import { getCustomerByToken } from '../services/publicStatementService';
 import { Customer, Product } from '../types';
-import { supabase } from '../lib/supabase';
 import { useI18n } from '../i18n';
+import { useErrorHandler } from '../hooks/useErrorHandler';
 import { getTranslatedString } from '../utils/multilingual';
 import { PrintLayout } from '../components/common/PrintLayout';
 import { PrintPreview } from '../components/common/PrintPreview';
 import { useState as useStateReact, useRef, useEffect } from 'react';
 import { setupPrintWithPageSelection } from '../utils/printUtils';
 import { paginateTransactions, getTotalPages } from '../utils/printPagination';
+import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 interface PublicCustomerStatementProps {
   // This component will be used in a public route, so it needs to fetch its own data
@@ -35,6 +37,7 @@ interface PublicCustomerStatementProps {
 export default function PublicCustomerStatement() {
   const { token: encodedToken } = useParams<{ token: string }>();
   const { language } = useI18n();
+  const { handleError } = useErrorHandler();
   
   // URL-decode the token (it was encoded to handle special characters)
   const token = encodedToken ? decodeURIComponent(encodedToken) : undefined;
@@ -49,8 +52,8 @@ export default function PublicCustomerStatement() {
   const [totalPages, setTotalPages] = useStateReact(1);
   const printContentRef = useRef<HTMLDivElement>(null);
   const [dateRange, setDateRange] = useStateReact<{ start: string; end: string }>({
-    start: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
+    start: getLocalDateString(new Date(new Date().getFullYear(), 0, 1).toISOString()),
+    end: getTodayLocalDate(),
   });
 
   useEffect(() => {
@@ -66,108 +69,32 @@ export default function PublicCustomerStatement() {
     setError(null);
 
     try {
-      // Step 1: Validate token and get customer data using secure database function
-      console.log('📥 Fetching customer data...');
-      const { data: customerData, error: customerError } = await supabase
-        .rpc('get_customer_by_token', { p_token: token });
-      
-      if (customerError || !customerData || customerData.length === 0) {
-        console.error('❌ Token validation failed:', customerError);
-        setError('Invalid access link. Please check the QR code and try again.');
+      const tokenResult = await getCustomerByToken(token);
+
+      if (!tokenResult.success) {
+        handleError(tokenResult.error);
+        setError(tokenResult.error.message);
         setIsLoading(false);
         return;
       }
 
-      const customerRecord = customerData[0];
-      console.log('✅ Token validated successfully for customer:', customerRecord.id);
-      setCustomerId(customerRecord.id);
+      const { data } = tokenResult;
+      setCustomerId(data.customerId);
+      setCustomer(data.customer);
 
-      // Step 2: Log the access (update access count and timestamp)
-      const updateData = { 
-        accessed_at: new Date().toISOString(),
-        access_count: 1 // We'll increment this in the database function
-      };
-      await (supabase as any)
-        .from('public_access_tokens')
-        .update(updateData)
-        .eq('token', token);
-
-      // Transform customer data to match Customer type
-      // Note: Balances are now calculated from journal entries, not stored on the entity
-      const customer: Customer = {
-        id: customerRecord.id,
-        name: customerRecord.name,
-        email: customerRecord.email || undefined,
-        phone: customerRecord.phone || undefined,
-        address: customerRecord.address || undefined,
-        isActive: customerRecord.is_active ?? true,
-        createdAt: customerRecord.created_at,
-        // Balances are calculated from journal entries via accountStatementService
-        lb_balance: 0, // Will be calculated from journal entries in the statement
-        usd_balance: 0 // Will be calculated from journal entries in the statement
-      };
-
-      setCustomer(customer);
-
-      // Fetch all bill line items for this customer using secure function
-      console.log('📥 Fetching bill line items...');
-      const { data: salesData, error: salesError } = await supabase
-        .rpc('get_customer_bill_line_items', { p_token: token });
-      
-      if (salesError) {
-        console.warn('⚠️ Bill line items function failed, using empty array:', salesError);
-      }
-      
-      // Fetch all transactions for this customer using secure function
-      console.log('📥 Fetching transactions...');
-      const { data: transactionsData, error: transactionsError } = await supabase
-        .rpc('get_customer_transactions', { p_token: token });
-
-      if (transactionsError) {
-        console.warn('⚠️ Transactions function failed, using empty array:', transactionsError);
-      }
-
-      // Fetch all products for product details (no token needed - public data)
-      console.log('📥 Fetching products...');
-      const { data: productsData } = await supabase
-        .from('products')
-        .select('*') as { data: any; error: any };
-
-      // Fetch inventory items (no token needed - public data)
-      console.log('📥 Fetching inventory items...');
-      const { data: inventoryData } = await supabase
-        .from('inventory_items')
-        .select('*') as { data: any; error: any };
-
-      // Fetch bills for this customer using secure function
-      console.log('📥 Fetching bills...');
-      const { data: billsData, error: billsError } = await supabase
-        .rpc('get_customer_bills', { p_token: token });
-
-      if (billsError) {
-        console.warn('⚠️ Bills function failed, using empty array:', billsError);
-      }
-
-      // Generate statement using AccountStatementService (now uses journal entries)
-      console.log('📊 Generating statement...');
       const accountStatementService = AccountStatementService.getInstance();
-      
-      // Get storeId from customer or use a default (you may need to adjust this)
-      const storeId = customer.store_id || '';
-      
       const generatedStatement = await accountStatementService.generateCustomerStatement(
-        customer.id,
-        storeId,
+        data.customerId,
+        data.storeId,
         dateRange,
         viewMode,
         language as 'en' | 'ar' | 'fr'
       );
 
       setStatement(generatedStatement);
-      console.log('✅ Statement loaded successfully');
       
     } catch (err) {
-      console.error('❌ Error loading customer statement:', err);
+      handleError(err);
       setError('Failed to load customer statement. Please try again later.');
     } finally {
       setIsLoading(false);
@@ -215,13 +142,13 @@ export default function PublicCustomerStatement() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${viewMode === 'detailed' ? 'Detailed' : 'Summary'}_Statement_${customer?.name}_${new Date().toISOString().split('T')[0]}.txt`;
+      a.download = `${viewMode === 'detailed' ? 'Detailed' : 'Summary'}_Statement_${customer?.name}_${getTodayLocalDate()}.txt`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
-      console.error('Error exporting statement:', error);
+      handleError(error);
     }
   };
 
@@ -601,7 +528,7 @@ export default function PublicCustomerStatement() {
                 <input
                   type="date"
                   value={dateRange.end}
-                  max={new Date().toISOString().split('T')[0]}
+                  max={getTodayLocalDate()}
                   onChange={(e) => {
                     const selectedDate = new Date(e.target.value);
                     const today = new Date();

@@ -7,6 +7,7 @@ import { EmployeeService } from '../services/employeeService';
 import Toast from '../components/common/Toast';
 import { ModuleAccessManager } from '../components/rbac/ModuleAccessManager';
 import { useI18n } from '../i18n';
+import { useErrorHandler } from '../hooks/useErrorHandler';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
 
 export default function Employees() {
@@ -22,6 +23,7 @@ export default function Employees() {
     visible: false,
   });
   const { t } = useI18n();
+  const { handleError } = useErrorHandler();
   const [formData, setFormData] = useState<Partial<Employee>>({
     name: '',
     email: '',
@@ -64,7 +66,7 @@ export default function Employees() {
       console.log('✅ Loaded employees:', employees.length, 'employees');
       setRoleCounts(counts);
     } catch (error) {
-      console.error('❌ Error loading employees:', error);
+      handleError(error);
       setToast({ 
         message: error instanceof Error ? error.message : t('employees.employeeListFailed'), 
         type: 'error', 
@@ -126,14 +128,12 @@ export default function Employees() {
     });
     
     if (!storeId) {
-      console.error('❌ No storeId available');
       setToast({ message: 'Store ID is missing', type: 'error', visible: true });
       return;
     }
 
     const isValid = validateForm();
     if (!isValid) {
-      console.error('❌ Form validation failed:', formErrors);
       setToast({ 
         message: 'Please fix form errors before submitting', 
         type: 'error', 
@@ -254,7 +254,7 @@ export default function Employees() {
       
       resetForm();
     } catch (error) {
-      console.error('❌ Error saving employee:', error);
+      handleError(error);
       const errorMessage = error instanceof Error ? error.message : t('employees.employeeCreatedFailed');
       setToast({ 
         message: errorMessage, 

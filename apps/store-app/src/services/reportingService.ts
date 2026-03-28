@@ -4,6 +4,7 @@
 import { getDB } from '../lib/db';
 import { snapshotService } from './snapshotService';
 import { entityQueryService } from './entityQueryService';
+import { getLocalDateString } from '../utils/dateUtils';
 
 export interface GeneralLedgerEntry {
   date: string;
@@ -119,7 +120,7 @@ export class ReportingService {
       // Get opening balance using snapshots
       const previousDay = new Date(startDate);
       previousDay.setDate(previousDay.getDate() - 1);
-      const previousDayStr = previousDay.toISOString().split('T')[0];
+      const previousDayStr = getLocalDateString(previousDay.toISOString());
       
       let openingBalance = { USD: 0, LBP: 0 };
       
@@ -269,7 +270,7 @@ export class ReportingService {
       // Get opening balance
       const previousDay = new Date(startDate);
       previousDay.setDate(previousDay.getDate() - 1);
-      const previousDayStr = previousDay.toISOString().split('T')[0];
+      const previousDayStr = getLocalDateString(previousDay.toISOString());
       
       let openingBalance = { USD: 0, LBP: 0 };
       

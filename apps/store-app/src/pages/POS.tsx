@@ -26,12 +26,12 @@ import {
 import { Customer, BillLineItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
+import { useErrorHandler } from '../hooks/useErrorHandler';
 import { useQRCodeGeneration } from '../hooks/useQRCodeGeneration';
 import { generateBillReference } from '../utils/referenceGenerator';
 import { accountingInitService } from '../services/accountingInitService';
 import { useProductMultilingual } from '../hooks/useMultilingual';
 import { parseMultilingualString } from '../utils/multilingual';
-import { getDB } from '../lib/db';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
 
 
@@ -90,6 +90,7 @@ export default function POS() {
   const { userProfile } = useSupabaseAuth();
   const { formatCurrency } = useCurrency();
   const { t } = useI18n();
+  const { handleError } = useErrorHandler();
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
   const { getProductName } = useProductMultilingual();
 
@@ -118,7 +119,7 @@ export default function POS() {
           const result = await raw.getRecommendedOpeningAmount();
           setRecommendedDrawerAmount(result.amount);
         } catch (error) {
-          console.error('Error fetching recommended amount:', error);
+          handleError(error);
           // Fallback to sale amount if available
           const fallbackAmount = activeTab?.amountReceived ? parseFloat(activeTab?.amountReceived) : total;
           setRecommendedDrawerAmount(fallbackAmount);
@@ -216,7 +217,7 @@ export default function POS() {
           console.log('🔵 [FUNCTION CALL] printReceipt - SUCCESS');
           showToast('success', 'Receipt printed successfully');
         } else {
-          console.error('❌ Receipt printing failed:', result.message);
+          handleError(new Error(result.message ?? 'Receipt printing failed'), 'UNKNOWN_ERROR');
           console.log('🔴 [FUNCTION CALL] printReceipt - FAILED:', result.message);
           showToast('error', 'Receipt printing failed: ' + result.message);
         }
@@ -225,7 +226,7 @@ export default function POS() {
         showToast('error', 'Printing not available in web mode');
       }
     } catch (error) {
-      console.error('❌ Error printing receipt:', error);
+      handleError(error);
       console.log('🔴 [FUNCTION CALL] printReceipt - ERROR:', error);
       showToast('error', 'Failed to print receipt');
     } finally {
@@ -252,7 +253,7 @@ export default function POS() {
       const storeId = userProfile?.store_id;
       if (storeId) {
         try {
-          const store = await getDB().stores.get(storeId);
+          const store = await raw.getStore(storeId);
           if (store) {
             receiptSettings = {
               storeName: store.name || '',
@@ -269,7 +270,7 @@ export default function POS() {
             };
           }
         } catch (error) {
-          console.error('Error fetching store data for receipt:', error);
+          handleError(error);
         }
       }
     }
@@ -299,7 +300,7 @@ export default function POS() {
       try {
         logo = await raw.getBranchLogo(currentBranchId, storeId);
       } catch (error) {
-        console.error('Error fetching logo for receipt:', error);
+        handleError(error);
       }
     }
 
@@ -834,7 +835,7 @@ ${dashSeparator}`;
       await processSale();
       
     } catch (error) {
-      console.error('Error checking cash drawer:', error);
+      handleError(error);
       showToast('error', 'Failed to check cash drawer status');
       setIsProcessing(false);
     }
@@ -1037,7 +1038,7 @@ ${dashSeparator}`;
       }
       showToast('success', `${t('common.labels.saleCompletedSuccessfully')}! ${t('common.labels.billCreatedAndReceiptPrinted')}.`);
     } catch (error) {
-      console.error('Sale processing error:', error);
+      handleError(error);
       showToast('error', `${t('common.labels.saleFailed')}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
     setIsProcessing(false);

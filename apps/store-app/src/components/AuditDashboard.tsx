@@ -26,6 +26,7 @@ import {
 import { auditLogService, AuditLogEntry, AuditQuery } from '../services/auditLogService';
 import { useCurrency } from '../hooks/useCurrency';
 import ActivityFeed from './ActivityFeed';
+import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 interface AuditDashboardProps {
   showHeader?: boolean;
@@ -44,8 +45,8 @@ export default function AuditDashboard({
   const [loading, setLoading] = useState(true);
   const [auditSummary, setAuditSummary] = useState<any>(null);
   const [dateRange, setDateRange] = useState({
-    start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
+    start: getLocalDateString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+    end: getTodayLocalDate(),
   });
 
   // Load audit summary

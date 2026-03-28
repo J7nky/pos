@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { profitLossService } from '../services/profitLossService';
 import type { PLReportFilters, PLReportSummary } from '../types/profitLoss';
+import { getLocalDateString } from '../utils/dateUtils';
 
 export interface UseProfitLossResult {
   data: PLReportSummary | null;
@@ -150,7 +151,7 @@ export function useProfitLoss(filters: PLReportFilters): UseProfitLossResult {
 
       // Aggregate by date range (daily)
       for (const line of result.lines) {
-        const date = new Date(line.closedAt).toISOString().split('T')[0];
+        const date = getLocalDateString(new Date(line.closedAt).toISOString());
         if (!summary.breakdowns.byDateRange[date]) {
           summary.breakdowns.byDateRange[date] = {
             totalRevenue: 0,

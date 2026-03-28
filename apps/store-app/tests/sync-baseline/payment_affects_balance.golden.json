@@ -1,0 +1,278 @@
+{
+  "localSnapshot": {
+    "entities": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "customer_data": null,
+        "entity_code": "CUST-001",
+        "entity_type": "customer",
+        "id": "00000000-0000-4000-8000-000000000010",
+        "is_active": true,
+        "is_system_entity": false,
+        "name": "Parity Customer",
+        "phone": null,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "supplier_data": null,
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "journal_entries": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "account_code": "1100",
+        "account_name": "Cash",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "credit_lbp": 0,
+        "credit_usd": 0,
+        "debit_lbp": 0,
+        "debit_usd": 50,
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "entity_type": "cash",
+        "fiscal_period": "2024-01",
+        "id": "00000000-0000-4000-8000-000000000040",
+        "is_posted": true,
+        "posted_date": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "transaction_id": "00000000-0000-4000-8000-000000000030"
+      },
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "account_code": "1200",
+        "account_name": "Accounts Receivable",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "credit_lbp": 0,
+        "credit_usd": 50,
+        "debit_lbp": 0,
+        "debit_usd": 0,
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "entity_type": "customer",
+        "fiscal_period": "2024-01",
+        "id": "00000000-0000-4000-8000-000000000041",
+        "is_posted": true,
+        "posted_date": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "transaction_id": "00000000-0000-4000-8000-000000000030"
+      }
+    ],
+    "transactions": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "amount": 50,
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "category": "Customer Payment",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "currency": "USD",
+        "description": "Customer payment",
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "id": "00000000-0000-4000-8000-000000000030",
+        "reference": null,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "type": "income",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ]
+  },
+  "scenarioId": "payment_affects_balance",
+  "serverSnapshot": {
+    "entities": [
+      {
+        "_synced": false,
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "customer_data": null,
+        "entity_code": "CUST-001",
+        "entity_type": "customer",
+        "id": "00000000-0000-4000-8000-000000000010",
+        "is_active": true,
+        "is_system_entity": false,
+        "name": "Parity Customer",
+        "phone": null,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "supplier_data": null,
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "journal_entries": [
+      {
+        "_synced": false,
+        "account_code": "1100",
+        "account_name": "Cash",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "credit_lbp": 0,
+        "credit_usd": 0,
+        "debit_lbp": 0,
+        "debit_usd": 50,
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "entity_type": "cash",
+        "fiscal_period": "2024-01",
+        "id": "00000000-0000-4000-8000-000000000040",
+        "is_posted": true,
+        "posted_date": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "transaction_id": "00000000-0000-4000-8000-000000000030"
+      },
+      {
+        "_synced": false,
+        "account_code": "1200",
+        "account_name": "Accounts Receivable",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "credit_lbp": 0,
+        "credit_usd": 50,
+        "debit_lbp": 0,
+        "debit_usd": 0,
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "entity_type": "customer",
+        "fiscal_period": "2024-01",
+        "id": "00000000-0000-4000-8000-000000000041",
+        "is_posted": true,
+        "posted_date": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "transaction_id": "00000000-0000-4000-8000-000000000030"
+      }
+    ],
+    "transactions": [
+      {
+        "_synced": false,
+        "amount": 50,
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "category": "Customer Payment",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "currency": "USD",
+        "description": "Customer payment",
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "id": "00000000-0000-4000-8000-000000000030",
+        "reference": null,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "type": "income",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ]
+  },
+  "syncMetadata": [
+    {
+      "id": "balance_snapshots",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "balance_snapshots"
+    },
+    {
+      "id": "bill_audit_logs",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "bill_audit_logs"
+    },
+    {
+      "id": "bill_line_items",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "bill_line_items"
+    },
+    {
+      "id": "bills",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "bills"
+    },
+    {
+      "id": "branches",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "branches"
+    },
+    {
+      "id": "cash_drawer_accounts",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "cash_drawer_accounts"
+    },
+    {
+      "id": "cash_drawer_sessions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "cash_drawer_sessions"
+    },
+    {
+      "id": "chart_of_accounts",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "chart_of_accounts"
+    },
+    {
+      "id": "entities",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "entities"
+    },
+    {
+      "id": "inventory_bills",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "inventory_bills"
+    },
+    {
+      "id": "inventory_items",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "inventory_items"
+    },
+    {
+      "id": "journal_entries",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "journal_entries"
+    },
+    {
+      "id": "missed_products",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "missed_products"
+    },
+    {
+      "id": "products",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "products"
+    },
+    {
+      "id": "reminders",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "reminders"
+    },
+    {
+      "id": "role_permissions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "role_permissions"
+    },
+    {
+      "id": "stores",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "stores"
+    },
+    {
+      "id": "transactions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "transactions"
+    },
+    {
+      "id": "user_permissions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "user_permissions"
+    },
+    {
+      "id": "users",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "users"
+    }
+  ],
+  "syncResult": {
+    "conflicts": 0,
+    "errors": [],
+    "success": true,
+    "synced": {
+      "downloaded": 4,
+      "uploaded": 0
+    }
+  }
+}

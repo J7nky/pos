@@ -4,6 +4,7 @@ import { useProfitLoss } from '../../hooks/useProfitLoss';
 import { useCurrency } from '../../hooks/useCurrency';
 import type { PLReportFilters } from '../../types/profitLoss';
 import { DollarSign, TrendingUp, TrendingDown, Package, Download, Filter, ChevronDown, ChevronUp, Calendar, X, CreditCard, Wallet, Tag, Layers } from 'lucide-react';
+import { getLocalDateString, getTodayLocalDate } from '../../utils/dateUtils';
 
 interface ProfitLossReportProps {
   storeId: string;
@@ -31,9 +32,13 @@ export default function ProfitLossReport({ storeId, branchId }: ProfitLossReport
   };
   
   // Date range state with presets
-  const [dateRange, setDateRange] = useState({
-    startDate: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0], // Last 30 days
-    endDate: new Date().toISOString().split('T')[0], // Today
+  const [dateRange, setDateRange] = useState(() => {
+    const start = new Date();
+    start.setDate(start.getDate() - 30);
+    return {
+      startDate: getLocalDateString(start.toISOString()),
+      endDate: getTodayLocalDate(),
+    };
   });
 
   // Filter states
@@ -95,8 +100,8 @@ export default function ProfitLossReport({ storeId, branchId }: ProfitLossReport
     }
 
     setDateRange({
-      startDate: startDate.toISOString().split('T')[0],
-      endDate: endDate.toISOString().split('T')[0],
+      startDate: getLocalDateString(startDate.toISOString()),
+      endDate: getLocalDateString(endDate.toISOString()),
     });
   };
 
@@ -105,9 +110,13 @@ export default function ProfitLossReport({ storeId, branchId }: ProfitLossReport
     setSelectedBillTypes([]);
     setSelectedProductCategories([]);
     setSelectedPaymentMethods([]);
-    setDateRange({
-      startDate: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
-      endDate: new Date().toISOString().split('T')[0],
+    setDateRange(() => {
+      const start = new Date();
+      start.setDate(start.getDate() - 30);
+      return {
+        startDate: getLocalDateString(start.toISOString()),
+        endDate: getTodayLocalDate(),
+      };
     });
   };
 

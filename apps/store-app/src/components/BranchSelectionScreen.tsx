@@ -11,7 +11,6 @@ import { Building2, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { BranchAccessValidationService } from '../services/branchAccessValidationService';
-import { getDB } from '../lib/db';
 import { Branch } from '../types';
 
 interface BranchSelectionScreenProps {
@@ -20,7 +19,7 @@ interface BranchSelectionScreenProps {
 
 export default function BranchSelectionScreen({ onBranchSelected }: BranchSelectionScreenProps) {
   const { userProfile } = useSupabaseAuth();
-  const { branchSyncStatus } = useOfflineData();
+  const { branchSyncStatus, ensureDataReady, getBranchById, getFirstBranchForStore } = useOfflineData();
   
   const [branches, setBranches] = useState<Branch[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -90,7 +89,7 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
       
       try {
         // Ensure database is open before querying
-        await getDB().ensureOpen();
+        await ensureDataReady();
         
         // If sync just completed, wait a bit longer to ensure transaction is fully committed
         if (branchSyncStatus.isComplete && attemptNumber === 0) {
@@ -130,10 +129,7 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
 
         // Load full branch details
         const branchDetails = await Promise.all(
-          accessibleBranches.map(async (b) => {
-            const branch = await getDB().branches.get(b.id);
-            return branch;
-          })
+          accessibleBranches.map((b) => getBranchById(b.id))
         );
 
         const validBranches = branchDetails.filter(b => b !== undefined) as Branch[];
@@ -300,20 +296,14 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
               </button>
 
               <button
-                onClick={() => {
+                onClick={async () => {
                   // Try to get the first available branch and auto-select it
-                  getDB().branches
-                    .where('store_id')
-                    .equals(userProfile?.store_id || '')
-                    .filter(b => !(b._deleted === true))
-                    .first()
-                    .then(branch => {
-                      if (branch) {
-                        onBranchSelected(branch.id);
-                      } else {
-                        setError('No branches available. Please wait a moment and try again.');
-                      }
-                    });
+                  const branch = await getFirstBranchForStore(userProfile?.store_id || '');
+                  if (branch) {
+                    onBranchSelected(branch.id);
+                  } else {
+                    setError('No branches available. Please wait a moment and try again.');
+                  }
                 }}
                 className="w-full px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-semibold"
               >

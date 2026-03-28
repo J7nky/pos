@@ -16,8 +16,8 @@ describe('Bill Type Verification Tests', () => {
       // - Total upfront: $100 from cash drawer
       // - After selling: $464 total sales
       // - Commission: 10% = $46.4
-      // - At closing: Total fees = $50 (plastic) + $46.4 (commission) + $20 (porterage) + $30 (transfer) = $145.4
-      // - Supplier payment: $464 - $145.4 = $309.6
+      // - At closing: deduct commission + plastic + porterage + transfer from sales
+      // - Supplier payment: $464 - $46.4 - $50 - $20 - $30 = $317.6
       // - Profit: $46.4
 
       const totalSales = 464;
@@ -32,7 +32,7 @@ describe('Bill Type Verification Tests', () => {
 
       // Calculate supplier payment (total sales - all fees)
       const supplierAmount = totalSales - commissionAmount - plasticFee - porterageFee - transferFee;
-      expect(supplierAmount).toBe(309.6);
+      expect(supplierAmount).toBe(317.6);
 
       // Verify total fees
       const totalFees = plasticFee + porterageFee + transferFee;

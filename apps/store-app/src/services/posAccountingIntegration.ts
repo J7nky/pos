@@ -1,5 +1,6 @@
 // Note: erpFinancialService has been removed - this service is deprecated
 // All financial operations should now use OfflineDataContext methods
+import { getTodayLocalDate } from '../utils/dateUtils';
 import { BillLineItem, Customer, Supplier } from '../types';
 import { userProfile } from '../auth/authContext';
 
@@ -366,7 +367,7 @@ const storeId = userProfile?.store_id || 'default-store';
       const cashDrawer = null; // Deprecated service
 
       // Get today's transactions from localStorage
-      const today = new Date().toISOString().split('T')[0];
+      const today = getTodayLocalDate();
       const transactions = JSON.parse(localStorage.getItem('erp_financial_transactions') || '[]');
       const todaysTransactions = transactions.filter((t: any) => 
         t.timestamp.startsWith(today) && t.type === 'cash_sale'

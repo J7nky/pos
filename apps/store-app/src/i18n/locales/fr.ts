@@ -484,6 +484,9 @@ const fr = {
     lbp: 'LBP',
     currency: 'LBP'
   },
+  cashDrawer: {
+    closedStatus: 'Tiroir-caisse fermé',
+  },
   unsyncedItems: {
     title: 'Éléments non synchronisés',
     subtitle: 'Éléments en attente de synchronisation avec le serveur',
@@ -493,7 +496,41 @@ const fr = {
     allSynced: 'Tous les éléments sont synchronisés',
     noPendingItems: 'Il n\'y a pas d\'éléments en attente de synchronisation.',
     offlineWarning: 'Vous êtes actuellement hors ligne. Les éléments seront synchronisés lorsque la connexion sera rétablie.'
-  }
+  },
+  errors: {
+    transaction: {
+      amount_required: 'Le montant est obligatoire.',
+      amount_non_positive: 'Le montant doit être supérieur à zéro.',
+      currency_invalid: 'La devise doit être USD ou LBP.',
+      category_invalid: 'La catégorie de transaction n\'est pas valide.',
+      description_required: 'La description est obligatoire.',
+      store_id_required: 'Informations du magasin manquantes. Veuillez recharger l\'application.',
+      branch_id_required: 'Informations de la succursale manquantes. Veuillez recharger l\'application.',
+      entity_not_found: 'Le client ou le fournisseur sélectionné est introuvable.',
+      cash_drawer_missing: 'Aucun compte de caisse trouvé. Veuillez en créer un avant de traiter cette transaction.',
+    },
+    journal: {
+      branch_id_required: 'Les informations de la succursale sont manquantes dans cette écriture.',
+      debit_credit_mismatch: 'Les débits et crédits de l\'écriture comptable doivent être égaux.',
+      amount_non_positive: 'Le montant de l\'écriture doit être supérieur à zéro.',
+      account_invalid: 'Un ou plusieurs codes de compte dans cette écriture ne sont pas reconnus.',
+    },
+    bill: {
+      supplier_required: 'Un fournisseur doit être sélectionné avant d\'enregistrer cette facture.',
+      line_items_empty: 'Cette facture doit contenir au moins une ligne.',
+      amount_non_positive: 'Les montants des lignes de la facture doivent être supérieurs à zéro.',
+    },
+    statement: {
+      token_invalid: 'Ce lien de relevé est invalide ou a déjà été utilisé.',
+      token_expired: 'Ce lien de relevé a expiré. Veuillez en demander un nouveau.',
+    },
+    system: {
+      local_write_failed: 'Impossible d\'enregistrer vos modifications. Veuillez réessayer.',
+      sync_upload_failed: 'Impossible de synchroniser vos modifications. Une nouvelle tentative sera effectuée automatiquement.',
+      network_unavailable: 'Vous semblez être hors ligne. Cette action nécessite une connexion.',
+      unknown: 'Une erreur s\'est produite. Veuillez réessayer ou recharger l\'application.',
+    },
+  },
 };
 
 export default fr;

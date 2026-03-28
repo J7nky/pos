@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { useI18n } from '../../i18n';
 import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
-import { getDB } from '../../lib/db';
 interface PrintLayoutProps {
   children: React.ReactNode;
   title: string;
@@ -60,7 +59,7 @@ export function PrintLayout({
         const storeId = userProfile?.store_id;
         if (storeId) {
           try {
-            const store = await getDB().stores.get(storeId);
+            const store = await offlineData.getStore(storeId);
             if (store) {
               setReceiptSettings({
                 storeName: store.name || '',

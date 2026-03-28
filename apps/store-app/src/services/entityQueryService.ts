@@ -6,6 +6,7 @@ import { Entity } from '../types/accounting';
 import { snapshotService } from './snapshotService';
 import { QueryHelpers } from '../utils/queryHelpers';
 import { entityBalanceService } from './entityBalanceService';
+import { getTodayLocalDate } from '../utils/dateUtils';
 
 export interface EntityWithBalance extends Entity {
   current_balance_usd: number;
@@ -350,7 +351,7 @@ export class EntityQueryService {
         return null;
       }
       
-      const targetDate = asOfDate || new Date().toISOString().split('T')[0];
+      const targetDate = asOfDate || getTodayLocalDate();
       
       // Get all accounts that this entity has balances in
       const relevantAccounts = await getDB().chart_of_accounts

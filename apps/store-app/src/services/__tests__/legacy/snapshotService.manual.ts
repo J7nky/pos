@@ -7,6 +7,7 @@ import { snapshotSchedulerService } from '../snapshotSchedulerService';
 import { journalService } from '../journalService';
 import { entityMigrationService } from '../entityMigrationService';
 import { SYSTEM_ENTITY_IDS } from '../../constants/systemEntities';
+import { getLocalDateString, getTodayLocalDate } from '../../utils/dateUtils';
 
 // Mock data for testing
 const mockStoreId = 'test-store-snapshot-123';
@@ -161,9 +162,9 @@ async function setupTestData(): Promise<void> {
  * Create test journal entries for different dates
  */
 async function createTestJournalEntries(): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const today = getTodayLocalDate();
+  const yesterday = getLocalDateString(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  const twoDaysAgo = getLocalDateString(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString());
   
   // Day 1 (two days ago): Cash sale $100
   await journalService.createJournalEntry({
@@ -217,7 +218,7 @@ async function createTestJournalEntries(): Promise<void> {
  * Test daily snapshot creation
  */
 async function testDailySnapshotCreation(): Promise<void> {
-  const snapshotDate = new Date().toISOString().split('T')[0];
+  const snapshotDate = getTodayLocalDate();
   
   // Create daily snapshots
   const result = await snapshotService.createDailySnapshots(mockStoreId, snapshotDate);
@@ -265,8 +266,8 @@ async function testDailySnapshotCreation(): Promise<void> {
  * Test historical balance queries
  */
 async function testHistoricalBalanceQueries(): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const today = getTodayLocalDate();
+  const yesterday = getLocalDateString(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
   
   // Test getting balance from snapshot (today)
   const todayBalance = await snapshotService.getHistoricalBalance(
@@ -310,7 +311,7 @@ async function testHistoricalBalanceQueries(): Promise<void> {
  * Test snapshot verification
  */
 async function testSnapshotVerification(): Promise<void> {
-  const snapshotDate = new Date().toISOString().split('T')[0];
+  const snapshotDate = getTodayLocalDate();
   
   // Verify snapshots against journal calculations
   const verification = await snapshotService.verifySnapshots(mockStoreId, snapshotDate);
@@ -336,9 +337,9 @@ async function testSnapshotVerification(): Promise<void> {
  * Test balance history
  */
 async function testBalanceHistory(): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const today = getTodayLocalDate();
+  const yesterday = getLocalDateString(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  const twoDaysAgo = getLocalDateString(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString());
   
   // Create snapshots for yesterday as well
   await snapshotService.createDailySnapshots(mockStoreId, yesterday);

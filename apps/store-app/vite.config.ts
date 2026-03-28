@@ -36,6 +36,14 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/legacy/**',
+      '**/integration/**',
+      /** Parity gate only — uses vitest.parity.config.ts + fake-indexeddb */
+      'tests/sync-parity/**',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

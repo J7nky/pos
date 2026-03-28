@@ -33,6 +33,7 @@ import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
 import { createId } from '../lib/db';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import type { JournalEntry } from '../types/accounting';
+import { validateTransactionCreation } from './businessValidationService';
 // ============================================================================
 // TYPES & INTERFACES
 // ============================================================================
@@ -150,12 +151,13 @@ export class TransactionService {
         };
       }
       
-      // 1. VALIDATION (outside transaction)
-      const validationResult = this.validateTransaction(params);
-      if (!validationResult.isValid) {
+      // 1. VALIDATION (outside transaction) — via centralized businessValidationService
+      const bvsResult = await validateTransactionCreation(params);
+      if (!bvsResult.isValid) {
+        const firstViolation = bvsResult.violations[0];
         return {
           success: false,
-          error: validationResult.errors.join(', '),
+          error: firstViolation?.message ?? 'Validation failed',
           balanceBefore: 0,
           balanceAfter: 0,
           affectedRecords: []

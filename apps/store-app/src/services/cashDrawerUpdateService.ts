@@ -222,40 +222,29 @@ export class CashDrawerUpdateService {
 
   /**
    * Get current cash drawer balance - PURE GETTER
-   * 
-   * ✅ Calculates balance from journal entries (account_code = 1100) - single source of truth
-   * ✅ Zero side effects - never writes to database
-   * ✅ Fast and safe - no database writes during reads
-   * 
-   * Journal entries are the ONLY source of truth. Balance cache fields are never read or written.
-   * 
-   * 🚀 CACHED for 5 seconds to improve performance
+   *
+   * Session-scoped: same formula as `getCurrentCashDrawerBalances` (opening + net 1100 journals in open session).
+   * Delegates to `getCurrentCashDrawerBalances` so all callers share one canonical model.
+   * Cached separately under `CacheKeys.balance` with TTL.SHORT (1s).
    */
   public async getCurrentCashDrawerBalance(storeId: string, branchId: string): Promise<number> {
     return PerformanceMonitor.withTracking(
       'cashDrawer:getBalance',
       async () => {
         const cacheKey = CacheKeys.balance(storeId, branchId);
-        
-        // ✅ IMPROVEMENT: Extended cache TTL for balance queries (30 seconds instead of 5)
-        // Balance calculations are expensive, and balances don't change frequently during active sessions
         return CacheManager.withCache(
           cacheKey,
-          CacheManager.TTL.LONG, // 30 seconds - balances are relatively stable
+          CacheManager.TTL.SHORT,
           async () => {
             try {
-              // Verify cash drawer account exists
               const account = await this.getCashDrawerAccount(storeId, branchId);
               if (!account) {
                 console.warn('No cash drawer account exists for store', storeId, 'branch', branchId);
                 return 0;
               }
-
-              // ✅ Calculate balance from journal entries (single source of truth)
-              // Balance cache fields are never read - always calculate from journal entries
-              const { calculateCashDrawerBalance } = await import('../utils/balanceCalculation');
               const currency = (account as any)?.currency || 'LBP';
-              return await calculateCashDrawerBalance(storeId, branchId, currency);
+              const balances = await this.getCurrentCashDrawerBalances(storeId, branchId);
+              return currency === 'LBP' ? balances.LBP : balances.USD;
             } catch (error) {
               console.error('Error getting cash drawer balance:', error);
               return 0;
@@ -278,9 +267,9 @@ export class CashDrawerUpdateService {
    * ✅ Fast and safe - no database writes during reads
    * 
    * Journal entries are the ONLY source of truth. Balance cache fields are never read or written.
-   * 
-   * 🚀 CACHED for 5 seconds to improve performance
-   * 
+   *
+   * Cached with TTL.SHORT (1s) under `balance_${storeId}_${branchId}_both`.
+   *
    * @param storeId - Store ID
    * @param branchId - Branch ID
    * @returns Object with USD and LBP balances (returns zeros if no active session)
@@ -291,11 +280,9 @@ export class CashDrawerUpdateService {
       async () => {
         const cacheKey = `${CacheKeys.balance(storeId, branchId)}_both`;
         
-        // ✅ IMPROVEMENT: Extended cache TTL for dual-currency balance queries (10 seconds)
-        // These queries are more expensive as they calculate both USD and LBP balances
         return CacheManager.withCache(
           cacheKey,
-          CacheManager.TTL.LONG, // 10 seconds - balances are relatively stable
+          CacheManager.TTL.SHORT,
           async () => {
             try {
               // Get current active session

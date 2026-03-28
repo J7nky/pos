@@ -1,6 +1,7 @@
 // Generic CRUD helper to eliminate repetitive operations in OfflineDataContext
 import { getDB, createId, createBaseEntity } from '../lib/db';
 import { Database } from '../types/database';
+import { TABLES_WITH_UPDATED_AT } from './universalChangeDetectionService';
 
 // Get singleton database instance
 const db = getDB();
@@ -57,11 +58,16 @@ export class CRUDHelperService {
       ? cleanedEntityData.id
       : baseEntity.id;
     
-    const entity = {
+    const entity: any = {
       ...baseEntity,
       ...cleanedEntityData,
       id: finalId // Ensure ID is always valid
     };
+
+    // Remove updated_at for tables that don't have the column
+    if (!(TABLES_WITH_UPDATED_AT as readonly string[]).includes(tableName as string)) {
+      delete entity.updated_at;
+    }
 
     // Final validation before adding
     if (!entity.id || typeof entity.id !== 'string' || entity.id.trim() === '') {
@@ -96,9 +102,7 @@ export class CRUDHelperService {
       _synced: false
     };
     
-    // Add updated_at for tables that have it (customers, suppliers, products, stores)
-    const tablesWithUpdatedAt = ['customers', 'suppliers', 'products', 'stores', 'users'];
-    if (tablesWithUpdatedAt.includes(tableName)) {
+    if ((TABLES_WITH_UPDATED_AT as readonly string[]).includes(tableName as string)) {
       updatePayload.updated_at = new Date().toISOString();
     }
     
@@ -278,11 +282,12 @@ export class CRUDHelperService {
     entities: Array<Omit<Tables[T]['Insert'], 'store_id'>>
   ): Promise<void> {
     const now = new Date().toISOString();
+    const tableHasUpdatedAt = (TABLES_WITH_UPDATED_AT as readonly string[]).includes(tableName as string);
     const mappedEntities = entities.map(entity => ({
       id: createId(),
       store_id: storeId,
       created_at: now,
-      updated_at: now,
+      ...(tableHasUpdatedAt ? { updated_at: now } : {}),
       _synced: false,
       ...entity
     }));

@@ -10,7 +10,6 @@ import React, { useState, useEffect } from 'react';
 import { balanceVerificationService } from '../services/balanceVerificationService';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
-import { getDB } from '../lib/db';
 
 export function DevAccountingTestPanel() {
   const raw = useOfflineData();
@@ -38,16 +37,16 @@ export function DevAccountingTestPanel() {
         return;
       }
 
-      // Try 3: From database (get first user)
+      // Try 3: From offline context (first user in DB)
       try {
-        const users = await getDB().users.limit(1).toArray();
-        if (users.length > 0 && users[0].id) {
-          console.log('📝 Using user from database:', users[0].id);
-          setResolvedUserId(users[0].id);
+        const firstUser = await raw.getFirstUser();
+        if (firstUser?.id) {
+          console.log('📝 Using user from context:', firstUser.id);
+          setResolvedUserId(firstUser.id);
           return;
         }
       } catch (error) {
-        console.warn('Could not fetch user from database:', error);
+        console.warn('Could not fetch first user from context:', error);
       }
 
       // Try 4: Use a test/fallback user ID

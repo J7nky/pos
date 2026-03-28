@@ -8,6 +8,7 @@ import { legacyCompatibilityService } from '../legacyCompatibilityService';
 import { snapshotService } from '../snapshotService';
 import { journalService } from '../journalService';
 import { SYSTEM_ENTITY_IDS } from '../../constants/systemEntities';
+import { getLocalDateString, getTodayLocalDate } from '../../utils/dateUtils';
 
 // Mock data for testing
 const mockStoreId = 'test-store-phase5-123';
@@ -150,8 +151,8 @@ async function setupCompleteTestData(): Promise<void> {
   await getDB().entities.bulkAdd(entities as any);
   
   // Create some journal entries for testing
-  const today = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const today = getTodayLocalDate();
+  const yesterday = getLocalDateString(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
   
   // Customer sale on credit
   await journalService.createJournalEntry({
@@ -301,8 +302,8 @@ async function testLegacyCompatibilityService(): Promise<void> {
  * Test reporting service functionality
  */
 async function testReportingService(): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const today = getTodayLocalDate();
+  const yesterday = getLocalDateString(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
   
   // Test general ledger report
   const glReport = await reportingService.generateGeneralLedger(
@@ -373,7 +374,7 @@ async function testReportingService(): Promise<void> {
  * Test performance improvements
  */
 async function testPerformanceImprovements(): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayLocalDate();
   
   // Test snapshot-based historical query performance
   const startTime = Date.now();
@@ -442,7 +443,7 @@ async function testEndToEndWorkflow(): Promise<void> {
   }
   
   // 3. Generate account statement
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayLocalDate();
   const statement = await reportingService.generateAccountStatement(
     mockStoreId,
     mockCustomerId,

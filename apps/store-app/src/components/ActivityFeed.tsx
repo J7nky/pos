@@ -26,6 +26,7 @@ import {
 import { auditLogService, AuditLogEntry, AuditQuery } from '../services/auditLogService';
 import { useCurrency } from '../hooks/useCurrency';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
+import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 interface ActivityFeedProps {
   showSearch?: boolean;
@@ -57,8 +58,8 @@ export default function ActivityFeed({
   const [selectedAction, setSelectedAction] = useState<string>('all');
   const [selectedUser, setSelectedUser] = useState<string>('all');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
-    start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
+    start: getLocalDateString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+    end: getTodayLocalDate(),
   });
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set());
@@ -224,7 +225,7 @@ export default function ActivityFeed({
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `activity-log-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `activity-log-${getTodayLocalDate()}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
   };

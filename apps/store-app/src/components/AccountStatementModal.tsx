@@ -25,6 +25,7 @@ import { setupPrintWithPageSelection } from '../utils/printUtils';
 import { paginateTransactions, getTotalPages } from '../utils/printPagination';
 import { AccountStatementPrintContent } from './AccountStatementPrintContent';
 import { formatCurrency as formatCurrencyUtil } from '../utils/currencyFormatter';
+import { getTodayLocalDate } from '../utils/dateUtils';
 import type { AccountStatementPrintPayload } from '../types/electron';
 
 interface AccountStatementModalProps {
@@ -159,7 +160,7 @@ export default function AccountStatementModal({
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${viewMode === 'detailed' ? 'Detailed' : 'Summary'}_Statement_${entity.name}_${new Date().toISOString().split('T')[0]}.txt`;
+      a.download = `${viewMode === 'detailed' ? 'Detailed' : 'Summary'}_Statement_${entity.name}_${getTodayLocalDate()}.txt`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -335,7 +336,7 @@ export default function AccountStatementModal({
                 <input
                   type="date"
                   value={dateRange.end}
-                  max={new Date().toISOString().split('T')[0]}
+                  max={getTodayLocalDate()}
                   onChange={(e) => {
                     const selectedDate = new Date(e.target.value);
                     const today = new Date();

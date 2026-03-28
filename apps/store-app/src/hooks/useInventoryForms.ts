@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocalStorage } from './useLocalStorage';
+import { getTodayLocalDate } from '../utils/dateUtils';
 
 interface UseInventoryFormsReturn {
   // Product form
@@ -89,7 +90,7 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
     plastic_count: '',
     plastic_price: '',
     plastic_currency: 'USD' as 'USD' | 'LBP',
-    received_at: new Date().toISOString().split('T')[0] // Today's date in YYYY-MM-DD format
+    received_at: getTodayLocalDate() // Today's date in YYYY-MM-DD format
   });
 
   // Error states
@@ -174,7 +175,7 @@ export const useInventoryForms = (defaultCommissionRate: number): UseInventoryFo
       plastic_count: '',
       plastic_price: '',
       plastic_currency: 'USD' as 'USD' | 'LBP',
-      received_at: new Date().toISOString().split('T')[0] // Today's date in YYYY-MM-DD format
+      received_at: getTodayLocalDate() // Today's date in YYYY-MM-DD format
     });
     setReceiveErrors({});
   };

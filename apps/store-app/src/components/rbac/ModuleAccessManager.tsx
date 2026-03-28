@@ -8,7 +8,6 @@
  */
 
 import { useState, useEffect } from 'react';
-import { getDB } from '../../lib/db';
 import { ModuleName, UserModuleAccess } from '../../types';
 import { RolePermissionService } from '../../services/rolePermissionService';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
@@ -27,7 +26,7 @@ export function ModuleAccessManager({
   storeId,
   onUpdate
 }: ModuleAccessManagerProps) {
-  const { debouncedSync } = useOfflineData();
+  const { getUserModuleAccessOverrides, setUserModuleAccessOverride, removeUserModuleAccessOverride } = useOfflineData();
   const [moduleAccess, setModuleAccess] = useState<Record<ModuleName, {
     canAccess: boolean;
     isCustom: boolean;
@@ -56,11 +55,7 @@ export function ModuleAccessManager({
       const roleDefaults = RolePermissionService.getDefaultModuleAccess(userRole);
 
       // Get user-specific overrides (not deleted)
-      const userOverrides = await getDB().user_module_access
-        .where('[user_id+store_id]')
-        .equals([userId, storeId])
-        .filter(record => !record._deleted) // Only active records
-        .toArray();
+      const userOverrides = await getUserModuleAccessOverrides(userId, storeId);
 
       const access: any = {};
       modules.forEach(({ name }) => {
@@ -90,45 +85,9 @@ export function ModuleAccessManager({
     setSaving(true);
     try {
       console.log(`🔄 ${canAccess ? 'Granting' : 'Blocking'} ${module} access for user`);
-      
-      const existingRecord = await getDB().user_module_access
-        .where('[user_id+store_id+module]')
-        .equals([userId, storeId, module])
-        .first();
-
-      if (existingRecord) {
-        // Update existing record
-        console.log('📝 Updating existing record');
-        await getDB().user_module_access.update(existingRecord.id, {
-          can_access: canAccess,
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          _deleted: false // Ensure it's not marked as deleted
-        });
-      } else {
-        // Create new record
-        console.log('➕ Creating new override record');
-        await getDB().user_module_access.add({
-          id: crypto.randomUUID(),
-          user_id: userId,
-          store_id: storeId,
-          module,
-          can_access: canAccess,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          _synced: false,
-          _deleted: false
-        });
-      }
-
+      await setUserModuleAccessOverride({ userId, storeId, module, canAccess });
       console.log('✅ Module access updated in IndexedDB');
-      
-      // Reload access to refresh UI
       await loadModuleAccess();
-      
-      // Trigger background sync
-      console.log('🔄 Triggering sync to Supabase...');
-      debouncedSync();
       
       onUpdate?.();
       
@@ -149,36 +108,9 @@ export function ModuleAccessManager({
     setSaving(true);
     try {
       console.log('🗑️ Removing custom module access override for:', module);
-      
-      const existingRecord = await getDB().user_module_access
-        .where('[user_id+store_id+module]')
-        .equals([userId, storeId, module])
-        .first();
-
-      if (!existingRecord) {
-        console.warn('⚠️ No override record found for module:', module);
-        alert('No custom permission found to remove.');
-        setSaving(false);
-        return;
-      }
-
-      console.log('📝 Found override record:', existingRecord);
-      
-      // Mark as deleted (soft delete) - follows offline-first pattern
-      const updateResult = await getDB().user_module_access.update(existingRecord.id, {
-        _deleted: true,
-        _synced: false,
-        updated_at: new Date().toISOString()
-      });
-      
-      console.log('✅ Marked as deleted:', updateResult, 'record(s) updated');
-      
-      // Reload module access to refresh UI (will filter out _deleted records)
+      await removeUserModuleAccessOverride(userId, storeId, module);
+      console.log('✅ Marked as deleted');
       await loadModuleAccess();
-      
-      // Trigger background sync to update Supabase
-      console.log('🔄 Triggering sync to Supabase...');
-      debouncedSync();
       
       // Call onUpdate callback
       if (onUpdate) {

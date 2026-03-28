@@ -1,3 +1,5 @@
+import type { BranchCore, StoreCore, UserCore } from '@pos-platform/shared';
+
 export interface Database {
   public: {
     Tables: {
@@ -141,14 +143,10 @@ export interface Database {
         };
       };
       users: {
-        Row: {
-          id: string;
-          email: string;
-          name: string;
-          role: 'admin' | 'manager' | 'cashier';
-          store_id: string;
-          created_at: string;
-          updated_at: string;
+        /** Overlap: `UserCore` from `@pos-platform/shared`; `is_active` optional here for legacy/synced rows (normative core requires boolean — see feature research). */
+        Row: Omit<UserCore, 'is_active'> & {
+          /** Present in admin-app; optional on synced store rows when column absent. */
+          is_active?: boolean;
           phone?: string | null;
           address?: string | null;
           monthly_salary?: string | null; // Monthly salary configuration (e.g., "500.00 USD" or "1000000 LBP")
@@ -195,21 +193,15 @@ export interface Database {
         };
       };
       stores: {
-        Row: {
-          id: string;
-          preferred_currency: 'USD' | 'LBP';
-          preferred_language: 'en' | 'ar'|'fr';
+        /** Remote `stores` row: normative overlap `StoreCore` + store-app extensions (not Dexie-only `_synced`). */
+        Row: StoreCore & {
           preferred_commission_rate: number;
-          exchange_rate: number;
           low_stock_alert: boolean;
-          name: string;
           address: string | null;
           phone: string | null;
           email: string | null;
           logo: string | null;
           status: 'active' | 'suspended' | 'archived';
-          created_at: string;
-          updated_at: string;
         };
         Insert: {
           id?: string;
@@ -240,6 +232,36 @@ export interface Database {
           email?: string | null;
           logo?: string | null;
           status?: 'active' | 'suspended' | 'archived';
+          updated_at?: string;
+        };
+      };
+      branches: {
+        /** Remote `branches` row: normative overlap `BranchCore` + shared remote columns (soft-delete may be present before sync strips to `_deleted` locally). */
+        Row: BranchCore & {
+          logo: string | null;
+          is_deleted?: boolean;
+          deleted_at?: string | null;
+          deleted_by?: string | null;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          name: string;
+          address?: string | null;
+          phone?: string | null;
+          is_active?: boolean;
+          logo?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          name?: string;
+          address?: string | null;
+          phone?: string | null;
+          is_active?: boolean;
+          logo?: string | null;
           updated_at?: string;
         };
       };

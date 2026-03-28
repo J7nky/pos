@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Reminder, ReminderType, ReminderStatus } from '../../types';
 import { reminderMonitoringService } from '../../services/reminderMonitoringService';
+import { getTodayLocalDate } from '../../utils/dateUtils';
 
 interface RemindersDashboardProps {
   storeId: string;
@@ -42,7 +43,7 @@ export default function RemindersDashboard({
 
   // Calculate statistics
   const stats = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayLocalDate();
     
     return {
       total: reminders.length,
@@ -400,7 +401,7 @@ export default function RemindersDashboard({
                 type="date"
                 value={snoozeDate}
                 onChange={(e) => setSnoozeDate(e.target.value)}
-                min={new Date().toISOString().split('T')[0]}
+                min={getTodayLocalDate()}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
               />
               <div className="flex justify-end gap-3 mt-4">

@@ -2,6 +2,7 @@
 import { SupabaseAuthProvider, useSupabaseAuth } from './contexts/SupabaseAuthContext';
 import { OfflineDataProvider, useOfflineData } from './contexts/OfflineDataContext';
 import { CustomerFormProvider } from './contexts/CustomerFormContext';
+import { ErrorNotificationProvider } from './contexts/ErrorNotificationContext';
 
 import SupabaseLogin from './components/SupabaseLogin';
 import BranchSelectionScreen from './components/BranchSelectionScreen';
@@ -130,17 +131,19 @@ function BranchAwareAppContent() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <SupabaseAuthProvider>
-        <OfflineDataProvider>
-          <I18nErrorBoundary>
-            <I18nProvider>
-              <CustomerFormProvider>
-                <BranchAwareAppContent />
-              </CustomerFormProvider>
-            </I18nProvider>
-          </I18nErrorBoundary>
-        </OfflineDataProvider>
-      </SupabaseAuthProvider>
+      <ErrorNotificationProvider>
+        <SupabaseAuthProvider>
+          <OfflineDataProvider>
+            <I18nErrorBoundary>
+              <I18nProvider>
+                <CustomerFormProvider>
+                  <BranchAwareAppContent />
+                </CustomerFormProvider>
+              </I18nProvider>
+            </I18nErrorBoundary>
+          </OfflineDataProvider>
+        </SupabaseAuthProvider>
+      </ErrorNotificationProvider>
     </ErrorBoundary>
   );
 }

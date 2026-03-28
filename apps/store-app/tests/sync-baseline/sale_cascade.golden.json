@@ -1,0 +1,319 @@
+{
+  "localSnapshot": {
+    "bill_line_items": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "bill_id": "00000000-0000-4000-8000-000000000020",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "00000000-0000-4000-8000-000000000021",
+        "inventory_item_id": null,
+        "line_order": 1,
+        "line_total": 10,
+        "notes": null,
+        "product_id": "00000000-0000-4000-8000-000000000003",
+        "quantity": 1,
+        "received_value": 0,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "unit_price": 10,
+        "updated_at": "PARITY_FIXED_TIMESTAMP",
+        "weight": null
+      }
+    ],
+    "bills": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "amount_paid": 10,
+        "bill_date": "PARITY_FIXED_TIMESTAMP",
+        "bill_number": "INV-001",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "id": "00000000-0000-4000-8000-000000000020",
+        "notes": null,
+        "payment_method": "cash",
+        "payment_status": "paid",
+        "status": "active",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "journal_entries": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "account_code": "1100",
+        "account_name": "Cash",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "credit_lbp": 0,
+        "credit_usd": 0,
+        "debit_lbp": 0,
+        "debit_usd": 10,
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "entity_type": "cash",
+        "fiscal_period": "2024-01",
+        "id": "00000000-0000-4000-8000-000000000040",
+        "is_posted": true,
+        "posted_date": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "transaction_id": "00000000-0000-4000-8000-000000000030"
+      },
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "account_code": "4100",
+        "account_name": "Sales Revenue",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "credit_lbp": 0,
+        "credit_usd": 10,
+        "debit_lbp": 0,
+        "debit_usd": 0,
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "entity_type": "cash",
+        "fiscal_period": "2024-01",
+        "id": "00000000-0000-4000-8000-000000000041",
+        "is_posted": true,
+        "posted_date": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "transaction_id": "00000000-0000-4000-8000-000000000030"
+      }
+    ],
+    "transactions": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "amount": 10,
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "category": "Cash Drawer Sale",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "currency": "USD",
+        "description": "Cash sale",
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "id": "00000000-0000-4000-8000-000000000030",
+        "reference": null,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "type": "income",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ]
+  },
+  "scenarioId": "sale_cascade",
+  "serverSnapshot": {
+    "bill_line_items": [
+      {
+        "bill_id": "00000000-0000-4000-8000-000000000020",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "00000000-0000-4000-8000-000000000021",
+        "inventory_item_id": null,
+        "line_order": 1,
+        "line_total": 10,
+        "notes": null,
+        "product_id": "00000000-0000-4000-8000-000000000003",
+        "quantity": 1,
+        "received_value": 0,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "unit_price": 10,
+        "updated_at": "PARITY_FIXED_TIMESTAMP",
+        "weight": null
+      }
+    ],
+    "bills": [
+      {
+        "amount_paid": 10,
+        "bill_date": "PARITY_FIXED_TIMESTAMP",
+        "bill_number": "INV-001",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "id": "00000000-0000-4000-8000-000000000020",
+        "notes": null,
+        "payment_method": "cash",
+        "payment_status": "paid",
+        "status": "active",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "journal_entries": [
+      {
+        "_synced": false,
+        "account_code": "1100",
+        "account_name": "Cash",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "credit_lbp": 0,
+        "credit_usd": 0,
+        "debit_lbp": 0,
+        "debit_usd": 10,
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "entity_type": "cash",
+        "fiscal_period": "2024-01",
+        "id": "00000000-0000-4000-8000-000000000040",
+        "is_posted": true,
+        "posted_date": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "transaction_id": "00000000-0000-4000-8000-000000000030"
+      },
+      {
+        "_synced": false,
+        "account_code": "4100",
+        "account_name": "Sales Revenue",
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "credit_lbp": 0,
+        "credit_usd": 10,
+        "debit_lbp": 0,
+        "debit_usd": 0,
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "entity_type": "cash",
+        "fiscal_period": "2024-01",
+        "id": "00000000-0000-4000-8000-000000000041",
+        "is_posted": true,
+        "posted_date": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "transaction_id": "00000000-0000-4000-8000-000000000030"
+      }
+    ],
+    "transactions": [
+      {
+        "_synced": false,
+        "amount": 10,
+        "branch_id": "00000000-0000-4000-8000-000000000002",
+        "category": "Cash Drawer Sale",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "currency": "USD",
+        "description": "Cash sale",
+        "entity_id": "00000000-0000-4000-8000-000000000010",
+        "id": "00000000-0000-4000-8000-000000000030",
+        "reference": null,
+        "store_id": "00000000-0000-4000-8000-000000000001",
+        "type": "income",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ]
+  },
+  "syncMetadata": [
+    {
+      "id": "balance_snapshots",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "balance_snapshots"
+    },
+    {
+      "id": "bill_audit_logs",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "bill_audit_logs"
+    },
+    {
+      "id": "bill_line_items",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "bill_line_items"
+    },
+    {
+      "id": "bills",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "bills"
+    },
+    {
+      "id": "branches",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "branches"
+    },
+    {
+      "id": "cash_drawer_accounts",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "cash_drawer_accounts"
+    },
+    {
+      "id": "cash_drawer_sessions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "cash_drawer_sessions"
+    },
+    {
+      "id": "chart_of_accounts",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "chart_of_accounts"
+    },
+    {
+      "id": "entities",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "entities"
+    },
+    {
+      "id": "inventory_bills",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "inventory_bills"
+    },
+    {
+      "id": "inventory_items",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "inventory_items"
+    },
+    {
+      "id": "journal_entries",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "journal_entries"
+    },
+    {
+      "id": "missed_products",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "missed_products"
+    },
+    {
+      "id": "products",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "products"
+    },
+    {
+      "id": "reminders",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "reminders"
+    },
+    {
+      "id": "role_permissions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "role_permissions"
+    },
+    {
+      "id": "stores",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "stores"
+    },
+    {
+      "id": "transactions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "transactions"
+    },
+    {
+      "id": "user_permissions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "user_permissions"
+    },
+    {
+      "id": "users",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "table_name": "users"
+    }
+  ],
+  "syncResult": {
+    "conflicts": 0,
+    "errors": [],
+    "success": true,
+    "synced": {
+      "downloaded": 5,
+      "uploaded": 0
+    }
+  }
+}

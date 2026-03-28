@@ -4,10 +4,11 @@ import { useState } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
+import { useErrorHandler } from '../hooks/useErrorHandler';
 import { useEntityBalances } from '../hooks/useEntityBalances';
-import { 
-  DollarSign, 
-  Package, 
+import {
+  DollarSign,
+  Package,
   AlertTriangle,
   ShoppingCart,
   Receipt,
@@ -25,6 +26,8 @@ import StatCard from '../components/cards/StatCard';
 import LowStockItem from '../components/LowStockItem';
 import CashDrawerOpeningModal from '../components/common/CashDrawerOpeningModal';
 import TransactionListModal from '../components/common/TransactionListModal';
+import RecordExpenseModal from '../components/common/RecordExpenseModal';
+import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 interface CashDrawerStatus {
   currentBalance: number; // Keep for backward compatibility
@@ -36,7 +39,7 @@ interface CashDrawerStatus {
 }
 
 export default function Home() {
-  
+
   const navigate = useNavigate();
   const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
   const [isLoadingCashDrawer, setIsLoadingCashDrawer] = useState(false);
@@ -45,34 +48,35 @@ export default function Home() {
   const [showCombinedBalance, setShowCombinedBalance] = useState(false);
   const [showExpensesModal, setShowExpensesModal] = useState(false);
   const [showIncomeModal, setShowIncomeModal] = useState(false);
+  const [showRecordExpenseModal, setShowRecordExpenseModal] = useState(false);
   // Use ref to store debounce timeout to avoid memory leaks
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   // Use ref to track previous balances for comparison (not for rendering)
   const prevBalancesRef = useRef<{ USD: number; LBP: number } | null>(null);
 
   const raw = useOfflineData();
-  const products = Array.isArray(raw.products) ? raw.products.map(p => ({...p, isActive: true, createdAt: p.created_at})) : [];
-  
+  const products = Array.isArray(raw.products) ? raw.products.map(p => ({ ...p, isActive: true, createdAt: p.created_at })) : [];
+
   // Get customer entities and calculate balances from journal entries
   const customerEntities = Array.isArray(raw.customers) ? raw.customers : [];
   const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
   const customerBalances = useEntityBalances(customerIds, 'customer', true);
-  
+
   const customers = customerEntities.map(c => {
     const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
     return {
-      ...c, 
-      isActive: c.is_active, 
-      createdAt: c.created_at, 
+      ...c,
+      isActive: c.is_active,
+      createdAt: c.created_at,
       lb_balance: balances.LBP,  // From journal entries
       usd_balance: balances.USD  // From journal entries
     };
   });
-  const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({...s, createdAt: s.created_at})) : [];
+  const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({ ...s, createdAt: s.created_at })) : [];
   const stockLevels = Array.isArray(raw.stockLevels) ? raw.stockLevels : [];
   const cashDrawer = raw.cashDrawer;
   const openCashDrawer = raw.openCashDrawer;
-  const transactions = Array.isArray(raw.transactions) ? raw.transactions.map(t => ({...t, createdAt: t.created_at})) : [];
+  const transactions = Array.isArray(raw.transactions) ? raw.transactions.map(t => ({ ...t, createdAt: t.created_at })) : [];
   const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
   const lowStockThreshold = raw.lowStockThreshold;
   const exchangeRate = raw.exchangeRate || 89500; // Get exchange rate from context
@@ -80,8 +84,9 @@ export default function Home() {
   const { userProfile } = useSupabaseAuth();
   const [showFastActions, setShowFastActions] = useState(true);
   const { t } = useI18n();
+  const { handleError } = useErrorHandler();
   const inventory = Array.isArray(raw.inventory) ? raw.inventory : [];
-  const recentReceivesCount = useMemo(() => 
+  const recentReceivesCount = useMemo(() =>
     inventory
       .sort((a, b) => new Date(b.received_at || b.receivedAt).getTime() - new Date(a.received_at || a.receivedAt).getTime())
       .slice(0, 10).length,
@@ -89,23 +94,23 @@ export default function Home() {
   );
 
   // Memoize expensive calculations
-  const today = useMemo(() => new Date().toISOString().split('T')[0], []);
-  
-  const todaySales = useMemo(() => 
-    sales.filter(sale => 
-      sale.createdAt && sale.createdAt.split('T')[0] === today
+  const today = useMemo(() => getTodayLocalDate(), []);
+
+  const todaySales = useMemo(() =>
+    sales.filter(sale =>
+      sale.createdAt && getLocalDateString(sale.createdAt) === today
     ), [sales, today]
   );
-  
-  const todayExpenses = useMemo(() => 
-    transactions.filter(t => 
-      t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today
+
+  const todayExpenses = useMemo(() =>
+    transactions.filter(t =>
+      t.type === 'expense' && t.createdAt && getLocalDateString(t.createdAt) === today
     ), [transactions, today]
   );
 
-  const todayIncome = useMemo(() => 
-    transactions.filter(t => 
-      t.type === 'income' && t.createdAt && t.createdAt.split('T')[0] === today
+  const todayIncome = useMemo(() =>
+    transactions.filter(t =>
+      t.type === 'income' && t.createdAt && getLocalDateString(t.createdAt) === today
     ), [transactions, today]
   );
 
@@ -123,19 +128,19 @@ export default function Home() {
   const convertIncomeAmount = useCallback((income: any): number => {
     const amount = income.amount || 0;
     const transactionCurrency = income.currency || 'LBP';
-    
+
     // If transaction currency matches store preferred currency, return as-is
     if (transactionCurrency === storePreferredCurrency) {
       return amount;
     }
-    
+
     // Convert between currencies
     if (transactionCurrency === 'USD' && storePreferredCurrency === 'LBP') {
       return amount * exchangeRate;
     } else if (transactionCurrency === 'LBP' && storePreferredCurrency === 'USD') {
       return amount / exchangeRate;
     }
-    
+
     return amount;
   }, [storePreferredCurrency, exchangeRate]);
 
@@ -160,21 +165,21 @@ export default function Home() {
   }, [transactions, raw.storeId]);
 
   const loadCashDrawerStatus = useCallback(async (showLoading = false) => {
-   
+
     if (!raw.storeId || !raw.currentBranchId) return;
-    
+
     // Only show loading spinner on initial load or when explicitly requested
     if (showLoading || isInitialLoad) {
       setIsLoadingCashDrawer(true);
     }
-    
+
     try {
       // ✅ Get balance computed from journal entries (single source of truth)
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
-      
+
       // Get current session
       const currentSession = getLocalCurrentSession();
-      
+
       // If there's no active session, set status to null
       if (!currentSession) {
         setCashDrawerStatus((prev) => {
@@ -187,39 +192,39 @@ export default function Home() {
         setIsLoadingCashDrawer(false);
         return;
       }
-      
+
       // Get balances for both currencies computed from journal entries (account_code = '1100')
       const balances = await cashDrawerUpdateService.getCurrentCashDrawerBalances(
         raw.storeId,
         raw.currentBranchId
       );
-      
+
       // Calculate current balance in store's preferred currency for backward compatibility
-      const currentBalance = storePreferredCurrency === 'USD' 
+      const currentBalance = storePreferredCurrency === 'USD'
         ? balances.USD + (balances.LBP / exchangeRate)
         : balances.LBP + (balances.USD * exchangeRate);
-      
+
       const localHistory = getLocalCashDrawerHistory();
-      
+
       // Only update if balances actually changed to prevent unnecessary re-renders
       const prevBalances = prevBalancesRef.current;
-      const balancesChanged = !prevBalances || 
-        prevBalances.USD !== balances.USD || 
+      const balancesChanged = !prevBalances ||
+        prevBalances.USD !== balances.USD ||
         prevBalances.LBP !== balances.LBP;
-      
+
       if (balancesChanged) {
         // Update ref for next comparison
         prevBalancesRef.current = balances;
-        
+
         // Only update state if something actually changed
         setCashDrawerStatus((prevStatus) => {
-          if (prevStatus && 
-              prevStatus.usdBalance === balances.USD && 
-              prevStatus.lbpBalance === balances.LBP &&
-              prevStatus.transactionCount === localHistory.length) {
+          if (prevStatus &&
+            prevStatus.usdBalance === balances.USD &&
+            prevStatus.lbpBalance === balances.LBP &&
+            prevStatus.transactionCount === localHistory.length) {
             return prevStatus; // No change
           }
-          
+
           return {
             currentBalance, // Keep for backward compatibility
             usdBalance: balances.USD,
@@ -230,10 +235,10 @@ export default function Home() {
           };
         });
       }
-      
+
       setIsInitialLoad(false);
     } catch (error) {
-      console.error('Error loading cash drawer status:', error);
+      handleError(error);
       // Don't show error state in UI, just log it
     } finally {
       setIsLoadingCashDrawer(false);
@@ -246,7 +251,7 @@ export default function Home() {
     if (debounceTimeoutRef.current) {
       clearTimeout(debounceTimeoutRef.current);
     }
-    
+
     // Set new timeout
     debounceTimeoutRef.current = setTimeout(() => {
       loadCashDrawerStatus();
@@ -265,15 +270,15 @@ export default function Home() {
 
   // Track previous cash drawer session ID to detect changes
   const prevCashDrawerIdRef = useRef<string | null>(null);
-  
+
   // ✅ IMPROVEMENT 1: React directly to context changes (cashDrawer state)
   // This ensures we always reflect the latest session state from context
   useEffect(() => {
     if (!raw.storeId || !raw.currentBranchId) return;
-    
+
     const currentSessionId = raw.cashDrawer?.id || null;
     const sessionChanged = prevCashDrawerIdRef.current !== currentSessionId;
-    
+
     if (sessionChanged) {
       prevCashDrawerIdRef.current = currentSessionId;
       // Session changed - reload status (debounced to avoid rapid updates)
@@ -281,30 +286,19 @@ export default function Home() {
     }
   }, [raw.cashDrawer?.id, raw.storeId, raw.currentBranchId, debouncedLoadCashDrawerStatus]);
 
-  // ✅ IMPROVEMENT 2: Consolidated refresh triggers
-  // Combines: initial load, sync completion, transaction changes, and periodic refresh
+  // Consolidated refresh triggers: initial load when store/branch context is ready (no periodic polling).
   useEffect(() => {
     if (!raw.storeId || !raw.currentBranchId) return;
-    
-    // Initial load with loading spinner
+
     loadCashDrawerStatus(true);
 
-    // Periodic refresh every 60 seconds as a fallback
-    const interval = setInterval(() => {
-      if (!isLoadingCashDrawer) {
-        loadCashDrawerStatus();
-      }
-    }, 60000);
-    
     return () => {
-      clearInterval(interval);
-      // Clear debounce timeout on cleanup
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
         debounceTimeoutRef.current = null;
       }
     };
-  }, [raw.storeId, raw.currentBranchId, loadCashDrawerStatus, isLoadingCashDrawer]);
+  }, [raw.storeId, raw.currentBranchId, loadCashDrawerStatus]);
 
   // ✅ IMPROVEMENT 3: Sync completion detection (only when sync transitions to complete)
   useEffect(() => {
@@ -323,12 +317,12 @@ export default function Home() {
   const prevTransactionCountRef = useRef(transactions.length);
   useEffect(() => {
     if (!raw.storeId || isLoadingCashDrawer) return;
-    
+
     // Only reload if transaction count actually changed (new cash drawer transaction added)
-    const currentCount = transactions.filter(t => 
+    const currentCount = transactions.filter(t =>
       t.category?.startsWith('cash_drawer_')
     ).length;
-    
+
     if (prevTransactionCountRef.current !== currentCount) {
       prevTransactionCountRef.current = currentCount;
       debouncedLoadCashDrawerStatus();
@@ -345,30 +339,29 @@ export default function Home() {
   //
   // Primary mechanism: React reactivity (raw.cashDrawer?.id changes)
   // Secondary mechanism: Event listeners (for cross-tab/external updates)
-  // Fallback: Periodic refresh (60 seconds)
   useEffect(() => {
     if (!raw.storeId) return;
-    
+
     const handleCashDrawerUpdated = (e: any) => {
       if (e?.detail?.storeId && e.detail.storeId !== raw.storeId) return;
       debouncedLoadCashDrawerStatus();
     };
-    
+
     const handleUndoCompleted = (e: any) => {
       if (e?.detail?.storeId && e.detail.storeId !== raw.storeId) return;
       debouncedLoadCashDrawerStatus();
     };
-    
+
     const handleDataSynced = () => {
       if (!isLoadingCashDrawer) {
         debouncedLoadCashDrawerStatus();
       }
     };
-    
+
     window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
     window.addEventListener('undo-completed', handleUndoCompleted as any);
     window.addEventListener('data-synced', handleDataSynced as any);
-    
+
     return () => {
       window.removeEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
       window.removeEventListener('undo-completed', handleUndoCompleted as any);
@@ -376,7 +369,7 @@ export default function Home() {
     };
   }, [raw.storeId, debouncedLoadCashDrawerStatus, isLoadingCashDrawer]);
 
-  const lowStockItems = lowStockAlertsEnabled 
+  const lowStockItems = lowStockAlertsEnabled
     ? stockLevels.filter(item => item.currentStock < lowStockThreshold)
     : [];
 
@@ -394,7 +387,7 @@ export default function Home() {
           const result = await raw.getRecommendedOpeningAmount();
           setRecommendedAmount(result.amount);
         } catch (error) {
-          console.error('Error fetching recommended amount:', error);
+          handleError(error);
           setRecommendedAmount(0);
         }
       };
@@ -406,25 +399,25 @@ export default function Home() {
     if (!userProfile) {
       throw new Error('User not authenticated');
     }
-    
+
     // Convert the entered amount to LBP for storage
     // User enters in preferred currency, we store in LBP
     let amountInLBP = openingAmount;
     if (storePreferredCurrency === 'USD') {
       amountInLBP = openingAmount * exchangeRate;
     }
-    
+
     await openCashDrawer(amountInLBP, userProfile.id);
-    
+
     // Wait a moment for the database to be updated
     await new Promise(resolve => setTimeout(resolve, 100));
-    
+
     // Immediately refresh local status with loading indicator
     await loadCashDrawerStatus(true);
-    
+
     // Notify any listeners
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('cash-drawer-updated', { 
+      window.dispatchEvent(new CustomEvent('cash-drawer-updated', {
         detail: { storeId: raw.storeId, event: 'opened' }
       }));
     }
@@ -438,7 +431,7 @@ export default function Home() {
       icon: ShoppingCart,
       color: 'bg-green-500',
       hoverColor: 'hover:bg-green-600',
-      action: () => {navigate('/pos');},
+      action: () => { navigate('/pos'); },
       stats: `${todaySales.length} ${t('home.today')}`
     },
     {
@@ -448,7 +441,7 @@ export default function Home() {
       icon: Truck,
       color: 'bg-blue-500',
       hoverColor: 'hover:bg-blue-600',
-      action: () => {navigate('/inventory')},
+      action: () => { navigate('/inventory') },
       stats: `${recentReceivesCount} ${t('common.recentReceives')}`
     },
     {
@@ -458,7 +451,7 @@ export default function Home() {
       icon: UserPlus,
       color: 'bg-purple-500',
       hoverColor: 'hover:bg-purple-600',
-      action: () => {navigate('/accounts')},
+      action: () => { navigate('/accounts') },
       stats: `${customers.filter(c => c.isActive).length} ${t('common.active')}`
     },
     {
@@ -468,7 +461,7 @@ export default function Home() {
       icon: Receipt,
       color: 'bg-amber-500',
       hoverColor: 'hover:bg-amber-600',
-      action: () => {navigate('/accounting')},
+      action: () => setShowRecordExpenseModal(true),
       stats: `${formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + convertExpenseAmount(expense), 0))} ${t('home.today')} (${t(`common.currency.${storePreferredCurrency}`)})`
     },
     {
@@ -478,7 +471,7 @@ export default function Home() {
       icon: Eye,
       color: 'bg-indigo-500',
       hoverColor: 'hover:bg-indigo-600',
-      action: () => {navigate('/reports')},
+      action: () => { navigate('/reports') },
       stats: `${todaySales.length} ${t('home.sales')}`
     },
     {
@@ -488,7 +481,7 @@ export default function Home() {
       icon: Package,
       color: 'bg-teal-500',
       hoverColor: 'hover:bg-teal-600',
-      action: () => {navigate('/inventory')},
+      action: () => { navigate('/inventory') },
       stats: lowStockAlertsEnabled ? `${lowStockItems.length} ${t('home.lowStock')}` : `${products.length} ${t('home.products')}`
     }
   ];
@@ -499,16 +492,16 @@ export default function Home() {
     if (isInitialLoad && isLoadingCashDrawer) {
       return t('common.loading');
     }
-    
+
     if (!cashDrawerStatus) {
       return t('common.closed');
     }
-    
+
     // Always use current status values, but show subtle loading indicator during updates
     // This prevents flickering by keeping the display stable
     const usdBalance = cashDrawerStatus.usdBalance;
     const lbpBalance = cashDrawerStatus.lbpBalance;
-    
+
     // If showing combined balance, convert both to preferred currency and sum
     if (showCombinedBalance) {
       let combinedAmount: number;
@@ -521,7 +514,7 @@ export default function Home() {
       }
       return formatCurrencyForStore(combinedAmount);
     }
-    
+
     // Dual currency view: show both currencies
     const usdFormatted = `$${usdBalance.toFixed(2)}`;
     const lbpFormatted = `${Math.round(lbpBalance).toLocaleString()} ل.ل`;
@@ -532,11 +525,11 @@ export default function Home() {
     if (isInitialLoad && isLoadingCashDrawer) {
       return t('common.loading');
     }
-    
+
     if (!cashDrawerStatus) {
       return t('home.notOpenedToday');
     }
-    
+
     return `${t('common.opened')}: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}`;
   }, [cashDrawerStatus, isInitialLoad, isLoadingCashDrawer, t]);
 
@@ -553,26 +546,26 @@ export default function Home() {
       onToggleCombined: () => setShowCombinedBalance(!showCombinedBalance),
     },
     {
-      title: t('home.todaysExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) }), 
+      title: t('home.todaysExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) }),
       value: formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + convertExpenseAmount(expense), 0)),
       icon: Receipt,
       color: 'bg-red-500',
-      change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && t.createdAt.split('T')[0] === today).length} ${t('common.transactions')}`,
+      change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && getLocalDateString(t.createdAt) === today).length} ${t('common.transactions')}`,
       onClick: () => setShowExpensesModal(true)
     },
     {
-      title: t('home.todaysIncome', { currency: t(`common.currency.${storePreferredCurrency}`) }), 
+      title: t('home.todaysIncome', { currency: t(`common.currency.${storePreferredCurrency}`) }),
       value: formatCurrencyForStore(todayIncome.reduce((sum, income) => sum + convertIncomeAmount(income), 0)),
       icon: Receipt,
       color: 'bg-green-500',
-      change: `${transactions.filter(t => t.type === 'income' && t.createdAt && t.createdAt.split('T')[0] === today).length} ${t('common.transactions')}`,
+      change: `${transactions.filter(t => t.type === 'income' && t.createdAt && getLocalDateString(t.createdAt) === today).length} ${t('common.transactions')}`,
       onClick: () => setShowIncomeModal(true)
     },
     {
       title: t('home.lowStockItems'),
       value: lowStockAlertsEnabled ? lowStockItems.length.toString() : lowStockItems.length.toString(),
       icon: AlertTriangle,
-      color: lowStockAlertsEnabled ? 'bg-amber-500' : 'bg-gray-400', 
+      color: lowStockAlertsEnabled ? 'bg-amber-500' : 'bg-gray-400',
       change: lowStockAlertsEnabled ? t('home.needAttention') : t('home.alertsDisabled')
     }
   ];
@@ -613,13 +606,13 @@ export default function Home() {
             )}
           </button>
         </div>
-        
+
         <div className={`transition-all duration-300 ease-in-out ${showFastActions ? "max-h-[999px] opacity-100" : "max-h-0 opacity-0 overflow-hidden"}`}>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {fastActions.map((action) => (
-                <FastActionCard key={action.id} action={action} />
-              ))}
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {fastActions.map((action) => (
+              <FastActionCard key={action.id} action={action} />
+            ))}
+          </div>
         </div>
       </div>
 
@@ -667,7 +660,7 @@ export default function Home() {
             )}
           </div>
         )}
-  
+
       </div>
 
       {/* Transaction List Modals */}
@@ -699,7 +692,17 @@ export default function Home() {
         description={t('pos.enterOpeningCashAmount')}
       />
 
+      {/* Record Expense Modal */}
+      <RecordExpenseModal
+        isOpen={showRecordExpenseModal}
+        onClose={() => setShowRecordExpenseModal(false)}
+        onSuccess={() => {
+          // Refresh data to update today's expenses
+          raw.refreshData();
+        }}
+      />
+
     </div>
   );
-  
+
 }

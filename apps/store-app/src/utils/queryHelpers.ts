@@ -12,6 +12,7 @@
  */
 
 import { Table } from 'dexie';
+import { getLocalDateString } from './dateUtils';
 
 export interface QueryOptions {
   limit?: number;
@@ -236,11 +237,11 @@ export class DateFilters {
       let key: string;
       
       if (period === 'day') {
-        key = date.toISOString().split('T')[0];
+        key = getLocalDateString(date.toISOString());
       } else if (period === 'week') {
         const weekStart = new Date(date);
         weekStart.setDate(date.getDate() - date.getDay());
-        key = weekStart.toISOString().split('T')[0];
+        key = getLocalDateString(weekStart.toISOString());
       } else { // month
         key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Printer, ChevronLeft, ChevronRight, Check, FileText } from 'lucide-react';
 import { useI18n } from '../../i18n';
+import { getTodayLocalDate } from '../../utils/dateUtils';
 interface PrintPreviewProps {
   isOpen: boolean;
   onClose: () => void;
@@ -245,7 +246,7 @@ export function PrintPreview({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    const fileName = `${(title || 'document').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date().toISOString().split('T')[0]}.html`;
+    const fileName = `${(title || 'document').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${getTodayLocalDate()}.html`;
     link.download = fileName;
     document.body.appendChild(link);
     link.click();

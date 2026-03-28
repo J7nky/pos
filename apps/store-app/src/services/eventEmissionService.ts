@@ -209,6 +209,28 @@ export class EventEmissionService {
   }
 
   /**
+   * Emit cash_drawer_transaction_posted after a cash-impacting transaction is uploaded.
+   */
+  async emitCashDrawerTransactionPosted(
+    storeId: string,
+    branchId: string,
+    transactionId: string,
+    category: string,
+    userId?: string
+  ): Promise<void> {
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'cash_drawer_transaction_posted',
+      entity_type: 'transaction',
+      entity_id: transactionId,
+      operation: 'insert',
+      user_id: userId,
+      metadata: { category, branch_id: branchId },
+    });
+  }
+
+  /**
    * Emit cash_drawer_session_closed event
    * Called when a cash drawer session is closed
    */

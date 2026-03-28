@@ -15,6 +15,7 @@ import RecentReceivesTable from '../components/inventory/RecentReceivesTable';
 import ProductTable from '../components/inventory/ProductTable';
 import { Product, Supplier, InventoryItem } from '../types/inventory';
 import { useI18n } from '../i18n';
+import { useErrorHandler } from '../hooks/useErrorHandler';
 import { parseMultilingualString } from '../utils/multilingual';
 import { normalizeNameForComparison } from '../utils/nameNormalization';    
 
@@ -153,7 +154,7 @@ const Inventory: React.FC = () => {
       });
       showToast('success', 'Inventory item updated successfully!');
     } catch (error) {
-      console.error('Error updating inventory item:', error);
+      handleError(error);
       showToast('error', 'Failed to update inventory item.');
     }
   };
@@ -163,7 +164,7 @@ const Inventory: React.FC = () => {
       await deleteInventoryItem(item.id);
       showToast('success', 'Inventory item deleted successfully!');
     } catch (error) {
-      console.error('Error deleting inventory item:', error);
+      handleError(error);
       showToast('error', 'Failed to delete inventory item.');
     }
   };
@@ -196,7 +197,7 @@ const Inventory: React.FC = () => {
       });
       showToast('success', 'Product updated successfully!');
     } catch (error) {
-      console.error('Error updating product:', error);
+      handleError(error);
       showToast('error', 'Failed to update product.');
     }
   };
@@ -206,11 +207,12 @@ const Inventory: React.FC = () => {
       await deleteProduct(product.id);
       showToast('success', 'Product deleted successfully!');
     } catch (error) {
-      console.error('Error deleting product:', error);
+      handleError(error);
       showToast('error', 'Failed to delete product.');
     }
   };
   const { t, language } = useI18n();
+  const { handleError } = useErrorHandler();
 
   // Filter products based on search term (handle multilingual names)
   const filteredProducts = useMemo(() => {

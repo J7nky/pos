@@ -19,9 +19,22 @@
 import { supabase } from '../lib/supabase';
 import { getDB } from '../lib/db';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { normalizeBillDateFromRemote } from '../utils/dateUtils';
 
 // Get singleton database instance
 const db = getDB();
+
+/**
+ * Per-event trace logs (very noisy during large catch-up).
+ * Set VITE_EVENT_STREAM_VERBOSE=true in apps/store-app/.env to enable.
+ */
+const EVENT_STREAM_VERBOSE =
+  typeof import.meta !== 'undefined' &&
+  String((import.meta as ImportMeta).env?.VITE_EVENT_STREAM_VERBOSE ?? '') === 'true';
+
+function evLog(...args: unknown[]): void {
+  if (EVENT_STREAM_VERBOSE) console.log(...args);
+}
 
 export interface BranchEvent {
   id: string;
@@ -47,6 +60,8 @@ export interface EventProcessingResult {
   processed: number;
   errors: string[];
   last_version: number;
+  /** Rows not returned from Supabase (deleted, RLS, or race); not thrown errors */
+  skipped_missing?: number;
 }
 
 export class EventStreamService {
@@ -55,19 +70,22 @@ export class EventStreamService {
   private eventQueue: Map<string, BranchEvent[]> = new Map();
   private catchUpInterval: Map<string, NodeJS.Timeout> = new Map();
   private reconnectTimeouts: Map<string, NodeJS.Timeout> = new Map();
+  /** Counts consecutive reconnects while never reaching SUBSCRIBED; reset on SUBSCRIBED or stop. */
+  private reconnectAttempt: Map<string, number> = new Map();
+  /** Throttle reconnect console noise when Realtime keeps closing (misconfig, network, or stale callbacks). */
+  private lastReconnectWarnAt: Map<string, number> = new Map();
   private onEventsProcessedCallback?: (result: EventProcessingResult) => void | Promise<void>;
   
   // Configuration
   private readonly BATCH_SIZE = 100;
-  private readonly CATCH_UP_INTERVAL_MS = 60000; // 1 minute safety net (reduced from 5 min for faster catch-up)
-  private readonly MAX_RETRIES = 3;
-  private readonly RETRY_DELAY_MS = 2000;
+  /** Allowed per DEVELOPER_RULES §5: single long-interval safety net for missed Realtime events only. */
+  private readonly CATCH_UP_INTERVAL_MS = 300000; // 5 minutes
 
   /**
    * Set callback to be notified when events are processed
    */
   setOnEventsProcessed(callback: ((result: EventProcessingResult) => void | Promise<void>) | undefined): void {
-    console.log(`[EventStream] Setting callback:`, callback ? 'callback provided' : 'callback cleared');
+    evLog(`[EventStream] Setting callback:`, callback ? 'callback provided' : 'callback cleared');
     this.onEventsProcessedCallback = callback;
   }
 
@@ -77,11 +95,11 @@ export class EventStreamService {
    */
   async start(branchId: string, storeId: string): Promise<void> {
     if (this.channels.has(branchId)) {
-      console.log(`[EventStream] Already subscribed to branch ${branchId}`);
+      evLog(`[EventStream] Already subscribed to branch ${branchId}`);
       return;
     }
 
-    console.log(`[EventStream] Starting event stream for branch ${branchId}`);
+    evLog(`[EventStream] Starting event stream for branch ${branchId}`);
 
     // 1. Perform initial catch-up
     await this.catchUp(branchId, storeId);
@@ -97,18 +115,22 @@ export class EventStreamService {
    * Stop event stream for a branch
    */
   async stop(branchId: string): Promise<void> {
-    // Clear reconnect timeout
+    // Clear reconnect timeout and backoff
     const reconnectTimeout = this.reconnectTimeouts.get(branchId);
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       this.reconnectTimeouts.delete(branchId);
     }
+    this.reconnectAttempt.delete(branchId);
+    this.lastReconnectWarnAt.delete(branchId);
 
-    // Unsubscribe from Realtime
+    // Unsubscribe from Realtime: remove from registry before removeChannel so intentional
+    // teardown does not leave the old channel registered when CLOSED fires — avoids treating
+    // that CLOSED as needing reconnect.
     const channel = this.channels.get(branchId);
     if (channel) {
-      await supabase.removeChannel(channel);
       this.channels.delete(branchId);
+      await supabase.removeChannel(channel);
     }
 
     // Clear catch-up interval
@@ -122,7 +144,7 @@ export class EventStreamService {
     this.isProcessing.delete(branchId);
     this.eventQueue.delete(branchId);
 
-    console.log(`[EventStream] Stopped event stream for branch ${branchId}`);
+    evLog(`[EventStream] Stopped event stream for branch ${branchId}`);
   }
 
   /**
@@ -140,90 +162,118 @@ export class EventStreamService {
     // Remove existing channel if it exists (to avoid duplicates)
     const existingChannel = this.channels.get(branchId);
     if (existingChannel) {
-      console.log(`[EventStream] Removing existing channel for branch ${branchId} before reconnecting`);
+      evLog(`[EventStream] Removing existing channel for branch ${branchId} before reconnecting`);
+      // Unregister first: Supabase may emit CLOSED during remove while the channel was still
+      // registered, causing reconnect storms.
+      this.channels.delete(branchId);
       try {
         await supabase.removeChannel(existingChannel);
       } catch (error) {
         console.warn(`[EventStream] Error removing existing channel:`, error);
       }
-      this.channels.delete(branchId);
     }
 
-    console.log(`[EventStream] Setting up Realtime subscription for branch ${branchId}`);
-    
-    const channel = supabase
-      .channel(`branch_events:${branchId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'branch_event_log',
-          filter: `branch_id=eq.${branchId}`,
-        },
-        async (payload) => {
-          // Realtime message is just a signal
-          // We'll pull the actual event by version
-          const event = payload.new as BranchEvent;
-          console.log(`[EventStream] Realtime signal: event ${event.id} version ${event.version}`);
+    evLog(`[EventStream] Setting up Realtime subscription for branch ${branchId}`);
 
-          // Trigger catch-up (will pull all events > last_version)
-          await this.catchUp(branchId, storeId);
-        }
-      )
-      .subscribe((status) => {
-        console.log(`[EventStream] Realtime subscription status for branch ${branchId}: ${status}`);
-        if (status === 'SUBSCRIBED') {
-          console.log(`✅ [EventStream] Realtime subscribed successfully for branch ${branchId}`);
-          // Clear any reconnect timeout since we're successfully connected
-          const timeout = this.reconnectTimeouts.get(branchId);
-          if (timeout) {
-            clearTimeout(timeout);
-            this.reconnectTimeouts.delete(branchId);
-          }
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error(`❌ [EventStream] Realtime error for branch ${branchId} - attempting to reconnect...`);
-          this.scheduleReconnect(branchId, storeId, 2000); // Retry after 2 seconds
-        } else if (status === 'TIMED_OUT') {
-          console.warn(`⏱️ [EventStream] Realtime subscription timed out for branch ${branchId} - attempting to reconnect...`);
-          this.scheduleReconnect(branchId, storeId, 3000); // Retry after 3 seconds
-        } else if (status === 'CLOSED') {
-          console.warn(`🔒 [EventStream] Realtime subscription closed for branch ${branchId} - attempting to reconnect...`);
-          // Only reconnect if we're still supposed to be connected (channel exists in map)
-          if (this.channels.has(branchId)) {
-            this.scheduleReconnect(branchId, storeId, 2000); // Retry after 2 seconds
-          } else {
-            console.log(`[EventStream] Channel was intentionally stopped, not reconnecting`);
-          }
-        } else {
-          console.log(`ℹ️ [EventStream] Realtime subscription status changed to: ${status} for branch ${branchId}`);
-        }
-      });
+    const channel = supabase.channel(`branch_events:${branchId}`).on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'branch_event_log',
+        filter: `branch_id=eq.${branchId}`,
+      },
+      async (payload) => {
+        if (this.channels.get(branchId) !== channel) return;
+        const event = payload.new as BranchEvent;
+        evLog(`[EventStream] Realtime signal: event ${event.id} version ${event.version}`);
+        await this.catchUp(branchId, storeId);
+      }
+    );
 
+    // Register before subscribe() so synchronous status callbacks see the active channel,
+    // and stale CLOSED from a replaced channel does not match this reference.
     this.channels.set(branchId, channel);
-    console.log(`[EventStream] Realtime channel created for branch ${branchId}, waiting for subscription...`);
+
+    channel.subscribe((status) => {
+      if (this.channels.get(branchId) !== channel) {
+        evLog(`[EventStream] Ignoring Realtime status ${status} for superseded channel branch ${branchId}`);
+        return;
+      }
+      evLog(`[EventStream] Realtime subscription status for branch ${branchId}: ${status}`);
+      if (status === 'SUBSCRIBED') {
+        evLog(`✅ [EventStream] Realtime subscribed successfully for branch ${branchId}`);
+        this.reconnectAttempt.delete(branchId);
+        const timeout = this.reconnectTimeouts.get(branchId);
+        if (timeout) {
+          clearTimeout(timeout);
+          this.reconnectTimeouts.delete(branchId);
+        }
+      } else if (status === 'CHANNEL_ERROR') {
+        this.logReconnectIssue(
+          branchId,
+          'error',
+          `❌ [EventStream] Realtime error for branch ${branchId} - attempting to reconnect...`
+        );
+        this.scheduleReconnect(branchId, storeId);
+      } else if (status === 'TIMED_OUT') {
+        this.logReconnectIssue(
+          branchId,
+          'timeout',
+          `⏱️ [EventStream] Realtime subscription timed out for branch ${branchId} - attempting to reconnect...`
+        );
+        this.scheduleReconnect(branchId, storeId);
+      } else if (status === 'CLOSED') {
+        this.logReconnectIssue(
+          branchId,
+          'closed',
+          `🔒 [EventStream] Realtime subscription closed for branch ${branchId} - attempting to reconnect...`
+        );
+        this.scheduleReconnect(branchId, storeId);
+      } else {
+        evLog(`ℹ️ [EventStream] Realtime subscription status changed to: ${status} for branch ${branchId}`);
+      }
+    });
+
+    evLog(`[EventStream] Realtime channel created for branch ${branchId}, waiting for subscription...`);
+  }
+
+  private readonly RECONNECT_WARN_THROTTLE_MS = 15000;
+
+  private logReconnectIssue(branchId: string, _kind: string, message: string): void {
+    const now = Date.now();
+    const last = this.lastReconnectWarnAt.get(branchId) ?? 0;
+    if (now - last >= this.RECONNECT_WARN_THROTTLE_MS) {
+      this.lastReconnectWarnAt.set(branchId, now);
+      if (message.startsWith('❌')) console.error(message);
+      else console.warn(message);
+    } else {
+      evLog(message);
+    }
   }
 
   /**
-   * Schedule a reconnection attempt for a branch
+   * Schedule a reconnection attempt for a branch (exponential backoff, max 30s).
    */
-  private scheduleReconnect(branchId: string, storeId: string, delayMs: number): void {
-    // Don't schedule multiple reconnects
+  private scheduleReconnect(branchId: string, storeId: string): void {
     if (this.reconnectTimeouts.has(branchId)) {
-      console.log(`[EventStream] Reconnect already scheduled for branch ${branchId}, skipping`);
+      evLog(`[EventStream] Reconnect already scheduled for branch ${branchId}, skipping`);
       return;
     }
 
-    console.log(`[EventStream] Scheduling reconnect for branch ${branchId} in ${delayMs}ms`);
+    const attempt = this.reconnectAttempt.get(branchId) ?? 0;
+    const delayMs = Math.min(2000 * 2 ** attempt, 30000);
+    this.reconnectAttempt.set(branchId, attempt + 1);
+
+    evLog(`[EventStream] Scheduling reconnect for branch ${branchId} in ${delayMs}ms (attempt ${attempt + 1})`);
     const timeout = setTimeout(async () => {
       this.reconnectTimeouts.delete(branchId);
-      console.log(`[EventStream] Attempting to reconnect for branch ${branchId}...`);
+      evLog(`[EventStream] Attempting to reconnect for branch ${branchId}...`);
       try {
         await this.subscribeToRealtime(branchId, storeId);
       } catch (error) {
         console.error(`[EventStream] Reconnection failed for branch ${branchId}:`, error);
-        // Retry with exponential backoff (double the delay)
-        this.scheduleReconnect(branchId, storeId, Math.min(delayMs * 2, 30000)); // Max 30 seconds
+        this.scheduleReconnect(branchId, storeId);
       }
     }, delayMs);
 
@@ -237,7 +287,7 @@ export class EventStreamService {
   async catchUp(branchId: string, storeId: string): Promise<EventProcessingResult> {
     // Prevent concurrent catch-up for same branch
     if (this.isProcessing.get(branchId)) {
-      console.log(`[EventStream] Catch-up already in progress for branch ${branchId}`);
+      evLog(`[EventStream] Catch-up already in progress for branch ${branchId}`);
       return { processed: 0, errors: [], last_version: 0 };
     }
 
@@ -251,7 +301,7 @@ export class EventStreamService {
       // ✅ FIX 3: Enhanced sync state initialization
       // If no sync state exists, check if database has data and initialize accordingly
       if (!syncState && lastVersion === 0) {
-        console.log(`[EventStream] No sync state found for branch ${branchId}, checking if database has data...`);
+        evLog(`[EventStream] No sync state found for branch ${branchId}, checking if database has data...`);
         
         // Check if database has any data (pick a table that's likely to have records)
         const hasData = await getDB().products.limit(1).count() > 0 || 
@@ -261,39 +311,39 @@ export class EventStreamService {
         if (hasData) {
           // Database has data but no sync state - initialize to current max version
           // This prevents replaying all historical events when event stream starts
-          console.log(`[EventStream] Database has data but no sync state - initializing to current max version to avoid replaying all events`);
+          evLog(`[EventStream] Database has data but no sync state - initializing to current max version to avoid replaying all events`);
           try {
           await this.initializeSyncState(branchId);
           
           // Fetch the newly initialized sync state
           const newSyncState = await this.getSyncState(branchId);
           lastVersion = newSyncState?.last_seen_event_version || 0;
-            console.log(`[EventStream] ✅ Initialized sync state to version ${lastVersion} for branch ${branchId}`);
+            evLog(`[EventStream] ✅ Initialized sync state to version ${lastVersion} for branch ${branchId}`);
           } catch (initError) {
             console.warn(`[EventStream] ⚠️ Failed to initialize sync state, will start from version 0:`, initError);
             // Continue with lastVersion = 0 if initialization fails
           }
         } else {
-          console.log(`[EventStream] Database is empty - will start from version 0 (expected on first sync)`);
+          evLog(`[EventStream] Database is empty - will start from version 0 (expected on first sync)`);
         }
       }
 
-      console.log(`[EventStream] Catching up from version ${lastVersion} for branch ${branchId}`);
+      evLog(`[EventStream] Catching up from version ${lastVersion} for branch ${branchId}`);
 
       // 3. Pull events since last version
       const events = await this.pullEvents(branchId, lastVersion);
 
       if (events.length === 0) {
-        console.log(`[EventStream] No new events for branch ${branchId}`);
+        evLog(`[EventStream] No new events for branch ${branchId}`);
         return { processed: 0, errors: [], last_version: lastVersion };
       }
 
-      console.log(`[EventStream] Found ${events.length} new events for branch ${branchId} (versions ${events[0]?.version} to ${events[events.length - 1]?.version})`);
+      evLog(`[EventStream] Found ${events.length} new events for branch ${branchId} (versions ${events[0]?.version} to ${events[events.length - 1]?.version})`);
 
       // 4. Process events sequentially
-      console.log(`[EventStream] About to call processEvents with ${events.length} events`);
+      evLog(`[EventStream] About to call processEvents with ${events.length} events`);
       const result = await this.processEvents(branchId, storeId, events);
-      console.log(`[EventStream] processEvents returned:`, {
+      evLog(`[EventStream] processEvents returned:`, {
         processed: result.processed,
         errors: result.errors.length,
         last_version: result.last_version,
@@ -302,20 +352,20 @@ export class EventStreamService {
 
       // 5. Update last seen version
       if (result.last_version > lastVersion) {
-        console.log(`[EventStream] Updating sync state from version ${lastVersion} to ${result.last_version}`);
+        evLog(`[EventStream] Updating sync state from version ${lastVersion} to ${result.last_version}`);
         await this.updateSyncState(branchId, result.last_version);
-        console.log(`[EventStream] Sync state updated successfully`);
+        evLog(`[EventStream] Sync state updated successfully`);
       } else {
-        console.log(`[EventStream] Not updating sync state: result.last_version (${result.last_version}) <= lastVersion (${lastVersion})`);
+        evLog(`[EventStream] Not updating sync state: result.last_version (${result.last_version}) <= lastVersion (${lastVersion})`);
       }
 
       // 5. Notify callback if events were processed
-      console.log(`[EventStream] Checking callback: processed=${result.processed}, hasCallback=${!!this.onEventsProcessedCallback}`);
+      evLog(`[EventStream] Checking callback: processed=${result.processed}, hasCallback=${!!this.onEventsProcessedCallback}`);
       if (result.processed > 0 && this.onEventsProcessedCallback) {
-        console.log(`[EventStream] ✅ Notifying callback: ${result.processed} events processed`);
+        evLog(`[EventStream] ✅ Notifying callback: ${result.processed} events processed`);
         try {
           await this.onEventsProcessedCallback(result);
-          console.log(`[EventStream] ✅ Callback executed successfully`);
+          evLog(`[EventStream] ✅ Callback executed successfully`);
         } catch (callbackError) {
           console.error(`[EventStream] ❌ Error in callback:`, callbackError);
           if (callbackError instanceof Error) {
@@ -323,7 +373,7 @@ export class EventStreamService {
           }
         }
       } else {
-        console.log(`[EventStream] ⚠️ Not calling callback:`, {
+        evLog(`[EventStream] ⚠️ Not calling callback:`, {
           processed: result.processed,
           hasCallback: !!this.onEventsProcessedCallback,
           reason: result.processed === 0 ? 'no events processed' : 'callback not set'
@@ -419,9 +469,9 @@ export class EventStreamService {
     const deduplicatedCount = deduplicated.length;
     
     if (originalCount > deduplicatedCount) {
-      console.log(
+      evLog(
         `[EventStream] Deduplicated ${originalCount} events → ${deduplicatedCount} events ` +
-        `(${originalCount - deduplicatedCount} duplicates removed)`
+          `(${originalCount - deduplicatedCount} duplicates removed)`
       );
     }
     
@@ -439,13 +489,14 @@ export class EventStreamService {
   ): Promise<EventProcessingResult> {
     const errors: string[] = [];
     let processed = 0;
+    let skippedMissing = 0;
     let lastVersion = 0;
 
-    console.log(`[EventStream] Processing ${events.length} events for branch ${branchId}`);
-    console.log(`[EventStream] Events array:`, events.map(e => ({ id: e.id, version: e.version, entity_type: e.entity_type, entity_id: e.entity_id })));
+    evLog(`[EventStream] Processing ${events.length} events for branch ${branchId}`);
+    evLog(`[EventStream] Events array:`, events.map(e => ({ id: e.id, version: e.version, entity_type: e.entity_type, entity_id: e.entity_id })));
 
     if (!events || events.length === 0) {
-      console.warn(`[EventStream] Events array is empty or null`);
+      evLog(`[EventStream] Events array is empty or null`);
       return { processed: 0, errors: [], last_version: 0 };
     }
 
@@ -464,13 +515,13 @@ export class EventStreamService {
     for (let i = 0; i < deduplicatedEvents.length; i++) {
       const event = deduplicatedEvents[i];
       if (!event) {
-        console.warn(`[EventStream] Event at index ${i} is null or undefined`);
+        evLog(`[EventStream] Event at index ${i} is null or undefined`);
         continue;
       }
 
       try {
-        console.log(`[EventStream] Starting to process event ${event.id} (version ${event.version}, index ${i}/${deduplicatedEvents.length})`);
-        console.log(`[EventStream] Event details:`, {
+        evLog(`[EventStream] Starting to process event ${event.id} (version ${event.version}, index ${i}/${deduplicatedEvents.length})`);
+        evLog(`[EventStream] Event details:`, {
           id: event.id,
           event_type: event.event_type,
           entity_type: event.entity_type,
@@ -478,9 +529,12 @@ export class EventStreamService {
           operation: event.operation,
           version: event.version
         });
-        await this.processEvent(event, storeId);
+        const outcome = await this.processEvent(event, storeId);
+        if (outcome === 'skipped_missing') skippedMissing++;
         processed++;
-        console.log(`[EventStream] Successfully processed event ${event.id} (version ${event.version})`);
+        evLog(
+          `[EventStream] Event ${event.id} (v${event.version}) finished: ${outcome === 'skipped_missing' ? 'skipped (no row)' : 'handled'}`
+        );
       } catch (error) {
         const errorMsg = `Failed to process event ${event.id} (${event.event_type}): ${
           error instanceof Error ? error.message : 'Unknown error'
@@ -494,12 +548,29 @@ export class EventStreamService {
       }
     }
 
-    console.log(`[EventStream] Processed ${processed}/${deduplicatedEvents.length} deduplicated events (from ${events.length} original events), last version: ${lastVersion}`);
+    evLog(`[EventStream] Processed ${processed}/${deduplicatedEvents.length} deduplicated events (from ${events.length} original events), last version: ${lastVersion}`);
     if (errors.length > 0) {
-      console.warn(`[EventStream] ${errors.length} errors during processing:`, errors);
+      console.warn(`[EventStream] ${errors.length} error(s) during processing:`, errors);
+    }
+    if (skippedMissing > 0) {
+      console.info(
+        `[EventStream] ${skippedMissing} event(s) skipped: no matching row in Supabase (RLS, deleted, or stale event log). ` +
+          `Sync version advanced to ${lastVersion}. Set VITE_EVENT_STREAM_VERBOSE=true for per-event logs.`
+      );
     }
 
-    return { processed, errors, last_version: lastVersion };
+    return { processed, errors, last_version: lastVersion, skipped_missing: skippedMissing };
+  }
+
+  /**
+   * Sync parity baseline tests only: run a single event through the same pipeline as catch-up.
+   * Not used by production UI.
+   */
+  async parityBaselineProcessEvent(
+    storeId: string,
+    event: BranchEvent
+  ): Promise<'handled' | 'skipped_missing'> {
+    return this.processEvent(event, storeId);
   }
 
   /**
@@ -507,43 +578,147 @@ export class EventStreamService {
    * Fetches the affected record and updates IndexedDB
    * Handles both single-record events and bulk events
    */
-  private async processEvent(event: BranchEvent, storeId: string): Promise<void> {
-    console.log(
+  private async processEvent(event: BranchEvent, storeId: string): Promise<'handled' | 'skipped_missing'> {
+    evLog(
       `[EventStream] Processing event: ${event.event_type} ${event.operation} on ${event.entity_type}/${event.entity_id}`
     );
 
     // Handle bulk events (products_bulk_updated, entities_bulk_updated, etc.)
     if (this.isBulkEvent(event.event_type)) {
-      console.log(`[EventStream] Processing bulk event: ${event.event_type}`);
+      evLog(`[EventStream] Processing bulk event: ${event.event_type}`);
       await this.processBulkEvent(event, storeId);
-      return;
+      return 'handled';
     }
 
     // Handle reverse operations (deletions)
     if (event.operation === 'reverse') {
-      console.log(`[EventStream] Handling reverse operation for ${event.entity_type}/${event.entity_id}`);
+      evLog(`[EventStream] Handling reverse operation for ${event.entity_type}/${event.entity_id}`);
       await this.handleReverse(event);
-      console.log(`[EventStream] Reverse operation completed for ${event.entity_type}/${event.entity_id}`);
-      return;
+      evLog(`[EventStream] Reverse operation completed for ${event.entity_type}/${event.entity_id}`);
+      return 'handled';
     }
 
     // Fetch the affected record from Supabase
-    console.log(`[EventStream] Fetching record ${event.entity_type}/${event.entity_id} from Supabase`);
+    evLog(`[EventStream] Fetching record ${event.entity_type}/${event.entity_id} from Supabase`);
     const record = await this.fetchAffectedRecord(event.entity_type, event.entity_id, storeId);
 
     if (!record) {
       // Record might have been deleted or doesn't exist yet
-      // This is OK - we'll catch it on next sync
-      console.warn(
+      evLog(
         `[EventStream] Record ${event.entity_type}/${event.entity_id} not found, skipping`
       );
+      return 'skipped_missing';
+    }
+
+    evLog(`[EventStream] Fetched record ${event.entity_type}/${event.entity_id}, updating IndexedDB`);
+    // Update IndexedDB
+    await this.updateIndexedDB(event.entity_type, record);
+
+    // Cascade: fetch child records for parent events that own child rows
+    await this.fetchAndStoreChildRecords(event, storeId, record);
+
+    evLog(`[EventStream] Completed processing event ${event.id}`);
+    return 'handled';
+  }
+
+  /**
+   * Fetch and store child records for parent events.
+   * The architecture rule is one event per business action — so sale_posted covers
+   * both the bill and its line items; inventory_received covers the bill and its items.
+   * journal_entry_created covers one event per transaction but multiple entries (debit+credit).
+   * This method ensures those child rows land in IndexedDB atomically with the parent.
+   */
+  private async fetchAndStoreChildRecords(
+    event: BranchEvent,
+    storeId: string,
+    parentRecord?: Record<string, unknown>
+  ): Promise<void> {
+    if (event.event_type === 'sale_posted') {
+      try {
+        const { data: lineItems, error } = await supabase
+          .from('bill_line_items')
+          .select('*')
+          .eq('bill_id', event.entity_id);
+
+        if (error) {
+          evLog(`[EventStream] Could not fetch bill_line_items for bill ${event.entity_id}:`, error.message);
+          return;
+        }
+
+        if (lineItems && lineItems.length > 0) {
+          await db.bill_line_items.bulkPut(
+            lineItems.map((r: any) => ({ ...r, _synced: true, _lastSyncedAt: new Date().toISOString() }))
+          );
+          evLog(`[EventStream] Stored ${lineItems.length} bill_line_items for bill ${event.entity_id}`);
+        }
+      } catch (err) {
+        evLog(`[EventStream] Error fetching bill_line_items for bill ${event.entity_id}:`, err);
+      }
       return;
     }
 
-    console.log(`[EventStream] Fetched record ${event.entity_type}/${event.entity_id}, updating IndexedDB`);
-    // Update IndexedDB
-    await this.updateIndexedDB(event.entity_type, record, event.operation === 'insert');
-    console.log(`[EventStream] Completed processing event ${event.id}`);
+    if (event.event_type === 'inventory_received') {
+      try {
+        // inventory_items link to inventory_bills via batch_id (= bill id), not inventory_bill_id
+        const { data: items, error } = await supabase
+          .from('inventory_items')
+          .select('*')
+          .eq('batch_id', event.entity_id);
+
+        if (error) {
+          evLog(`[EventStream] Could not fetch inventory_items for bill ${event.entity_id}:`, error.message);
+          return;
+        }
+
+        if (items && items.length > 0) {
+          await db.inventory_items.bulkPut(
+            items.map((r: any) => ({ ...r, _synced: true, _lastSyncedAt: new Date().toISOString() }))
+          );
+          evLog(`[EventStream] Stored ${items.length} inventory_items for inventory_bill ${event.entity_id}`);
+        }
+      } catch (err) {
+        evLog(`[EventStream] Error fetching inventory_items for bill ${event.entity_id}:`, err);
+      }
+      return;
+    }
+
+    if (event.event_type === 'journal_entry_created') {
+      try {
+        const txId =
+          parentRecord && typeof (parentRecord as { transaction_id?: string | null }).transaction_id === 'string'
+            ? (parentRecord as { transaction_id: string }).transaction_id
+            : null;
+        if (!txId) {
+          evLog(`[EventStream] journal_entry_created: no transaction_id on parent row, keeping single entry only`);
+          return;
+        }
+
+        const { data: entries, error } = await supabase
+          .from('journal_entries')
+          .select('*')
+          .eq('store_id', storeId)
+          .eq('transaction_id', txId);
+
+        if (error) {
+          evLog(`[EventStream] Could not fetch journal_entries for transaction ${txId}:`, error.message);
+          return;
+        }
+
+        if (entries && entries.length > 0) {
+          await db.journal_entries.bulkPut(
+            entries.map((r) => ({
+              ...r,
+              _synced: true,
+              _lastSyncedAt: new Date().toISOString(),
+            }))
+          );
+          evLog(`[EventStream] Stored ${entries.length} journal_entries for transaction ${txId}`);
+        }
+      } catch (err) {
+        evLog(`[EventStream] Error fetching journal_entries for journal_entry_created:`, err);
+      }
+      return;
+    }
   }
 
   /**
@@ -565,7 +740,7 @@ export class EventStreamService {
   private async processBulkEvent(event: BranchEvent, storeId: string): Promise<void> {
     const metadata = event.metadata;
     if (!metadata) {
-      console.warn(`[EventStream] Bulk event ${event.id} has no metadata, skipping`);
+      evLog(`[EventStream] Bulk event ${event.id} has no metadata, skipping`);
       return;
     }
 
@@ -584,25 +759,25 @@ export class EventStreamService {
     } else if (event.event_type === 'users_bulk_updated' && metadata.affected_user_ids) {
       affectedIds = metadata.affected_user_ids;
     } else {
-      console.warn(`[EventStream] Bulk event ${event.id} missing affected IDs in metadata`);
+      evLog(`[EventStream] Bulk event ${event.id} missing affected IDs in metadata`);
       return;
     }
 
     if (affectedIds.length === 0) {
-      console.warn(`[EventStream] Bulk event ${event.id} has empty affected IDs list`);
+      evLog(`[EventStream] Bulk event ${event.id} has empty affected IDs list`);
       return;
     }
 
-    console.log(`[EventStream] Processing bulk event with ${affectedIds.length} affected records`);
+    evLog(`[EventStream] Processing bulk event with ${affectedIds.length} affected records`);
 
     // Handle bulk deletions
     if (event.operation === 'reverse') {
-      console.log(`[EventStream] Bulk deletion of ${affectedIds.length} ${tableName} records`);
+      evLog(`[EventStream] Bulk deletion of ${affectedIds.length} ${tableName} records`);
       const table = (db as any)[tableName];
       if (table) {
         for (const id of affectedIds) {
           await table.delete(id);
-          console.log(`[EventStream] Deleted ${tableName}/${id} from IndexedDB`);
+          evLog(`[EventStream] Deleted ${tableName}/${id} from IndexedDB`);
         }
       }
       return;
@@ -629,11 +804,11 @@ export class EventStreamService {
       }
 
       if (!records || records.length === 0) {
-        console.warn(`[EventStream] Bulk query returned no records for ${tableName}`);
+        evLog(`[EventStream] Bulk query returned no records for ${tableName}`);
         return;
       }
 
-      console.log(`[EventStream] Fetched ${records.length} records for bulk update`);
+      evLog(`[EventStream] Fetched ${records.length} records for bulk update`);
 
       // Update all records in IndexedDB
       const table = (db as any)[tableName];
@@ -653,7 +828,7 @@ export class EventStreamService {
       // Bulk put (upsert) all records at once
       await table.bulkPut(normalizedRecords);
 
-      console.log(`[EventStream] Bulk updated ${normalizedRecords.length} ${tableName} records in IndexedDB`);
+      evLog(`[EventStream] Bulk updated ${normalizedRecords.length} ${tableName} records in IndexedDB`);
     } catch (error) {
       console.error(`[EventStream] Error processing bulk event:`, error);
       throw error;
@@ -674,8 +849,9 @@ export class EventStreamService {
       throw new Error(`Unknown entity type: ${entityType}`);
     }
 
-    // Build query with store filter
-    let query = supabase.from(tableName).select('*').eq('id', entityId).single();
+    // Build query with store filter (apply all filters before maybeSingle)
+    // Use maybeSingle() to avoid 406 when record doesn't exist (event before upload, deleted, or RLS block)
+    let query = supabase.from(tableName).select('*').eq('id', entityId);
 
     // Apply store filter if needed
     if (tableName !== 'stores' && tableName !== 'transactions') {
@@ -686,11 +862,10 @@ export class EventStreamService {
       }
     } else if (tableName === 'stores') {
       // For stores, entityId is the store ID - no additional filter needed
-      // The query already filters by id=entityId above
-      console.log(`[EventStream] Fetching store ${entityId} (entityId matches store ID)`);
+      evLog(`[EventStream] Fetching store ${entityId} (entityId matches store ID)`);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       if (error.code === 'PGRST116') {
@@ -706,7 +881,7 @@ export class EventStreamService {
   /**
    * Update IndexedDB with the fetched record
    */
-  private async updateIndexedDB(entityType: string, record: any, isInsert: boolean): Promise<void> {
+  private async updateIndexedDB(entityType: string, record: any): Promise<void> {
     const tableName = this.mapEntityTypeToTable(entityType);
     if (!tableName) {
       throw new Error(`Unknown entity type: ${entityType}`);
@@ -727,7 +902,7 @@ export class EventStreamService {
       _lastSyncedAt: new Date().toISOString(),
     });
 
-    console.log(`[EventStream] Updated ${tableName}/${normalized.id} in IndexedDB`);
+    evLog(`[EventStream] Updated ${tableName}/${normalized.id} in IndexedDB`);
   }
 
   /**
@@ -746,7 +921,7 @@ export class EventStreamService {
 
     // Delete from IndexedDB
     await table.delete(event.entity_id);
-    console.log(`[EventStream] Reversed ${tableName}/${event.entity_id} in IndexedDB`);
+    evLog(`[EventStream] Reversed ${tableName}/${event.entity_id} in IndexedDB`);
   }
 
   /**
@@ -773,6 +948,8 @@ export class EventStreamService {
       user: 'users',
       chart_of_account: 'chart_of_accounts',
       user_module_access: 'user_module_access',
+      role_permissions: 'role_permissions',
+      user_permissions: 'user_permissions',
     };
 
     return mapping[entityType] || null;
@@ -795,6 +972,10 @@ export class EventStreamService {
       delete normalized.is_deleted;
       delete normalized.deleted_at;
       delete normalized.deleted_by;
+    }
+
+    if (tableName === 'bills') {
+      normalized.bill_date = normalizeBillDateFromRemote(normalized);
     }
 
     return normalized;
@@ -838,12 +1019,12 @@ export class EventStreamService {
   }
 
   /**
-   * Schedule periodic catch-up as safety net
-   * Runs every CATCH_UP_INTERVAL_MS to catch any missed events
+   * Schedule periodic catch-up as safety net (DEVELOPER_RULES §5 documented exception).
+   * Runs every CATCH_UP_INTERVAL_MS to catch missed Realtime events only; not "periodic polling for sync".
    */
   private schedulePeriodicCatchUp(branchId: string, storeId: string): void {
     const interval = setInterval(async () => {
-      console.log(`[EventStream] Periodic catch-up for branch ${branchId}`);
+      evLog(`[EventStream] Periodic catch-up for branch ${branchId}`);
       await this.catchUp(branchId, storeId);
     }, this.CATCH_UP_INTERVAL_MS);
 
@@ -856,7 +1037,7 @@ export class EventStreamService {
    */
   async initializeSyncState(branchId: string): Promise<void> {
     try {
-      console.log(`[EventStream] Initializing sync state for branch ${branchId}...`);
+      evLog(`[EventStream] Initializing sync state for branch ${branchId}...`);
       
       // Fetch the current max version from branch_event_log
       const { data, error } = await supabase
@@ -865,24 +1046,24 @@ export class EventStreamService {
         .eq('branch_id', branchId)
         .order('version', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (error) {
-        // If no events exist yet, that's fine - start from version 0
-        if (error.code === 'PGRST116') {
-          console.log(`[EventStream] No events found for branch ${branchId}, starting from version 0`);
-          await this.updateSyncState(branchId, 0);
-          return;
-        }
         throw error;
       }
 
-      const maxVersion = data?.version || 0;
-      console.log(`[EventStream] Found max version ${maxVersion} for branch ${branchId}`);
+      if (data == null) {
+        evLog(`[EventStream] No events found for branch ${branchId}, starting from version 0`);
+        await this.updateSyncState(branchId, 0);
+        return;
+      }
+
+      const maxVersion = Number((data as { version?: number }).version) || 0;
+      evLog(`[EventStream] Found max version ${maxVersion} for branch ${branchId}`);
 
       // Update sync state with current max version
       await this.updateSyncState(branchId, maxVersion);
-      console.log(`[EventStream] ✅ Sync state initialized to version ${maxVersion} for branch ${branchId}`);
+      evLog(`[EventStream] ✅ Sync state initialized to version ${maxVersion} for branch ${branchId}`);
     } catch (error) {
       console.error(`[EventStream] Failed to initialize sync state for branch ${branchId}:`, error);
       // Don't throw - let the service start anyway, it will just replay events
@@ -901,7 +1082,7 @@ export class EventStreamService {
    * Useful when Realtime subscription might have missed events
    */
   async manualCatchUp(branchId: string, storeId: string): Promise<EventProcessingResult> {
-    console.log(`[EventStream] Manual catch-up triggered for branch ${branchId}`);
+    evLog(`[EventStream] Manual catch-up triggered for branch ${branchId}`);
     return this.catchUp(branchId, storeId);
   }
 

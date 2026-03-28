@@ -1001,6 +1001,7 @@ const en = {
     startClosingProcess: 'Start Closing Process',
     refreshStatus: 'Refresh Status',
     noActiveSession: 'No Active Session',
+    closedStatus: 'Cash drawer closed',
     mustBeOpenedMessage: 'Cash drawer must be opened to start tracking transactions',
     verifyCashBalance: 'Verify Cash Balance',
     expectedAmount: 'Expected Amount',
@@ -1121,7 +1122,41 @@ const en = {
     allSynced: 'All Items Synced',
     noPendingItems: 'There are no items waiting to be synchronized.',
     offlineWarning: 'You are currently offline. Items will sync when connection is restored.',
-  }
+  },
+  errors: {
+    transaction: {
+      amount_required: 'Amount is required.',
+      amount_non_positive: 'Amount must be greater than zero.',
+      currency_invalid: 'Currency must be USD or LBP.',
+      category_invalid: 'Transaction category is not valid.',
+      description_required: 'Description is required.',
+      store_id_required: 'Store information is missing. Please reload the app.',
+      branch_id_required: 'Branch information is missing. Please reload the app.',
+      entity_not_found: 'The selected customer or supplier could not be found.',
+      cash_drawer_missing: 'No cash drawer account found. Please set one up before processing this transaction.',
+    },
+    journal: {
+      branch_id_required: 'Branch information is missing from this journal entry.',
+      debit_credit_mismatch: 'Journal entry debits and credits must be equal.',
+      amount_non_positive: 'Journal entry amount must be greater than zero.',
+      account_invalid: 'One or more account codes in this journal entry are not recognised.',
+    },
+    bill: {
+      supplier_required: 'A supplier must be selected before saving this bill.',
+      line_items_empty: 'This bill must have at least one line item.',
+      amount_non_positive: 'Bill line item amounts must be greater than zero.',
+    },
+    statement: {
+      token_invalid: 'This statement link is invalid or has already been used.',
+      token_expired: 'This statement link has expired. Please request a new one.',
+    },
+    system: {
+      local_write_failed: 'Could not save your changes. Please try again.',
+      sync_upload_failed: 'Could not sync your changes. They will be retried automatically.',
+      network_unavailable: 'You appear to be offline. This action requires a connection.',
+      unknown: 'Something went wrong. Please try again or reload the app.',
+    },
+  },
 };
 
 export default en;

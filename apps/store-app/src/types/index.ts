@@ -1,5 +1,6 @@
 // Multilingual data types
 import type { MultilingualString } from '../utils/multilingual';
+import type { BranchCore } from '@pos-platform/shared';
 
 // Core type definitions for the ERP system
 export interface User {
@@ -136,25 +137,10 @@ export interface Sale {
   created_at: string;
   amount_paid: number;
 }
-export interface Store {
-  id: string;
-  name: string;
-  address: string;
-  phone: string;
-  email: string;
-  logo?: string | null;
-  created_at: string;
-}
 
-export interface Branch {
-  id: string;
-  store_id: string;
-  name: string;
-  address?: string | null;
-  phone?: string | null;
+
+export interface Branch extends BranchCore {
   logo?: string | null; // Branch logo: can be base64 (custom upload) or URL (selected global logo)
-  created_at: string;
-  updated_at: string;
   _synced?: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
@@ -707,6 +693,10 @@ export interface PendingSync {
   operation: 'create' | 'update' | 'delete';
   created_at: string;
   retry_count: number;
+  /** Row payload for create/update retries (stored by addPendingSync) */
+  payload?: unknown;
+  /** Last Supabase or client error message on retry */
+  last_error?: string;
 }
 
 // Notification types

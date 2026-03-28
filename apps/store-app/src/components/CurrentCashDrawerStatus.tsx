@@ -8,6 +8,7 @@ import { missedProductsService } from '../services/missedProductsService';
 import { useI18n } from '../i18n';
 import { EmployeeService } from '../services/employeeService';
 import { Employee } from '../types';
+import CashDrawerOpeningModal from './common/CashDrawerOpeningModal';
 
 interface CurrentCashDrawerStatusProps {
   storeId: string;
@@ -146,8 +147,15 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
   const [inventoryVerificationData, setInventoryVerificationData] = useState<any>(null);
   const [openedByEmployee, setOpenedByEmployee] = useState<Employee | null>(null);
   const [cashDrawerBalances, setCashDrawerBalances] = useState<{ USD: number; LBP: number } | null>(null);
+  const [showOpeningModal, setShowOpeningModal] = useState(false);
   const { userProfile } = useSupabaseAuth();
-  const { closeCashDrawer: contextCloseCashDrawer, currency: storePreferredCurrency, exchangeRate, currentBranchId } = useOfflineData();
+  const {
+    closeCashDrawer: contextCloseCashDrawer,
+    openCashDrawer: contextOpenCashDrawer,
+    currency: storePreferredCurrency,
+    exchangeRate,
+    currentBranchId,
+  } = useOfflineData();
 
   useEffect(() => {
     loadStatus();
@@ -204,6 +212,19 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleConfirmOpenDrawer = async (openingAmount: number) => {
+    if (!userProfile?.id) {
+      throw new Error('User not authenticated');
+    }
+    const rate = exchangeRate || 89500;
+    let amountInLBP = openingAmount;
+    if (storePreferredCurrency === 'USD') {
+      amountInLBP = openingAmount * rate;
+    }
+    await contextOpenCashDrawer(amountInLBP, userProfile.id);
+    await loadStatus();
   };
 
   const handleCloseCashDrawer = async (actualAmount: number) => {
@@ -469,6 +490,9 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
             <div className="mb-4">
               <Wallet className="w-16 h-16 text-gray-300 mx-auto" />
             </div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-1 rtl:text-right">
+              {t('cashDrawer.closedStatus')}
+            </p>
             <p className="text-lg font-medium text-gray-900 mb-2 rtl:text-right">{t('cashDrawer.noActiveSession')}</p>
             <p className="text-gray-600 mb-4 rtl:text-right">{status.message}</p>
             <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
@@ -480,8 +504,16 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
               </div>
             </div>
             
-            <div className="mt-6">
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
               <button
+                type="button"
+                onClick={() => setShowOpeningModal(true)}
+                className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm font-medium"
+              >
+                {t('home.openCashDrawer')}
+              </button>
+              <button
+                type="button"
                 onClick={loadStatus}
                 className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm"
               >
@@ -509,6 +541,15 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
         loading={closingLoading}
         error={error || undefined}
         storePreferredCurrency={storePreferredCurrency}
+      />
+
+      <CashDrawerOpeningModal
+        isOpen={showOpeningModal}
+        onClose={() => setShowOpeningModal(false)}
+        onConfirm={handleConfirmOpenDrawer}
+        suggestedAmount={0}
+        title={t('pos.openCashDrawer')}
+        description={t('pos.enterOpeningCashAmount')}
       />
     </>
   );

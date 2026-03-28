@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { X, Edit, Trash2, FileText } from 'lucide-react';
 import { Modal } from '../../../common/Modal';
+import { useOfflineData } from '../../../../contexts/OfflineDataContext';
 import { ReceivedBill, SaleLineItem, CloseBillFees } from './types';
 
 interface ReceivedBillSalesLogsModalProps {
@@ -34,6 +35,7 @@ export function ReceivedBillSalesLogsModal({
   showToast,
   onMarkBillClosed
 }: ReceivedBillSalesLogsModalProps) {
+  const { getInventoryBatch } = useOfflineData();
   const [showCloseBillModal, setShowCloseBillModal] = useState(false);
   const [closeBillFees, setCloseBillFees] = useState<CloseBillFees | null>(null);
   const [actualBillType, setActualBillType] = useState<'commission' | 'cash' | 'credit' | null>(null);
@@ -141,7 +143,6 @@ export function ReceivedBillSalesLogsModal({
         : derivedBillMetrics.revenue;
 
       // Get batch ID and calculate P&L using profitLossService
-      const { getDB } = await import('../../../../lib/db');
       const batchId = bill.batchId;
       let cogs = 0;
       let currency: 'USD' | 'LBP' = 'USD';
@@ -154,7 +155,7 @@ export function ReceivedBillSalesLogsModal({
       let supplierAmount = 0;
 
       if (batchId) {
-        const batch = await getDB().inventory_bills.get(batchId);
+        const batch = await getInventoryBatch(batchId);
         currency = batch?.currency || 'USD';
         const billType = (batch?.type || (bill as any).batchType || 'commission') as 'commission' | 'cash' | 'credit';
         setActualBillType(billType);

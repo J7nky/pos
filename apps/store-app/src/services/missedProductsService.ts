@@ -1,5 +1,6 @@
 
 import { getDB, createId } from '../lib/db';
+import { getLocalDateString } from '../utils/dateUtils';
 
 export interface MissedProductData {
   itemId: string;
@@ -449,7 +450,7 @@ export class MissedProductsService {
       missedProducts.forEach(mp => {
         const session = sessions.find(s => s.id === mp.session_id);
         if (session) {
-          const date = new Date(session.opened_at).toISOString().split('T')[0];
+          const date = getLocalDateString(new Date(session.opened_at).toISOString());
           
           if (dateGroups.has(date)) {
             const existing = dateGroups.get(date)!;
@@ -552,7 +553,7 @@ export class MissedProductsService {
         
         return {
           id: mp.id,
-          date: session ? new Date(session.opened_at).toISOString().split('T')[0] : 'Unknown Date',
+          date: session ? getLocalDateString(new Date(session.opened_at).toISOString()) : 'Unknown Date',
           productName: mp.product_name || 'Unknown Product',
           varianceNumber: mp.variance,
           employeeId: session?.opened_by || 'Unknown Employee',

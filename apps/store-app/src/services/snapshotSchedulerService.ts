@@ -3,6 +3,7 @@
 
 import { snapshotService } from './snapshotService';
 import { getDB } from '../lib/db';
+import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 export interface SchedulerConfig {
   enabled: boolean;
@@ -101,7 +102,7 @@ export class SnapshotSchedulerService {
     try {
       const now = new Date();
       const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-      const currentDate = now.toISOString().split('T')[0];
+      const currentDate = getLocalDateString(now.toISOString());
       
       // Check if it's the scheduled time (within 1 minute window)
       if (currentTime === this.config.scheduleTime) {
@@ -121,7 +122,7 @@ export class SnapshotSchedulerService {
    * Run daily snapshots for all active stores
    */
   async runDailySnapshotsForAllStores(snapshotDate?: string): Promise<void> {
-    const targetDate = snapshotDate || new Date().toISOString().split('T')[0];
+    const targetDate = snapshotDate || getTodayLocalDate();
     
     try {
       // Get all active stores
@@ -336,7 +337,7 @@ export class SnapshotSchedulerService {
    * Manually trigger snapshots for a specific store
    */
   async triggerSnapshotForStore(storeId: string, snapshotDate?: string): Promise<void> {
-    const targetDate = snapshotDate || new Date().toISOString().split('T')[0];
+    const targetDate = snapshotDate || getTodayLocalDate();
     
     console.log(`📊 Manually triggering snapshot for store ${storeId} on ${targetDate}`);
     
@@ -396,7 +397,7 @@ export class SnapshotSchedulerService {
     const jobs = this.getAllSnapshotJobs();
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
-    const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+    const cutoffDateStr = getLocalDateString(cutoffDate.toISOString());
     
     const filteredJobs = jobs.filter(job => job.scheduledDate >= cutoffDateStr);
     const deletedCount = jobs.length - filteredJobs.length;
