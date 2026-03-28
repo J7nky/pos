@@ -43,16 +43,19 @@ Supabase → syncService.ts → IndexedDB → offlineDataContext.ts → UI compo
 - Maintain consistency with established schema conventions
 - Keep implementations simple and focused on core functionality
 
-## 5. Event-Driven Architecture (No Periodic Polling)
+## 5. Event-Driven Architecture (No Periodic Polling for Sync)
 
-**Rule:** The system uses a fully event-driven architecture with zero periodic polling. All data synchronization happens through real-time events.
+**Rule:** Sync is event-driven: real-time events drive data flow. There is no periodic polling to *trigger* sync or to *fetch* sync state for the purpose of driving sync. UI must not poll for unsynced state; it must react to context (e.g. `unsyncedCount` from `getSyncStatus()`) which is updated by callbacks after CRUD and after sync.
 
 **Implementation Requirements:**
-- No `setInterval()` or periodic sync timers for data synchronization
+- No `setInterval()` or periodic timers in UI or app code for sync or for “refresh unsynced” — use event-driven updates (context state updated by `crudHelperService` / sync callbacks)
 - All changes must emit events to `branch_event_log` via `eventEmissionService`
-- Use `eventStreamService` for real-time synchronization across devices
+- Use `eventStreamService` for real-time synchronization (Realtime subscription + optional catch-up)
 - Manual sync is only used for force sync, initial resync, or uploading unsynced changes
 - Bulk operations must use bulk event emitters to prevent event storms
+
+**Documented exception (policy vs implementation):**
+- **eventStreamService** may run a single, long-interval “catch-up” (e.g. ~5min) as a safety net for missed Realtime events (e.g. tab in background, connection blip). This is not “periodic polling for sync” and is the only allowed periodic interval in the sync/event path. All other sync-related updates are driven by events and callbacks.
 
 ## 6. Atomic Transactions with TransactionService
 
@@ -80,17 +83,19 @@ Supabase → syncService.ts → IndexedDB → offlineDataContext.ts → UI compo
 
 ## 8. Data Access Layer Architecture
 
-**Rule:** Strict data access layer pattern must be followed - UI components can only access data through `useOfflineData()` hook.
+**Rule:** UI must not import supabase, db, or repositories. UI may only import from hooks, services, and contexts.
 
-**Forbidden Patterns:**
-- ❌ UI components importing `db.ts` directly
-- ❌ UI components importing `supabase` directly
-- ❌ Services accessing `supabase` (except `syncService` and authentication)
+**UI must NOT import:**
+- ❌ **supabase** — no `lib/supabase` or any Supabase client in pages/components/layouts
+- ❌ **db** — no `lib/db`, `getDB()`, or any direct IndexedDB access in UI
+- ❌ **repositories** — no repository layer that wraps db/supabase in UI
 
-**Allowed Patterns:**
-- ✅ UI components using `useOfflineData()` hook from `OfflineDataContext`
-- ✅ Services accessing `db.ts` when called by `OfflineDataContext`
-- ✅ Only `syncService` and authentication context access Supabase directly
+**UI may ONLY import from:**
+- ✅ **hooks** (e.g. `useOfflineData`, `useCurrency`, `useSupabaseAuth`)
+- ✅ **services** (business logic that does not expose db/supabase to callers)
+- ✅ **contexts** (e.g. `OfflineDataContext`, `SupabaseAuthContext`)
+
+Services and contexts may use `db` and `supabase` internally. Only designated layers (e.g. `syncService`, auth context) access Supabase directly.
 
 ## 9. Service Architecture Patterns
 
@@ -182,13 +187,35 @@ When implementing new features, verify:
 - [ ] Local computation is used instead of server RPCs where applicable
 - [ ] Schema follows patterns from `@database.ts` and `@db.ts`
 - [ ] Implementation is simple and avoids unnecessary complexity
-- [ ] Event-driven synchronization is implemented (no periodic polling)
+- [ ] Event-driven sync: no UI/sync polling; use context/callbacks for unsynced state; eventStreamService catch-up is the only allowed periodic interval (§5)
 - [ ] Financial transactions use `TransactionService` with proper atomicity
 - [ ] RBAC permissions are checked for all user actions
-- [ ] UI components only access data through `useOfflineData()` hook
+- [ ] UI does not import supabase, db, or repositories; only hooks, services, contexts
 - [ ] Services follow established patterns and error handling
 - [ ] Schema changes include proper migrations and version bumps
 - [ ] Input validation and error handling are comprehensive
 - [ ] Multilingual support is implemented for user-facing text
 - [ ] Currency handling follows established patterns
 - [ ] Tests cover critical functionality and edge cases
+
+## Sync parity baseline (refactor merge gate)
+
+**Rule:** Changes that refactor `syncService` or materially alter sync/event reconciliation must keep parity with the committed golden snapshots.
+
+**Merge gate (run from `apps/store-app`):**
+
+```bash
+pnpm run parity:gate
+```
+
+This runs `test:parity` (contract mocks + golden comparison), `parity:check-registry`, `parity:check-dexie-mode`, and `parity:coverage-matrix`.
+
+**Definitions:** See [apps/store-app/tests/sync-parity/VALID_TEST_RULES.md](apps/store-app/tests/sync-parity/VALID_TEST_RULES.md).
+
+**Golden files:** `apps/store-app/tests/sync-baseline/*.golden.json` — PRs that add or change these require intentional review (see [.github/CODEOWNERS](.github/CODEOWNERS)).
+
+**Legacy tests:** `src/services/__tests__/legacy/**` are excluded from the default Vitest run; they are not parity proof.
+
+**Default unit run:** `pnpm run test:run` (from `apps/store-app`) excludes `legacy/`, `integration/`, and `tests/sync-parity/`; use `pnpm run parity:gate` for sync parity + checks.
+
+**Optional:** Non-blocking Supabase integration checks may live under `src/services/__tests__/integration/` and are not part of `parity:gate`.

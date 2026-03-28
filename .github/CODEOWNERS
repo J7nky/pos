@@ -1,0 +1,2 @@
+# Sync parity golden snapshots — require review when changed
+apps/store-app/tests/sync-baseline/*.golden.json @J7nky

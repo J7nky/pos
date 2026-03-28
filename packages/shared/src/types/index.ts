@@ -1,6 +1,13 @@
 // Multilingual data types
 import type { MultilingualString } from '../utils/multilingual';
 
+export type {
+  StoreCore,
+  BranchCore,
+  UserCore,
+  StoreSubscriptionCore,
+} from './supabase-core';
+
 // Core type definitions for the ERP system
 export interface User {
   id: string;
@@ -40,24 +47,8 @@ export interface Transaction {
   _deleted?: boolean;
 }
 
-export interface Store {
-  id: string;
-  store_id: string;
-  name: string;
-  address: string;
-  phone: string;
-  email: string;
-  preferred_currency: 'USD' | 'LBP';
-  preferred_language: 'en' | 'ar' | 'fr';
-  preferred_commission_rate: number;
-  exchange_rate: number;
-  low_stock_alert: boolean;
-  created_at: string;
-  updated_at: string;
-  _synced: boolean;
-  _lastSyncedAt?: string;
-  _deleted?: boolean;
-}
+// Dexie / full store row shapes live in store-app (`types/index.ts`); shared exports only cross-app
+// contract cores (`StoreCore`, etc. in `./supabase-core`) — see IMPROVEMENTS §1.4.
 
 // Re-export MultilingualString for convenience
 export type { MultilingualString, SupportedLanguage } from '../utils/multilingual';

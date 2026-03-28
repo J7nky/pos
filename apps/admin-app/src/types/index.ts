@@ -1,25 +1,25 @@
 // Admin App Types
 // Comprehensive type definitions for store management
 
+import type {
+  BranchCore,
+  StoreCore,
+  StoreSubscriptionCore,
+  UserCore,
+} from '@pos-platform/shared';
+
 // ============================================================================
 // STORE TYPES
 // ============================================================================
 
-export interface Store {
-  id: string;
-  name: string;
+export interface Store extends StoreCore {
   address: string | null;
   phone: string | null;
   email: string | null;
   logo: string | null;
-  preferred_currency: 'USD' | 'LBP';
-  preferred_language: 'en' | 'ar' | 'fr';
   preferred_commission_rate: number;
-  exchange_rate: number;
   low_stock_alert: boolean;
   status: 'active' | 'suspended' | 'archived';
-  created_at: string;
-  updated_at: string;
   // Soft-delete fields (industry standard - stores should NEVER be hard-deleted)
   is_deleted?: boolean;
   deleted_at?: string | null;
@@ -61,16 +61,8 @@ export interface UpdateStoreInput {
 // BRANCH TYPES
 // ============================================================================
 
-export interface Branch {
-  id: string;
-  store_id: string;
-  name: string;
-  address: string | null;
-  phone: string | null;
+export interface Branch extends BranchCore {
   logo: string | null;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
   // Soft-delete fields (industry standard - branches should NEVER be hard-deleted)
   is_deleted?: boolean;
   deleted_at?: string | null;
@@ -98,17 +90,8 @@ export interface UpdateBranchInput {
 
 export type UserRole = 'admin' | 'manager' | 'cashier';
 
-export interface StoreUser {
-  id: string;
-  store_id: string;
-  branch_id: string | null;
-  email: string;
-  name: string;
-  role: UserRole;
+export interface StoreUser extends UserCore {
   phone: string | null;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface CreateUserInput {
@@ -133,7 +116,7 @@ export interface UpdateUserInput {
 // SUBSCRIPTION TYPES
 // ============================================================================
 
-// Maps to existing store_subscriptions table
+// Maps to existing store_subscriptions table. Overlap with `StoreSubscriptionCore` is via Pick + admin field names; map to `starts_at` / `ends_at` at the service layer when talking to Supabase.
 export type SubscriptionPlan = 'starter' | 'professional' | 'premium';
 export type SubscriptionStatus = 'active' | 'trial' | 'expired' | 'cancelled';
 export type BillingCycle = 'monthly' | 'yearly';
@@ -142,9 +125,8 @@ export type Currency = 'USD' | 'LBP';
 // Legacy alias for compatibility
 export type SubscriptionTier = SubscriptionPlan;
 
-export interface Subscription {
-  id: string;
-  store_id: string;
+export interface Subscription
+  extends Pick<StoreSubscriptionCore, 'id' | 'store_id' | 'created_at' | 'updated_at'> {
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
   billing_cycle: BillingCycle;
@@ -155,8 +137,6 @@ export interface Subscription {
   allowed_branches: number;
   cancelled_at: string | null;
   cancellation_reason: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface SubscriptionUsage {

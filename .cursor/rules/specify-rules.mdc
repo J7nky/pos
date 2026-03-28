@@ -1,0 +1,45 @@
+---
+description: Project Development Guidelines
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# pos-1 Development Guidelines
+
+Auto-generated from all feature plans. Last updated: 2026-03-27
+
+## Active Technologies
+- TypeScript 5.x, React 18, Node.js >=18 + React Router 7, Dexie v4, Supabase JS v2, Vite 7, `@pos-platform/shared` workspace package (001-shared-types-home-drawer)
+- Supabase PostgreSQL (remote) + IndexedDB via Dexie (local, source-of-truth for store-app runtime) (001-shared-types-home-drawer)
+- TypeScript 5.x, React 18, Node.js ≥18 + Dexie v4, Supabase JS v2, React Router 7, Tailwind CSS 3, Vite 7, Electron 38 (002-cash-drawer-sync-balance)
+- Supabase (PostgreSQL — remote); IndexedDB via Dexie v4 (local, primary) (002-cash-drawer-sync-balance)
+- Supabase (PostgreSQL — remote); IndexedDB via Dexie v4 (local, primary); **no schema change for this feature** (004-local-date-timezone)
+- TypeScript 5.x, React 18, Node.js ≥18 + `@pos-platform/shared` (workspace), Supabase JS v2 (both apps), Dexie v4 (store-app only), Vite 7, React Router 7 (005-admin-store-backend-contract)
+- Supabase (PostgreSQL — remote) for both apps; IndexedDB via Dexie (store-app local — not in scope for contract edits except where `types/database.ts` references cores) (005-admin-store-backend-contract)
+- TypeScript 5.x, React 18, Node.js ≥18 + Dexie v4, Supabase JS v2, Vitest parity suite (`parity:gate`), modular `syncService` split (006-sync-service-modular-split)
+
+- (001-shared-types-home-drawer)
+
+## Project Structure
+
+```text
+src/
+tests/
+```
+
+## Commands
+
+# Add commands for 
+
+## Code Style
+
+: Follow standard conventions
+
+## Recent Changes
+- 007-error-handling-validation: Added TypeScript 5.x, React 18, Node.js ≥18 + Dexie v4, Supabase JS v2, React Router 7, Tailwind CSS 3, Vite 7, Electron 38
+- 006-sync-service-modular-split: Modular sync service split (syncConfig, syncUpload, syncDownload, syncDeletionDetection + orchestrator); Vitest parity gate; Supabase + Dexie unchanged
+- 005-admin-store-backend-contract: Added TypeScript 5.x, React 18, Node.js ≥18 + `@pos-platform/shared` (workspace), Supabase JS v2 (both apps), Dexie v4 (store-app only), Vite 7, React Router 7
+
+
+<!-- MANUAL ADDITIONS START -->
+<!-- MANUAL ADDITIONS END -->
