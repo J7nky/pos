@@ -1,6 +1,6 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
-import { generateBillReference } from '../utils/referenceGenerator';
+import { generateBillReference } from '@pos-platform/shared';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
   Product, 

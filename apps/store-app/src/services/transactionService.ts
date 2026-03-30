@@ -27,9 +27,8 @@ import {
   generateARReference, 
   generateAPReference,
   generateReference 
-} from '../utils/referenceGenerator';
+} from '@pos-platform/shared';
 import { getLocalDateString } from '../utils/dateUtils';
-import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
 import { createId } from '../lib/db';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import type { JournalEntry } from '../types/accounting';

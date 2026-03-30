@@ -5,7 +5,7 @@
  * Wires crudHelperService.setCallbacks so other layers trigger refresh/sync via these callbacks.
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { syncService } from '../../services/syncService';
 import { crudHelperService } from '../../services/crudHelperService';
 import type { SyncStateLayerAdapter, SyncStateLayerResult } from './types';
@@ -68,6 +68,11 @@ export function useSyncStateLayer(adapter: SyncStateLayerAdapter): SyncStateLaye
       return 0;
     }
   }, []);
+
+  // Ref always pointing to the latest updateUnsyncedCount so that
+  // long-lived setTimeout callbacks don't call stale closures.
+  const updateUnsyncedCountRef = useRef(updateUnsyncedCount);
+  updateUnsyncedCountRef.current = updateUnsyncedCount;
 
   const performSync = useCallback(
     async (isAutomatic = false): Promise<SyncResult> => {
@@ -176,6 +181,11 @@ export function useSyncStateLayer(adapter: SyncStateLayerAdapter): SyncStateLaye
     ]
   );
 
+  // Ref always pointing to the latest performSync so that debouncedSync's
+  // long-lived setTimeout callback doesn't call a stale closure.
+  const performSyncRef = useRef(performSync);
+  performSyncRef.current = performSync;
+
   const resetAutoSyncTimer = useCallback(() => {
     if (autoSyncTimerRef.current) {
       console.log('🔄 [AUTO-SYNC] Clearing existing auto-sync timer');
@@ -192,7 +202,7 @@ export function useSyncStateLayer(adapter: SyncStateLayerAdapter): SyncStateLaye
         const currentUnsyncedCount = await getCurrentUnsyncedCount();
         if (currentUnsyncedCount > 0 && !syncService.isCurrentlyRunning()) {
           console.log(`📤 [AUTO-SYNC] Uploading ${currentUnsyncedCount} local changes`);
-          const result = await performSync(true);
+          const result = await performSyncRef.current(true);
           console.log('✅ [AUTO-SYNC] Upload completed:', {
             success: result.success,
             uploaded: result.synced.uploaded,
@@ -204,36 +214,45 @@ export function useSyncStateLayer(adapter: SyncStateLayerAdapter): SyncStateLaye
     } else if (unsyncedCount === 0) {
       console.log('✅ [AUTO-SYNC] All changes synced, no timer needed');
     }
-  }, [isOnline, storeId, currentBranchId, isSyncing, unsyncedCount, getCurrentUnsyncedCount, performSync, autoSyncTimerRef]);
+  }, [isOnline, storeId, currentBranchId, isSyncing, unsyncedCount, getCurrentUnsyncedCount, autoSyncTimerRef]);
 
   const debouncedSync = useCallback(() => {
-    if (!isOnline || !currentBranchId || isSyncing) return;
+    if (!isOnline || !currentBranchId) return;
+    // Note: isSyncing is intentionally NOT checked here.
+    // If a sync is already running we still want to schedule an upload for when it finishes,
+    // rather than silently bail out and leave unsynced records behind for up to 60 s.
 
     if (debouncedSyncTimeout) {
       clearTimeout(debouncedSyncTimeout);
     }
 
     const timeout = setTimeout(async () => {
-      await updateUnsyncedCount();
-      if (isOnline && !isSyncing) {
+      // Use refs so we always call the latest performSync / updateUnsyncedCount —
+      // not the stale closures captured at timer-creation time.
+      await updateUnsyncedCountRef.current();
+      // Use syncService.isCurrentlyRunning() for a live isSyncing check rather than
+      // the stale closure value that was captured 30 seconds ago.
+      if (!syncService.isCurrentlyRunning()) {
         try {
           const { total: freshCount } = await crudHelperService.getUnsyncedCount();
           if (freshCount > 0) {
             debug('🔄 Debounced auto-sync triggered', { unsyncedCount: freshCount });
-            performSync(true);
+            performSyncRef.current(true);
           } else {
             debug('🔄 Debounced sync skipped: no unsynced records');
           }
         } catch (error) {
           console.warn('Failed to get unsynced count, triggering sync anyway:', error);
-          performSync(true);
+          performSyncRef.current(true);
         }
+      } else {
+        debug('🔄 Debounced sync deferred: sync already in progress');
       }
       setDebouncedSyncTimeout(null);
     }, 30000);
 
     setDebouncedSyncTimeout(timeout);
-  }, [isOnline, currentBranchId, isSyncing, updateUnsyncedCount, performSync, debouncedSyncTimeout, setDebouncedSyncTimeout]);
+  }, [isOnline, currentBranchId, debouncedSyncTimeout, setDebouncedSyncTimeout]);
 
   const getSyncStatus = useCallback(
     () => ({
@@ -252,6 +271,8 @@ export function useSyncStateLayer(adapter: SyncStateLayerAdapter): SyncStateLaye
       onUpdateUnsyncedCount: updateUnsyncedCount,
       onDebouncedSync: debouncedSync,
       onResetAutoSyncTimer: resetAutoSyncTimer,
+      // Always calls the latest performSync via ref — no extra delay, no stale closure.
+      onPerformSync: (isAutomatic) => performSyncRef.current(isAutomatic),
     });
   }, [refreshData, updateUnsyncedCount, debouncedSync, resetAutoSyncTimer]);
 

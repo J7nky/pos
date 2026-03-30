@@ -43,9 +43,14 @@ export interface ChangeDetectionResult {
 }
 
 export class UniversalChangeDetectionService {
-  // Cache for change detection results to avoid repeated queries
+  // Cache for change detection results to avoid repeated queries.
+  // Key: `tableName:storeId` — intentionally excludes lastSyncAt so that
+  // rapid back-to-back syncs (e.g. multiple timer callbacks firing within
+  // 60 s) reuse the same "no changes" result without re-hitting Supabase.
+  // A cached "0 changes" result is acceptable for up to 60 s of staleness in
+  // a POS context; any genuine remote changes will be caught on the next sync.
   private changeDetectionCache: Map<string, { result: ChangeDetectionResult; timestamp: number }> = new Map();
-  private readonly CACHE_TTL = 15000; // Cache results for 15 seconds
+  private readonly CACHE_TTL = 60000; // 60 s — covers back-to-back sync bursts
 
   /**
    * Detects if a table has changes since lastSyncAt
@@ -64,8 +69,8 @@ export class UniversalChangeDetectionService {
     lastSyncAt: string,
     isFirstSync: boolean
   ): Promise<ChangeDetectionResult> {
-    // Check cache first
-    const cacheKey = `${tableName}:${storeId}:${lastSyncAt}`;
+    // Check cache first — key excludes lastSyncAt intentionally (see comment above)
+    const cacheKey = `${tableName}:${storeId}`;
     const cached = this.changeDetectionCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
       return cached.result;
@@ -161,6 +166,16 @@ export class UniversalChangeDetectionService {
    */
   clearCache(): void {
     this.changeDetectionCache.clear();
+  }
+
+  /**
+   * Invalidate cache for a specific table so the next detectChanges()
+   * call issues a fresh COUNT query even within the TTL window.
+   * Call this after uploading records to a table so the download phase
+   * re-checks that table for concurrent remote modifications.
+   */
+  invalidateTable(tableName: string, storeId: string): void {
+    this.changeDetectionCache.delete(`${tableName}:${storeId}`);
   }
 
   /**

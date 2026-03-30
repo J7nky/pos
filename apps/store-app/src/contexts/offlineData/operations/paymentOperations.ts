@@ -13,9 +13,8 @@ import { BranchAccessValidationService } from '../../../services/branchAccessVal
 import { getAccountMapping, getJournalDescription } from '../../../utils/accountMapping';
 import { getLocalDateString } from '../../../utils/dateUtils';
 import { createMultilingualFromString, getTranslatedString } from '../../../utils/multilingual';
-import { generatePaymentReference, generateAdvanceReference, generateReversalReference } from '../../../utils/referenceGenerator';
+import { generatePaymentReference, generateAdvanceReference, generateReversalReference } from '@pos-platform/shared';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
-import { calculateCashDrawerBalance } from '../../../utils/balanceCalculation';
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
 

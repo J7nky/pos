@@ -13,7 +13,7 @@ import {
   generateCommissionReference,
   generatePorterageReference,
   generateTransferReference
-} from '../utils/referenceGenerator';
+} from '@pos-platform/shared';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 
 import Toast from '../components/common/Toast';

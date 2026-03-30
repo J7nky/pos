@@ -4,7 +4,6 @@
  */
 
 import { getDB } from '../../../lib/db';
-import { calculateCashDrawerBalance } from '../../../utils/balanceCalculation';
 
 export interface CashDrawerSessionDeps {
   storeId: string | null | undefined;
@@ -33,9 +32,6 @@ export async function openCashDrawer(
 
     const account = await getDB().getCashDrawerAccount(storeId, currentBranchId);
     if (!account) throw new Error('Failed to retrieve cash drawer account after opening session');
-
-    const acctCurrency = (account as any)?.currency || 'USD';
-    await calculateCashDrawerBalance(storeId, currentBranchId, acctCurrency);
 
     setCashDrawer({
       id: result.sessionId!,

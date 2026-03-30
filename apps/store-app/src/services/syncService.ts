@@ -3,6 +3,8 @@ import { getDB } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import { dataValidationService } from './dataValidationService';
 import { universalChangeDetectionService } from './universalChangeDetectionService';
+import { networkMonitorService } from './networkMonitorService';
+import { eventStreamService } from './eventStreamService';
 import { normalizeBillDateFromRemote } from '../utils/dateUtils';
 import type { Store } from '../types';
 import {
@@ -25,8 +27,34 @@ const db = getDB();
 export class SyncService {
   private isRunning = false;
   private lastSyncAttempt: Date | null = null;
-  private lastDeletionCheck: Date | null = null;
+  private lastSyncCompleted: Date | null = null;
+  // Persisted across page reloads so the 5-min interval is truly respected.
+  private lastDeletionCheck: Date | null = SyncService.loadLastDeletionCheck();
   private deletionStateCache: Map<string, DeletionState> = new Map();
+
+  private static readonly DELETION_CHECK_LS_KEY = 'pos_sync_last_deletion_check';
+  // 30-second minimum gap between two consecutive sync calls to prevent
+  // multiple timers (syncTriggerService, resetAutoSyncTimer, debouncedSync)
+  // from stacking and each running a full deletion-detection pass.
+  private static readonly MIN_SYNC_INTERVAL_MS = 30_000;
+
+  private static loadLastDeletionCheck(): Date | null {
+    try {
+      const stored = localStorage.getItem(SyncService.DELETION_CHECK_LS_KEY);
+      if (stored) {
+        const d = new Date(stored);
+        if (!isNaN(d.getTime())) return d;
+      }
+    } catch { /* localStorage unavailable in SSR / tests */ }
+    return null;
+  }
+
+  private persistLastDeletionCheck(date: Date): void {
+    this.lastDeletionCheck = date;
+    try {
+      localStorage.setItem(SyncService.DELETION_CHECK_LS_KEY, date.toISOString());
+    } catch { /* ignore */ }
+  }
 
   async sync(storeId: string, branchId?: string): Promise<SyncResult> {
     // If sync is already running, return early with a skipped result instead of throwing
@@ -40,9 +68,26 @@ export class SyncService {
       };
     }
 
+    // Prevent back-to-back syncs that arrive from multiple independent timers
+    // (syncTriggerService 30s, resetAutoSyncTimer 30s, debouncedSync 30s, focus/visibility 1s)
+    // all firing within the same short window.
+    if (
+      this.lastSyncCompleted &&
+      Date.now() - this.lastSyncCompleted.getTime() < SyncService.MIN_SYNC_INTERVAL_MS
+    ) {
+      console.log('⏭️  [SYNC] Skipping: minimum sync interval not yet elapsed since last sync');
+      return {
+        success: true,
+        errors: [],
+        synced: { uploaded: 0, downloaded: 0 },
+        conflicts: 0
+      };
+    }
+
     this.isRunning = true;
     this.lastSyncAttempt = new Date();
     const syncStartTime = performance.now();
+    networkMonitorService.startSession(`sync @ ${new Date().toLocaleTimeString()}`);
 
     const result: SyncResult = {
       success: true,
@@ -52,6 +97,11 @@ export class SyncService {
     };
 
     try {
+      // Suspend EventStreamService so Realtime events emitted by our own
+      // uploads don't trigger redundant catchUp() round-trips during sync.
+      // Placed inside try so the finally block's resumeAfterSync() is
+      // guaranteed to run whenever suspendForSync() has been called.
+      if (branchId) eventStreamService.suspendForSync(branchId);
       const setupStart = performance.now();
       await this.ensureStoreExists(storeId);
       await this.initializeSyncMetadata(storeId);
@@ -85,6 +135,13 @@ export class SyncService {
       result.synced.uploaded = uploadResult.uploaded;
       result.errors.push(...uploadResult.errors);
 
+      // Invalidate change-detection cache for every table we just uploaded to so
+      // the download phase re-checks those specific tables for concurrent remote
+      // changes, while all OTHER tables benefit from the 60-second cache.
+      for (const uploadedTable of uploadResult.uploadedTables) {
+        universalChangeDetectionService.invalidateTable(uploadedTable, storeId);
+      }
+
       const downloadStart = performance.now();
       const downloadResult = await downloadRemoteChanges(storeId);
       const downloadTime = performance.now() - downloadStart;
@@ -105,12 +162,15 @@ export class SyncService {
       );
 
       if (shouldCheckDeletions) {
+        // Stamp the time BEFORE running so that a failed/aborted detection pass
+        // does not immediately retry on the very next sync — we treat this as a
+        // "cooling off" timestamp rather than a "completed successfully" timestamp.
+        this.persistLastDeletionCheck(new Date());
         const deletionStart = performance.now();
         const deletionResult = await detectAndSyncDeletions(storeId, this.deletionStateCache);
         const deletionTime = performance.now() - deletionStart;
         console.log(`⏱️  Deletion detection: ${deletionTime.toFixed(2)}ms (${deletionResult.deleted} records removed)`);
         result.errors.push(...deletionResult.errors);
-        this.lastDeletionCheck = new Date();
       }
 
       const totalTime = performance.now() - syncStartTime;
@@ -125,6 +185,11 @@ export class SyncService {
       result.errors.push(error instanceof Error ? error.message : 'Unknown sync error');
     } finally {
       this.isRunning = false;
+      this.lastSyncCompleted = new Date();
+      networkMonitorService.endSession();
+      // Resume event stream — deferred catchUp will replay events that arrived
+      // during the window (records already in IndexedDB, so it's idempotent).
+      if (branchId) eventStreamService.resumeAfterSync(branchId, storeId);
     }
 
     return result;

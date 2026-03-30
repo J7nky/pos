@@ -65,8 +65,8 @@ export function calculateBothCurrenciesLiability(entries: JournalEntry[]): { USD
   return entries.reduce(
     (acc, e) => {
       // For liabilities: credit - debit (opposite of assets)
-      acc.USD += e.credit_usd - e.debit_usd;
-      acc.LBP += e.credit_lbp - e.debit_lbp;
+      acc.USD += (e.credit_usd || 0) - (e.debit_usd || 0);
+      acc.LBP += (e.credit_lbp || 0) - (e.debit_lbp || 0);
       return acc;
     },
     { USD: 0, LBP: 0 }

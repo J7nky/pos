@@ -13,6 +13,7 @@ interface CRUDCallbacks {
   onUpdateUnsyncedCount?: () => Promise<void>;
   onDebouncedSync?: () => void;
   onResetAutoSyncTimer?: () => void;
+  onPerformSync?: (isAutomatic?: boolean) => Promise<unknown>;
 }
 
 export class CRUDHelperService {

@@ -75,6 +75,47 @@ export class EventStreamService {
   /** Throttle reconnect console noise when Realtime keeps closing (misconfig, network, or stale callbacks). */
   private lastReconnectWarnAt: Map<string, number> = new Map();
   private onEventsProcessedCallback?: (result: EventProcessingResult) => void | Promise<void>;
+
+  /**
+   * Set of branch IDs for which event processing is suspended while a full
+   * sync() is running.  During sync, uploadLocalChanges() emits events via
+   * emit_branch_event RPC; those events would otherwise wake the Realtime
+   * subscription and trigger catchUp() → pullEvents() → fetchAffectedRecord()
+   * — re-downloading records that the sync is already uploading/downloading.
+   * Suspending here eliminates that duplicate round-trip.
+   */
+  private syncSuspendedBranches: Set<string> = new Set();
+
+  /**
+   * Suspend event stream processing for a branch while sync() runs.
+   * Called by SyncService before upload starts.
+   */
+  suspendForSync(branchId: string): void {
+    this.syncSuspendedBranches.add(branchId);
+    evLog(`[EventStream] Event processing suspended for sync on branch ${branchId}`);
+  }
+
+  /**
+   * Resume event stream processing after sync() finishes.
+   * Called by SyncService in the finally block.
+   * Schedules a deferred catchUp so any events emitted during the suspended
+   * window are replayed — but after sync has committed its own version bump,
+   * making those events idempotent (records already in IndexedDB).
+   */
+  resumeAfterSync(branchId: string, storeId: string): void {
+    this.syncSuspendedBranches.delete(branchId);
+    evLog(`[EventStream] Event processing resumed after sync on branch ${branchId}`);
+    // Defer so initializeSyncState (called by useSyncStateLayer after sync)
+    // has a chance to advance last_seen_event_version first.
+    setTimeout(() => {
+      if (!this.syncSuspendedBranches.has(branchId)) {
+        evLog(`[EventStream] Post-sync deferred catchUp for branch ${branchId}`);
+        this.catchUp(branchId, storeId).catch(err =>
+          console.warn(`[EventStream] Post-sync catchUp error:`, err)
+        );
+      }
+    }, 500);
+  }
   
   // Configuration
   private readonly BATCH_SIZE = 100;
@@ -285,6 +326,13 @@ export class EventStreamService {
    * This is the core sync algorithm - pull-based, sequential, idempotent
    */
   async catchUp(branchId: string, storeId: string): Promise<EventProcessingResult> {
+    // Suppress during sync — events emitted by our own upload will be
+    // replayed by a deferred catchUp once sync finishes (see resumeAfterSync).
+    if (this.syncSuspendedBranches.has(branchId)) {
+      evLog(`[EventStream] catchUp suppressed — sync in progress for branch ${branchId}`);
+      return { processed: 0, errors: [], last_version: 0 };
+    }
+
     // Prevent concurrent catch-up for same branch
     if (this.isProcessing.get(branchId)) {
       evLog(`[EventStream] Catch-up already in progress for branch ${branchId}`);

@@ -5,7 +5,6 @@
 
 import { useState, useCallback } from 'react';
 import { getDB } from '../../lib/db';
-import { calculateCashDrawerBalance } from '../../utils/balanceCalculation';
 import type { CashDrawerDataLayerAdapter, CashDrawerDataLayerResult } from './types';
 
 export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): CashDrawerDataLayerResult {

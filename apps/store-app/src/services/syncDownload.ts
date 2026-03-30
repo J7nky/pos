@@ -307,43 +307,46 @@ async function resolveConflict(tableName: string, localRecord: any, remoteRecord
   return true;
 }
 
+/**
+ * Per-table metadata gathered before the download loop.
+ */
+interface TableMeta {
+  tableName: string;
+  lastSyncAt: string;
+  isFirstSync: boolean;
+  localRecordCount: number;
+  shouldDoFullSync: boolean;
+  hasChanges: boolean;
+  dependenciesOk: boolean;
+}
+
 export async function downloadRemoteChanges(storeId: string) {
   const result = { downloaded: 0, conflicts: 0, errors: [] as string[] };
 
-  for (const tableName of SYNC_TABLES) {
-    const tableStart = performance.now();
-    try {
-      // NOTE: In fully event-driven mode, ALL tables are handled by EventStreamService
-      // This sync() method is only used for:
-      // 1. Initial full resync (when DB is empty)
-      // 2. Manual "Force Sync" triggered by user
-      // 3. Uploading local unsynced changes
-      // Real-time updates happen via EventStreamService, not periodic sync
-
-      if (!await validateDependencies(tableName, storeId)) {
-        console.log(`⏳ Skipping download for ${tableName} - dependencies not met`);
-        continue;
+  // ── Phase 1: gather per-table metadata and run ALL change-detection COUNT
+  //    queries IN PARALLEL before starting any download.  This replaces the
+  //    previous sequential loop that blocked 22 × ~100 ms = 2+ s on the
+  //    COUNT round-trips before the first byte of real data was fetched.
+  const metaResults = await Promise.all(
+    SYNC_TABLES.map(async (tableName): Promise<TableMeta> => {
+      const dependenciesOk = await validateDependencies(tableName, storeId);
+      if (!dependenciesOk) {
+        return { tableName, lastSyncAt: '', isFirstSync: false, localRecordCount: 0, shouldDoFullSync: false, hasChanges: false, dependenciesOk: false };
       }
 
       const syncMetadata = await getDB().getSyncMetadata(tableName);
       let lastSyncAt = syncMetadata?.last_synced_at || '1970-01-01T00:00:00.000Z';
-
       if (lastSyncAt && isNaN(Date.parse(lastSyncAt))) {
         console.warn(`Invalid lastSyncAt for ${tableName}: ${lastSyncAt}, using default`);
         lastSyncAt = '1970-01-01T00:00:00.000Z';
       }
 
       const isFirstSync = !lastSyncAt || lastSyncAt === '1970-01-01T00:00:00.000Z';
-      const timestampField = getTimestampField(tableName);
-      
-      // Check if we have any non-deleted local records - if not, do a full sync to catch existing records
-      // This prevents the issue where sync metadata exists but local database is empty (manually cleared, migration, etc.)
       const table = (db as any)[tableName];
       const localRecordCount = await table.filter((record: any) => !record._deleted).count();
       const shouldDoFullSync = isFirstSync || localRecordCount === 0;
 
-      // Change detection - skip sync if no changes detected
-      // In fully event-driven mode, this is only used for initial/manual sync
+      let hasChanges = shouldDoFullSync; // full-sync tables always process
       if (!shouldDoFullSync) {
         const changeDetection = await universalChangeDetectionService.detectChanges(
           tableName,
@@ -351,24 +354,42 @@ export async function downloadRemoteChanges(storeId: string) {
           lastSyncAt,
           isFirstSync
         );
-
-        if (!changeDetection.hasChanges) {
-          // Still update sync metadata to track that we checked
+        hasChanges = changeDetection.hasChanges;
+        if (!hasChanges) {
+          // Update sync metadata so the next sync's cache key stays fresh
           await getDB().updateSyncMetadata(tableName, new Date().toISOString());
-          continue; // Skip to next table
         }
+      }
 
-        console.log(`📊 Incremental sync for ${tableName} since ${lastSyncAt} (${localRecordCount} local records) - changes detected`);
-      } else {
+      return { tableName, lastSyncAt, isFirstSync, localRecordCount, shouldDoFullSync, hasChanges, dependenciesOk };
+    })
+  );
+
+  const tablesWithChanges = metaResults.filter(m => m.hasChanges && m.dependenciesOk);
+  const skippedCount = metaResults.length - tablesWithChanges.length;
+  console.log(`📊 Change detection complete: ${tablesWithChanges.length}/${metaResults.length} tables have remote changes (${skippedCount} skipped)`);
+
+  // ── Phase 2: download only tables that have changes ──────────────────────
+  for (const meta of tablesWithChanges) {
+    const { tableName, lastSyncAt, localRecordCount, shouldDoFullSync } = meta;
+    const tableStart = performance.now();
+    try {
+      // NOTE: In fully event-driven mode, ALL tables are handled by EventStreamService.
+      // This sync() method is only used for:
+      // 1. Initial full resync (when DB is empty)
+      // 2. Manual "Force Sync" triggered by user
+      // 3. Uploading local unsynced changes
+      // Real-time updates happen via EventStreamService, not periodic sync
+
+      const timestampField = getTimestampField(tableName);
+
+      if (shouldDoFullSync) {
         console.log(`📊 Full sync for ${tableName} (${localRecordCount} local records)`);
+      } else {
+        console.log(`📊 Incremental sync for ${tableName} since ${lastSyncAt} (${localRecordCount} local records) - changes detected`);
       }
 
-      // Add debug logging for branches
-      if (tableName === 'branches') {
-        console.log(`🔍 Branch debug: localRecordCount=${localRecordCount}, isFirstSync=${isFirstSync}, shouldDoFullSync=${shouldDoFullSync}`);
-        const localBranches = await table.filter((record: any) => !record._deleted).toArray();
-        console.log(`🔍 Local branches:`, localBranches.map((b: any) => ({ id: b.id, name: b.name, store_id: b.store_id, _synced: b._synced })));
-      }
+      const table = (db as any)[tableName];
 
       // Build query with store filter
       let query = supabase.from(tableName as any).select('*');
@@ -517,34 +538,7 @@ export async function downloadRemoteChanges(storeId: string) {
       }
 
       if (!remoteRecords || remoteRecords.length === 0) {
-        console.warn(`⚠️ downloadRemoteChanges: ${tableName} query returned no data. Possible causes:`, {
-          storeId,
-          tableName,
-          shouldDoFullSync,
-          lastSyncAt,
-          timestampField: getTimestampField(tableName)
-        });
-
-        // For inventory_items specifically, log diagnostic info
-        if (tableName === 'inventory_items') {
-          const allRemoteQuery = supabase.from('inventory_items').select('id, store_id, created_at').eq('store_id', storeId).limit(5);
-          const { data: sampleRecords } = await allRemoteQuery;
-          console.log(`🔍 Diagnostic: Found ${sampleRecords?.length || 0} total inventory_items in Supabase for this store (sample check)`);
-        }
-        
-        // For branches specifically, log diagnostic info
-        if (tableName === 'branches') {
-          const allRemoteQuery = supabase.from('branches').select('id, store_id, name, created_at').eq('store_id', storeId).limit(5);
-          const { data: sampleRecords } = await allRemoteQuery;
-          console.log(`🔍 Diagnostic: Found ${sampleRecords?.length || 0} total branches in Supabase for this store (sample check)`);
-          if (sampleRecords && sampleRecords.length > 0) {
-            console.log(`🔍 Branch sample:`, sampleRecords[0]);
-          }
-          
-          // Also check if there are any branches at all (without store filter)
-          const { data: allBranches } = await supabase.from('branches').select('id, store_id, name').limit(5);
-          console.log(`🔍 Diagnostic: Found ${allBranches?.length || 0} total branches in Supabase (all stores)`);
-        }
+        console.warn(`⚠️ downloadRemoteChanges: ${tableName} query returned no records (storeId=${storeId}, shouldDoFullSync=${shouldDoFullSync}, lastSyncAt=${lastSyncAt})`);
         continue;
       }
 
@@ -620,9 +614,17 @@ export async function downloadRemoteChanges(storeId: string) {
         }
       }
 
-      const latestRecord = remoteRecords[remoteRecords.length - 1];
-      const latestTimestamp = latestRecord?.[timestampField] || new Date().toISOString();
-      await getDB().updateSyncMetadata(tableName, latestTimestamp);
+      // Update metadata to NOW (not the latest record's timestamp).
+      // Using the record's own timestamp would cause the next sync's COUNT
+      // query (updated_at >= lastSyncAt) to re-match the same record every
+      // time, triggering a spurious re-download on every sync.
+      const syncedAt = new Date().toISOString();
+      await getDB().updateSyncMetadata(tableName, syncedAt);
+      // Also clear this table's change-detection cache entry. Without this,
+      // a cached hasChanges:true result (from the COUNT query we just ran)
+      // would survive for up to 60 s and cause the next sync to fire an
+      // empty download query even though sync_metadata now points to "now".
+      universalChangeDetectionService.invalidateTable(tableName, storeId);
 
       const tableTime = performance.now() - tableStart;
       console.log(`  ⏱️  ${tableName} download: ${tableTime.toFixed(2)}ms (${remoteRecords.length} records)`);

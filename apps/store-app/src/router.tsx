@@ -11,7 +11,6 @@ import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
 import Employees from './pages/Employees';
 import UnsyncedItems from './pages/UnsyncedItems';
-import TestAccounting from './pages/TestAccounting';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
 import ErrorPage from './components/ErrorPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -99,12 +98,6 @@ export const router = createRouter([
             element: <UnsyncedItems />,
             errorElement: <ErrorPage />,
           },
-          {
-            path: "test-accounting",
-            element: <TestAccounting />,
-            errorElement: <ErrorPage />,
-          },
-        
         ],
       },
       // Public routes (no authentication required)

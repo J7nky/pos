@@ -7,6 +7,13 @@
  */
 
 import { TRANSACTION_CATEGORIES, isValidTransactionCategory, getTransactionType } from '../../constants/transactionCategories';
+import {
+  generatePaymentReference,
+  generateExpenseReference,
+  generateARReference,
+  generateAPReference,
+  generateReference,
+} from '@pos-platform/shared';
 
 // ============================================================================
 // VALIDATION FUNCTIONS
@@ -121,14 +128,6 @@ export function validateReferenceGenerators(): { passed: boolean; errors: string
   console.log('\n📋 Validating Reference Generators...\n');
   
   try {
-    const {
-      generatePaymentReference,
-      generateExpenseReference,
-      generateARReference,
-      generateAPReference,
-      generateReference
-    } = require('../../utils/referenceGenerator');
-    
     // Generate some references
     const paymentRef = generatePaymentReference();
     const expenseRef = generateExpenseReference();

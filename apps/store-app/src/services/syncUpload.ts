@@ -352,7 +352,7 @@ async function handleCashDrawerSessionConflict(cleanedBatch: any[], originalBatc
 }
 
 export async function uploadLocalChanges(storeId: string, branchId?: string) {
-  const result = { uploaded: 0, errors: [] as string[] };
+  const result = { uploaded: 0, errors: [] as string[], uploadedTables: new Set<string>() };
 
   // Get detailed count for debugging
   const { crudHelperService } = await import('./crudHelperService');
@@ -364,6 +364,11 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
     const { SyncDebugger } = await import('../utils/syncDebugger');
     await SyncDebugger.printSyncDiscrepancyReport(storeId);
   }
+
+  // Caches confirmed-existing remote IDs per table within this sync pass.
+  // Prevents duplicate Supabase validation queries (e.g. bills checked for both
+  // bill_line_items and bill_audit_logs with the same IDs).
+  const parentExistenceCache = new Map<string, Set<string>>();
 
   for (const tableName of SYNC_TABLES) {
     const tableStart = performance.now();
@@ -476,26 +481,37 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
         }
       }
 
-      // CRITICAL: For bill_line_items and bill_audit_logs, check if parent bills exist in Supabase
-      // NOTE: Only validate activeRecords - deleted records don't need parent bill validation
+      // CRITICAL: For bill_line_items and bill_audit_logs, check if parent bills exist in Supabase.
+      // Uses parentExistenceCache so the query fires at most once per sync pass even though
+      // both tables share the same bill IDs.
+      // NOTE: Only validate activeRecords - deleted records don't need parent bill validation.
       if ((tableName === 'bill_line_items' || tableName === 'bill_audit_logs') && activeRecords.length > 0) {
-        const billIds = [...new Set(activeRecords.map((record: any) => record.bill_id))];
+        const billIds = [...new Set(activeRecords.map((record: any) => record.bill_id))] as string[];
 
         try {
-          const { data: billsData, error: billsError } = await supabase
-            .from('bills')
-            .select('id')
-            .in('id', billIds);
+          // Only query for IDs not already confirmed from a previous iteration.
+          const cachedBillIds = parentExistenceCache.get('bills') ?? new Set<string>();
+          const unknownBillIds = billIds.filter(id => !cachedBillIds.has(id));
 
-          if (billsError) {
-            console.warn(`Failed to validate bill IDs for ${tableName}:`, billsError);
-            console.log(`⏳ Skipping ${tableName} active records sync - cannot validate bill dependencies (deleted records will still be processed)`);
-            // Don't continue - still process deleted records
-            activeRecords.length = 0; // Clear active records but continue to process deleted records
-          } else {
-            const validBillIds = new Set(billsData?.map((b: any) => b.id) || []);
+          if (unknownBillIds.length > 0) {
+            const { data: billsData, error: billsError } = await supabase
+              .from('bills')
+              .select('id')
+              .in('id', unknownBillIds);
 
-            // Filter out records whose parent bills don't exist in Supabase yet
+            if (billsError) {
+              console.warn(`Failed to validate bill IDs for ${tableName}:`, billsError);
+              console.log(`⏳ Skipping ${tableName} active records sync - cannot validate bill dependencies (deleted records will still be processed)`);
+              activeRecords.length = 0;
+            } else {
+              const newlyValid = new Set((billsData ?? []).map((b: any) => b.id));
+              const merged = new Set([...cachedBillIds, ...newlyValid]);
+              parentExistenceCache.set('bills', merged);
+            }
+          }
+
+          if (activeRecords.length > 0) {
+            const validBillIds = parentExistenceCache.get('bills') ?? new Set<string>();
             const recordsWithValidBills: any[] = [];
             const recordsWithMissingBills: any[] = [];
 
@@ -511,16 +527,13 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               console.log(`⏳ ${recordsWithMissingBills.length} ${tableName} active records skipped - parent bills not yet synced (will retry next sync)`);
             }
 
-            // Update activeRecords to only include those with valid parent bills
-            // Note: We don't continue here even if no valid records - we still want to process deleted records
             activeRecords.length = 0;
             activeRecords.push(...recordsWithValidBills);
           }
         } catch (error) {
           console.warn(`Failed to validate bill IDs for ${tableName}:`, error);
           console.log(`⏳ Skipping ${tableName} active records sync - cannot validate bill dependencies (deleted records will still be processed)`);
-          // Don't continue - still process deleted records
-          activeRecords.length = 0; // Clear active records but continue to process deleted records
+          activeRecords.length = 0;
         }
       }
 
@@ -550,25 +563,34 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
           continue;
         }
 
-        // Preflight: for bill_line_items, nullify inventory_item_id if the referenced item doesn't exist in Supabase
+        // Preflight: for bill_line_items, nullify inventory_item_id if the referenced item doesn't exist in Supabase.
+        // Uses parentExistenceCache to avoid a Supabase round-trip for IDs already confirmed this sync.
         if (tableName === 'bill_line_items') {
           try {
             const inventoryItemIds = [...new Set((cleanedBatch as any[])
               .map(r => r.inventory_item_id)
               .filter((v: string | null) => !!v))] as string[];
             if (inventoryItemIds.length > 0) {
-              const { data: existingItems, error: invErr } = await supabase
-                .from('inventory_items')
-                .select('id')
-                .in('id', inventoryItemIds);
-              if (!invErr) {
-                const existingSet = new Set((existingItems || []).map((i: any) => i.id));
-                cleanedBatch = (cleanedBatch as any[]).map(r => (
-                  r.inventory_item_id && !existingSet.has(r.inventory_item_id)
-                    ? { ...r, inventory_item_id: null }
-                    : r
-                ));
+              const cachedInvIds = parentExistenceCache.get('inventory_items') ?? new Set<string>();
+              const unknownInvIds = inventoryItemIds.filter(id => !cachedInvIds.has(id));
+
+              if (unknownInvIds.length > 0) {
+                const { data: existingItems, error: invErr } = await supabase
+                  .from('inventory_items')
+                  .select('id')
+                  .in('id', unknownInvIds);
+                if (!invErr) {
+                  const newlyValid = new Set((existingItems || []).map((i: any) => i.id));
+                  parentExistenceCache.set('inventory_items', new Set([...cachedInvIds, ...newlyValid]));
+                }
               }
+
+              const existingSet = parentExistenceCache.get('inventory_items') ?? new Set<string>();
+              cleanedBatch = (cleanedBatch as any[]).map(r => (
+                r.inventory_item_id && !existingSet.has(r.inventory_item_id)
+                  ? { ...r, inventory_item_id: null }
+                  : r
+              ));
             }
           } catch (e) {
             console.warn('Preflight check for bill_line_items inventory_item_id failed:', e);
@@ -689,6 +711,13 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
             await getDB().markAsSynced(tableName, record.id);
           }
           result.uploaded += batch.length;
+          result.uploadedTables.add(tableName);
+          // Warm the parentExistenceCache so later tables can skip validation queries.
+          const cached = parentExistenceCache.get(tableName) ?? new Set<string>();
+          for (const record of batch as any[]) {
+            if (record.id) cached.add(record.id as string);
+          }
+          parentExistenceCache.set(tableName, cached);
           console.log(`✅ [Sync] Successfully uploaded ${batch.length} ${tableName} records to Supabase`);
           
           // Special logging for branches
@@ -1173,6 +1202,7 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
             await getDB().markAsSynced(tableName, record.id);
             await table.delete(record.id);
             result.uploaded++;
+            result.uploadedTables.add(tableName);
             console.log(`✅ Successfully deleted ${tableName} record ${record.id.substring(0, 8)}...`);
           }
         } catch (error) {

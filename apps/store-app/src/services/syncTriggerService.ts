@@ -53,60 +53,52 @@ class SyncTriggerService {
 
     this.syncTriggered = false;
 
-    // Get callbacks from crudHelperService
-    // These are set up in OfflineDataContext and include:
-    // - onResetAutoSyncTimer
-    // - onDebouncedSync
-    // - onUpdateUnsyncedCount (important: update count before triggering sync)
     const callbacks = (crudHelperService as any).callbacks;
 
-    // If callbacks are available, use them
-    if (callbacks?.onResetAutoSyncTimer || callbacks?.onDebouncedSync) {
-      console.log('🔄 [SyncTrigger] Callbacks available, executing sync');
-      
-      // CRITICAL: Update unsynced count first, then trigger sync
-      // This ensures debouncedSync sees the correct unsynced count
-      if (callbacks.onUpdateUnsyncedCount) {
-        try {
-          console.log('🔄 [SyncTrigger] Updating unsynced count...');
-          await callbacks.onUpdateUnsyncedCount();
-          console.log('🔄 [SyncTrigger] Unsynced count updated');
-        } catch (error) {
-          console.warn('⚠️ [SyncTrigger] Failed to update unsynced count:', error);
-        }
-      }
-
-      if (callbacks.onResetAutoSyncTimer) {
-        console.log('🔄 [SyncTrigger] Resetting auto-sync timer');
-        callbacks.onResetAutoSyncTimer();
-      }
-
-      if (callbacks.onDebouncedSync) {
-        console.log('🔄 [SyncTrigger] Triggering debounced sync');
-        callbacks.onDebouncedSync();
-      } else {
-        console.warn('⚠️ [SyncTrigger] onDebouncedSync callback not available');
-      }
-    } else {
-      // Fallback: If callbacks aren't set up yet, log a warning
-      // This can happen if hooks fire before OfflineDataContext initializes
-      console.warn('⚠️ Sync trigger service: Callbacks not available yet. Sync will be triggered when callbacks are set up.');
-      // Re-trigger sync after a delay to give callbacks time to be set up
+    if (!callbacks) {
+      // Callbacks not set up yet — retry once after a short delay
+      console.warn('⚠️ Sync trigger service: Callbacks not available yet. Retrying in 2s...');
       setTimeout(async () => {
         const retryCallbacks = (crudHelperService as any).callbacks;
         if (retryCallbacks) {
           if (retryCallbacks.onUpdateUnsyncedCount) {
-            try {
-              await retryCallbacks.onUpdateUnsyncedCount();
-            } catch (error) {
-              console.warn('Failed to update unsynced count on retry:', error);
-            }
+            try { await retryCallbacks.onUpdateUnsyncedCount(); } catch { /* ignore */ }
           }
-          if (retryCallbacks.onDebouncedSync) {
+          if (retryCallbacks.onPerformSync) {
+            retryCallbacks.onPerformSync(true);
+          } else if (retryCallbacks.onDebouncedSync) {
             retryCallbacks.onDebouncedSync();
           }
         }
       }, 2000);
+      return;
+    }
+
+    console.log('🔄 [SyncTrigger] Callbacks available, executing sync');
+
+    // Update the UI counter first so the badge is accurate before sync starts.
+    if (callbacks.onUpdateUnsyncedCount) {
+      try {
+        console.log('🔄 [SyncTrigger] Updating unsynced count...');
+        await callbacks.onUpdateUnsyncedCount();
+        console.log('🔄 [SyncTrigger] Unsynced count updated');
+      } catch (error) {
+        console.warn('⚠️ [SyncTrigger] Failed to update unsynced count:', error);
+      }
+    }
+
+    // Use onPerformSync to run the sync immediately — we have already waited 30 s
+    // in the debounce timer above, so there is no reason to schedule another
+    // 30-second delay via onResetAutoSyncTimer or onDebouncedSync.
+    if (callbacks.onPerformSync) {
+      console.log('🔄 [SyncTrigger] Triggering performSync directly');
+      callbacks.onPerformSync(true);
+    } else if (callbacks.onDebouncedSync) {
+      // Fallback for older wiring that may not have onPerformSync registered yet
+      console.warn('⚠️ [SyncTrigger] onPerformSync not available, falling back to debouncedSync');
+      callbacks.onDebouncedSync();
+    } else {
+      console.warn('⚠️ [SyncTrigger] No sync callback available');
     }
   }
 

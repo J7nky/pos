@@ -28,7 +28,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { useQRCodeGeneration } from '../hooks/useQRCodeGeneration';
-import { generateBillReference } from '../utils/referenceGenerator';
+import { generateBillReference } from '@pos-platform/shared';
 import { accountingInitService } from '../services/accountingInitService';
 import { useProductMultilingual } from '../hooks/useMultilingual';
 import { parseMultilingualString } from '../utils/multilingual';

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { Database } from '../types/database';
+import { networkMonitorService } from '../services/networkMonitorService';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -64,9 +65,16 @@ export const supabase = createClient<Database>(safeSupabaseUrl, safeSupabaseAnon
       }
       
       // Online - proceed with request
+      const monitorId = networkMonitorService.onRequestStart(
+        typeof input === 'string' ? input : input.toString(),
+        init
+      );
       try {
-        return await fetch(input, init);
+        const response = await fetch(input, init);
+        networkMonitorService.onRequestEnd(monitorId, response.status);
+        return response;
       } catch (error) {
+        networkMonitorService.onRequestEnd(monitorId, null);
         // If request fails and we're now offline, provide a better error message
         if (!navigator.onLine) {
           console.log('🌐 Connection lost during request');
