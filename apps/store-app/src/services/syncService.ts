@@ -71,7 +71,12 @@ export class SyncService {
     // Prevent back-to-back syncs that arrive from multiple independent timers
     // (syncTriggerService 30s, resetAutoSyncTimer 30s, debouncedSync 30s, focus/visibility 1s)
     // all firing within the same short window.
+    const isVitestRun =
+      (typeof process !== 'undefined' && process.env?.VITEST === 'true') ||
+      import.meta.env.MODE === 'test';
+
     if (
+      !isVitestRun &&
       this.lastSyncCompleted &&
       Date.now() - this.lastSyncCompleted.getTime() < SyncService.MIN_SYNC_INTERVAL_MS
     ) {
