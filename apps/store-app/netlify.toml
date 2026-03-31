@@ -1,21 +1,12 @@
 [build]
-  # Directory to change to before starting a build
-  # Note: Netlify should set base directory to apps/store-app in dashboard
-  # If base directory is not set, this will fail - ensure it's set in Netlify dashboard
   base = "."
-  
-  # Directory that contains the deploy-ready HTML files and assets
   publish = "dist"
-  
-  # Build command - runs from apps/store-app directory (when base directory is set correctly)
-  # If you see "Missing script: build:netlify" error, check that base directory is set to apps/store-app in Netlify dashboard
-  command = "npm install --include=dev && npm run build:netlify"
+  # Monorepo: run pnpm from git root so this works when Netlify cwd is apps/store-app.
+  command = "cd \"$(git rev-parse --show-toplevel)\" && pnpm install --frozen-lockfile && pnpm --filter ./apps/store-app run build:netlify"
 
 [build.environment]
-  # Node.js version (use 20 for better Vite compatibility)
   NODE_VERSION = "20"
-  # Ensure dev dependencies are installed
-  NPM_FLAGS = "--include=dev"
+  PNPM_VERSION = "10.20.0"
 
 # Redirect rules for SPA routing
 # IMPORTANT: Exclude /updates/* from SPA redirects so update files are accessible
