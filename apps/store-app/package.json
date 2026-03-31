@@ -32,7 +32,7 @@
     "parity:check-registry": "node ./scripts/parity-check-registry.mjs",
     "parity:check-dexie-mode": "node ./scripts/parity-check-dexie-mode.mjs",
     "parity:coverage-matrix": "node ./scripts/parity-coverage-matrix.mjs",
-    "parity:gate": "pnpm run test:parity && pnpm run parity:check-registry && pnpm run parity:check-dexie-mode && pnpm run parity:coverage-matrix"
+    "parity:gate": "pnpm --filter @pos-platform/shared run build && pnpm run test:parity && pnpm run parity:check-registry && pnpm run parity:check-dexie-mode && pnpm run parity:coverage-matrix"
   },
   "dependencies": {
     "@pos-platform/shared": "workspace:*",

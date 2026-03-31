@@ -28,5 +28,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build shared package
+        run: pnpm --filter @pos-platform/shared run build
+
       - name: Parity gate
         run: pnpm --filter ./apps/store-app run parity:gate
