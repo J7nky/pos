@@ -7,6 +7,7 @@
 #
 # Per-app toml: apps/store-app/netlify.toml, apps/admin-app/netlify.toml
 
+
 [build]
   # Always run pnpm from the git root so Netlify base/subdir does not matter.
   command = "cd \"$(git rev-parse --show-toplevel)\" && SITE_NAME=\"${NETLIFY_SITE_NAME:-${NETLIFY_SITE_ID:-unknown}}\"; URL=\"${URL:-${DEPLOY_PRIME_URL:-unknown}}\"; if echo \"$SITE_NAME $URL\" | grep -qiE '(admin|super)'; then echo '🔧 Building admin-app for site: $SITE_NAME ($URL)' && pnpm install --frozen-lockfile && pnpm --filter @pos-platform/shared build && pnpm --filter admin-app build && echo 'admin-app' > .netlify-build-target; else echo '🔧 Building store-app for site: $SITE_NAME ($URL)' && pnpm install --frozen-lockfile && pnpm --filter @pos-platform/shared build && pnpm --filter ./apps/store-app run build:netlify && mkdir -p apps/admin-app && cp -r apps/store-app/dist apps/admin-app/dist && echo 'store-app' > .netlify-build-target; fi"
