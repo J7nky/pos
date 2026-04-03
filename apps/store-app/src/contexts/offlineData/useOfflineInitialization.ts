@@ -251,10 +251,11 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
         debug(
           `📊 Local database loaded: ${productCount} products, ${supplierEntityCount} supplier entities, ${customerEntityCount} customer entities`
         );
-        if (isOnline && unsyncedCount === 0) {
-          debug('🔄 Performing background sync to check for updates...');
+        if (isOnline && unsyncedCount > 0) {
+          debug('🔄 Uploading pending local changes after init...');
           void performSync(true);
         }
+        // unsyncedCount === 0: remote updates are handled by EventStreamService.start() catchUp
       }
     } catch (error) {
       console.error('❌ Data initialization failed:', error);

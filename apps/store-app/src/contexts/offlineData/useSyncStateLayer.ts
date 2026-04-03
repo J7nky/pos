@@ -90,30 +90,14 @@ export function useSyncStateLayer(adapter: SyncStateLayerAdapter): SyncStateLaye
         };
       }
 
-      try {
-        const { eventStreamService } = await import('../../services/eventStreamService');
-        let waitCount = 0;
-        const maxWait = 10;
-        while (eventStreamService.isProcessingEvents(currentBranchId) && waitCount < maxWait) {
-          console.log(`⏳ [SYNC] Waiting for event stream to finish processing (attempt ${waitCount + 1}/${maxWait})...`);
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          waitCount++;
-        }
-        if (waitCount > 0) {
-          console.log('✅ [SYNC] Event stream finished processing, proceeding with sync');
-        }
-      } catch (error) {
-        console.warn('⚠️ [SYNC] Could not check event stream status, proceeding anyway:', error);
-      }
-
-      console.log(`🔄 [SYNC] Starting ${isAutomatic ? 'AUTO' : 'MANUAL'} sync at ${new Date().toLocaleTimeString()}`);
+      console.log(`🔄 [SYNC] Starting ${isAutomatic ? 'AUTO' : 'MANUAL'} upload at ${new Date().toLocaleTimeString()}`);
       setIsSyncing(true);
       setIsAutoSyncing(isAutomatic);
       setLoading((prev: any) => ({ ...prev, sync: true }));
 
       try {
         const syncStartTime = Date.now();
-        const result = await syncService.sync(storeId, currentBranchId);
+        const result = await syncService.uploadOnly(storeId, currentBranchId);
         const syncDuration = Date.now() - syncStartTime;
 
         setLastSync(new Date());

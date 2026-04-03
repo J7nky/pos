@@ -179,6 +179,26 @@ export class UniversalChangeDetectionService {
   }
 
   /**
+   * Pre-seed the cache with hasChanges=true for a table we just uploaded to.
+   *
+   * After an upload the table definitely has at least the records we pushed,
+   * so a fresh COUNT query would always return > 0 — wasting a round-trip.
+   * By pre-seeding, we skip that COUNT query and let the download phase
+   * proceed directly.  The cache entry uses a short TTL (one sync cycle) so
+   * it doesn't suppress a genuine "no changes" result on the next sync.
+   *
+   * Use this instead of invalidateTable() when you know changes exist.
+   */
+  markTableHasChanges(tableName: string, storeId: string): void {
+    this.changeDetectionCache.set(`${tableName}:${storeId}`, {
+      result: { hasChanges: true, changeCount: 1 },
+      // Set timestamp just outside the TTL so the NEXT sync cycle re-checks
+      // with a real COUNT query, but THIS sync cycle skips the network round-trip.
+      timestamp: Date.now() - (this.CACHE_TTL - 1000),
+    });
+  }
+
+  /**
    * Applies appropriate store filter based on table type
    * Handles special cases:
    * - products: includes both store-specific and global products

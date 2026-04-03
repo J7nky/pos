@@ -13,7 +13,10 @@ export default defineConfig({
   },
   plugins: [react()],
   optimizeDeps: {
-    exclude: ['lucide-react'],
+    // Pre-bundle lucide-react so Vite serves it as a single chunk instead of
+    // issuing one HTTP request per icon file (~1 500+ files in v0.540).
+    // Excluding it was causing ~2 000 individual icon requests in dev mode.
+    include: ['lucide-react'],
   },
   build: {
     outDir: 'dist',

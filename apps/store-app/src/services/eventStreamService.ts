@@ -998,6 +998,8 @@ export class EventStreamService {
       user_module_access: 'user_module_access',
       role_permissions: 'role_permissions',
       user_permissions: 'user_permissions',
+      balance_snapshot: 'balance_snapshots',
+      bill_audit_log: 'bill_audit_logs',
     };
 
     return mapping[entityType] || null;

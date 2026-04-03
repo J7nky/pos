@@ -28,9 +28,13 @@ export class SyncService {
   private isRunning = false;
   private lastSyncAttempt: Date | null = null;
   private lastSyncCompleted: Date | null = null;
-  // Persisted across page reloads so the 5-min interval is truly respected.
+  // Persisted across page reloads so the 30-min interval is truly respected.
   private lastDeletionCheck: Date | null = SyncService.loadLastDeletionCheck();
   private deletionStateCache: Map<string, DeletionState> = new Map();
+  // Static app-start timestamp — used for the startup grace period so the very
+  // first sync after a cold app load never runs deletion detection immediately,
+  // even if the persisted lastDeletionCheck is stale (> 30 min ago).
+  private static readonly appStartTime: number = Date.now();
 
   private static readonly DELETION_CHECK_LS_KEY = 'pos_sync_last_deletion_check';
   // 30-second minimum gap between two consecutive sync calls to prevent
@@ -140,11 +144,13 @@ export class SyncService {
       result.synced.uploaded = uploadResult.uploaded;
       result.errors.push(...uploadResult.errors);
 
-      // Invalidate change-detection cache for every table we just uploaded to so
-      // the download phase re-checks those specific tables for concurrent remote
-      // changes, while all OTHER tables benefit from the 60-second cache.
+      // For tables we just uploaded to: pre-seed the change-detection cache
+      // with hasChanges=true.  This tells the download phase to fetch those
+      // tables (so concurrent remote changes are not missed) without first
+      // issuing a redundant COUNT round-trip — we *know* changes exist because
+      // we just wrote them.  Other tables continue to use their 60-second cache.
       for (const uploadedTable of uploadResult.uploadedTables) {
-        universalChangeDetectionService.invalidateTable(uploadedTable, storeId);
+        universalChangeDetectionService.markTableHasChanges(uploadedTable, storeId);
       }
 
       const downloadStart = performance.now();
@@ -160,11 +166,20 @@ export class SyncService {
       const pendingTime = performance.now() - pendingStart;
       console.log(`⏱️  Pending syncs processing: ${pendingTime.toFixed(2)}ms`);
 
-      // Check if we should run deletion detection
-      const shouldCheckDeletions = SYNC_CONFIG.enableDeletionDetection && (
-        !this.lastDeletionCheck ||
-        Date.now() - this.lastDeletionCheck.getTime() > SYNC_CONFIG.deletionDetectionInterval
-      );
+      // Check if we should run deletion detection.
+      // Two guards:
+      //   1. Startup grace period — don't run on the very first sync after a
+      //      cold app load; give the UI time to render before issuing 24+ extra
+      //      paginated queries (each with a CORS preflight).
+      //   2. Interval guard — only run once per 30-minute window (persisted in
+      //      localStorage so the interval spans page reloads).
+      const timeSinceAppStart = Date.now() - SyncService.appStartTime;
+      const startupGraceElapsed = timeSinceAppStart > SYNC_CONFIG.deletionDetectionStartupGrace;
+      const shouldCheckDeletions = SYNC_CONFIG.enableDeletionDetection &&
+        startupGraceElapsed && (
+          !this.lastDeletionCheck ||
+          Date.now() - this.lastDeletionCheck.getTime() > SYNC_CONFIG.deletionDetectionInterval
+        );
 
       if (shouldCheckDeletions) {
         // Stamp the time BEFORE running so that a failed/aborted detection pass
@@ -194,6 +209,107 @@ export class SyncService {
       networkMonitorService.endSession();
       // Resume event stream — deferred catchUp will replay events that arrived
       // during the window (records already in IndexedDB, so it's idempotent).
+      if (branchId) eventStreamService.resumeAfterSync(branchId, storeId);
+    }
+
+    return result;
+  }
+
+  /**
+   * Push local unsynced rows to Supabase only — no table-scan download.
+   * EventStreamService handles remote changes via branch_event_log + catchUp.
+   * Used by performSync / auto-sync / syncTriggerService to avoid redundant
+   * COUNT + select round-trips on every CRUD write.
+   */
+  async uploadOnly(storeId: string, branchId?: string): Promise<SyncResult> {
+    if (this.isRunning) {
+      console.log('⏭️  [UPLOAD-ONLY] Sync already in progress, skipping duplicate request');
+      return {
+        success: true,
+        errors: [],
+        synced: { uploaded: 0, downloaded: 0 },
+        conflicts: 0,
+      };
+    }
+
+    const isVitestRun =
+      (typeof process !== 'undefined' && process.env?.VITEST === 'true') ||
+      import.meta.env.MODE === 'test';
+
+    if (
+      !isVitestRun &&
+      this.lastSyncCompleted &&
+      Date.now() - this.lastSyncCompleted.getTime() < SyncService.MIN_SYNC_INTERVAL_MS
+    ) {
+      console.log('⏭️  [UPLOAD-ONLY] Skipping: minimum sync interval not yet elapsed since last sync');
+      return {
+        success: true,
+        errors: [],
+        synced: { uploaded: 0, downloaded: 0 },
+        conflicts: 0,
+      };
+    }
+
+    this.isRunning = true;
+    this.lastSyncAttempt = new Date();
+    const syncStartTime = performance.now();
+    networkMonitorService.startSession(`uploadOnly @ ${new Date().toLocaleTimeString()}`);
+
+    const result: SyncResult = {
+      success: true,
+      errors: [],
+      synced: { uploaded: 0, downloaded: 0 },
+      conflicts: 0,
+    };
+
+    try {
+      if (branchId) eventStreamService.suspendForSync(branchId);
+      await this.initializeSyncMetadata(storeId);
+
+      const cacheStart = performance.now();
+      await dataValidationService.refreshCache(storeId, supabase);
+      console.log(`⏱️  [UPLOAD-ONLY] Validation cache refresh: ${(performance.now() - cacheStart).toFixed(2)}ms`);
+
+      const uploadStart = performance.now();
+      const uploadResult = await uploadLocalChanges(storeId, branchId);
+      console.log(
+        `⏱️  [UPLOAD-ONLY] Upload time: ${(performance.now() - uploadStart).toFixed(2)}ms (${uploadResult.uploaded} records)`
+      );
+      result.synced.uploaded = uploadResult.uploaded;
+      result.errors.push(...uploadResult.errors);
+
+      const pendingStart = performance.now();
+      await this.processPendingSyncs();
+      console.log(`⏱️  [UPLOAD-ONLY] Pending syncs: ${(performance.now() - pendingStart).toFixed(2)}ms`);
+
+      const timeSinceAppStart = Date.now() - SyncService.appStartTime;
+      const startupGraceElapsed = timeSinceAppStart > SYNC_CONFIG.deletionDetectionStartupGrace;
+      const shouldCheckDeletions =
+        SYNC_CONFIG.enableDeletionDetection &&
+        startupGraceElapsed &&
+        (!this.lastDeletionCheck ||
+          Date.now() - this.lastDeletionCheck.getTime() > SYNC_CONFIG.deletionDetectionInterval);
+
+      if (shouldCheckDeletions) {
+        this.persistLastDeletionCheck(new Date());
+        const deletionStart = performance.now();
+        const deletionResult = await detectAndSyncDeletions(storeId, this.deletionStateCache);
+        console.log(
+          `⏱️  [UPLOAD-ONLY] Deletion detection: ${(performance.now() - deletionStart).toFixed(2)}ms (${deletionResult.deleted} removed)`
+        );
+        result.errors.push(...deletionResult.errors);
+      }
+
+      console.log(`⏱️  [UPLOAD-ONLY] Total: ${(performance.now() - syncStartTime).toFixed(2)}ms`);
+      result.success = result.errors.length === 0;
+    } catch (error) {
+      console.error(`⏱️  [UPLOAD-ONLY] Failed after ${(performance.now() - syncStartTime).toFixed(2)}ms:`, error);
+      result.success = false;
+      result.errors.push(error instanceof Error ? error.message : 'Unknown upload error');
+    } finally {
+      this.isRunning = false;
+      this.lastSyncCompleted = new Date();
+      networkMonitorService.endSession();
       if (branchId) eventStreamService.resumeAfterSync(branchId, storeId);
     }
 

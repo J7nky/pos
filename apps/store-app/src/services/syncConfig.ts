@@ -7,8 +7,16 @@ export const SYNC_CONFIG = {
   maxRecordsPerSync: 1000,
   queryTimeout: 30000, // Query timeout for individual queries (30s)
   // Deletion detection - optimized
+  // EventStreamService already propagates real-time deletes via Supabase Realtime,
+  // so this full-table scan is only a safety net for records deleted directly in
+  // the database. Running it every 5 min generated ~24-48 extra requests per sync
+  // cycle; 30 min is a good trade-off (once per typical session, not 6×).
   enableDeletionDetection: true, // Enable detection of remote deletions
-  deletionDetectionInterval: 300000, // Run full deletion check every 5 minutes
+  deletionDetectionInterval: 1_800_000, // Run full deletion check every 30 minutes (was 5 min)
+  // Minimum delay before the FIRST deletion check after a cold app start.
+  // Prevents the very first sync from immediately issuing 24+ paginated
+  // ID-scan queries before the user even sees the UI.
+  deletionDetectionStartupGrace: 300_000, // 5-minute startup grace period
   deletionUseHashComparison: true, // Use hash-based comparison for large tables
   // Pagination for large-table remote ID scans (deletion detection)
   largeTablePaginationSize: 500,

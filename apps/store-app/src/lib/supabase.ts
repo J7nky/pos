@@ -23,27 +23,25 @@ if (supabaseUrl) {
   }
 }
 
-// Check if we're online
-const isOnline = () => navigator.onLine;
-
 // Use placeholder values if environment variables are missing
 const safeSupabaseUrl = supabaseUrl || 'https://placeholder.supabase.co';
 const safeSupabaseAnonKey = supabaseAnonKey || 'placeholder-key';
 const safeSupabaseServiceRoleKey = supabaseServiceRoleKey || 'placeholder-service-role-key';
 
-// Determine if we should enable auto token refresh (only when online)
-// Note: We can't dynamically change this, but we'll block refresh attempts in the fetch interceptor
-const shouldAutoRefreshToken = isOnline();
-
 export const supabase = createClient<Database>(safeSupabaseUrl, safeSupabaseAnonKey, {
   auth: {
-    autoRefreshToken: shouldAutoRefreshToken, // Disable when offline to prevent ERR_NAME_NOT_RESOLVED
+    // Always enable auto token refresh. The custom fetch interceptor below already
+    // blocks all auth requests (including /auth/v1/token) while offline, so there
+    // is no risk of ERR_NAME_NOT_RESOLVED. Freezing this to false at startup
+    // (based on navigator.onLine at import time) would permanently disable refresh
+    // for the entire session if the app loads offline then comes back online.
+    autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true
   },
   global: {
     headers: {
-      'X-Client-Info': `pos-app-${isOnline() ? 'online' : 'offline'}`
+      'X-Client-Info': `pos-app-${navigator.onLine ? 'online' : 'offline'}`
     },
     fetch: async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       // If offline, prevent ALL Supabase requests including auth token refresh

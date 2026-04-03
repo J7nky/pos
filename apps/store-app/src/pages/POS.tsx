@@ -1021,10 +1021,6 @@ ${dashSeparator}`;
 
       await raw.refreshData(); // Ensure UI is in sync with backend
 
-      // Trigger immediate sync after sale completion for critical data
-      raw.debouncedSync?.();
-
-
       if (activeTabs.length > 1) {
         closeTab(activeTabId);
       } else {
