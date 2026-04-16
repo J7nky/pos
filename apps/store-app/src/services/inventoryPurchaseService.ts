@@ -16,7 +16,7 @@ export interface InventoryPurchaseItem {
   price?: number;
   selling_price?: number;
 }
-
+ 
 
 export interface InventoryPurchaseData {
   supplier_id: string;
