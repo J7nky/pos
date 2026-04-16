@@ -55,6 +55,7 @@ npx --yes netlify-cli deploy --prod --dir=dist
    npm install --include=dev
    npm run build:netlify
    ```
+   
 
 2. **Go to Netlify Dashboard:**
    - Visit: https://app.netlify.com
