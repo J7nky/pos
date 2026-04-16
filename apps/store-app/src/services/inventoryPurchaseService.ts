@@ -17,6 +17,7 @@ export interface InventoryPurchaseItem {
   selling_price?: number;
 }
 
+
 export interface InventoryPurchaseData {
   supplier_id: string;
   type: 'cash' | 'credit' | 'commission';
