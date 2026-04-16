@@ -1,5 +1,5 @@
 [build]
-  base = "."
+  base = "apps/store-app"
   publish = "dist"
   # Monorepo: run pnpm from git root so this works when Netlify cwd is apps/store-app.
   command = "cd \"$(git rev-parse --show-toplevel)\" && pnpm install --frozen-lockfile && pnpm --filter ./apps/store-app run build:netlify"
