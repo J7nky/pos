@@ -3,6 +3,7 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { crudHelperService } from '../services/crudHelperService';
+import { getDB } from '../lib/db';
 import { 
   RefreshCw, 
   AlertCircle, 
@@ -54,24 +55,42 @@ const TABLE_METADATA: Record<string, TableMetadata> = {
 export default function UnsyncedItems() {
   const { t } = useI18n();
   const { handleError } = useErrorHandler();
-  const { sync, getSyncStatus, isOnline, getUnsyncedRecords } = useOfflineData();
+  const {
+    sync,
+    getSyncStatus,
+    isOnline,
+    getPermanentlyFailedOutboxItems,
+    discardPermanentlyFailedOutboxItem,
+  } = useOfflineData();
   const { unsyncedCount, isSyncing } = getSyncStatus();
   
   const [unsyncedData, setUnsyncedData] = useState<UnsyncedTableData[]>([]);
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [failedOutbox, setFailedOutbox] = useState<
+    Array<{ id: string; table_name: string; operation: string; record_id: string; last_error?: string }>
+  >([]);
+
+  const loadFailedOutbox = async () => {
+    try {
+      const rows = await getPermanentlyFailedOutboxItems();
+      setFailedOutbox(rows);
+    } catch (error) {
+      handleError(error);
+    }
+  };
 
   const loadUnsyncedData = async () => {
     setLoading(true);
     try {
-      const { total, byTable } = await crudHelperService.getUnsyncedCount();
+      const { byTable } = await crudHelperService.getUnsyncedCount();
       
       const tablesWithData: UnsyncedTableData[] = [];
       
       for (const [tableName, count] of Object.entries(byTable)) {
         if (count > 0) {
-          const records = await getUnsyncedRecords(tableName);
+          const records = await getDB().getUnsyncedRecords(tableName);
           tablesWithData.push({
             tableName,
             count,
@@ -85,6 +104,7 @@ export default function UnsyncedItems() {
       
       setUnsyncedData(tablesWithData);
       setLastRefresh(new Date());
+      await loadFailedOutbox();
     } catch (error) {
       handleError(error);
     } finally {
@@ -221,6 +241,37 @@ export default function UnsyncedItems() {
             )}
           </div>
         </div>
+
+        {failedOutbox.length > 0 && (
+          <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4">
+            <h2 className="mb-2 text-lg font-semibold text-red-900">{t('sync.outboxPermanentSection')}</h2>
+            <ul className="space-y-3">
+              {failedOutbox.map(row => (
+                <li
+                  key={row.id}
+                  className="flex flex-col gap-2 rounded-md border border-red-100 bg-white p-3 text-sm sm:flex-row sm:items-start sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="font-mono text-gray-800">
+                      {row.table_name} · {row.operation} · {row.record_id}
+                    </p>
+                    {row.last_error ? <p className="mt-1 break-words text-red-700">{row.last_error}</p> : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await discardPermanentlyFailedOutboxItem(row.id);
+                      await loadFailedOutbox();
+                    }}
+                    className="shrink-0 rounded-md bg-red-600 px-3 py-1.5 text-white hover:bg-red-700"
+                  >
+                    {t('sync.discardOutbox')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         
         {/* Status Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">

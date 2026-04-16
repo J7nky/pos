@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-04-06T21:32:06.651Z",
+  "passed": 10,
+  "failed": 0,
+  "results": [
+    {
+      "id": "offline_then_online_no_duplication",
+      "pass": true
+    },
+    {
+      "id": "concurrent_updates_deterministic",
+      "pass": true
+    },
+    {
+      "id": "out_of_order_events_converge",
+      "pass": true
+    },
+    {
+      "id": "duplicate_event_ids_idempotent",
+      "pass": true
+    },
+    {
+      "id": "partial_sync_failure_resume",
+      "pass": true
+    },
+    {
+      "id": "deletion_soft_vs_hard",
+      "pass": true
+    },
+    {
+      "id": "vector_clock_version_stress",
+      "pass": true
+    },
+    {
+      "id": "clock_skew_offline_writes_merge",
+      "pass": true
+    },
+    {
+      "id": "large_offline_queue",
+      "pass": true
+    },
+    {
+      "id": "long_offline_version_catchup",
+      "pass": true
+    }
+  ]
+}

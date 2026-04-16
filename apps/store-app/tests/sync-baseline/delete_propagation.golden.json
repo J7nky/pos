@@ -6,103 +6,163 @@
   "serverSnapshot": {},
   "syncMetadata": [
     {
+      "hydration_complete": false,
       "id": "balance_snapshots",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "balance_snapshots"
     },
     {
+      "hydration_complete": false,
       "id": "bill_audit_logs",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "bill_audit_logs"
     },
     {
+      "hydration_complete": false,
       "id": "bill_line_items",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "bill_line_items"
     },
     {
+      "hydration_complete": false,
       "id": "bills",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "bills"
     },
     {
+      "hydration_complete": false,
       "id": "branches",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "branches"
     },
     {
+      "hydration_complete": false,
       "id": "cash_drawer_accounts",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "cash_drawer_accounts"
     },
     {
+      "hydration_complete": false,
       "id": "cash_drawer_sessions",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "cash_drawer_sessions"
     },
     {
+      "hydration_complete": false,
       "id": "chart_of_accounts",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "chart_of_accounts"
     },
     {
+      "hydration_complete": false,
       "id": "entities",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "entities"
     },
     {
+      "hydration_complete": false,
       "id": "inventory_bills",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "inventory_bills"
     },
     {
+      "hydration_complete": false,
       "id": "inventory_items",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "inventory_items"
     },
     {
+      "hydration_complete": false,
       "id": "journal_entries",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "journal_entries"
     },
     {
+      "hydration_complete": false,
       "id": "missed_products",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "missed_products"
     },
     {
+      "hydration_complete": false,
       "id": "products",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "products"
     },
     {
+      "hydration_complete": false,
       "id": "reminders",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "reminders"
     },
     {
+      "hydration_complete": false,
       "id": "role_permissions",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "role_permissions"
     },
     {
+      "hydration_complete": false,
       "id": "stores",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "stores"
     },
     {
+      "hydration_complete": false,
       "id": "transactions",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "transactions"
     },
     {
+      "hydration_complete": false,
       "id": "user_permissions",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "user_permissions"
     },
     {
+      "hydration_complete": false,
       "id": "users",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "users"
     }
   ],

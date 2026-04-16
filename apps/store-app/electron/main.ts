@@ -695,6 +695,197 @@ ipcMain.handle('print-statement', async (_event: any, payload: any) => {
   }
 });
 
+// Formal Bill (A4) Printing Handler
+ipcMain.handle('print-formal-bill', async (_event: any, payload: any) => {
+  try {
+    console.log('🖨️ Starting formal bill print job');
+
+    const htmlContent = generateFormalBillHTML(payload);
+
+    const printWindow = new BrowserWindow({
+      width: 794,
+      height: 1123,
+      show: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+    // Wait for content to render
+    await new Promise(resolve => setTimeout(resolve, 800));
+
+    const printerName: string | undefined = payload.printerName && payload.printerName !== ''
+      ? payload.printerName
+      : undefined;
+
+    const printOptions: any = {
+      silent: true,
+      printBackground: true,
+      pageSize: 'A4',
+      margins: { marginType: 'default' },
+    };
+    if (printerName) printOptions.deviceName = printerName;
+
+    console.log('🖨️ Printing formal bill with options:', printOptions);
+    await printWindow.webContents.print(printOptions);
+
+    setTimeout(() => { printWindow.close(); }, 1500);
+
+    return { success: true, message: 'Formal bill print job submitted successfully' };
+  } catch (error) {
+    console.error('❌ Error printing formal bill:', error);
+    return {
+      success: false,
+      message: 'Failed to print formal bill',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+});
+
+function generateFormalBillHTML(payload: any): string {
+  const rs = payload.receiptSettings || {};
+  const bill = payload.bill || {};
+  const entity = payload.entity || null;
+  const lineItems: any[] = payload.lineItems || [];
+  const lang: string = payload.language || 'en';
+  const currency: string = payload.currency || 'LBP';
+  const exchangeRate: number = payload.exchangeRate || 0;
+  const isRTL = lang === 'ar';
+
+  function esc(s: any): string {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fmt(amount: number): string {
+    if (currency === 'USD' && exchangeRate > 0) {
+      const usd = amount / exchangeRate;
+      return '$' + usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return amount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' LL';
+  }
+
+  const labels: Record<string, Record<string, string>> = {
+    en: { invoice: 'Invoice', billNo: 'Bill No', date: 'Date', customer: 'Customer', phone: 'Phone', payment: 'Payment', no: '#', product: 'Product', qty: 'Qty', weight: 'Weight', unitPrice: 'Unit Price', total: 'Total', subtotal: 'Subtotal', prevBalance: 'Prev. Balance', grandTotal: 'Grand Total', items: 'Items' },
+    ar: { invoice: 'فاتورة', billNo: 'رقم الفاتورة', date: 'التاريخ', customer: 'الزبون', phone: 'الهاتف', payment: 'الدفع', no: '#', product: 'المنتج', qty: 'الكمية', weight: 'الوزن', unitPrice: 'سعر الوحدة', total: 'المجموع', subtotal: 'المجموع الفرعي', prevBalance: 'الرصيد السابق', grandTotal: 'المجموع الكلي', items: 'عناصر' },
+    fr: { invoice: 'Facture', billNo: 'N° Facture', date: 'Date', customer: 'Client', phone: 'Téléphone', payment: 'Paiement', no: '#', product: 'Produit', qty: 'Qté', weight: 'Poids', unitPrice: 'Prix Unit.', total: 'Total', subtotal: 'Sous-total', prevBalance: 'Solde Préc.', grandTotal: 'Total Général', items: 'Articles' },
+  };
+  const L = labels[lang] || labels['en'];
+
+  const billDate = bill.bill_date ? new Date(bill.bill_date).toLocaleDateString('en-GB') : '';
+  const billNumber = (rs.billNumberPrefix || '') + (String(bill.bill_number || '').split('-')[1] || bill.bill_number || '');
+
+  const phones = [
+    rs.phone1Name && rs.phone1 ? `${esc(rs.phone1Name)}: ${esc(rs.phone1)}` : (rs.phone1 ? esc(rs.phone1) : ''),
+    rs.phone2Name && rs.phone2 ? `${esc(rs.phone2Name)}: ${esc(rs.phone2)}` : (rs.phone2 ? esc(rs.phone2) : ''),
+  ].filter(Boolean).join('  /  ');
+
+  const logoHtml = payload.logo
+    ? `<img style="max-width:90px;max-height:70px;object-fit:contain;${isRTL ? 'margin-right:12px' : 'margin-left:12px'}" src="${esc(payload.logo)}" alt="logo">`
+    : '';
+
+  const rowsHtml = lineItems.map((item: any, i: number) => {
+    const weightCell = item.weight && item.weight > 0 ? `${Number(item.weight).toFixed(2)} kg` : '-';
+    return `<tr style="background:${i % 2 === 1 ? '#fafafa' : '#fff'}">
+      <td style="padding:4px 7px;border-bottom:1px solid #e0e0e0;color:#888;font-size:9.5px">${i + 1}</td>
+      <td style="padding:4px 7px;border-bottom:1px solid #e0e0e0">${esc(item.productName)}</td>
+      <td style="padding:4px 7px;border-bottom:1px solid #e0e0e0;text-align:${isRTL ? 'left' : 'right'}">${item.quantity}</td>
+      <td style="padding:4px 7px;border-bottom:1px solid #e0e0e0;text-align:${isRTL ? 'left' : 'right'};white-space:nowrap">${weightCell}</td>
+      <td style="padding:4px 7px;border-bottom:1px solid #e0e0e0;text-align:${isRTL ? 'left' : 'right'};white-space:nowrap">${fmt(item.unit_price || 0)}</td>
+      <td style="padding:4px 7px;border-bottom:1px solid #e0e0e0;text-align:${isRTL ? 'left' : 'right'};font-weight:600;white-space:nowrap">${fmt(item.line_total || 0)}</td>
+    </tr>`;
+  }).join('');
+
+  const prevBalanceRow = rs.showPreviousBalance && entity && (entity.lb_balance || 0) > 0
+    ? `<tr><td style="padding:3px 6px;color:#555">${L.prevBalance}:</td><td style="padding:3px 6px;font-weight:600;text-align:${isRTL ? 'left' : 'right'}">${fmt(entity.lb_balance)}</td></tr>`
+    : '';
+
+  const itemCountHtml = rs.showItemCount
+    ? `<div style="font-size:10px;color:#666;text-align:${isRTL ? 'left' : 'right'};margin-bottom:4px">${lineItems.length} ${L.items}</div>`
+    : '';
+
+  const css = `
+    @page { size: A4; margin: 12mm 15mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; background: #fff; direction: ${isRTL ? 'rtl' : 'ltr'}; }
+    table { border-collapse: collapse; }
+    @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+  `;
+
+  return `<!DOCTYPE html>
+<html lang="${esc(lang)}" dir="${isRTL ? 'rtl' : 'ltr'}">
+<head>
+  <meta charset="UTF-8">
+  <title>${L.invoice}</title>
+  <style>${css}</style>
+</head>
+<body>
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:10px;margin-bottom:10px">
+    <div>
+      <div style="font-size:18px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">${esc(rs.storeName || '')}</div>
+      ${rs.address ? `<div style="font-size:10px;color:#444;margin-top:2px">${esc(rs.address)}</div>` : ''}
+      ${phones ? `<div style="font-size:10px;color:#444;margin-top:2px">${phones}</div>` : ''}
+    </div>
+    ${logoHtml}
+  </div>
+
+  <!-- Invoice Meta -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:8px 12px;margin-bottom:12px;font-size:10.5px">
+    <div><span style="font-weight:600;color:#555;margin-${isRTL ? 'left' : 'right'}:6px">${L.billNo}:</span><span>${esc(billNumber)}</span></div>
+    <div><span style="font-weight:600;color:#555;margin-${isRTL ? 'left' : 'right'}:6px">${L.date}:</span><span>${esc(billDate)}</span></div>
+    ${entity ? `<div><span style="font-weight:600;color:#555;margin-${isRTL ? 'left' : 'right'}:6px">${L.customer}:</span><span>${esc(entity.name)}</span></div>` : ''}
+    ${entity && entity.phone ? `<div><span style="font-weight:600;color:#555;margin-${isRTL ? 'left' : 'right'}:6px">${L.phone}:</span><span>${esc(entity.phone)}</span></div>` : ''}
+    <div><span style="font-weight:600;color:#555;margin-${isRTL ? 'left' : 'right'}:6px">${L.payment}:</span><span style="text-transform:capitalize">${esc(bill.payment_method || '')}</span></div>
+  </div>
+
+  ${itemCountHtml}
+
+  <!-- Line Items Table -->
+  <table style="width:100%;margin-bottom:10px">
+    <thead>
+      <tr>
+        <th style="background:#222;color:#fff;padding:5px 7px;font-size:10px;font-weight:600;text-align:${isRTL ? 'right' : 'left'};width:28px">${L.no}</th>
+        <th style="background:#222;color:#fff;padding:5px 7px;font-size:10px;font-weight:600;text-align:${isRTL ? 'right' : 'left'}">${L.product}</th>
+        <th style="background:#222;color:#fff;padding:5px 7px;font-size:10px;font-weight:600;text-align:${isRTL ? 'left' : 'right'};width:68px">${L.qty}</th>
+        <th style="background:#222;color:#fff;padding:5px 7px;font-size:10px;font-weight:600;text-align:${isRTL ? 'left' : 'right'};width:68px">${L.weight}</th>
+        <th style="background:#222;color:#fff;padding:5px 7px;font-size:10px;font-weight:600;text-align:${isRTL ? 'left' : 'right'};width:80px">${L.unitPrice}</th>
+        <th style="background:#222;color:#fff;padding:5px 7px;font-size:10px;font-weight:600;text-align:${isRTL ? 'left' : 'right'};width:80px">${L.total}</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+
+  <!-- Totals -->
+  <div style="display:flex;justify-content:${isRTL ? 'flex-start' : 'flex-end'};margin-bottom:14px">
+    <table style="width:220px;font-size:10.5px">
+      <tr>
+        <td style="padding:3px 6px;color:#555">${L.subtotal}:</td>
+        <td style="padding:3px 6px;font-weight:600;text-align:${isRTL ? 'left' : 'right'}">${fmt(bill.subtotal || 0)}</td>
+      </tr>
+      ${prevBalanceRow}
+      <tr>
+        <td style="padding:5px 6px;border-top:2px solid #222;font-size:12px;font-weight:700">${L.grandTotal}:</td>
+        <td style="padding:5px 6px;border-top:2px solid #222;font-size:12px;font-weight:700;text-align:${isRTL ? 'left' : 'right'}">${fmt(bill.total_amount || 0)}</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Footer -->
+  <div style="border-top:1px solid #ccc;padding-top:8px;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#555">
+    <span style="font-size:12px;font-weight:600;color:#222">${esc(rs.thankYouMessage || 'Thank You!')}</span>
+    <span style="text-transform:capitalize">${esc(bill.payment_method || '')}</span>
+  </div>
+</body>
+</html>`;
+}
+
 // Helper function: Render Arabic text to bitmap image
 function renderTextToBitmap(text: string, options: any = {}): Buffer {
   const {

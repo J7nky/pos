@@ -6,23 +6,66 @@ import { universalChangeDetectionService } from './universalChangeDetectionServi
 import { networkMonitorService } from './networkMonitorService';
 import { eventStreamService } from './eventStreamService';
 import { normalizeBillDateFromRemote } from '../utils/dateUtils';
-import type { Store } from '../types';
+import { createMultilingualFromString, getTranslatedString } from '../utils/multilingual';
+import type { Store, PendingSync } from '../types';
 import {
   SYNC_CONFIG,
   SYNC_TABLES,
+  getTablesInTierOrdered,
 } from './syncConfig';
-import type { SyncResult, DeletionState } from './syncConfig';
+import type {
+  SyncResult,
+  DeletionState,
+  DataTierName,
+  DownloadPageResult,
+  SyncCheckpoint,
+} from './syncConfig';
 export { SYNC_TABLES } from './syncConfig';
-export type { SyncTable, SyncResult } from './syncConfig';
+export type { SyncTable, SyncResult, DataTierName, DownloadPageResult, SyncCheckpoint } from './syncConfig';
 import { uploadLocalChanges, isUnrecoverableError, deleteProblematicRecord } from './syncUpload';
 import { downloadRemoteChanges, applyStoreFilter } from './syncDownload';
 import { detectAndSyncDeletions } from './syncDeletionDetection';
+import { comprehensiveLoggingService } from './comprehensiveLoggingService';
+import { notificationService } from './notificationService';
 
 // Keep SyncTable import for use within the class
 import type { SyncTable } from './syncConfig';
 
 // Get singleton database instance
 const db = getDB();
+
+function recordMaxVersion(records: Record<string, unknown>[]): number {
+  let max = 0;
+  for (const r of records) {
+    const v = Number((r as { version?: unknown }).version ?? 0);
+    if (!Number.isNaN(v) && v > max) max = v;
+  }
+  return max;
+}
+
+function isNonRetryableHttpClientError(error: unknown): boolean {
+  const e = error as { status?: number; code?: string };
+  if (
+    typeof e?.status === 'number' &&
+    e.status >= 400 &&
+    e.status < 500 &&
+    e.status !== 408 &&
+    e.status !== 429
+  ) {
+    return true;
+  }
+  const c = e?.code || '';
+  if (typeof c === 'string' && c.startsWith('PGRST3')) return true;
+  if (typeof c === 'string' && /^(22|23)/.test(c)) return true;
+  return false;
+}
+
+function indicatesPermissionRevoked(error: unknown): boolean {
+  const e = error as { status?: number; code?: string; message?: string };
+  if (e?.status === 403) return true;
+  const msg = (e?.message || '').toLowerCase();
+  return e?.code === '42501' || msg.includes('permission denied for');
+}
 
 export class SyncService {
   private isRunning = false;
@@ -58,6 +101,65 @@ export class SyncService {
     try {
       localStorage.setItem(SyncService.DELETION_CHECK_LS_KEY, date.toISOString());
     } catch { /* ignore */ }
+  }
+
+  /** Parity / Vitest runs must not wait 5 minutes before deletion detection can execute. */
+  private deletionStartupGraceSatisfied(): boolean {
+    const isVitest =
+      (typeof process !== 'undefined' && process.env?.VITEST === 'true') ||
+      import.meta.env.MODE === 'test';
+    if (isVitest) return true;
+    return Date.now() - SyncService.appStartTime > SYNC_CONFIG.deletionDetectionStartupGrace;
+  }
+
+  private onPermissionRevoked: ((storeId: string) => Promise<void>) | null = null;
+
+  /** Injected from `SupabaseAuthContext` — keeps sync free of direct auth imports (CG-02). */
+  setOnPermissionRevoked(handler: ((storeId: string) => Promise<void>) | null): void {
+    this.onPermissionRevoked = handler;
+  }
+
+  private async handleSyncTransportError(storeId: string, error: unknown): Promise<void> {
+    if (error == null) return;
+    if (!indicatesPermissionRevoked(error)) return;
+    this.emitSyncStructuredLog('permission_revoked', storeId, undefined, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    const cb = this.onPermissionRevoked;
+    if (cb) await cb(storeId);
+  }
+
+  private emitSyncStructuredLog(
+    action:
+      | 'sync_started'
+      | 'sync_completed'
+      | 'sync_failed'
+      | 'tier_started'
+      | 'tier_completed'
+      | 'page_downloaded'
+      | 'outbox_processed'
+      | 'outbox_item_permanently_failed'
+      | 'checkpoint_saved'
+      | 'permission_revoked',
+    storeId: string,
+    branchId?: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    try {
+      comprehensiveLoggingService.logSystemActivity({
+        action,
+        description: JSON.stringify({ storeId, branchId, ...metadata }),
+        context: {
+          userId: 'system',
+          module: 'sync',
+          source: 'web',
+        },
+        severity: action === 'permission_revoked' || action === 'outbox_item_permanently_failed' ? 'high' : 'low',
+        metadata: { storeId, branchId, ...metadata },
+      });
+    } catch {
+      /* logging must never break sync */
+    }
   }
 
   async sync(storeId: string, branchId?: string): Promise<SyncResult> {
@@ -97,6 +199,7 @@ export class SyncService {
     this.lastSyncAttempt = new Date();
     const syncStartTime = performance.now();
     networkMonitorService.startSession(`sync @ ${new Date().toLocaleTimeString()}`);
+    this.emitSyncStructuredLog('sync_started', storeId, branchId, { mode: 'full' });
 
     const result: SyncResult = {
       success: true,
@@ -162,7 +265,7 @@ export class SyncService {
       result.errors.push(...downloadResult.errors);
 
       const pendingStart = performance.now();
-      await this.processPendingSyncs();
+      await this.processPendingSyncs(storeId);
       const pendingTime = performance.now() - pendingStart;
       console.log(`⏱️  Pending syncs processing: ${pendingTime.toFixed(2)}ms`);
 
@@ -173,8 +276,7 @@ export class SyncService {
       //      paginated queries (each with a CORS preflight).
       //   2. Interval guard — only run once per 30-minute window (persisted in
       //      localStorage so the interval spans page reloads).
-      const timeSinceAppStart = Date.now() - SyncService.appStartTime;
-      const startupGraceElapsed = timeSinceAppStart > SYNC_CONFIG.deletionDetectionStartupGrace;
+      const startupGraceElapsed = this.deletionStartupGraceSatisfied();
       const shouldCheckDeletions = SYNC_CONFIG.enableDeletionDetection &&
         startupGraceElapsed && (
           !this.lastDeletionCheck ||
@@ -254,6 +356,7 @@ export class SyncService {
     this.lastSyncAttempt = new Date();
     const syncStartTime = performance.now();
     networkMonitorService.startSession(`uploadOnly @ ${new Date().toLocaleTimeString()}`);
+    this.emitSyncStructuredLog('sync_started', storeId, branchId, { mode: 'upload_only' });
 
     const result: SyncResult = {
       success: true,
@@ -279,11 +382,10 @@ export class SyncService {
       result.errors.push(...uploadResult.errors);
 
       const pendingStart = performance.now();
-      await this.processPendingSyncs();
+      await this.processPendingSyncs(storeId);
       console.log(`⏱️  [UPLOAD-ONLY] Pending syncs: ${(performance.now() - pendingStart).toFixed(2)}ms`);
 
-      const timeSinceAppStart = Date.now() - SyncService.appStartTime;
-      const startupGraceElapsed = timeSinceAppStart > SYNC_CONFIG.deletionDetectionStartupGrace;
+      const startupGraceElapsed = this.deletionStartupGraceSatisfied();
       const shouldCheckDeletions =
         SYNC_CONFIG.enableDeletionDetection &&
         startupGraceElapsed &&
@@ -316,33 +418,31 @@ export class SyncService {
     return result;
   }
 
-  private async processPendingSyncs() {
+  private async processPendingSyncs(activeStoreId: string) {
     const pendingSyncs = await getDB().getPendingSyncs();
 
     for (const pendingSync of pendingSyncs) {
+      const outboxStoreId =
+        (pendingSync.payload as { store_id?: string } | undefined)?.store_id || activeStoreId;
       try {
         if (pendingSync.retry_count >= SYNC_CONFIG.maxRetries) {
           console.error(`Max retries reached for pending sync: ${pendingSync.id}`);
-          // Check if it's an unrecoverable error, if so, delete the record
-          // Note: last_error might not be in the type definition but is added during updates
-          const lastError = (pendingSync as any).last_error || '';
-          const isUnrecoverable = lastError.includes('23503') ||
-            lastError.includes('foreign key') ||
-            lastError.includes('constraint') ||
-            lastError.includes('violates');
-          if (isUnrecoverable && pendingSync.operation !== 'delete') {
-            await deleteProblematicRecord(
-              pendingSync.table_name,
-              pendingSync.record_id,
-              { message: lastError, code: '23503' }
-            );
-          }
-          await getDB().removePendingSync(pendingSync.id);
+          const lastError = pendingSync.last_error || '';
+          await getDB().pending_syncs.update(pendingSync.id, {
+            status: 'permanently_failed',
+            last_error: lastError || 'Max retries exceeded',
+          });
+          this.emitSyncStructuredLog('outbox_item_permanently_failed', outboxStoreId, undefined, {
+            pendingSyncId: pendingSync.id,
+            table: pendingSync.table_name,
+            reason: 'max_retries',
+          });
+          await this.notifyOutboxPermanentFailure(outboxStoreId, pendingSync, lastError || 'Max retries exceeded');
           continue;
         }
 
         let success = false;
-        let error: any = null;
+        let error: unknown = null;
 
         switch (pendingSync.operation) {
           case 'create':
@@ -352,14 +452,40 @@ export class SyncService {
               pendingSync.table_name
             );
             if (cleanedPayload) {
-              const { error: upsertError } = await supabase
-                .from(pendingSync.table_name as any)
-                .upsert(cleanedPayload)
+              const idem = pendingSync.idempotency_key;
+              const { error: upsertError } = await (supabase as any)
+                .from(pendingSync.table_name)
+                .upsert(cleanedPayload, {
+                  onConflict: 'id',
+                  ...(idem ? { headers: { 'Idempotency-Key': idem } } : {}),
+                })
                 .select();
               error = upsertError;
               success = !upsertError;
+              if (upsertError) await this.handleSyncTransportError(outboxStoreId, upsertError);
 
-              // If error is unrecoverable, delete the record
+              if (
+                upsertError &&
+                isNonRetryableHttpClientError(upsertError) &&
+                !indicatesPermissionRevoked(upsertError)
+              ) {
+                await getDB().pending_syncs.update(pendingSync.id, {
+                  status: 'permanently_failed',
+                  last_error: upsertError.message || 'Client error',
+                });
+                this.emitSyncStructuredLog('outbox_item_permanently_failed', outboxStoreId, undefined, {
+                  pendingSyncId: pendingSync.id,
+                  table: pendingSync.table_name,
+                  code: (upsertError as { code?: string }).code,
+                });
+                await this.notifyOutboxPermanentFailure(
+                  outboxStoreId,
+                  pendingSync,
+                  upsertError.message || 'Client error'
+                );
+                continue;
+              }
+
               if (upsertError && isUnrecoverableError(upsertError, pendingSync.table_name, cleanedPayload)) {
                 await deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, upsertError);
                 await getDB().removePendingSync(pendingSync.id);
@@ -371,35 +497,55 @@ export class SyncService {
 
           case 'delete': {
             const { error: deleteError } = await supabase
-              .from(pendingSync.table_name as any)
+              .from(pendingSync.table_name as string)
               .delete()
               .eq('id', pendingSync.record_id);
             error = deleteError;
             success = !deleteError;
+            if (deleteError) await this.handleSyncTransportError(outboxStoreId, deleteError);
+
+            if (
+              deleteError &&
+              isNonRetryableHttpClientError(deleteError) &&
+              !indicatesPermissionRevoked(deleteError)
+            ) {
+              await getDB().pending_syncs.update(pendingSync.id, {
+                status: 'permanently_failed',
+                last_error: deleteError.message || 'Client error',
+              });
+              this.emitSyncStructuredLog('outbox_item_permanently_failed', outboxStoreId, undefined, {
+                pendingSyncId: pendingSync.id,
+                table: pendingSync.table_name,
+              });
+              await this.notifyOutboxPermanentFailure(
+                outboxStoreId,
+                pendingSync,
+                deleteError.message || 'Client error'
+              );
+              continue;
+            }
             break;
           }
         }
 
         if (success) {
           await getDB().removePendingSync(pendingSync.id);
-        } else {
-          // Check if error is unrecoverable
-          if (error && isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
-            // Delete the record instead of retrying
-            if (pendingSync.operation !== 'delete') {
-              await deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
-            }
-            await getDB().removePendingSync(pendingSync.id);
-          } else {
-            await getDB().pending_syncs.update(pendingSync.id, {
-              retry_count: pendingSync.retry_count + 1,
-              last_error: error instanceof Error ? error.message : (error?.message || 'Retry failed')
-            });
+        } else if (error && isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
+          if (pendingSync.operation !== 'delete') {
+            await deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
           }
+          await getDB().removePendingSync(pendingSync.id);
+        } else if (error) {
+          await getDB().pending_syncs.update(pendingSync.id, {
+            retry_count: pendingSync.retry_count + 1,
+            last_error: error instanceof Error ? error.message : (error as { message?: string })?.message || 'Retry failed',
+          });
         }
-
       } catch (error) {
-        // Check if it's an unrecoverable error
+        await this.handleSyncTransportError(
+          (pendingSync.payload as { store_id?: string })?.store_id || activeStoreId,
+          error
+        );
         if (isUnrecoverableError(error, pendingSync.table_name, pendingSync.payload)) {
           if (pendingSync.operation !== 'delete') {
             await deleteProblematicRecord(pendingSync.table_name, pendingSync.record_id, error);
@@ -408,10 +554,34 @@ export class SyncService {
         } else {
           await getDB().pending_syncs.update(pendingSync.id, {
             retry_count: pendingSync.retry_count + 1,
-            last_error: error instanceof Error ? error.message : 'Unknown error'
+            last_error: error instanceof Error ? error.message : 'Unknown error',
           });
         }
       }
+    }
+  }
+
+  private async notifyOutboxPermanentFailure(
+    storeId: string,
+    pendingSync: PendingSync,
+    technicalMessage: string
+  ): Promise<void> {
+    try {
+      const store = await getDB().stores.get(storeId);
+      const lang = (store?.preferred_language as 'en' | 'ar' | 'fr') || 'en';
+      const titleMl = createMultilingualFromString('Outbox upload failed');
+      const msgMl = createMultilingualFromString(
+        `Could not sync ${pendingSync.table_name} (${pendingSync.operation}). ${technicalMessage}`
+      );
+      await notificationService.createNotification(
+        storeId,
+        'sync_error',
+        getTranslatedString(titleMl, lang),
+        getTranslatedString(msgMl, lang),
+        { priority: 'high', metadata: { pendingSyncId: pendingSync.id, table: pendingSync.table_name } }
+      );
+    } catch (e) {
+      console.warn('notifyOutboxPermanentFailure:', e);
     }
   }
 
@@ -463,17 +633,22 @@ export class SyncService {
     }
   }
 
-  private async initializeSyncMetadata(_storeId: string) {
+  private async initializeSyncMetadata(storeId: string) {
     const hasAnySyncMetadata = await getDB().sync_metadata.count() > 0;
 
     const currentTime = new Date().toISOString();
+    const defaults = {
+      store_id: storeId,
+      last_synced_version: 0,
+      hydration_complete: false,
+    };
 
     if (!hasAnySyncMetadata) {
       console.log('🔄 Initializing sync metadata for first sync...');
 
       for (const tableName of SYNC_TABLES) {
         try {
-          await getDB().updateSyncMetadata(tableName, currentTime);
+          await getDB().updateSyncMetadata(tableName, currentTime, defaults);
         } catch (error) {
           console.warn(`Failed to initialize sync metadata for ${tableName}:`, error);
         }
@@ -487,7 +662,7 @@ export class SyncService {
             .equals(tableName)
             .first();
           if (!existing) {
-            await getDB().updateSyncMetadata(tableName, currentTime);
+            await getDB().updateSyncMetadata(tableName, currentTime, defaults);
           }
         } catch (error) {
           console.warn(`Failed to backfill sync metadata for ${tableName}:`, error);
@@ -577,7 +752,12 @@ export class SyncService {
             console.log(`✅ Full resync: downloaded ${uniqueRecords.length} products (${storeProductsResult.data?.length || 0} store-specific + ${globalProductsResult.data?.length || 0} global)`);
           }
 
-          await getDB().updateSyncMetadata(tableName, new Date().toISOString());
+          const pv = uniqueRecords.length ? recordMaxVersion(uniqueRecords as Record<string, unknown>[]) : 0;
+          await getDB().updateSyncMetadata(tableName, new Date().toISOString(), {
+            store_id: storeId,
+            last_synced_version: pv,
+            hydration_complete: true,
+          });
         } else {
           // For all other tables, use standard query with helper method
           let query = supabase.from(tableName as any).select('*');
@@ -622,7 +802,18 @@ export class SyncService {
             await (db as any)[tableName].bulkPut(recordsWithSync);
             result.synced.downloaded += remoteRecords.length;
 
-            await getDB().updateSyncMetadata(tableName, new Date().toISOString());
+            const mv = recordMaxVersion(remoteRecords as Record<string, unknown>[]);
+            await getDB().updateSyncMetadata(tableName, new Date().toISOString(), {
+              store_id: storeId,
+              last_synced_version: mv,
+              hydration_complete: true,
+            });
+          } else if (!error) {
+            await getDB().updateSyncMetadata(tableName, new Date().toISOString(), {
+              store_id: storeId,
+              last_synced_version: 0,
+              hydration_complete: true,
+            });
           }
         }
       }
@@ -634,6 +825,235 @@ export class SyncService {
       result.errors.push(error instanceof Error ? error.message : 'Full resync failed');
     }
 
+    return result;
+  }
+
+  async getCheckpoint(tableName: SyncTable, storeId: string): Promise<SyncCheckpoint> {
+    const row = await getDB().getSyncMetadata(tableName);
+    const sid = row?.store_id ?? null;
+    const version =
+      !row || sid === storeId || sid === null || sid === undefined
+        ? (row?.last_synced_version ?? 0)
+        : 0;
+    return {
+      tableName,
+      storeId,
+      lastSyncedVersion: version,
+      hydrationComplete: row?.hydration_complete ?? false,
+      lastSyncedAt: row?.last_synced_at || '1970-01-01T00:00:00.000Z',
+    };
+  }
+
+  async saveCheckpoint(
+    tableName: SyncTable,
+    storeId: string,
+    version: number,
+    hydrationComplete: boolean
+  ): Promise<void> {
+    await getDB().updateSyncMetadata(tableName, new Date().toISOString(), {
+      last_synced_version: version,
+      store_id: storeId,
+      hydration_complete: hydrationComplete,
+    });
+    this.emitSyncStructuredLog('checkpoint_saved', storeId, undefined, {
+      tableName,
+      version,
+      hydrationComplete,
+    });
+  }
+
+  async hasExistingData(storeId: string): Promise<boolean> {
+    const rows = await getDB().sync_metadata.toArray();
+    return rows.some(
+      r =>
+        (r.last_synced_version ?? 0) > 0 &&
+        (r.store_id === storeId || r.store_id === null || r.store_id === undefined)
+    );
+  }
+
+  async getPermanentlyFailedItems(): Promise<PendingSync[]> {
+    return getDB().pending_syncs.where('status').equals('permanently_failed').sortBy('created_at');
+  }
+
+  private normalizeRemoteRecordForDexie(
+    tableName: SyncTable,
+    record: Record<string, unknown>
+  ): Record<string, unknown> {
+    const normalized = { ...record };
+    if (tableName === 'branches' && normalized.is_deleted !== undefined) {
+      normalized._deleted = normalized.is_deleted === true || normalized.is_deleted === 1;
+      delete normalized.is_deleted;
+      delete normalized.deleted_at;
+      delete normalized.deleted_by;
+    }
+    if (tableName === 'stores' && normalized.is_deleted !== undefined) {
+      normalized._deleted = normalized.is_deleted === true || normalized.is_deleted === 1;
+      delete normalized.is_deleted;
+      delete normalized.deleted_at;
+      delete normalized.deleted_by;
+    }
+    if (tableName === 'products' && normalized.is_global !== undefined) {
+      normalized.is_global = normalized.is_global === true ? 1 : 0;
+    }
+    if (tableName === 'bills') {
+      normalized.bill_date = normalizeBillDateFromRemote(normalized);
+    }
+    return {
+      ...normalized,
+      _synced: true,
+      _lastSyncedAt: new Date().toISOString(),
+    };
+  }
+
+  async downloadTablePaged(
+    tableName: SyncTable,
+    storeId: string,
+    options?: { fromVersion?: number; signal?: AbortSignal }
+  ): Promise<DownloadPageResult> {
+    const pageSize = SYNC_CONFIG.cursorPageSize;
+    const cp = await this.getCheckpoint(tableName, storeId);
+    let cursor = options?.fromVersion ?? cp.lastSyncedVersion;
+    let total = 0;
+    let lastCount = 0;
+    let finalMax = cursor;
+
+    // On cold start (cursor === 0) skip version filtering — tables may not have a `version`
+    // column yet, and we need all records anyway. Paginate by id offset instead.
+    const useDeltaMode = cursor > 0;
+    let idCursor: string | null = null; // used for cold-start id-based pagination
+
+    while (true) {
+      if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
+      let query;
+      if (tableName === 'products') {
+        if (useDeltaMode) {
+          query = supabase
+            .from('products')
+            .select('*')
+            .or(`store_id.eq.${storeId},is_global.eq.true`)
+            .gt('version', cursor)
+            .order('version', { ascending: true })
+            .limit(pageSize);
+        } else {
+          let q = supabase
+            .from('products')
+            .select('*')
+            .or(`store_id.eq.${storeId},is_global.eq.true`)
+            .order('id', { ascending: true })
+            .limit(pageSize);
+          if (idCursor) q = (q as any).gt('id', idCursor);
+          query = q;
+        }
+      } else {
+        let q = supabase.from(tableName as string).select('*');
+        q = applyStoreFilter(q, tableName, storeId);
+        if (useDeltaMode) {
+          query = (q as any).gt('version', cursor).order('version', { ascending: true }).limit(pageSize);
+        } else {
+          q = (q as any).order('id', { ascending: true }).limit(pageSize);
+          if (idCursor) q = (q as any).gt('id', idCursor);
+          query = q;
+        }
+      }
+
+      const { data: page, error } = await query;
+      if (error) {
+        await this.handleSyncTransportError(storeId, error);
+        throw new Error(error.message);
+      }
+
+      const rows = (page || []) as Record<string, unknown>[];
+
+      if (rows.length > 0) {
+        const bulk = rows.map((r) => this.normalizeRemoteRecordForDexie(tableName, r));
+        await (db as any)[tableName].bulkPut(bulk);
+      }
+
+      total += rows.length;
+      lastCount = rows.length;
+      const complete = rows.length < pageSize;
+
+      if (useDeltaMode) {
+        const maxV = rows.length ? recordMaxVersion(rows) : cursor;
+        const pageMax = Math.max(cursor, maxV);
+
+        if (rows.length > 0 && pageMax <= cursor) {
+          console.warn(
+            `[sync] Table "${tableName}" rows lack advancing version; stopping paged download to avoid a loop.`
+          );
+          await this.saveCheckpoint(tableName, storeId, cursor, true);
+          break;
+        }
+
+        await this.saveCheckpoint(tableName, storeId, pageMax, complete);
+        this.emitSyncStructuredLog('page_downloaded', storeId, undefined, {
+          tableName, records: rows.length, cursorAfter: pageMax, complete,
+        });
+        if (complete) { finalMax = pageMax; break; }
+        cursor = pageMax;
+        finalMax = pageMax;
+      } else {
+        // Cold-start id-based pagination: advance idCursor to last row's id
+        const lastId = rows.length ? String(rows[rows.length - 1]['id'] ?? '') : null;
+        if (lastId) idCursor = lastId;
+        // Save a nominal checkpoint version of 0 until delta mode is active
+        await this.saveCheckpoint(tableName, storeId, 0, complete);
+        this.emitSyncStructuredLog('page_downloaded', storeId, undefined, {
+          tableName, records: rows.length, cursorAfter: 0, complete,
+        });
+        if (complete) { break; }
+      }
+
+      // Keep original break-on-complete path unreachable (handled above)
+      if (complete) {
+        finalMax = cursor;
+        break;
+      }
+      cursor = pageMax;
+      finalMax = pageMax;
+    }
+
+    return {
+      tableName,
+      recordsReceived: lastCount,
+      lastVersion: finalMax,
+      isComplete: true,
+      totalRecordsDownloaded: total,
+    };
+  }
+
+  async downloadTier(
+    tier: DataTierName,
+    storeId: string,
+    branchId: string,
+    options?: { signal?: AbortSignal }
+  ): Promise<SyncResult> {
+    this.emitSyncStructuredLog('tier_started', storeId, branchId, { tier });
+    const result: SyncResult = {
+      success: true,
+      errors: [],
+      synced: { uploaded: 0, downloaded: 0 },
+      conflicts: 0,
+    };
+    const tables = getTablesInTierOrdered(tier);
+    for (const t of tables) {
+      try {
+        const r = await this.downloadTablePaged(t, storeId, { signal: options?.signal });
+        result.synced.downloaded += r.totalRecordsDownloaded;
+      } catch (e) {
+        // Log and continue — one table failure must not abort the remaining tier tables
+        const msg = e instanceof Error ? e.message : 'downloadTier failed';
+        result.errors.push(`${t}: ${msg}`);
+        result.success = false;
+        console.warn(`[sync] downloadTier '${tier}': table '${t}' failed — continuing`, msg);
+      }
+    }
+    this.emitSyncStructuredLog('tier_completed', storeId, branchId, {
+      tier,
+      downloaded: result.synced.downloaded,
+      success: result.success,
+    });
     return result;
   }
 
@@ -902,10 +1322,12 @@ export async function syncWithSupabase(storeId: string): Promise<SyncResult> {
   return syncService.sync(storeId);
 }
 
+/** Legacy display-only timestamp; version checkpoints in IndexedDB are authoritative (v55+). */
 export function getLastSyncedAt(): string | null {
   return localStorage.getItem('last_synced_at');
 }
 
+/** Legacy display-only; prefer `sync_metadata` / `saveCheckpoint` for sync state. */
 export function setLastSyncedAt(ts: string) {
   localStorage.setItem('last_synced_at', ts);
 }

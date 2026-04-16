@@ -1,4 +1,5 @@
 import { OfflineIndicator } from '../components/OfflineIndicator';
+import { SyncProgressIndicator } from '../components/SyncProgressIndicator';
 import { ErrorToastContainer } from '../components/common/ErrorToastContainer';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import KeyboardShortcutsHelp from '../components/common/KeyboardShortcutsHelp';
@@ -385,6 +386,7 @@ export default function Layout() {
         </ErrorBoundary>
       </div>
       <OfflineIndicator />
+      <SyncProgressIndicator />
       <UndoToastManager />
       <ErrorToastContainer />
     </div>

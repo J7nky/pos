@@ -23,6 +23,9 @@ function mergeStoreDataIntoReceiptSettings(store: any, existingSettings: any): a
     showPreviousBalance: existingSettings?.showPreviousBalance !== undefined ? existingSettings.showPreviousBalance : true,
     showItemCount: existingSettings?.showItemCount !== undefined ? existingSettings.showItemCount : true,
     receiptWidth: existingSettings?.receiptWidth || 32,
+    defaultPrinterType: existingSettings?.defaultPrinterType || 'auto',
+    defaultPrinterName: existingSettings?.defaultPrinterName || '',
+    autoPrint: existingSettings?.autoPrint !== undefined ? existingSettings.autoPrint : false,
   };
 }
 

@@ -320,13 +320,15 @@ async function handleCashDrawerSessionConflict(cleanedBatch: any[], originalBatc
         
         // Close the local session since there's already an open one remotely
         // This prevents the local app from thinking it has an open session
+        // Update local session to closed state. Do NOT set _synced: false here —
+        // that would fire the triggerSyncOnUpdate hook and schedule an extra sync cycle
+        // before markAsSynced sets it back to true, creating unnecessary churn.
         await (db as any).cash_drawer_sessions.update(original.id, {
           status: 'closed',
           closed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          _synced: false
         });
-        
+
         // Mark as synced to prevent retry
         await getDB().markAsSynced('cash_drawer_sessions', original.id);
         continue;
@@ -354,15 +356,18 @@ async function handleCashDrawerSessionConflict(cleanedBatch: any[], originalBatc
 export async function uploadLocalChanges(storeId: string, branchId?: string) {
   const result = { uploaded: 0, errors: [] as string[], uploadedTables: new Set<string>() };
 
-  // Get detailed count for debugging
-  const { crudHelperService } = await import('./crudHelperService');
-  const detailedCount = await crudHelperService.getDetailedUnsyncedCount();
-  console.log('🔍 [SYNC-DEBUG] Detailed unsynced count before sync:', detailedCount.summary);
-  
-  // Run detailed discrepancy analysis if there are unsynced records
-  if (detailedCount.total > 0) {
-    const { SyncDebugger } = await import('../utils/syncDebugger');
-    await SyncDebugger.printSyncDiscrepancyReport(storeId);
+  // Get detailed count for debugging (M6: wrapped in try-catch — debug utilities must not abort sync)
+  let detailedCount: { total: number; summary: unknown; byTable: Record<string, { active: number; deleted: number }> } | null = null;
+  try {
+    const { crudHelperService } = await import('./crudHelperService');
+    detailedCount = await crudHelperService.getDetailedUnsyncedCount();
+    console.log('🔍 [SYNC-DEBUG] Detailed unsynced count before sync:', detailedCount.summary);
+    if (detailedCount.total > 0) {
+      const { SyncDebugger } = await import('../utils/syncDebugger');
+      await SyncDebugger.printSyncDiscrepancyReport(storeId);
+    }
+  } catch (debugErr) {
+    console.warn('⚠️ [SYNC-DEBUG] Debug pre-flight failed (non-fatal):', debugErr);
   }
 
   // Caches confirmed-existing remote IDs per table within this sync pass.
@@ -381,6 +386,10 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
       }
 
       const table = (db as any)[tableName];
+      if (!table) {
+        console.error(`❌ [syncUpload] Table '${tableName}' not found in local DB — skipping`);
+        continue;
+      }
       const activeRecords = await table.filter((record: any) => !record._synced && !record._deleted).toArray();
       const deletedRecords = await table.filter((record: any) => record._deleted && !record._synced).toArray();
 
@@ -405,7 +414,7 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
       }
 
       // Debug logging for discrepancy analysis
-      const tableDetail = detailedCount.byTable[tableName];
+      const tableDetail = detailedCount?.byTable[tableName];
       if (tableDetail && (activeRecords.length !== tableDetail.active || deletedRecords.length !== tableDetail.deleted)) {
         console.warn(`🔍 [SYNC-DEBUG] Count mismatch for ${tableName}:`, {
           expected: tableDetail,
@@ -815,7 +824,8 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                   firstEntry.id, // Use first journal entry ID as entity_id
                   firstEntry.created_by,
                   {
-                    entries_count: entries.length
+                    entries_count: entries.length,
+                    transaction_id: txId === 'standalone' ? undefined : txId,
                   }
                 );
                 console.log(`🎯 [Event] Emitted journal_entry_created event for ${entries.length} entries (transaction ${txId})`);

@@ -1,18 +1,22 @@
 <!--
-  SYNC IMPACT REPORT — Constitution Amendment v1.2.0 → v1.3.0
-  Generated: 2026-03-22
+  SYNC IMPACT REPORT — Constitution Amendment v1.3.0 → v1.4.0
+  Generated: 2026-04-14
 
-  Version change:   1.2.0 → 1.3.0
-  Bump rationale:   MINOR — new principle added (§3.XI Local Date Extraction, CG-11)
-                    closing a timezone/UTC bug found in 9+ locations across the codebase.
+  Version change:   1.3.0 → 1.4.0
+  Bump rationale:   MINOR — sync architecture updated: performSync / auto-sync
+                    now uses uploadOnly() (upload-only path); downloads are
+                    event-driven exclusively via eventStreamService.
+                    Deletion detection interval changed 5 min → 30 min with
+                    a 5-min startup grace period.
 
   Modified principles:
-    §3 intro        Updated gate range from CG-01–CG-10 to CG-01–CG-11
+    §3.III  Event-Driven Sync — clarified that performSync calls uploadOnly();
+            full sync() is reserved for initial hydration and fullResync.
+    §5.1    Write Path — updated to show uploadOnly() in performSync flow.
 
   Added:
-    §3.XI  "Local Date Extraction via getLocalDateString" (CG-11)
-    §12.2  CG-11 row added to gate-mapping table
-    §10    New checklist item: local date extraction
+    §4.5    syncService.ts — uploadOnly() method noted.
+    §4.4    useSyncStateLayer — updated to reflect uploadOnly() call.
 
   Removed sections:   none
 
@@ -183,9 +187,19 @@ Sync MUST be event-driven, never timer-driven.
 uploaded to Supabase — NEVER before. This guarantees the record exists when Device B fetches
 it. Emitting events before upload is FORBIDDEN.
 
+**performSync / auto-sync MUST use `syncService.uploadOnly()`** (upload-only path). Remote
+changes are downloaded exclusively via `eventStreamService` (Supabase Realtime + version-based
+catch-up). The full `syncService.sync()` (which also runs a table-scan download) is reserved
+for initial hydration and explicit `fullResync()` calls only.
+
 **Only one allowed periodic interval:** `eventStreamService` MAY run a single ~5-minute
 catch-up safety net for missed Realtime events. No other `setInterval` is permitted anywhere
 in the sync or event path.
+
+**Deletion detection** runs at most once per 30-minute window (enforced by
+`SYNC_CONFIG.deletionDetectionInterval = 1_800_000`) with a 5-minute startup grace period
+(`SYNC_CONFIG.deletionDetectionStartupGrace = 300_000`) so the very first post-cold-start
+sync never immediately issues 24+ extra paginated ID-scan queries.
 
 ### IV. Financial Atomicity via TransactionService `CG-04`
 All financial transactions MUST go through `transactionService.createTransaction()`.
@@ -279,7 +293,7 @@ bugs documented in `IMPROVEMENTS_ENHANCEMENTS_REPORT.md §6`.
 |------|--------|
 | `useEntityDataLayer` | Customers & suppliers (unified entities) |
 | `useOfflineInitialization` | App startup: sync, local load, branch discovery |
-| `useSyncStateLayer` | Sync orchestration: `performSync`, `debouncedSync`, `updateUnsyncedCount` |
+| `useSyncStateLayer` | Sync orchestration: `performSync` (calls `syncService.uploadOnly()`), `debouncedSync`, `updateUnsyncedCount` |
 | `useCashDrawerDataLayer` | Cash drawer open/close/report/status |
 | `useBranchBootstrapEffects` | Admin branch sync; manager/cashier branch assignment |
 | `useStoreSettingsDataLayer` | Currency, exchange rate, language, receipt settings |
@@ -317,7 +331,7 @@ bugs documented in `IMPROVEMENTS_ENHANCEMENTS_REPORT.md §6`.
 
 | Service | Lines | Responsibility |
 |---------|-------|----------------|
-| `syncService.ts` | 2,862 | Upload dirty rows to Supabase; download remote changes; full resync; deletion detection; batch dependency ordering |
+| `syncService.ts` | 2,862 | Two entry points: `uploadOnly()` (used by performSync/auto-sync — upload + deletion detection, no table-scan download) and `sync()` (full upload + download, used only for initial hydration and `fullResync()`); batch dependency ordering |
 | `transactionService.ts` | 1,782 | **Financial core.** All transactions; journal entry creation; cash drawer; audit logging; atomic rollback |
 | `accountStatementService.ts` | 1,410 | Client-side account statement generation from IndexedDB |
 | `inventoryPurchaseService.ts` | 1,331 | Inventory receive workflow: bills, items, journal entries |
@@ -366,11 +380,15 @@ UI Component
       → crudHelperService / transactionService / journalService
         → getDB() [Dexie / IndexedDB]  ← write, _synced: false
           → debouncedSync() / resetAutoSyncTimer()
-            → syncService.sync() [upload IndexedDB → Supabase]
+            → syncService.uploadOnly() [upload local changes only]
               → per-batch: eventEmissionService.emit*() [AFTER confirmed upload]
                            supabase.rpc('emit_branch_event')
+                → Other devices receive event via Supabase Realtime
+                  → eventStreamService.catchUp() pulls affected records
 ```
 > **Upload-then-emit rule:** Events are emitted from within `syncService.uploadLocalChanges()` only after each batch is confirmed uploaded. Events are never emitted directly from local write operations.
+>
+> **uploadOnly vs sync:** `performSync` / auto-sync calls `uploadOnly()` (no table-scan download). The full `sync()` method (upload + download) is used only during initial app hydration and explicit `fullResync()` calls.
 
 ### 5.2 Read Path (UI Hydration)
 ```
@@ -605,7 +623,7 @@ these gates before proceeding past Phase 0 research:
 |---------|-----------|--------------------------------|
 | CG-01 | Offline-First Data Flow | Feature reads/writes Supabase from UI, or writes Supabase before IndexedDB |
 | CG-02 | UI Data Access Boundary | Feature imports `lib/db` or `lib/supabase` in `pages/`, `components/`, or `layouts/` |
-| CG-03 | Event-Driven Sync | Feature adds `setInterval` for sync/refresh, OR emits events before confirmed upload |
+| CG-03 | Event-Driven Sync | Feature adds `setInterval` for sync/refresh, OR emits events before confirmed upload, OR calls `syncService.sync()` from performSync/auto-sync instead of `uploadOnly()` |
 | CG-04 | Financial Atomicity | Feature creates financial records without `transactionService.createTransaction()` |
 | CG-05 | Client-Side Ledger | Feature adds a server-side RPC for account statement or balance computation |
 | CG-06 | Branch Isolation | Feature exposes cross-branch data to non-admin users, or omits `branch_id` from queries |
@@ -677,4 +695,4 @@ Any plan, spec, or task that would violate §3 (Core Architectural Principles) o
 
 ---
 
-**Version**: 1.3.0 | **Ratified**: 2026-03-22 | **Last Amended**: 2026-03-22
+**Version**: 1.4.0 | **Ratified**: 2026-03-22 | **Last Amended**: 2026-04-14

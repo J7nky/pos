@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getPrinters: () => ipcRenderer.invoke('get-printers'),
     printDocument: (options) => ipcRenderer.invoke('print-document', options),
     printStatement: (payload) => ipcRenderer.invoke('print-statement', payload),
+    printFormalBill: (payload) => ipcRenderer.invoke('print-formal-bill', payload),
     testPrinter: (printerName) => ipcRenderer.invoke('test-printer', printerName),
     getPrinterStatus: (printerName) => ipcRenderer.invoke('get-printer-status', printerName),
     // Test functions removed - not needed in production

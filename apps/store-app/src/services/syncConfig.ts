@@ -3,6 +3,8 @@ import { getDB } from '../lib/db';
 export const SYNC_CONFIG = {
   batchSize: 100,
   maxRetries: 2,
+  /** Page size for version-cursor incremental downloads (`downloadTablePaged` / `downloadTier`). */
+  cursorPageSize: 500,
   // syncInterval: REMOVED - no periodic sync in fully event-driven mode
   maxRecordsPerSync: 1000,
   queryTimeout: 30000, // Query timeout for individual queries (30s)
@@ -53,6 +55,35 @@ export const SYNC_TABLES = [
 
 export type SyncTable = typeof SYNC_TABLES[number];
 
+/** Tiered hydration groups (see `specs/010-incremental-sync-redesign/data-model.md`). */
+export type DataTierName = 'tier1' | 'tier2' | 'tier3';
+
+export const SYNC_TIERS: Record<DataTierName, readonly SyncTable[]> = {
+  tier1: [
+    'stores',
+    'branches',
+    'products',
+    'users',
+    'cash_drawer_accounts',
+    'chart_of_accounts',
+    'entities',
+    'cash_drawer_sessions',
+    'role_permissions',
+    'user_permissions',
+  ],
+  tier2: [
+    'inventory_bills',
+    'inventory_items',
+    'transactions',
+    'bills',
+    'journal_entries',
+    'balance_snapshots',
+    'bill_line_items',
+    'bill_audit_logs',
+  ],
+  tier3: ['missed_products', 'reminders'],
+} as const;
+
 const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'products': [],
   'stores': [],
@@ -80,6 +111,27 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'user_permissions': ['stores', 'users'] // RBAC: User permissions reference stores and users
 };
 
+/** Topologically order tables within a tier using `SYNC_DEPENDENCIES` (dependencies first). */
+export function getTablesInTierOrdered(tier: DataTierName): SyncTable[] {
+  const tierTables = SYNC_TIERS[tier];
+  const inTier = new Set<SyncTable>(tierTables);
+  const visited = new Set<SyncTable>();
+  const sorted: SyncTable[] = [];
+
+  const visit = (t: SyncTable) => {
+    if (!inTier.has(t) || visited.has(t)) return;
+    const deps = SYNC_DEPENDENCIES[t] ?? [];
+    for (const d of deps) {
+      if (inTier.has(d)) visit(d);
+    }
+    visited.add(t);
+    sorted.push(t);
+  };
+
+  for (const t of tierTables) visit(t);
+  return sorted;
+}
+
 export interface SyncResult {
   success: boolean;
   errors: string[];
@@ -88,6 +140,24 @@ export interface SyncResult {
     downloaded: number;
   };
   conflicts: number;
+}
+
+/** Result of a paged version-cursor download for one table (last page + running totals). */
+export interface DownloadPageResult {
+  tableName: SyncTable;
+  recordsReceived: number;
+  lastVersion: number;
+  isComplete: boolean;
+  totalRecordsDownloaded: number;
+}
+
+/** Checkpoint returned by `getCheckpoint` / updated by `saveCheckpoint`. */
+export interface SyncCheckpoint {
+  tableName: SyncTable;
+  storeId: string;
+  lastSyncedVersion: number;
+  hydrationComplete: boolean;
+  lastSyncedAt: string;
 }
 
 // Deletion state tracking for incremental deletion detection

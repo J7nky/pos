@@ -4,6 +4,10 @@ import { getDB } from '../../lib/db';
 /**
  * When the authenticated store changes, wipe IndexedDB and reload so Dexie state
  * cannot leak across stores.
+ *
+ * Logout / re-login to the **same** store does not change `store_id` here — IndexedDB
+ * is preserved for warm-start incremental sync (US4). Only a different `store_id`
+ * triggers a full local wipe + reload.
  */
 export function useStoreSwitchLifecycle(
   storeId: string | null,
@@ -26,6 +30,13 @@ export function useStoreSwitchLifecycle(
         console.log(`🔄 Store changed from ${previousStoreId} to ${storeId}. Clearing all IndexedDB data...`);
         isClearingStorageRef.current = true;
         try {
+          // M9: give any in-flight sync a moment to finish its current write before we
+          // wipe the DB. The page is about to reload, so a 300ms drain is acceptable.
+          const { syncService } = await import('../../services/syncService');
+          if (syncService.isCurrentlyRunning()) {
+            console.log('⏳ Waiting for in-flight sync to drain before clearing IndexedDB...');
+            await new Promise(res => setTimeout(res, 300));
+          }
           await getDB().close();
           await getDB().delete();
           try {

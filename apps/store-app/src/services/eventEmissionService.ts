@@ -150,7 +150,7 @@ export class EventEmissionService {
     branchId: string,
     journalEntryId: string,
     userId?: string,
-    metadata?: { entries_count?: number }
+    metadata?: { entries_count?: number; transaction_id?: string }
   ): Promise<void> {
     await this.emitEvent({
       store_id: storeId,

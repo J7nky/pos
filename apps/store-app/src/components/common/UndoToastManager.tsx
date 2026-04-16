@@ -2,35 +2,39 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Toast from './Toast';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { useI18n } from '../../i18n';
+import { UNDO_STORAGE_KEY } from '../../contexts/offlineData/operations/undoOperations';
+
 const UndoToastManager: React.FC = () => {
   const { canUndo, undoLastAction } = useOfflineData();
   const { t } = useI18n();
-  const [visible, setVisible] = useState(false); 
+  const [visible, setVisible] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedbackType, setFeedbackType] = useState<'success' | 'error' | null>(null);
+  const [actionType, setActionType] = useState<string | null>(null);
   const [progress, setProgress] = useState(100);
-  const previousCanUndo = useRef(canUndo);
   const lastUndoTimestamp = useRef<number>(0);
   const autoHideTimer = useRef<NodeJS.Timeout | null>(null);
   const progressTimer = useRef<NodeJS.Timeout | null>(null);
+  const feedbackClearTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Track when canUndo changes and check for new undo actions
   useEffect(() => {
-    
     // Don't trigger if we're just showing feedback
     if (feedback) return;
-    
+
     if (canUndo) {
-      // Check if this is a new undo action by checking timestamp
-      const undoData = localStorage.getItem('last_undo_action');
+      const undoData =
+        typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(UNDO_STORAGE_KEY) : null;
       if (undoData) {
         try {
           const parsed = JSON.parse(undoData);
           const currentTimestamp = parsed.timestamp || 0;
-          
+
           // If this is a new action (different timestamp) or first action
           if (currentTimestamp !== lastUndoTimestamp.current) {
             lastUndoTimestamp.current = currentTimestamp;
+            setActionType(typeof parsed.type === 'string' ? parsed.type : null);
             setVisible(true);
             setProgress(100);
 
@@ -51,9 +55,9 @@ const UndoToastManager: React.FC = () => {
               const elapsed = Date.now() - startTime;
               const remaining = Math.max(0, duration - elapsed);
               const progressPercent = (remaining / duration) * 100;
-              
+
               setProgress(progressPercent);
-              
+
               if (remaining <= 0) {
                 setVisible(false);
                 if (progressTimer.current) {
@@ -90,9 +94,7 @@ const UndoToastManager: React.FC = () => {
       }
     }
 
-    previousCanUndo.current = canUndo;
-  }, [canUndo, visible, feedback]);
-
+  }, [canUndo, feedback]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -103,15 +105,13 @@ const UndoToastManager: React.FC = () => {
       if (progressTimer.current) {
         clearInterval(progressTimer.current);
       }
+      if (feedbackClearTimer.current) {
+        clearTimeout(feedbackClearTimer.current);
+      }
     };
   }, []);
 
   const handleUndo = useCallback(async () => {
-    setUndoing(true);
-    const result = await undoLastAction();
-    setUndoing(false);
-    
-    // Clear all existing timers and hide current toast
     if (autoHideTimer.current) {
       clearTimeout(autoHideTimer.current);
       autoHideTimer.current = null;
@@ -120,32 +120,42 @@ const UndoToastManager: React.FC = () => {
       clearInterval(progressTimer.current);
       progressTimer.current = null;
     }
-    
-    // Hide current toast and show feedback toast
-    setVisible(false);
-    setFeedback(result ? t('common.labels.actionUndone') : t('common.labels.actionFailed'));
-    
-    // Show feedback toast for 2 seconds
-    setTimeout(() => {
-      setFeedback(null);
-    }, 2000);
-  }, [undoLastAction]);
+    if (feedbackClearTimer.current) {
+      clearTimeout(feedbackClearTimer.current);
+      feedbackClearTimer.current = null;
+    }
 
-  // Determine what to show in the single toast
+    setUndoing(true);
+    const result = await undoLastAction();
+    setUndoing(false);
+
+    setVisible(true);
+    setFeedback(result ? t('common.labels.actionUndone') : t('common.labels.actionFailed'));
+    setFeedbackType(result ? 'success' : 'error');
+
+    feedbackClearTimer.current = setTimeout(() => {
+      setFeedback(null);
+      setFeedbackType(null);
+      setActionType(null);
+      setVisible(false);
+      feedbackClearTimer.current = null;
+    }, 2000);
+  }, [undoLastAction, t]);
+
   const getToastMessage = () => {
     if (feedback) return feedback;
     if (undoing) return t('common.labels.undoing');
+    if (actionType) {
+      const key = `common.labels.undoActions.${actionType}`;
+      const label = t(key);
+      return label === key ? t('common.labels.actionCompleted') : label;
+    }
     return t('common.labels.actionCompleted');
   };
 
-  const getToastType = () => {
-    if (feedback) return feedback === t('common.labels.actionUndone') ? 'success' : 'error';
-    return 'success';
-  };
+  const getToastType = () => feedbackType ?? 'success';
 
-  const showActionButton = () => {
-    return !feedback && !undoing;
-  };
+  const showActionButton = () => !feedback && !undoing;
 
   return (
     <Toast
@@ -155,6 +165,8 @@ const UndoToastManager: React.FC = () => {
       onClose={() => {
         setVisible(false);
         setFeedback(null);
+        setFeedbackType(null);
+        setActionType(null);
       }}
       onAction={showActionButton() ? handleUndo : undefined}
       actionLabel={showActionButton() ? t('common.labels.undo') : undefined}

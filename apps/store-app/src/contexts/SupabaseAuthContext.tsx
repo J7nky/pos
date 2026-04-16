@@ -1,8 +1,9 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { User } from '@supabase/supabase-js';
 import { SupabaseService } from '../services/supabaseService';
 import { supabase } from '../lib/supabase';
 import { getDB } from '../lib/db';
+import { syncService } from '../services/syncService';
 import { localAuthService } from '../services/localAuthService';
 import { credentialStorageService } from '../services/credentialStorageService';
 
@@ -745,6 +746,24 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       setError(error?.message || 'Sign out failed');
     }
   };
+
+  const signOutRef = useRef(signOut);
+  signOutRef.current = signOut;
+
+  useEffect(() => {
+    syncService.setOnPermissionRevoked(async (_storeId: string) => {
+      try {
+        await getDB().close();
+        await getDB().delete();
+      } catch (e) {
+        console.warn('Failed to clear IndexedDB on permission revocation:', e);
+      }
+      await signOutRef.current();
+    });
+    return () => {
+      syncService.setOnPermissionRevoked(null);
+    };
+  }, []);
 
   const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
     try {

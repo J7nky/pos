@@ -684,6 +684,14 @@ export interface SyncMetadata {
   id: string;
   table_name: string;
   last_synced_at: string;
+  /** Legacy / optional token used by older sync paths */
+  sync_token?: string;
+  /** Last remote `version` sequence applied for this table (Dexie v55+). */
+  last_synced_version: number;
+  /** Store this checkpoint applies to (null = legacy row before v55 backfill). */
+  store_id?: string | null;
+  /** True after initial full hydration for this table completed at least once. */
+  hydration_complete: boolean;
 }
 
 export interface PendingSync {
@@ -697,6 +705,9 @@ export interface PendingSync {
   payload?: unknown;
   /** Last Supabase or client error message on retry */
   last_error?: string;
+  /** UUID v4 generated once when the outbox row is created; sent on every upload attempt. */
+  idempotency_key: string;
+  status: 'pending' | 'permanently_failed';
 }
 
 // Notification types

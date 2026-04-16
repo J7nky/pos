@@ -15,6 +15,7 @@ import type {
   NotificationRecord,
   NotificationType,
   NotificationPreferences,
+  PendingSync,
   RolePermission,
 } from '../../types';
 import type { InventoryItem } from '../../types/inventory';
@@ -36,6 +37,12 @@ type ReceiptSettings = {
   showPreviousBalance: boolean;
   showItemCount: boolean;
   receiptWidth: number;
+  /** 'auto' = detect at runtime; 'thermal' = force ESC/POS; 'normal' = force A4 HTML */
+  defaultPrinterType: 'auto' | 'thermal' | 'normal';
+  /** OS printer name to use by default (empty string = use system default) */
+  defaultPrinterName: string;
+  /** When true, skip the "Print bill?" confirmation dialog and print immediately */
+  autoPrint: boolean;
 };
 
 /** Input shape for createBill — omits server/auto-generated fields; callers supply business data. */
@@ -79,9 +86,9 @@ type BillFilters = {
 
 /** A single reversible step stored in an undo action. */
 type UndoStep = {
-  op: 'delete' | 'restore' | 'update';
+  op: 'delete' | 'restore' | 'add' | 'update';
   table: string;
-  id: string;
+  id?: string;
   changes?: Record<string, unknown>;
   record?: Record<string, unknown>;
   transaction_id?: string;
@@ -92,6 +99,7 @@ type UndoAction = {
   type: string;
   affected: Array<{ table: string; id: string }>;
   steps: UndoStep[];
+  metadata?: Record<string, unknown>;
 };
 
 /** Report returned by validateAndCleanData(). */
@@ -209,6 +217,16 @@ type BillDetails = Bill & {
   audit_logs?: BillAuditLog[];
 };
 
+/** Runtime tier hydration progress (not persisted — see incremental sync redesign). */
+export type OfflineSyncSessionState = {
+  isColdStart: boolean;
+  tier1Complete: boolean;
+  tier2Complete: boolean;
+  tier3Complete: boolean;
+  connectivity: 'online' | 'offline';
+  startedAt: number;
+};
+
 export interface OfflineDataContextType {
   storeId: string | null;
   currentBranchId: string | null;
@@ -221,6 +239,9 @@ export interface OfflineDataContextType {
   isDataReady: boolean;
   isInitializing: boolean;
   initializationError: string | null;
+  syncSession: OfflineSyncSessionState | null;
+  getPermanentlyFailedOutboxItems: () => Promise<PendingSync[]>;
+  discardPermanentlyFailedOutboxItem: (id: string) => Promise<void>;
   products: Tables['products']['Row'][];
   branches: Branch[];
   suppliers: Tables['entities']['Row'][];

@@ -212,6 +212,30 @@ class POSDatabase extends Dexie {
       // No data migration needed - fresh database
     });
 
+    // Version 55: incremental sync checkpoints + outbox idempotency (010-incremental-sync-redesign)
+    this.version(55).stores({
+      sync_metadata: 'id, table_name, last_synced_at, last_synced_version, store_id',
+      pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count, status',
+    }).upgrade(async (tx) => {
+      console.log('🔧 Migrating database schema v54 → v55 (sync checkpoints + outbox)');
+      await tx
+        .table('sync_metadata')
+        .toCollection()
+        .modify((row: SyncMetadata) => {
+          if (row.last_synced_version === undefined) row.last_synced_version = 0;
+          if (row.store_id === undefined) row.store_id = null;
+          if (row.hydration_complete === undefined) row.hydration_complete = false;
+        });
+      await tx
+        .table('pending_syncs')
+        .toCollection()
+        .modify((row: PendingSync) => {
+          if (row.idempotency_key === undefined) row.idempotency_key = uuidv4();
+          if (row.status === undefined) row.status = 'pending';
+        });
+      console.log('   ✅ v55 migration complete');
+    });
+
     // Add hooks for cash drawer tables
     this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.cash_drawer_sessions.hook('creating', this.addCreateFields);
@@ -1067,24 +1091,42 @@ class POSDatabase extends Dexie {
       operation,
       payload,
       created_at: new Date().toISOString(),
-      retry_count: 0
+      retry_count: 0,
+      idempotency_key: uuidv4(),
+      status: 'pending',
     });
   }
 
   async getPendingSyncs() {
-    return await this.pending_syncs.orderBy('created_at').toArray();
+    return await this.pending_syncs
+      .where('status')
+      .equals('pending')
+      .sortBy('created_at');
   }
 
   async removePendingSync(id: string) {
     await this.pending_syncs.delete(id);
   }
 
-  async updateSyncMetadata(tableName: string, lastSyncedAt: string, syncToken?: string) {
+  async updateSyncMetadata(
+    tableName: string,
+    lastSyncedAt: string,
+    extras?: Partial<{
+      sync_token: string;
+      last_synced_version: number;
+      store_id: string | null;
+      hydration_complete: boolean;
+    }>
+  ) {
+    const existing = await this.sync_metadata.get(tableName);
     await this.sync_metadata.put({
       id: tableName,
       table_name: tableName,
       last_synced_at: lastSyncedAt,
-      sync_token: syncToken
+      sync_token: extras?.sync_token ?? existing?.sync_token,
+      last_synced_version: extras?.last_synced_version ?? existing?.last_synced_version ?? 0,
+      store_id: extras?.store_id !== undefined ? extras.store_id : (existing?.store_id ?? null),
+      hydration_complete: extras?.hydration_complete ?? existing?.hydration_complete ?? false,
     });
   }
 

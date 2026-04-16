@@ -610,12 +610,31 @@ function ReceiptSettings() {
     billNumberPrefix: '000',
     showPreviousBalance: true,
     showItemCount: true,
-    receiptWidth: 32
+    receiptWidth: 32,
+    defaultPrinterType: 'auto' as 'auto' | 'thermal' | 'normal',
+    defaultPrinterName: '',
+    autoPrint: false,
   };
 
   const [tempSettings, setTempSettings] = useState(receiptSettings);
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [availablePrinters, setAvailablePrinters] = useState<Array<{ name: string; isDefault: boolean }>>([]);
+  const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI;
+
+  // Load available printers on mount (Electron only)
+  useEffect(() => {
+    if (!isElectron) return;
+    (window as any).electronAPI.getPrinters().then((result: any) => {
+      const list: Array<{ name: string; isDefault: boolean }> = [];
+      if (Array.isArray(result)) {
+        result.forEach((p: any) => list.push({ name: p.name, isDefault: !!p.isDefault }));
+      } else if (result?.printers) {
+        result.printers.forEach((p: any) => list.push({ name: p.name, isDefault: !!p.isDefault }));
+      }
+      setAvailablePrinters(list);
+    }).catch(() => {/* silently ignore if not available */});
+  }, [isElectron]);
 
   const handleSave = async () => {
     console.log('🔄 handleSave called for receipt settings', { hasUpdateReceiptSettings: !!offlineData?.updateReceiptSettings, settings: tempSettings });
@@ -861,6 +880,95 @@ function ReceiptSettings() {
               Show Total Items Count
             </label>
           </div>
+        </div>
+      </div>
+
+      {/* Printer Settings */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium text-gray-900 flex items-center">
+          <Printer className="w-5 h-5 mr-2" />
+          Printer Settings
+        </h3>
+
+        {/* Printer Type */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Default Printer Type
+          </label>
+          <div className="flex gap-3">
+            {(['auto', 'thermal', 'normal'] as const).map((type) => (
+              <label key={type} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="defaultPrinterType"
+                  value={type}
+                  checked={tempSettings.defaultPrinterType === type}
+                  onChange={() => setTempSettings((prev: typeof receiptSettings) => ({ ...prev, defaultPrinterType: type }))}
+                  disabled={!isAdminOrManager}
+                  className="text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                />
+                <span className="text-sm text-gray-700 capitalize">
+                  {type === 'auto' ? 'Auto-detect' : type === 'thermal' ? 'Thermal (ESC/POS)' : 'Normal (A4)'}
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Auto-detect will use A4 if a non-thermal printer is found, or thermal if a thermal printer is found.
+          </p>
+        </div>
+
+        {/* Default Printer Name (Electron only) */}
+        {isElectron && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Default Printer
+            </label>
+            <select
+              value={tempSettings.defaultPrinterName}
+              onChange={(e) => setTempSettings((prev: typeof receiptSettings) => ({ ...prev, defaultPrinterName: e.target.value }))}
+              disabled={!isAdminOrManager}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
+            >
+              <option value="">System default</option>
+              {availablePrinters.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}{p.isDefault ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
+            {availablePrinters.length === 0 && (
+              <p className="mt-1 text-xs text-amber-600">No printers detected. Connect a printer and refresh.</p>
+            )}
+          </div>
+        )}
+
+        {/* Auto-print toggle */}
+        <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+          <div>
+            <h4 className="text-sm font-medium text-gray-900">Auto-print without asking</h4>
+            <p className="text-xs text-gray-500 mt-0.5">
+              When enabled, the bill prints immediately after sale — no confirmation dialog.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (isAdminOrManager) {
+                setTempSettings((prev: typeof receiptSettings) => ({ ...prev, autoPrint: !prev.autoPrint }));
+              }
+            }}
+            disabled={!isAdminOrManager}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              tempSettings.autoPrint ? 'bg-blue-600' : 'bg-gray-200'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                tempSettings.autoPrint ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
         </div>
       </div>
 

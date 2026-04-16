@@ -106,6 +106,14 @@ export default function POS() {
   const [customerError, setCustomerError] = useState<string | null>(null);
   // Add printing state
   const [isPrinting, setIsPrinting] = useState(false);
+  // Print confirmation dialog state
+  const [printConfirm, setPrintConfirm] = useState<{
+    billData: any;
+    lineItemsData: any[];
+    entity: any;
+    qrCodeData: any;
+    availablePrinters: Array<{ name: string; isDefault: boolean }>;
+  } | null>(null);
   // Add cash drawer opening modal state
   const [showCashDrawerModal, setShowCashDrawerModal] = useState(false);
   const [pendingCashDrawerOpening, setPendingCashDrawerOpening] = useState<(() => void) | null>(null);
@@ -762,6 +770,148 @@ ${dashSeparator}`;
   const hasZeroPricedItem = activeTab?.cart?.some(i => (i.unitPrice ?? 0) === 0) ?? false;
 
 
+  // Smart print dispatcher: detects printers, respects settings, routes to thermal or formal bill
+  const handlePrint = async (billData: any, lineItemsData: any[], entity: any, qrCodeData: any) => {
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI) return; // Web mode — skip printing
+
+    let printerResult: any = null;
+    try {
+      printerResult = await electronAPI.getPrinters();
+    } catch {
+      showToast('error', 'Could not detect printers');
+      return;
+    }
+
+    // Normalise printer list
+    const printerList: Array<{ name: string; isDefault: boolean; isThermal?: boolean }> = [];
+    if (Array.isArray(printerResult)) {
+      printerResult.forEach((p: any) => printerList.push({
+        name: p.name,
+        isDefault: !!p.isDefault,
+        isThermal: /xprinter|thermal|receipt|pos/i.test(p.name),
+      }));
+    } else if (printerResult?.printers) {
+      printerResult.printers.forEach((p: any) => printerList.push({
+        name: p.name,
+        isDefault: !!p.isDefault,
+        isThermal: /xprinter|thermal|receipt|pos/i.test(p.name),
+      }));
+    }
+
+    if (printerList.length === 0) {
+      // No printers connected — skip silently (no toast, sale already succeeded)
+      return;
+    }
+
+    const settings = raw.receiptSettings || {};
+    const autoPrint: boolean = settings.autoPrint === true;
+
+    if (!autoPrint) {
+      // Show confirmation dialog
+      setPrintConfirm({ billData, lineItemsData, entity, qrCodeData, availablePrinters: printerList });
+      return;
+    }
+
+    // Auto-print immediately
+    await executePrint(billData, lineItemsData, entity, qrCodeData, printerList, settings.defaultPrinterName || '');
+  };
+
+  // Determine effective printer type and dispatch to the right print path
+  const executePrint = async (
+    billData: any,
+    lineItemsData: any[],
+    entity: any,
+    qrCodeData: any,
+    printerList: Array<{ name: string; isDefault: boolean; isThermal?: boolean }>,
+    chosenPrinterName: string,
+  ) => {
+    const settings = raw.receiptSettings || {};
+    const configuredType: 'auto' | 'thermal' | 'normal' = settings.defaultPrinterType || 'auto';
+
+    // Pick the printer to use
+    let selectedPrinter = chosenPrinterName
+      ? printerList.find(p => p.name === chosenPrinterName)
+      : null;
+    if (!selectedPrinter) {
+      selectedPrinter = printerList.find(p => p.isDefault) || printerList[0];
+    }
+
+    // Decide thermal vs normal
+    let useThermal = false;
+    if (configuredType === 'thermal') {
+      useThermal = true;
+    } else if (configuredType === 'normal') {
+      useThermal = false;
+    } else {
+      // auto: use thermal only if the selected printer looks like a thermal
+      useThermal = !!selectedPrinter?.isThermal;
+    }
+
+    if (useThermal) {
+      await printReceipt(billData, lineItemsData, entity, qrCodeData);
+    } else {
+      await printFormalBill(billData, lineItemsData, entity, selectedPrinter?.name || '');
+    }
+  };
+
+  // Print a formal A4 bill via Electron printFormalBill IPC
+  const printFormalBill = async (billData: any, lineItemsData: any[], entity: any, printerName: string) => {
+    setIsPrinting(true);
+    try {
+      const settings = raw.receiptSettings || {};
+      const logo = (raw.currentBranchId && userProfile?.store_id && raw.getBranchLogo)
+        ? await raw.getBranchLogo(raw.currentBranchId, userProfile.store_id).catch(() => null)
+        : null;
+
+      const fmtedLineItems = lineItemsData.map((item: any) => {
+        const product = products.find((p: any) => p.id === item.product_id);
+        return {
+          productName: product ? (typeof product.name === 'object' ? (product.name.ar || product.name.en || 'Product') : product.name) : 'Unknown Product',
+          quantity: item.quantity || 0,
+          weight: item.weight || null,
+          unit_price: item.unit_price || 0,
+          line_total: item.line_total || 0,
+        };
+      });
+
+      const payload = {
+        bill: billData,
+        lineItems: fmtedLineItems,
+        entity: entity ? { name: entity.name, phone: entity.phone, lb_balance: entity.lb_balance } : null,
+        receiptSettings: {
+          storeName: settings.storeName || '',
+          address: settings.address || '',
+          phone1: settings.phone1 || '',
+          phone1Name: settings.phone1Name || '',
+          phone2: settings.phone2 || '',
+          phone2Name: settings.phone2Name || '',
+          thankYouMessage: settings.thankYouMessage || 'Thank You!',
+          billNumberPrefix: settings.billNumberPrefix || '000',
+          showPreviousBalance: settings.showPreviousBalance !== false,
+          showItemCount: settings.showItemCount !== false,
+        },
+        logo,
+        printerName,
+        language: raw.language || 'en',
+        currency: raw.currency || 'LBP',
+        exchangeRate: raw.exchangeRate || 0,
+      };
+
+      const result = await (window as any).electronAPI.printFormalBill(payload);
+      if (result.success) {
+        showToast('success', 'Formal bill printed successfully');
+      } else {
+        showToast('error', 'Formal bill printing failed: ' + (result.message || result.error));
+      }
+    } catch (error) {
+      handleError(error);
+      showToast('error', 'Failed to print formal bill');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
   // Make handleCheckout async, add isProcessing state, and disable Complete Sale button while processing
   const handleCheckout = async () => {
     if (!activeTab || activeTab.cart.length === 0) return;
@@ -1006,16 +1156,16 @@ ${dashSeparator}`;
         }
       }
 
-      // Print receipt after successful bill creation
+      // Dispatch to smart print handler (thermal or formal A4 based on settings + detected printers)
       // First try to find as customer
       let entity = customers.find(c => c.id === activeTab.selectedCustomer);
-      
+
       // If not found as customer, try as supplier
       if (!entity) {
         entity = suppliers.find(s => s.id === activeTab.selectedCustomer);
       }
-      
-      await printReceipt(billData, lineItemsData, entity, qrCodeData);
+
+      await handlePrint(billData, lineItemsData, entity, qrCodeData);
       
       // Also download receipt for preview/testing
 
@@ -1123,6 +1273,29 @@ ${dashSeparator}`;
         title="Open Cash Drawer"
         description="The cash drawer is closed. Please enter the opening cash amount."
       />
+
+      {/* Print Confirmation Dialog */}
+      {printConfirm && (
+        <PrintConfirmDialog
+          availablePrinters={printConfirm.availablePrinters}
+          defaultPrinterName={raw.receiptSettings?.defaultPrinterName || ''}
+          onPrint={async (printerName) => {
+            const pd = printConfirm;
+            setPrintConfirm(null);
+            await executePrint(pd.billData, pd.lineItemsData, pd.entity, pd.qrCodeData, pd.availablePrinters, printerName);
+          }}
+          onSkip={() => setPrintConfirm(null)}
+          onDontAskAgain={async (printerName) => {
+            // Save autoPrint = true to settings
+            if (raw.updateReceiptSettings && raw.receiptSettings) {
+              await raw.updateReceiptSettings({ ...raw.receiptSettings, autoPrint: true, defaultPrinterName: printerName });
+            }
+            const pd = printConfirm;
+            setPrintConfirm(null);
+            await executePrint(pd.billData, pd.lineItemsData, pd.entity, pd.qrCodeData, pd.availablePrinters, printerName);
+          }}
+        />
+      )}
 
       {/* Add toast display at top right */}
       {toast && (
@@ -1735,3 +1908,68 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
     </div>
   </div>
 );}
+
+// Print confirmation dialog shown when autoPrint is false and printers are detected
+function PrintConfirmDialog({
+  availablePrinters,
+  defaultPrinterName,
+  onPrint,
+  onSkip,
+  onDontAskAgain,
+}: {
+  availablePrinters: Array<{ name: string; isDefault: boolean }>;
+  defaultPrinterName: string;
+  onPrint: (printerName: string) => void;
+  onSkip: () => void;
+  onDontAskAgain: (printerName: string) => void;
+}) {
+  const initial = defaultPrinterName || availablePrinters.find(p => p.isDefault)?.name || availablePrinters[0]?.name || '';
+  const [selectedPrinter, setSelectedPrinter] = React.useState(initial);
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[200]">
+      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900">Print Bill?</h2>
+        <p className="text-sm text-gray-600">A printer was detected. Do you want to print the bill?</p>
+
+        {availablePrinters.length > 1 && (
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Printer</label>
+            <select
+              value={selectedPrinter}
+              onChange={(e) => setSelectedPrinter(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {availablePrinters.map(p => (
+                <option key={p.name} value={p.name}>
+                  {p.name}{p.isDefault ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2 pt-1">
+          <button
+            onClick={() => onPrint(selectedPrinter)}
+            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm"
+          >
+            Print
+          </button>
+          <button
+            onClick={() => onDontAskAgain(selectedPrinter)}
+            className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
+          >
+            Print &amp; don't ask again
+          </button>
+          <button
+            onClick={onSkip}
+            className="w-full px-4 py-2 text-gray-500 hover:text-gray-700 text-sm"
+          >
+            Skip
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

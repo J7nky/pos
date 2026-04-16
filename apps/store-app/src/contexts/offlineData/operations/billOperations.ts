@@ -507,7 +507,8 @@ export async function createBill(
   }));
 
   // Store inventory states for undo
-  const inventoryStates: Array<{ id: string; originalQuantity: number }> = [];
+  const inventoryStates: Array<{ id: string; originalQuantity: number; wasSynced: boolean }> = [];
+  const auditLogId = createId();
   let creditSaleTransactionId: string | null = null;
   let cashDrawerTransactionId: string | null = null;
   let cashDrawerResult: CashDrawerAtomicResult | null = null;
@@ -532,7 +533,7 @@ export async function createBill(
     // Create audit log
     const generatedReason = `Creating bill #${bill.bill_number} with total amount ${bill.total_amount || 0}`;
     await getDB().bill_audit_logs.add({
-      id: createId(),
+      id: auditLogId,
       branch_id: currentBranchId || '',
       store_id: storeId,
       bill_id: billId,
@@ -563,7 +564,7 @@ export async function createBill(
       for (const item of itemsWithInventoryId) {
         const inventoryItem = inventoryMap.get(item.inventory_item_id!);
         if (inventoryItem && inventoryItem.quantity >= item.quantity) {
-          inventoryStates.push({ id: item.inventory_item_id!, originalQuantity: inventoryItem.quantity });
+          inventoryStates.push({ id: item.inventory_item_id!, originalQuantity: inventoryItem.quantity, wasSynced: !!inventoryItem._synced });
           const newQuantity = Math.max(0, inventoryItem.quantity - item.quantity);
           inventoryUpdatesToSave.push({ ...inventoryItem, quantity: newQuantity, _synced: false });
         }
@@ -585,7 +586,7 @@ export async function createBill(
         let qtyToDeduct = item.quantity || 1;
         for (const inv of inventoryRecords) {
           if (qtyToDeduct <= 0) break;
-          inventoryStates.push({ id: inv.id, originalQuantity: inv.quantity });
+          inventoryStates.push({ id: inv.id, originalQuantity: inv.quantity, wasSynced: !!inv._synced });
           const deduct = Math.min(inv.quantity, qtyToDeduct);
           const newQuantity = inv.quantity - deduct;
           await getDB().inventory_items.update(inv.id, { quantity: Math.max(0, newQuantity), _synced: false });
@@ -743,6 +744,7 @@ export async function createBill(
   const baseUndoData = {
     affected: [
       { table: 'bills', id: billId },
+      { table: 'bill_audit_logs', id: auditLogId },
       ...mappedLineItems.map(item => ({ table: 'bill_line_items', id: item.id })),
       ...inventoryStates.map(state => ({ table: 'inventory_items', id: state.id })),
       ...(customerBalanceUpdate && creditSaleTransactionId ? [
@@ -756,12 +758,13 @@ export async function createBill(
     ],
     steps: [
       { op: 'delete', table: 'bills', id: billId },
+      { op: 'delete', table: 'bill_audit_logs', id: auditLogId },
       ...mappedLineItems.map(item => ({ op: 'delete', table: 'bill_line_items', id: item.id })),
       ...inventoryStates.map(state => ({
         op: 'update',
         table: 'inventory_items',
         id: state.id,
-        changes: { quantity: state.originalQuantity, _synced: false }
+        changes: { quantity: state.originalQuantity, _synced: state.wasSynced }
       })),
       ...(customerBalanceUpdate && creditSaleTransactionId ? [
         { op: 'delete', table: 'transactions', id: creditSaleTransactionId },
@@ -775,7 +778,7 @@ export async function createBill(
   };
 
   const undoData = cashDrawerResult
-    ? createCashDrawerUndoData(cashDrawerResult.transactionId, cashDrawerResult.previousBalance, cashDrawerResult.accountId, baseUndoData)
+    ? createCashDrawerUndoData(cashDrawerResult.transactionId, cashDrawerResult.previousBalance, cashDrawerResult.accountId, baseUndoData, cashDrawerResult.accountWasSynced)
     : { type: 'complete_checkout', ...baseUndoData };
 
   pushUndo(undoData);

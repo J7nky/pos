@@ -28,6 +28,7 @@ export interface CashDrawerAtomicResult {
   previousBalance: number;
   newBalance: number;
   accountId: string | null;
+  accountWasSynced: boolean;
 }
 
 export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
@@ -126,6 +127,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
       previousBalance,
       newBalance: previousBalance + balanceChange,
       accountId: account.id || null,
+      accountWasSynced: !!(account as any)._synced,
     };
   }
 
@@ -222,6 +224,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
       previousBalance,
       newBalance: previousBalance + balanceChange,
       accountId: account.id || null,
+      accountWasSynced: !!(account as any)._synced,
     };
   }
 
@@ -315,6 +318,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
       previousBalance,
       newBalance: previousBalance + balanceChange,
       accountId: account.id || null,
+      accountWasSynced: !!(account as any)._synced,
     };
   }
 
@@ -473,7 +477,9 @@ export function createCashDrawerUndoData(
   additionalUndoData?: {
     affected: Array<{ table: string; id: string }>;
     steps: Array<{ op: string; table: string; id: string; changes?: any }>;
-  }
+  },
+  /** Original _synced state of the cash drawer account before this action. Defaults to true. */
+  accountWasSynced?: boolean
 ): any {
   console.log('🔧 Creating cash drawer undo data:', { transactionId, previousBalance, accountId, additionalUndoData });
 
@@ -491,7 +497,7 @@ export function createCashDrawerUndoData(
         op: 'update',
         table: 'cash_drawer_accounts',
         id: accountId,
-        changes: { current_balance: previousBalance, _synced: false }
+        changes: { current_balance: previousBalance, _synced: accountWasSynced ?? true }
       }] : [])
     ]
   };

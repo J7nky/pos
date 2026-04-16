@@ -1,6 +1,8 @@
 import { useCallback, useEffect, type Dispatch, type SetStateAction } from 'react';
 import { getDB } from '../../lib/db';
 import { syncService } from '../../services/syncService';
+import { SYNC_TIERS } from '../../services/syncConfig';
+import type { OfflineSyncSessionState } from './offlineDataContextContract';
 import { receivedBillMonitoringService } from '../../services/receivedBillMonitoringService';
 import { reminderMonitoringService } from '../../services/reminderMonitoringService';
 import type { Database } from '../../types/database';
@@ -36,6 +38,7 @@ export interface UseOfflineInitializationParams {
   setIsDataReady: Dispatch<SetStateAction<boolean>>;
   setIsInitializing: Dispatch<SetStateAction<boolean>>;
   setInitializationError: Dispatch<SetStateAction<string | null>>;
+  setSyncSession: Dispatch<SetStateAction<OfflineSyncSessionState | null>>;
   checkUndoValidity: () => Promise<void>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches composer debug()
   debug: (...args: any[]) => void;
@@ -63,6 +66,7 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
     setIsDataReady,
     setIsInitializing,
     setInitializationError,
+    setSyncSession,
     checkUndoValidity,
     debug,
   } = params;
@@ -150,18 +154,27 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
   );
 
   const initializeData = useCallback(async () => {
-    if (!storeId) return;
+    if (!storeId || !currentBranchId) return;
+    // Capture IDs at call time so we can guard against store switches mid-init (H2).
+    const capturedStoreId = storeId;
+    const capturedBranchId = currentBranchId;
     debug('🔄 Initializing data for store:', storeId);
     setIsDataReady(false);
     setIsInitializing(true);
     setInitializationError(null);
     let didFullResync = false;
+    let coldStartAttempted = false;
 
     try {
-      const [invalidCleaned, orphanedCleaned] = await Promise.all([
+      // L3: allSettled so one cleanup failure doesn't prevent the other from running
+      const [invalidResult, orphanedResult] = await Promise.allSettled([
         getDB().cleanupInvalidInventoryItems(),
-        getDB().cleanupOrphanedRecords(storeId),
+        getDB().cleanupOrphanedRecords(capturedStoreId),
       ]);
+      const invalidCleaned = invalidResult.status === 'fulfilled' ? invalidResult.value : 0;
+      const orphanedCleaned = orphanedResult.status === 'fulfilled' ? orphanedResult.value : 0;
+      if (invalidResult.status === 'rejected') console.warn('⚠️ cleanupInvalidInventoryItems failed:', invalidResult.reason);
+      if (orphanedResult.status === 'rejected') console.warn('⚠️ cleanupOrphanedRecords failed:', orphanedResult.reason);
       if (invalidCleaned > 0 || orphanedCleaned > 0) {
         debug(`🧹 Total cleanup: ${invalidCleaned + orphanedCleaned} records removed`);
       }
@@ -203,41 +216,88 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
       );
 
       const isLocalDatabaseEmpty = productCount === 0 && supplierEntityCount === 0 && customerEntityCount === 0;
+      const warmCheckpoint = await syncService.hasExistingData(storeId);
 
       if (isLocalDatabaseEmpty && isOnline) {
-        debug('📥 Local database is empty, syncing from cloud...');
+        coldStartAttempted = true;
+        debug('📥 Cold start: tiered hydration from cloud...');
         setLoading(prev => ({ ...prev, sync: true }));
+        setSyncSession({
+          isColdStart: true,
+          tier1Complete: false,
+          tier2Complete: false,
+          tier3Complete: false,
+          connectivity: 'online',
+          startedAt: Date.now(),
+        });
         try {
-          const syncResult = await syncService.fullResync(storeId);
-          if (syncResult.success) {
-            debug(`✅ Initial sync completed: downloaded ${syncResult.synced.downloaded} records`);
+          const tier1 = await syncService.downloadTier('tier1', capturedStoreId, capturedBranchId);
+          if (tier1.success) {
+            // H2: Guard against store switch that happened while tier 1 was running.
+            if (capturedStoreId !== storeId || capturedBranchId !== currentBranchId) {
+              debug('⚠️ Store/branch changed during tier 1 — discarding stale hydration result');
+              return;
+            }
+            debug(`✅ Tier 1 hydration: downloaded ${tier1.synced.downloaded} records`);
             await refreshData();
             await updateUnsyncedCount();
             if (userProfile) {
               const { AccessControlService } = await import('../../services/accessControlService');
               AccessControlService.clearCache(userProfile.id, userProfile.store_id);
-              debug('🔄 Permission cache invalidated after full resync');
+              debug('🔄 Permission cache invalidated after tier 1 hydration');
             }
             didFullResync = true;
-            if (currentBranchId) {
-              try {
-                await ensureCashDrawerAccountsSynced(storeId, currentBranchId);
-              } catch (error) {
-                console.warn('⚠️ Failed to ensure cash drawer accounts after sync:', error);
-              }
-              try {
-                const { eventStreamService: es } = await import('../../services/eventStreamService');
-                await es.initializeSyncState(currentBranchId);
-                debug('✅ Sync state initialized after fullResync');
-              } catch (syncStateError) {
-                console.warn('⚠️ Failed to initialize sync state after fullResync:', syncStateError);
-              }
+            setSyncSession((s) =>
+              s
+                ? { ...s, tier1Complete: true }
+                : {
+                    isColdStart: true,
+                    tier1Complete: true,
+                    tier2Complete: false,
+                    tier3Complete: false,
+                    connectivity: 'online',
+                    startedAt: Date.now(),
+                  }
+            );
+            try {
+              await ensureCashDrawerAccountsSynced(storeId, currentBranchId);
+            } catch (error) {
+              console.warn('⚠️ Failed to ensure cash drawer accounts after tier1:', error);
             }
+            try {
+              const { eventStreamService: es } = await import('../../services/eventStreamService');
+              await es.initializeSyncState(currentBranchId);
+              debug('✅ Sync state initialized after tier 1 hydration');
+            } catch (syncStateError) {
+              console.warn('⚠️ Failed to initialize sync state after tier1:', syncStateError);
+            }
+            setIsDataReady(true);
+            // H1: Use a shared AbortController so tier 2/3 can be cancelled if the
+            // component unmounts or the user switches stores before they finish.
+            const bgController = new AbortController();
+            void (async () => {
+              try {
+                await syncService.downloadTier('tier2', capturedStoreId, capturedBranchId, { signal: bgController.signal });
+              } catch (e) {
+                if ((e as Error)?.name !== 'AbortError') console.warn('Tier 2 background sync:', e);
+              } finally {
+                setSyncSession((s) => (s ? { ...s, tier2Complete: true } : s));
+              }
+            })();
+            void (async () => {
+              try {
+                await syncService.downloadTier('tier3', capturedStoreId, capturedBranchId, { signal: bgController.signal });
+              } catch (e) {
+                if ((e as Error)?.name !== 'AbortError') console.warn('Tier 3 background sync:', e);
+              } finally {
+                setSyncSession((s) => (s ? { ...s, tier3Complete: true } : s));
+              }
+            })();
           } else {
-            console.error('❌ Initial sync failed:', syncResult.errors);
+            console.error('❌ Tier 1 hydration failed:', tier1.errors);
           }
         } catch (error) {
-          console.error('❌ Initial sync error:', error);
+          console.error('❌ Initial tiered sync error:', error);
         } finally {
           setLoading(prev => ({ ...prev, sync: false }));
         }
@@ -251,6 +311,23 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
         debug(
           `📊 Local database loaded: ${productCount} products, ${supplierEntityCount} supplier entities, ${customerEntityCount} customer entities`
         );
+        if (isOnline) {
+          void (async () => {
+            try {
+              if (warmCheckpoint) {
+                debug('🔄 Warm start: Tier 1 delta sync in background');
+              } else {
+                debug('🔄 Rebuilding Tier 1 checkpoints in background');
+              }
+              for (const tableName of SYNC_TIERS.tier1) {
+                await syncService.downloadTablePaged(tableName, storeId, {});
+              }
+              await refreshData();
+            } catch (e) {
+              console.warn('Background Tier 1 sync:', e);
+            }
+          })();
+        }
         if (isOnline && unsyncedCount > 0) {
           debug('🔄 Uploading pending local changes after init...');
           void performSync(true);
@@ -281,7 +358,11 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
       reminderMonitoringService.startMonitoring(storeId);
     }
 
-    setIsDataReady(true);
+    // Only set data ready here for warm-start and offline-empty paths.
+    // Cold start sets it explicitly after initializeSyncState completes (C1/C2 fix).
+    if (!coldStartAttempted) {
+      setIsDataReady(true);
+    }
     setIsInitializing(false);
     debug('✅ Data initialization complete - isDataReady set to true, isInitializing set to false');
   }, [
@@ -298,6 +379,7 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
     setIsDataReady,
     setIsInitializing,
     setInitializationError,
+    setSyncSession,
     debug,
   ]);
 
@@ -308,10 +390,10 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
         currentBranchId,
       });
       void loadStoreData();
-      void initializeData();
-      setTimeout(() => {
+      void initializeData().then(() => {
+        // L2: run undo validity check after init completes rather than after an arbitrary 1000ms delay
         void checkUndoValidity();
-      }, 1000);
+      });
     } else {
       console.log('⏳ Waiting for branch selection before loading data...', {
         hasStoreId: !!storeId,

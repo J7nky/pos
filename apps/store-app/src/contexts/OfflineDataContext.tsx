@@ -40,7 +40,7 @@ import {
   useStoreSettingsDataLayer,
   useNotificationsDataLayer,
 } from './offlineData';
-import type { OfflineDataContextType } from './offlineData/offlineDataContextContract';
+import type { OfflineDataContextType, OfflineSyncSessionState } from './offlineData/offlineDataContextContract';
 import { useStoreSwitchLifecycle } from './offlineData/useStoreSwitchLifecycle';
 import { useBranchBootstrapEffects } from './offlineData/useBranchBootstrapEffects';
 import { useOfflineInitialization } from './offlineData/useOfflineInitialization';
@@ -91,6 +91,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [isDataReady, setIsDataReady] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [syncSession, setSyncSession] = useState<OfflineSyncSessionState | null>(null);
 
   const [loading, setLoading] = useState({
     sync: false, products: false, suppliers: false, customers: false,
@@ -108,10 +109,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   useStoreSwitchLifecycle(storeId, previousStoreIdRef, isClearingStorageRef);
 
   // Undo state
-  const [canUndo, setCanUndo] = useState(() => !!localStorage.getItem('last_undo_action'));
+  const [canUndo, setCanUndo] = useState(
+    () => typeof sessionStorage !== 'undefined' && !!sessionStorage.getItem(undoOps.UNDO_STORAGE_KEY)
+  );
 
   // Small arrays without a dedicated layer
-  const [expenseCategories] = useState<any[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<any[]>([]);
   const [billAuditLogs, setBillAuditLogs] = useState<any[]>([]);
   const [missedProducts, setMissedProducts] = useState<any[]>([]);
 
@@ -238,23 +241,87 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // ─── Definitions: checkUndoValidity, pushUndo ─────────────────────────────
   const checkUndoValidity = useCallback(async () => {
-    const undoData = localStorage.getItem('last_undo_action');
-    if (!undoData) { setCanUndo(false); return; }
+    try {
+      if (typeof sessionStorage === 'undefined') {
+        setCanUndo(false);
+        return;
+      }
 
-    const action = JSON.parse(undoData);
-    let isValid = true;
+      const undoData = sessionStorage.getItem(undoOps.UNDO_STORAGE_KEY);
+      if (!undoData) {
+        setCanUndo(false);
+        return;
+      }
 
-    for (const item of action.affected || []) {
-      const record = await (getDB() as any)[item.table].get(item.id);
-      if (!record) { isValid = false; break; }
-      if (record._synced && item.table !== 'cash_drawer_accounts') { isValid = false; break; }
+      const action = JSON.parse(undoData) as {
+        affected?: Array<{ table: string; id: string }>;
+        steps?: Array<{
+          op?: string;
+          table?: string;
+          id?: string;
+          record?: { id?: string };
+          changes?: { id?: string };
+        }>;
+      };
+
+      const restoreTargetKeys = new Set<string>();
+      for (const step of action.steps || []) {
+        if (step.op === 'restore' || step.op === 'add') {
+          const rid = step.id ?? step.record?.id ?? step.changes?.id;
+          if (step.table && rid) {
+            const mapped =
+              undoOps.TABLE_NAME_MAP[step.table as keyof typeof undoOps.TABLE_NAME_MAP] ?? step.table;
+            restoreTargetKeys.add(`${mapped}:${rid}`);
+          }
+        }
+      }
+
+      let isValid = true;
+
+      for (const item of action.affected || []) {
+        const tableName =
+          undoOps.TABLE_NAME_MAP[item.table as keyof typeof undoOps.TABLE_NAME_MAP] ?? item.table;
+        const db = getDB() as any;
+        if (!db[tableName]) {
+          console.warn(`checkUndoValidity: unknown table ${item.table} (resolved: ${tableName})`);
+          sessionStorage.removeItem(undoOps.UNDO_STORAGE_KEY);
+          setCanUndo(false);
+          return;
+        }
+
+        const mappedItemTable =
+          undoOps.TABLE_NAME_MAP[item.table as keyof typeof undoOps.TABLE_NAME_MAP] ?? item.table;
+        const itemKey = `${mappedItemTable}:${item.id}`;
+        if (restoreTargetKeys.has(itemKey)) continue;
+
+        const record = await db[tableName].get(item.id);
+        if (!record) {
+          isValid = false;
+          break;
+        }
+        if (record._synced && item.table !== undoOps.CASH_DRAWER_EXEMPT_TABLE) {
+          isValid = false;
+          break;
+        }
+      }
+
+      if (!isValid) {
+        sessionStorage.removeItem(undoOps.UNDO_STORAGE_KEY);
+        setCanUndo(false);
+      }
+    } catch (error) {
+      console.error('checkUndoValidity failed:', error);
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem(undoOps.UNDO_STORAGE_KEY);
+      }
+      setCanUndo(false);
     }
-
-    if (!isValid) { localStorage.removeItem('last_undo_action'); setCanUndo(false); }
   }, []);
 
   const pushUndo = useCallback((undoData: any) => {
-    localStorage.setItem('last_undo_action', JSON.stringify({ ...undoData, timestamp: Date.now() }));
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(undoOps.UNDO_STORAGE_KEY, JSON.stringify({ ...undoData, timestamp: Date.now() }));
+    }
     setCanUndo(true);
   }, []);
 
@@ -296,6 +363,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await billLayer.hydrate(billsData, billLineItemsData);
       inventoryLayer.hydrate(inventoryData, batchesData);
       accountingLayer.hydrate(journalEntriesData || [], chartOfAccountsData || [], balanceSnapshotsData || []);
+
+      // Derive expense categories from chart_of_accounts (account_type === 'expense')
+      setExpenseCategories(
+        (chartOfAccountsData || [])
+          .filter((a: any) => a.account_type === 'expense' && !a._deleted)
+          .map((a: any) => ({ id: a.id, name: a.account_name, is_active: a.is_active, created_at: a.created_at }))
+      );
 
       // Small arrays without dedicated layers
       setBillAuditLogs(billAuditLogsData);
@@ -382,6 +456,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     setIsDataReady,
     setIsInitializing,
     setInitializationError,
+    setSyncSession,
     checkUndoValidity,
     debug,
   });
@@ -455,7 +530,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   }, [getCurrentCashDrawerBalance]);
 
   // ─── Undo ─────────────────────────────────────────────────────────────────
-  const testUndo = () => { pushUndo({ type: 'test', affected: [], steps: [] }); };
+  const testUndo = import.meta.env.DEV
+    ? () => {
+        pushUndo({ type: 'test', affected: [], steps: [] });
+      }
+    : undefined;
   const undoLastAction = (): Promise<boolean> =>
     undoOps.undoLastAction({ storeId, refreshData, updateUnsyncedCount: syncStateLayer.updateUnsyncedCount, setCanUndo });
 
@@ -776,6 +855,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         isDataReady: false,
         isInitializing: false,
         initializationError: null,
+        syncSession: null,
+        getPermanentlyFailedOutboxItems: async () => [],
+        discardPermanentlyFailedOutboxItem: async () => {},
         products: [],
         branches: [],
         suppliers: [],
@@ -869,7 +951,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         canUndo: false,
         undoLastAction: async () => false,
         pushUndo: () => {},
-        testUndo: () => {},
+        testUndo: undefined,
         processCashDrawerTransaction: async () => ({ success: false }),
         createCashDrawerUndoData: () => ({ type: '', affected: [], steps: [] }),
         createId: () => crypto.randomUUID(),
@@ -904,6 +986,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       isDataReady,
       isInitializing,
       initializationError,
+      syncSession,
+      getPermanentlyFailedOutboxItems: () => syncService.getPermanentlyFailedItems(),
+      discardPermanentlyFailedOutboxItem: async (id: string) => {
+        await getDB().removePendingSync(id);
+      },
 
       // Data from domain layers
       products: productLayer.products,

@@ -36,6 +36,15 @@ function evLog(...args: unknown[]): void {
   if (EVENT_STREAM_VERBOSE) console.log(...args);
 }
 
+/** Split an array into chunks of at most `size` elements. */
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
 export interface BranchEvent {
   id: string;
   store_id: string;
@@ -56,12 +65,24 @@ export interface SyncState {
   updated_at: string;
 }
 
+/** Pre-fetched child-record caches used to eliminate per-event child queries. */
+interface ChildCaches {
+  /** bill_line_items grouped by bill_id (for sale_posted events) */
+  lineItemsByBillId: Map<string, unknown[]>;
+  /** inventory_items grouped by batch_id (for inventory_received events) */
+  inventoryItemsByBatchId: Map<string, unknown[]>;
+  /** journal_entries grouped by transaction_id (for journal_entry_created events) */
+  journalByTxId: Map<string, unknown[]>;
+}
+
 export interface EventProcessingResult {
   processed: number;
   errors: string[];
   last_version: number;
   /** Rows not returned from Supabase (deleted, RLS, or race); not thrown errors */
   skipped_missing?: number;
+  /** true when catchUp was a no-op because another catch-up was already in progress */
+  skipped?: boolean;
 }
 
 export class EventStreamService {
@@ -336,7 +357,7 @@ export class EventStreamService {
     // Prevent concurrent catch-up for same branch
     if (this.isProcessing.get(branchId)) {
       evLog(`[EventStream] Catch-up already in progress for branch ${branchId}`);
-      return { processed: 0, errors: [], last_version: 0 };
+      return { processed: 0, errors: [], last_version: 0, skipped: true };
     }
 
     this.isProcessing.set(branchId, true);
@@ -349,30 +370,23 @@ export class EventStreamService {
       // ✅ FIX 3: Enhanced sync state initialization
       // If no sync state exists, check if database has data and initialize accordingly
       if (!syncState && lastVersion === 0) {
-        evLog(`[EventStream] No sync state found for branch ${branchId}, checking if database has data...`);
-        
-        // Check if database has any data (pick a table that's likely to have records)
-        const hasData = await getDB().products.limit(1).count() > 0 || 
-                        await getDB().bills.limit(1).count() > 0 ||
-                        await getDB().transactions.limit(1).count() > 0;
-
-        if (hasData) {
-          // Database has data but no sync state - initialize to current max version
-          // This prevents replaying all historical events when event stream starts
-          evLog(`[EventStream] Database has data but no sync state - initializing to current max version to avoid replaying all events`);
-          try {
+        // Always initialize to the current max event version rather than replaying history.
+        // On cold start the DB is empty, but the tiered sync (useOfflineInitialization) owns
+        // bulk hydration via direct table scans. The event stream only handles events that
+        // arrive from this point forward. Starting from version 0 would replay every
+        // historical event and cause N+1 individual Supabase fetches per event.
+        evLog(`[EventStream] No sync state — initializing to current max version for branch ${branchId}`);
+        try {
           await this.initializeSyncState(branchId);
-          
-          // Fetch the newly initialized sync state
           const newSyncState = await this.getSyncState(branchId);
           lastVersion = newSyncState?.last_seen_event_version || 0;
-            evLog(`[EventStream] ✅ Initialized sync state to version ${lastVersion} for branch ${branchId}`);
-          } catch (initError) {
-            console.warn(`[EventStream] ⚠️ Failed to initialize sync state, will start from version 0:`, initError);
-            // Continue with lastVersion = 0 if initialization fails
-          }
-        } else {
-          evLog(`[EventStream] Database is empty - will start from version 0 (expected on first sync)`);
+          evLog(`[EventStream] ✅ Initialized sync state to version ${lastVersion} for branch ${branchId}`);
+        } catch (initError) {
+          // Do NOT fall back to version 0 — that would replay all historical events
+          // and trigger N+1 individual Supabase fetches per event.
+          // Re-throw so catchUp returns an error result; the stream will retry on the next cycle.
+          console.error(`[EventStream] ❌ Failed to initialize sync state — cannot safely catch up:`, initError);
+          throw initError;
         }
       }
 
@@ -415,10 +429,11 @@ export class EventStreamService {
           await this.onEventsProcessedCallback(result);
           evLog(`[EventStream] ✅ Callback executed successfully`);
         } catch (callbackError) {
-          console.error(`[EventStream] ❌ Error in callback:`, callbackError);
-          if (callbackError instanceof Error) {
-            console.error(`[EventStream] Callback error stack:`, callbackError.stack);
-          }
+          console.error(`[EventStream] ❌ Error in onEventsProcessedCallback:`, callbackError);
+          // Surface to caller so it knows the post-processing step failed (M2 fix)
+          result.errors.push(
+            `callback: ${callbackError instanceof Error ? callbackError.message : String(callbackError)}`
+          );
         }
       } else {
         evLog(`[EventStream] ⚠️ Not calling callback:`, {
@@ -560,6 +575,38 @@ export class EventStreamService {
       }
     }
 
+    // OPTIMIZATION: Batch-prefetch all records needed by regular (non-bulk, non-reverse) events.
+    // Replaces N individual fetchAffectedRecord() calls with one .in('id',[...]) per table.
+    const prefetchCache = await this.batchPrefetchRecords(deduplicatedEvents, storeId);
+
+    // OPTIMIZATION: Batch-prefetch child records for all event types that cascade to child tables.
+    // All three queries run in parallel; each replaces N individual per-event queries with one .in().
+    const [lineItemsByBillId, inventoryItemsByBatchId, journalByTxId] = await Promise.all([
+      this.batchPrefetchChildren(
+        deduplicatedEvents, 'sale_posted', 'bill_line_items', 'bill_id',
+        (e) => e.entity_id
+      ),
+      this.batchPrefetchChildren(
+        deduplicatedEvents, 'inventory_received', 'inventory_items', 'batch_id',
+        (e) => e.entity_id
+      ),
+      this.batchPrefetchChildren(
+        deduplicatedEvents, 'journal_entry_created', 'journal_entries', 'transaction_id',
+        (e) => {
+          // Prefer transaction_id from event metadata (set since the N+1 fix).
+          // Fall back to looking it up from the prefetchCache for older events that
+          // predate the metadata field.
+          const metaTxId = (e.metadata as Record<string, unknown> | undefined)?.transaction_id;
+          if (typeof metaTxId === 'string' && metaTxId) return metaTxId;
+          const parent = prefetchCache.get(`${e.entity_type}:${e.entity_id}`) as Record<string, unknown> | undefined;
+          const txId = parent?.transaction_id;
+          return typeof txId === 'string' && txId ? txId : null;
+        },
+        storeId
+      ),
+    ]);
+    const childCaches: ChildCaches = { lineItemsByBillId, inventoryItemsByBatchId, journalByTxId };
+
     for (let i = 0; i < deduplicatedEvents.length; i++) {
       const event = deduplicatedEvents[i];
       if (!event) {
@@ -577,7 +624,7 @@ export class EventStreamService {
           operation: event.operation,
           version: event.version
         });
-        const outcome = await this.processEvent(event, storeId);
+        const outcome = await this.processEvent(event, storeId, prefetchCache, childCaches);
         if (outcome === 'skipped_missing') skippedMissing++;
         processed++;
         evLog(
@@ -626,7 +673,12 @@ export class EventStreamService {
    * Fetches the affected record and updates IndexedDB
    * Handles both single-record events and bulk events
    */
-  private async processEvent(event: BranchEvent, storeId: string): Promise<'handled' | 'skipped_missing'> {
+  private async processEvent(
+    event: BranchEvent,
+    storeId: string,
+    prefetchCache?: Map<string, unknown>,
+    childCaches?: ChildCaches
+  ): Promise<'handled' | 'skipped_missing'> {
     evLog(
       `[EventStream] Processing event: ${event.event_type} ${event.operation} on ${event.entity_type}/${event.entity_id}`
     );
@@ -646,9 +698,34 @@ export class EventStreamService {
       return 'handled';
     }
 
-    // Fetch the affected record from Supabase
-    evLog(`[EventStream] Fetching record ${event.entity_type}/${event.entity_id} from Supabase`);
-    const record = await this.fetchAffectedRecord(event.entity_type, event.entity_id, storeId);
+    // FAST PATH: journal_entry_created events with transaction_id in metadata can be handled
+    // entirely via the pre-fetched journalByTxId batch cache — no individual record fetch needed.
+    // This eliminates the N+1 pattern where batchPrefetchRecords failure caused one
+    // fetchAffectedRecord call per journal entry.
+    if (event.event_type === 'journal_entry_created') {
+      const metaTxId = (event.metadata as Record<string, unknown> | undefined)?.transaction_id;
+      if (typeof metaTxId === 'string' && metaTxId && childCaches) {
+        const cached = childCaches.journalByTxId.get(metaTxId);
+        if (cached !== undefined) {
+          if (cached.length > 0) {
+            await db.journal_entries.bulkPut(
+              cached.map((r) => ({ ...(r as object), _synced: true, _lastSyncedAt: new Date().toISOString() }))
+            );
+            evLog(`[EventStream] journal_entry_created fast path: stored ${cached.length} entries for tx ${metaTxId}`);
+          }
+          return 'handled';
+        }
+        // Cache miss (batchPrefetchChildren returned nothing for this txId — may be a new tx).
+        // Fall through to normal processing which will do a per-txId query in fetchAndStoreChildRecords.
+      }
+    }
+
+    // Use prefetched record if available (batch optimisation), otherwise fall back to single fetch
+    const cacheKey = `${event.entity_type}:${event.entity_id}`;
+    const record = prefetchCache?.has(cacheKey)
+      ? prefetchCache.get(cacheKey)
+      : await this.fetchAffectedRecord(event.entity_type, event.entity_id, storeId);
+    evLog(`[EventStream] Record ${event.entity_type}/${event.entity_id}: ${record ? 'from cache' : 'fetched individually'}`);
 
     if (!record) {
       // Record might have been deleted or doesn't exist yet
@@ -663,7 +740,7 @@ export class EventStreamService {
     await this.updateIndexedDB(event.entity_type, record);
 
     // Cascade: fetch child records for parent events that own child rows
-    await this.fetchAndStoreChildRecords(event, storeId, record);
+    await this.fetchAndStoreChildRecords(event, storeId, record, childCaches);
 
     evLog(`[EventStream] Completed processing event ${event.id}`);
     return 'handled';
@@ -679,25 +756,34 @@ export class EventStreamService {
   private async fetchAndStoreChildRecords(
     event: BranchEvent,
     storeId: string,
-    parentRecord?: Record<string, unknown>
+    parentRecord?: Record<string, unknown>,
+    childCaches?: ChildCaches
   ): Promise<void> {
     if (event.event_type === 'sale_posted') {
       try {
-        const { data: lineItems, error } = await supabase
-          .from('bill_line_items')
-          .select('*')
-          .eq('bill_id', event.entity_id);
-
-        if (error) {
-          evLog(`[EventStream] Could not fetch bill_line_items for bill ${event.entity_id}:`, error.message);
+        const billId = event.entity_id;
+        // Use batch-prefetched line items when available; fall back to individual query
+        const cached = childCaches?.lineItemsByBillId.get(billId);
+        const lineItems: unknown[] | null = cached !== undefined ? cached : null;
+        if (lineItems !== null) {
+          if (lineItems.length > 0) {
+            await db.bill_line_items.bulkPut(
+              lineItems.map((r) => ({ ...(r as object), _synced: true, _lastSyncedAt: new Date().toISOString() }))
+            );
+            evLog(`[EventStream] Stored ${lineItems.length} bill_line_items for bill ${billId} (from batch cache)`);
+          }
           return;
         }
-
-        if (lineItems && lineItems.length > 0) {
+        const { data: fetched, error } = await supabase
+          .from('bill_line_items')
+          .select('*')
+          .eq('bill_id', billId);
+        if (error) { evLog(`[EventStream] Could not fetch bill_line_items for bill ${billId}:`, error.message); return; }
+        if (fetched && fetched.length > 0) {
           await db.bill_line_items.bulkPut(
-            lineItems.map((r: any) => ({ ...r, _synced: true, _lastSyncedAt: new Date().toISOString() }))
+            fetched.map((r: any) => ({ ...r, _synced: true, _lastSyncedAt: new Date().toISOString() }))
           );
-          evLog(`[EventStream] Stored ${lineItems.length} bill_line_items for bill ${event.entity_id}`);
+          evLog(`[EventStream] Stored ${fetched.length} bill_line_items for bill ${billId}`);
         }
       } catch (err) {
         evLog(`[EventStream] Error fetching bill_line_items for bill ${event.entity_id}:`, err);
@@ -707,25 +793,32 @@ export class EventStreamService {
 
     if (event.event_type === 'inventory_received') {
       try {
-        // inventory_items link to inventory_bills via batch_id (= bill id), not inventory_bill_id
-        const { data: items, error } = await supabase
-          .from('inventory_items')
-          .select('*')
-          .eq('batch_id', event.entity_id);
-
-        if (error) {
-          evLog(`[EventStream] Could not fetch inventory_items for bill ${event.entity_id}:`, error.message);
+        const batchId = event.entity_id;
+        // Use batch-prefetched inventory items when available; fall back to individual query
+        const cached = childCaches?.inventoryItemsByBatchId.get(batchId);
+        const items: unknown[] | null = cached !== undefined ? cached : null;
+        if (items !== null) {
+          if (items.length > 0) {
+            await db.inventory_items.bulkPut(
+              items.map((r) => ({ ...(r as object), _synced: true, _lastSyncedAt: new Date().toISOString() }))
+            );
+            evLog(`[EventStream] Stored ${items.length} inventory_items for batch ${batchId} (from batch cache)`);
+          }
           return;
         }
-
-        if (items && items.length > 0) {
+        const { data: fetched, error } = await supabase
+          .from('inventory_items')
+          .select('*')
+          .eq('batch_id', batchId);
+        if (error) { evLog(`[EventStream] Could not fetch inventory_items for batch ${batchId}:`, error.message); return; }
+        if (fetched && fetched.length > 0) {
           await db.inventory_items.bulkPut(
-            items.map((r: any) => ({ ...r, _synced: true, _lastSyncedAt: new Date().toISOString() }))
+            fetched.map((r: any) => ({ ...r, _synced: true, _lastSyncedAt: new Date().toISOString() }))
           );
-          evLog(`[EventStream] Stored ${items.length} inventory_items for inventory_bill ${event.entity_id}`);
+          evLog(`[EventStream] Stored ${fetched.length} inventory_items for batch ${batchId}`);
         }
       } catch (err) {
-        evLog(`[EventStream] Error fetching inventory_items for bill ${event.entity_id}:`, err);
+        evLog(`[EventStream] Error fetching inventory_items for batch ${event.entity_id}:`, err);
       }
       return;
     }
@@ -740,27 +833,29 @@ export class EventStreamService {
           evLog(`[EventStream] journal_entry_created: no transaction_id on parent row, keeping single entry only`);
           return;
         }
-
-        const { data: entries, error } = await supabase
+        // Use batch-prefetched entries when available; fall back to individual query
+        const cached = childCaches?.journalByTxId.get(txId);
+        const entries: unknown[] | null = cached !== undefined ? cached : null;
+        if (entries !== null) {
+          if (entries.length > 0) {
+            await db.journal_entries.bulkPut(
+              entries.map((r) => ({ ...(r as object), _synced: true, _lastSyncedAt: new Date().toISOString() }))
+            );
+            evLog(`[EventStream] Stored ${entries.length} journal_entries for transaction ${txId} (from batch cache)`);
+          }
+          return;
+        }
+        const { data: fetched, error } = await supabase
           .from('journal_entries')
           .select('*')
           .eq('store_id', storeId)
           .eq('transaction_id', txId);
-
-        if (error) {
-          evLog(`[EventStream] Could not fetch journal_entries for transaction ${txId}:`, error.message);
-          return;
-        }
-
-        if (entries && entries.length > 0) {
+        if (error) { evLog(`[EventStream] Could not fetch journal_entries for transaction ${txId}:`, error.message); return; }
+        if (fetched && fetched.length > 0) {
           await db.journal_entries.bulkPut(
-            entries.map((r) => ({
-              ...r,
-              _synced: true,
-              _lastSyncedAt: new Date().toISOString(),
-            }))
+            fetched.map((r) => ({ ...r, _synced: true, _lastSyncedAt: new Date().toISOString() }))
           );
-          evLog(`[EventStream] Stored ${entries.length} journal_entries for transaction ${txId}`);
+          evLog(`[EventStream] Stored ${fetched.length} journal_entries for transaction ${txId}`);
         }
       } catch (err) {
         evLog(`[EventStream] Error fetching journal_entries for journal_entry_created:`, err);
@@ -807,26 +902,30 @@ export class EventStreamService {
     } else if (event.event_type === 'users_bulk_updated' && metadata.affected_user_ids) {
       affectedIds = metadata.affected_user_ids;
     } else {
-      evLog(`[EventStream] Bulk event ${event.id} missing affected IDs in metadata`);
+      // M3: malformed metadata — log at error level so it's visible without verbose mode
+      console.error(`[EventStream] ❌ Bulk event ${event.id} (${event.event_type}) missing affected IDs in metadata — event will be skipped`, metadata);
       return;
     }
 
-    if (affectedIds.length === 0) {
-      evLog(`[EventStream] Bulk event ${event.id} has empty affected IDs list`);
+    if (!Array.isArray(affectedIds) || affectedIds.length === 0) {
+      // M3: distinguish empty-but-valid from non-array (type mismatch in metadata)
+      if (!Array.isArray(affectedIds)) {
+        console.error(`[EventStream] ❌ Bulk event ${event.id} affected IDs is not an array — metadata may be malformed`, metadata);
+      } else {
+        evLog(`[EventStream] Bulk event ${event.id} has empty affected IDs list`);
+      }
       return;
     }
 
     evLog(`[EventStream] Processing bulk event with ${affectedIds.length} affected records`);
 
-    // Handle bulk deletions
+    // Handle bulk deletions — one bulkDelete call instead of N individual deletes
     if (event.operation === 'reverse') {
       evLog(`[EventStream] Bulk deletion of ${affectedIds.length} ${tableName} records`);
       const table = (db as any)[tableName];
       if (table) {
-        for (const id of affectedIds) {
-          await table.delete(id);
-          evLog(`[EventStream] Deleted ${tableName}/${id} from IndexedDB`);
-        }
+        await table.bulkDelete(affectedIds);
+        evLog(`[EventStream] Bulk deleted ${affectedIds.length} ${tableName} records from IndexedDB`);
       }
       return;
     }
@@ -887,6 +986,144 @@ export class EventStreamService {
    * Fetch the affected record from Supabase
    * Only fetches the specific record, not the whole table
    */
+  /**
+   * Batch-prefetch all records required by a deduplicated event list.
+   * Groups events by table name and issues one `.in('id', [...])` query per table,
+   * replacing the previous N individual fetchAffectedRecord() calls.
+   *
+   * Returns a Map keyed by `"entityType:entityId"` for O(1) lookup in processEvent().
+   * Bulk and reverse events are excluded — they don't need individual record fetches.
+   */
+  /**
+   * Maximum IDs per `.in()` query chunk.
+   * PostgREST encodes `.in('id', ids)` as `id=in.(uuid,...)` in the URL.
+   * 600 UUIDs × ~37 chars ≈ 22 KB — well over Supabase's ~8 KB URL limit.
+   * Chunking at 100 keeps each request ~3.7 KB and prevents 414 errors that
+   * would otherwise cause the entire batch to fail and fall back to N individual fetches.
+   */
+  private static readonly PREFETCH_CHUNK_SIZE = 100;
+
+  private async batchPrefetchRecords(
+    events: BranchEvent[],
+    storeId: string
+  ): Promise<Map<string, unknown>> {
+    const cache = new Map<string, unknown>();
+
+    // Collect IDs grouped by table, skipping bulk and reverse events.
+    // Track all entity types seen per table (e.g. 'customer', 'supplier', 'entity' all → 'entities').
+    const tableIds = new Map<string, { entityTypes: Set<string>; ids: string[] }>();
+    for (const event of events) {
+      if (!event || this.isBulkEvent(event.event_type) || event.operation === 'reverse') continue;
+      const tableName = this.mapEntityTypeToTable(event.entity_type);
+      if (!tableName) continue;
+      if (!tableIds.has(tableName)) tableIds.set(tableName, { entityTypes: new Set(), ids: [] });
+      const entry = tableIds.get(tableName)!;
+      entry.entityTypes.add(event.entity_type);
+      if (!entry.ids.includes(event.entity_id)) entry.ids.push(event.entity_id);
+    }
+
+    // Fire chunked queries per table (all chunks for a table run in parallel).
+    // Chunking prevents URL-length overflow (414) when there are many IDs.
+    for (const [tableName, { entityTypes, ids }] of tableIds) {
+      if (ids.length === 0) continue;
+      try {
+        const chunks = chunkArray(ids, EventStreamService.PREFETCH_CHUNK_SIZE);
+        const chunkResults = await Promise.all(
+          chunks.map(async (chunkIds) => {
+            let query = supabase.from(tableName).select('*').in('id', chunkIds);
+            if (tableName === 'products') {
+              query = (query as any).or(`store_id.eq.${storeId},is_global.eq.true`);
+            } else if (tableName !== 'stores' && tableName !== 'transactions') {
+              query = query.eq('store_id', storeId);
+            }
+            const { data, error } = await query;
+            if (error) {
+              console.warn(`[EventStream] batchPrefetch failed for ${tableName} (chunk of ${chunkIds.length}):`, error.message);
+              return [] as unknown[];
+            }
+            return (data ?? []) as unknown[];
+          })
+        );
+        for (const rows of chunkResults) {
+          for (const row of rows) {
+            const rowId = (row as Record<string, unknown>)['id'];
+            // Cache under every entity type that maps to this table
+            for (const entityType of entityTypes) {
+              cache.set(`${entityType}:${rowId}`, row);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn(`[EventStream] batchPrefetch error for ${tableName}:`, e);
+      }
+    }
+
+    return cache;
+  }
+
+  /**
+   * Generic child-record batch prefetch.
+   *
+   * Collects the foreign-key value for every event matching `eventType` (via `keyExtractor`),
+   * fires one `.in(foreignKey, [...keys])` query against `table`, and returns a Map keyed by
+   * the foreign-key value → rows[].
+   *
+   * Used by processEvents to eliminate N per-event child queries:
+   *   - sale_posted       → bill_line_items   grouped by bill_id
+   *   - inventory_received → inventory_items  grouped by batch_id
+   *   - journal_entry_created → journal_entries grouped by transaction_id
+   *
+   * @param storeId When provided, adds `.eq('store_id', storeId)` to scope the query.
+   */
+  private async batchPrefetchChildren(
+    events: BranchEvent[],
+    eventType: string,
+    table: string,
+    foreignKey: string,
+    keyExtractor: (event: BranchEvent) => string | null,
+    storeId?: string
+  ): Promise<Map<string, unknown[]>> {
+    const cache = new Map<string, unknown[]>();
+
+    const keys = new Set<string>();
+    for (const event of events) {
+      if (event?.event_type !== eventType) continue;
+      const key = keyExtractor(event);
+      if (key) keys.add(key);
+    }
+
+    if (keys.size === 0) return cache;
+
+    try {
+      const keyArray = [...keys];
+      const chunks = chunkArray(keyArray, EventStreamService.PREFETCH_CHUNK_SIZE);
+      const chunkResults = await Promise.all(
+        chunks.map(async (chunkKeys: string[]) => {
+          let query = supabase.from(table).select('*').in(foreignKey, chunkKeys);
+          if (storeId) query = query.eq('store_id', storeId);
+          const { data, error } = await query;
+          if (error) {
+            console.warn(`[EventStream] batchPrefetchChildren(${table}) failed (chunk of ${chunkKeys.length}):`, error.message);
+            return [] as unknown[];
+          }
+          return (data ?? []) as unknown[];
+        })
+      );
+      for (const rows of chunkResults) {
+        for (const row of rows) {
+          const key = (row as Record<string, unknown>)[foreignKey] as string;
+          if (!key) continue;
+          if (!cache.has(key)) cache.set(key, []);
+          cache.get(key)!.push(row);
+        }
+      }
+    } catch (e) {
+      console.warn(`[EventStream] batchPrefetchChildren(${table}) error:`, e);
+    }
+
+    return cache;
+  }
+
   private async fetchAffectedRecord(
     entityType: string,
     entityId: string,
@@ -961,6 +1198,7 @@ export class EventStreamService {
     if (!tableName) {
       throw new Error(`Unknown entity type: ${event.entity_type}`);
     }
+    
 
     const table = (db as any)[tableName];
     if (!table) {
@@ -975,6 +1213,7 @@ export class EventStreamService {
   /**
    * Map entity_type to table name
    */
+  
   private mapEntityTypeToTable(entityType: string): string | null {
     const mapping: Record<string, string> = {
       bill: 'bills',
