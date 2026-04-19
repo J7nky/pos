@@ -1,6 +1,6 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { getDB } from '../../lib/db';
-import { syncService } from '../../services/syncService';
+import { syncService } from '../../services/syncOrchestrator';
 import type { OfflineInitLoadingState } from './useOfflineInitialization';
 
 export interface UseOfflineSyncLifecycleParams {

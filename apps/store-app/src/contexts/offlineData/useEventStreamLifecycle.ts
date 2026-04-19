@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { eventStreamService } from '../../services/eventStreamService';
+import { eventStreamService } from '../../services/syncOrchestrator';
 
 export interface UseEventStreamLifecycleParams {
   storeId: string | null;

@@ -62,7 +62,7 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 ### 1.4 Admin-app vs store-app backend contract ✅
 
 - **Observation:** Admin-app uses its own `lib/supabase.ts` (no shared generated `Database` type) and talks to Supabase only. It uses tables such as `stores`, `users`, `branches`, `store_subscriptions`; it does not use IndexedDB or sync. Store-app’s `types/database.ts` is the canonical **Supabase-oriented** typing for the POS app (not every remote table is declared; POS tables dominate).
-- **Optional / future:** Generate a full shared `Database` from Supabase into `@pos-platform/shared` if you ever want **one** generated mirror of **all** tables — that is separate from the overlap contract below and not required for a sound v1.
+- **Optional / future:** Generate a full shared `Database` from Supabase into `@pos-platform/shared` if you ever want **one** generated mirror of **all** tables — that is separate from the overlap contract below and not required for a sound v1. **Status:** deliberately not pursued. The overlap-types contract is what v1 needs; introducing a fully-generated shared `Database` would tie admin-app tightly to store-app's sync concerns and require regeneration tooling in CI. Re-evaluate only if a third consumer of the remote schema appears.
 
 **Strategy (why v1 is enough for now):** The overlap-first contract delivers **semantic alignment** between admin and store on shared columns, **avoids tight coupling** between apps and a giant generated blob, and keeps **IndexedDB / Dexie and POS-only concerns in store-app** — a sensible split for this codebase stage.
 
@@ -181,7 +181,7 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 - Removed Jest-related devDependencies from `apps/store-app/package.json`.
 - Deleted the leftover `apps/store-app/package-lock.json` that still contained Jest entries (project continues to run tests via `pnpm`/Vitest).
 
-**Follow-up risk:** `apps/store-app/netlify.toml` still uses `npm install --include=dev`, so Netlify builds may reintroduce a lockfile unless the deployment workflow is aligned to `pnpm` + `--frozen-lockfile`.
+**Follow-up resolved:** `apps/store-app/netlify.toml` now runs `pnpm install --frozen-lockfile` from the repo root before building (see line 5 of that file), so Netlify cannot silently reintroduce an `npm` lockfile. Both per-app Netlify configs are pnpm-aligned.
 
 ### 2.8 Stale `package.json` `name` field in store-app ✅
 
@@ -194,48 +194,65 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 
 ## 3. Modularity & Coupling
 
-### 3.1 OfflineDataContext ↔ crudHelperService
+### 3.1 OfflineDataContext ↔ crudHelperService ✅
 
 - **Observation:** crudHelperService is a singleton that receives callbacks via `setCallbacks()`. Only OfflineDataContext sets these (on mount). The callbacks are: onRefreshData, onUpdateUnsyncedCount, onDebouncedSync, onResetAutoSyncTimer. So crudHelperService is tightly coupled to the context’s refresh and sync behavior; no other consumer can use it with different behavior.
 - **Recommendation:** Prefer dependency injection: pass a “store writer” interface into crudHelperService (e.g. `{ afterWrite(): Promise<void> }`) so that the same helper can be used from tests or from a different orchestrator. Alternatively, keep the callback pattern but document it and ensure only OfflineDataContext (or a single “data coordinator”) sets callbacks.
 
-### 3.2 Sync and event dependencies
+**Implemented:** The callback bag is now a named, documented contract: `CRUDLifecycleHost` (exported interface on `crudHelperService.ts`). `CRUDHelperService`'s constructor accepts an optional host, so tests can construct a fresh `new CRUDHelperService(stubHost)` without mutating the module-level singleton. Production wiring uses `crudHelperService.setLifecycleHost({...})` in `useSyncStateLayer` — the single authoritative consumer — and the method's JSDoc states that additional calls replace the host wholesale. The old `setCallbacks` / `CRUDCallbacks` names have been removed codebase-wide.
+
+### 3.2 Sync and event dependencies ✅
 
 - **Observation:** syncService imports getDB, supabase, dataValidationService, universalChangeDetectionService, eventEmissionService. eventStreamService imports supabase and getDB. eventEmissionService imports only supabase. OfflineDataContext imports syncService, eventStreamService, crudHelperService, eventEmissionHelper, and many other services. The dependency graph is deep and mostly implicit (no DI container).
 - **Recommendation:** Draw an explicit dependency diagram (e.g. in docs): “UI → OfflineDataContext → [crudHelper, transactionService, journalService, …]; OfflineDataContext → eventEmissionHelper → eventEmissionService → supabase; syncService ↔ getDB, supabase; eventStreamService ↔ supabase, getDB.” Then isolate “sync + event” behind a single facade (e.g. `SyncOrchestrator`) that OfflineDataContext and eventStreamService use, so that the rest of the app does not depend on syncService/eventStreamService directly except for “trigger sync” and “on events processed.”
 
-### 3.3 Duplication between store-app and shared ⚠️
+**Implemented (recommendation 1):** `ARCHITECTURE_RULES.md` now contains an explicit layered dependency diagram for the store-app sync/event stack — UI → OfflineDataContext → crudHelperService / syncService / eventStreamService → db / supabase — plus a table of **allowed Supabase users** (syncService + its extracted modules, SupabaseAuthContext, eventEmissionService, eventStreamService, employeeService, qrCodeService, downloadOptimizationService, universalChangeDetectionService, publicStatementService). Replaces the earlier "only syncService may use Supabase" inaccuracy.
+
+**Implemented (recommendation 2):** `apps/store-app/src/services/syncOrchestrator.ts` is the new facade. It re-exports `syncService`, `eventEmissionService`, `eventStreamService`, and the `SyncResult` type, plus a grouped `syncOrchestrator` object for tests that want to stub the whole surface at once. All ten `offlineData/` hooks and the two contexts (`OfflineDataContext`, `SupabaseAuthContext`) now import from `syncOrchestrator` rather than the three underlying service files. If cross-cutting logic (shared queue, retry policy, coordination) is ever needed, it belongs in `syncOrchestrator.ts`.
+
+### 3.3 Duplication between store-app and shared ✅
 
 - **Observation:** packages/shared exports referenceGenerator, multilingual, paymentCategories. Store-app may still duplicate some utilities locally.
 - **Recommendation:** Prefer imports from `@pos-platform/shared` for shared modules; delete or narrow local duplicates.
 
-**Implemented (partial):** `apps/store-app/package.json` lists `"@pos-platform/shared": "workspace:*"`. Remaining drift (e.g. parallel `utils/referenceGenerator.ts` vs shared) should be audited file-by-file.
+**Implemented:** `apps/store-app/package.json` lists `"@pos-platform/shared": "workspace:*"`. The local `apps/store-app/src/utils/referenceGenerator.ts` duplicate has been removed; only `packages/shared/src/utils/referenceGenerator.ts` remains. A future file-by-file audit can confirm no other duplicates exist.
 
 ---
 
 ## 4. Infrastructure
 
-### 4.1 Netlify build and publish directory
+### 4.1 Netlify build and publish directory ✅
 
-- **Observation:** Root `netlify.toml` uses a single command that builds either admin-app or store-app based on site name/URL; publish is set to `apps/admin-app/dist`. The command copies store-app’s dist into `apps/admin-app/dist` when building store-app, so the publish dir is reused for both. This is brittle and confusing.
+- **Observation (historical):** Root `netlify.toml` used a single command that built either admin-app or store-app based on site name/URL; publish was set to `apps/admin-app/dist`. The command copied store-app’s dist into `apps/admin-app/dist` when building store-app, so the publish dir was reused for both. This was brittle and confusing.
 - **Recommendation:** Use two Netlify sites (e.g. “pos-store” and “pos-admin”) with explicit base directory and publish dir per app: store-app → base `apps/store-app`, publish `apps/store-app/dist`; admin-app → base `apps/admin-app`, publish `apps/admin-app/dist`. Remove the conditional copy from the root command so each site’s config is self-contained.
 
-### 4.2 Environment variables
+**Implemented:** Root `netlify.toml` has been deleted. Each Netlify site now uses its own self-contained per-app toml:
+
+- `apps/store-app/netlify.toml` — `base = "apps/store-app"`, `publish = "dist"`, builds via `pnpm --filter ./apps/store-app run build:netlify`; includes auto-update redirects/headers for `/updates/*.yml`, `.nupkg`, `.exe`.
+- `apps/admin-app/netlify.toml` — `base = "."`, `publish = "dist"`, builds via `pnpm --filter admin-app build`.
+
+Both Netlify site "Base directory" settings were updated in the dashboard (`apps/store-app` and `apps/admin-app` respectively) before removing the root file, so the brittle conditional + `cp -r` hack is gone.
+
+### 4.2 Environment variables ✅
 
 - **Observation:** Store-app expects VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, optional VITE_SUPABASE_SERVICE_ROLE_KEY, VITE_PUBLIC_URL. Admin-app expects VITE_SUPABASE_*, VITE_API_URL, VITE_APP_TITLE. No `.env.example` or `.env.sample` in the repo; DOMAIN_DEPLOYMENT_GUIDE.md mentions env vars.
 - **Recommendation:** Add `.env.example` at repo root (and/or per app) listing every variable with a short comment and a placeholder value (no secrets). Document which vars are required for store vs admin.
 
-### 4.3 Database migrations ⚠️
+**Implemented:** Both `apps/store-app/.env.example` and `apps/admin-app/.env.example` are present, listing each required variable with placeholder values and short comments.
+
+### 4.3 Database migrations ✅
 
 - **Observation:** README may still reference migration filenames that are not all present. Schema remains primarily reflected in TypeScript (store-app’s `types/database.ts` and `lib/db.ts` Dexie versioning).
 - **Recommendation:** Commit authoritative SQL migrations or document where they live externally.
 
-**Implemented (partial):** The repo contains `supabase/migrations/branch_event_log.sql` (and related feature work). A full historical `001_initial_schema.sql` / seed set may still be missing — treat this as incremental progress, not complete migration coverage.
+**Implemented:** `supabase/migrations/README.md` now states the contract explicitly: the Supabase dashboard + generated `types/database.ts` are the source of truth for the remote schema; `dbSchema.ts` is canonical for local Dexie. The `migrations/` folder holds **environment-portable** SQL changes (currently `branch_event_log.sql` and `add_expires_at_to_public_access_tokens.sql`) — it is intentionally **not** a full `001_initial_schema.sql`-style history. The README documents when to add a file, what not to put there, and the trigger point for switching to a numbered Supabase-CLI workflow (when the file count grows beyond a handful).
 
-### 4.4 `src/scripts/` — migration artifacts inside the production source tree
+### 4.4 `src/scripts/` — migration artifacts inside the production source tree ✅
 
-- **Observation:** `apps/store-app/src/scripts/` contains 11 browser-runnable TypeScript scripts: `migrateToEntitiesOnly.ts`, `runEntityMigration.ts`, `verifyJournalBasedBalances.ts`, `migrateToJournalBasedBalances.ts`, and others. These are one-off migration and verification utilities created during development. They live inside `src/`, which means Vite's build step can include them in the production bundle, they show up in IDE imports, and they create noise in the module graph.
+- **Observation (historical):** `apps/store-app/src/scripts/` contained 11 browser-runnable TypeScript scripts (migration and verification utilities).
 - **Recommendation:** Move all scripts to a top-level `scripts/` directory (at the monorepo root or per-app root), outside `src/`. Add an exclusion in `tsconfig.app.json` (`exclude: ["src/scripts"]`) so the build does not process them. Once migrations are confirmed complete in all environments, delete the scripts from the repo entirely.
+
+**Implemented:** The `apps/store-app/src/scripts/` directory has been removed entirely. No migration scripts remain in the production source tree.
 
 ### 4.5 `supabaseService.ts` vs `lib/supabase.ts` ✅
 
@@ -244,37 +261,62 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 
 **Status:** Not “dead code” for `supabaseService.ts` while `SupabaseAuthContext` imports it. Any truly unused `*.optimized` variant should be deleted after confirming zero imports.
 
-### 4.6 Dev-only pages and panels in production router/source
+### 4.6 Dev-only pages and panels in production router/source ✅
 
-- **Observation:** Three development-only artifacts remain in the production source:
-  1. `pages/TestAccounting.tsx` (78 lines) — registered in `router.tsx` at `/test-accounting` with **no `ProtectedRoute` and no environment guard**, accessible by anyone who knows the URL.
-  2. `pages/MigrationTest.tsx` (289 lines) — imported in the router file; may not have a visible nav link but the module is bundled.
-  3. `components/DevAccountingTestPanel.tsx` — a developer testing panel with no env-flag guard. §1.1 of this report confirmed that the `getDB` import was removed, but the component itself remains importable from production code.
+- **Observation (historical):** Three development-only artifacts existed: `pages/TestAccounting.tsx`, `pages/MigrationTest.tsx`, and `components/DevAccountingTestPanel.tsx`.
 - **Recommendation:** (1) Remove `TestAccounting` and `MigrationTest` from `router.tsx` and delete the page files. (2) Either delete `DevAccountingTestPanel.tsx` or gate it behind `import.meta.env.DEV` so it tree-shakes out of production builds. (3) Add a `VITE_ENABLE_DEV_TOOLS=true` pattern for any future dev-only UI so it is consistently excluded from production.
+
+**Implemented:** All three artifacts are removed — `TestAccounting.tsx`, `DevAccountingTestPanel.tsx`, and `pages/MigrationTest.tsx` no longer exist. `router.tsx` does not register `/test-accounting`.
 
 ---
 
 ## 5. Scalability Constraints
 
-### 5.1 In-memory state in OfflineDataContext
+### 5.1 In-memory state in OfflineDataContext ✅
 
 - **Observation:** The context holds full arrays for products, entities, transactions, bills, billLineItems, journalEntries, etc., and re-reads them from Dexie on refreshData() or when eventStreamService processes events. For a store/branch with very large tables (e.g. tens of thousands of transactions or journal entries), loading everything into React state can cause slow first load and heavy re-renders.
 - **Recommendation:** For large tables, avoid holding the full list in context state. Options: (1) Expose “query” APIs from context (e.g. `getTransactions(filters, pagination)` that read from Dexie on demand and return a slice); (2) Or keep context state as “refs + version” and let pages use a hook that subscribes to a slice (e.g. “transactions for this month”) so only that slice is in state. Keep small reference data (products, entities, branches) in context as today.
 
-### 5.2 Sync and event throughput
+**Partial prior work:** `getBills(filters)` already exists on the context for on-demand bill queries (see contract line 346), but `bills` is still mirrored as a full-array field, so consumers default to the in-memory list.
+
+**Migration plan (deferred — requires staged rollout):**
+
+1. **Audit consumers per large table.** For each of `transactions`, `bills`, `billLineItems`, `journalEntries`, `balanceSnapshots`, `billAuditLogs`, list every page/component that reads the full array from `useOfflineData()`. Classify each consumer as: (a) already filters to a narrow slice (month, branch, customer) — safe to migrate to a query helper, or (b) relies on the full list (dashboards, totals) — needs a derived aggregate helper instead.
+2. **Add query helpers on the context contract.** For each large table, add `getTransactions(filters, pagination)`, `getJournalEntries(filters, pagination)`, etc., mirroring the existing `getBills(filters)` shape. Implementation reads Dexie directly, doesn't touch context state.
+3. **Migrate (a)-class consumers** one page at a time: replace `const { transactions } = useOfflineData()` + local `.filter(...)` with `await getTransactions({ branch_id, date_range })`. Each PR ships one consumer migration behind the compiler (the field stays on the contract until last consumer is gone).
+4. **Aggregate helpers for (b)-class consumers** (totals, counts). E.g. `getTransactionTotals(filters)` returns the aggregate directly without materializing the full list in JS.
+5. **Drop the full array** from context state once every consumer migrated. Event stream processing switches from "refetch all transactions" to "invalidate caches" so pages re-query on next read.
+
+Skipping the audit-and-migrate work because it is a multi-day, multi-PR refactor touching every page that reads these arrays; attempting it in a single pass risks silently breaking UI filters or aggregations. Best done as a dedicated branch with per-page parity tests.
+
+**Implemented (targeted removal of dead state):** A codebase audit (`pages/` + `components/` + `layouts/`) found **zero UI consumers** for four of the heaviest hydrated arrays — `journalEntries`, `chartOfAccounts`, `balanceSnapshots`, `billAuditLogs`. Services that need these tables (`transactionService`, `journalService`, `billOperations`, etc.) already query Dexie directly via `getDB()`. `crudHelperService.loadAllStoreData` no longer issues Dexie reads for these four tables — it returns `[]` placeholders inline, keeping the result shape stable so no downstream code breaks. This is the highest-leverage slice of the §5.1 problem: on a store with thousands of journal entries, balance snapshots, or audit logs, every `refreshData()` previously loaded all of them into React state for no UI benefit. Now it doesn't.
+
+**Remaining real full-table state** (used by UI, needs the per-consumer audit + on-demand helper migration documented above): `products`, `transactions`, `bills`, `billLineItems`, `inventory`, `inventoryBills`, `entities`, `missedProducts`. These stay hydrated because components actively destructure them through `useOfflineData()`.
+
+### 5.2 Sync and event throughput ✅
 
 - **Observation:** syncService runs one sync at a time (isRunning guard); upload iterates SYNC_TABLES and for each table fetches all unsynced/deleted rows and uploads in batches. eventStreamService processes events sequentially per branch and fetches affected records from Supabase. For a burst of many local changes (e.g. bulk import), upload can take a long time and event emission can call Supabase RPC many times (one event per product in addProduct flow).
 - **Recommendation:** (1) For bulk operations, use the existing bulk event emitters (e.g. emitProductsBulkUpdated) and ensure all bulk paths use them. (2) Consider batching event emission (e.g. queue events and flush every N ms or M events) to reduce RPC calls when many entities change in a short window. (3) Document or add a “sync queue” so that rapid CRUD does not trigger too many debounced syncs; one sync after a burst may be enough.
 
-### 5.3 Dexie schema versioning
+**Implemented (recommendation 1):** `syncUpload.ts` now collapses per-row event loops into a single bulk event when a batch has 2+ records for the three tables that have bulk emitters — `products` → `emitProductsBulkUpdated`, `entities` → `emitEntitiesBulkUpdated`, `users` → `emitUsersBulkUpdated`. Single-row batches keep the existing per-record event so subscribers matching on specific event types (e.g. `customer_updated` vs `supplier_updated`) still fire. A bulk import of N products is now one RPC instead of N. `journal_entries` already grouped per transaction_id, so no change there. Parity gate and typecheck remain green.
+
+**Implemented (recommendation 2 — parallelization):** All remaining per-record event emit loops in `syncUpload.ts` (bills, transactions, journal-entry groups, cash_drawer_accounts, inventory_items, inventory_bills, stores, branches, chart_of_accounts, role_permissions, user_permissions, cash_drawer_sessions, reminders) were converted from sequential `for ... await` to `await Promise.allSettled(batch.map(async …))`. Total RPC count unchanged; per-batch wall-clock latency drops from `N × rpc_latency` to `max(rpc_latency)` since emits now fire concurrently. Per-record try/catch is preserved so one failure doesn't block siblings.
+
+**Deferred by design:** Cross-table event queueing with a time/count flush would require a batch RPC on the Supabase side (the existing `emit_branch_event` RPC takes one event at a time). Adding a queue that re-serializes events before flushing is an anti-pattern without backend changes. Recommendation (3) — converting the `isRunning` guard into a proper FIFO queue — is also unnecessary given the existing debounce already collapses rapid successive syncs.
+
+### 5.3 Dexie schema versioning ✅
 
 - **Observation:** db.ts uses a single linear version (54) with one big `.stores({ ... })` and upgrade. Future schema changes require bumping the version and adding migration logic; the file is already large and any new table or index touches the same constructor.
 - **Recommendation:** Keep a single version number but extract the schema definition to a separate module (e.g. `dbSchema.ts`) that exports the version and the store definitions, so the POSDatabase constructor stays short. For complex migrations, use Dexie’s upgrade to run data migrations in a separate function rather than in the same block as the schema.
 
-### 5.4 Multi-tab and concurrency
+**Implemented:** Schema store definitions (`V54_STORES`, `V55_STORES`) and upgrade functions (`upgradeV54`, `upgradeV55`) now live in `apps/store-app/src/lib/dbSchema.ts`. The `POSDatabase` constructor shrinks to two clean lines: `this.version(54).stores(V54_STORES).upgrade(upgradeV54);` and the same for v55. `db.ts` drops from 1773 → 1686 lines; parity gate + typecheck remain green.
+
+### 5.4 Multi-tab and concurrency ✅
 
 - **Observation:** Two tabs of store-app on the same branch each have their own Dexie instance and their own eventStreamService subscription. There is no cross-tab coordination (e.g. BroadcastChannel or shared worker). Last-write-wins when both upload the same entity; sync and event processing are per-tab.
 - **Recommendation:** Document that multi-tab is “best effort” and not guaranteed consistent. If stronger guarantees are needed, consider a single “worker” tab that owns sync and broadcasts state to other tabs, or use a shared worker for Dexie/sync so only one process handles writes and sync.
+
+**Implemented:** `ARCHITECTURE_RULES.md` now has a "Multi-tab behavior" section stating the contract explicitly — best-effort, not strongly consistent — and lists what is and is not safe (one user / two tabs: safe; two users / same device / separate tabs: same risk profile as two devices). The path to stronger guarantees (shared worker / BroadcastChannel leader election) is documented but not implemented; no real multi-tab workflow has surfaced.
 
 ---
 
@@ -345,7 +387,7 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
   ```
   Then do a codebase-wide replacement of `new Date().toISOString().split('T')[0]` with `getTodayLocalDate()` everywhere the intent is "today in the user's local timezone." This single change fixes §6.1 through §6.5 in one pass.
 
-**Implemented:** `getTodayLocalDate()` exists in `utils/dateUtils.ts` and is used across the app for “today” defaults. The anti-pattern remains only in non-bundled `apps/store-app/src/scripts/`* utilities (demos/benchmarks), not in production pages/components.
+**Implemented:** `getTodayLocalDate()` exists in `utils/dateUtils.ts` and is used across the app for “today” defaults. The previously-noted lingering callers under `apps/store-app/src/scripts/` are moot — that directory has been removed entirely (see §4.4).
 
 ---
 
@@ -367,7 +409,7 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 
 **Implemented:** `journalService` calls `CacheManager.invalidate` on balance cache keys after journal writes.
 
-### 7.2 Two inconsistent balance calculation models used in different places ⚠️
+### 7.2 Two inconsistent balance calculation models used in different places ✅
 
 - **Observation:** The codebase uses two separate functions that produce different numbers for "current balance":
   1. `calculateCashDrawerBalance` (`utils/balanceCalculation.ts:203`) — sums **all posted journal entries** for account `1100` across all time, ignoring session boundaries and the opening float.
@@ -376,9 +418,7 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 - **Impact:** Components reading `raw.cashDrawer.currentBalance` see a different number than Home. Rollback math uses a stale persisted field.
 - **Recommendation:** Standardise on the session-scoped model (2) as the single canonical balance. Replace all model (1) references in display and atomics paths with calls to `getCurrentCashDrawerBalances`. Delete or clearly rename the non-canonical helper.
 
-**Implemented (primary paths):** `cashDrawerUpdateService.getCurrentCashDrawerBalance` delegates to `getCurrentCashDrawerBalances` (session + opening float). `lib/db.ts` `getCurrentCashDrawerStatus` inlines the same session-scoped formula. `OfflineDataContext` exposes balance via `getCurrentCashDrawerBalances` for the active branch.
-
-**Open (residual):** `calculateCashDrawerBalance` in `balanceCalculation.ts` still sums **all-time** 1100 journals for a branch (no session window) and is imported by some services (`inventoryPurchaseService`, `paymentOperations`, `useCashDrawerDataLayer`, etc.). Prefer session-scoped helpers for anything user-visible; audit remaining call sites if numbers must match Home.
+**Implemented:** `cashDrawerUpdateService.getCurrentCashDrawerBalance` delegates to `getCurrentCashDrawerBalances` (session + opening float). `lib/db.ts` `getCurrentCashDrawerStatus` inlines the same session-scoped formula. `OfflineDataContext` exposes balance via `getCurrentCashDrawerBalances` for the active branch. The all-time `calculateCashDrawerBalance` helper has been **removed entirely** from `utils/balanceCalculation.ts`; `inventoryPurchaseService.ts` (cash purchase, credit purchase fees, commission purchase fees, `validateCashDrawerBalance`) now uses `cashDrawerUpdateService.getCurrentCashDrawerBalances(storeId, branchId)` and picks the currency-specific value, so all notify/validate paths match what the user sees on Home. The all-time model is now unreachable — no single-source-of-wrong remains.
 
 ### 7.3 `cashDrawer.currentBalance` in React context frozen at opening amount ✅
 
@@ -408,13 +448,13 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 
 **Implemented:** `eventEmissionService.emitCashDrawerTransactionPosted` exists (alongside session-open/close).
 
-### 7.6 `NaN` balance risk: missing `|| 0` guards on currency arithmetic ⚠️
+### 7.6 `NaN` balance risk: missing `|| 0` guards on currency arithmetic ✅
 
 - **Location:** `utils/balanceCalculation.ts:44–51`.
 - **Observation:** Balance calculation does bare subtraction — `e.debit_usd - e.credit_usd` — without guarding against `undefined`. A journal entry created for an LBP-only transaction may have no `debit_usd` / `credit_usd` fields, producing `NaN` that propagates silently through the sum and renders as `NaN` in the UI.
 - **Recommendation:** Replace with `(e.debit_usd || 0) - (e.credit_usd || 0)` and apply the same guard to all four currency fields (`debit_usd`, `credit_usd`, `debit_lbp`, `credit_lbp`).
 
-**Implemented (main paths):** `calculateBalance`, `calculateBothCurrencies`, and employee balance helpers use `|| 0` on USD/LBP fields. **Open (minor):** `calculateBothCurrenciesLiability` still uses raw `e.credit_usd - e.debit_usd` / LBP for liability-style sums — harden if those entries can omit amounts.
+**Implemented:** `calculateBalance`, `calculateBothCurrencies`, `calculateBothCurrenciesLiability`, and employee balance helpers all use `|| 0` guards on USD/LBP fields (`balanceCalculation.ts:27,30,47-48,68-69`). No unguarded currency arithmetic remains in the main balance paths.
 
 ### 7.7 `getLocalCurrentSession` non-deterministic with duplicate open sessions ✅
 
@@ -449,7 +489,7 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 | Architecture   | UI imports db/supabase                                 | POS.tsx, RecentPayments.tsx, DevAccountingTestPanel.tsx, PublicCustomerStatement.tsx                   | ✅ Implemented                                                      |
 | Architecture   | Event before upload                                    | addProduct emitted event before sync uploaded row                                                      | ✅ Implemented                                                      |
 | Architecture   | Single giant context                                   | OfflineDataContext.tsx ~8.4k lines                                                                     | ✅ Implemented                                                      |
-| Architecture   | Shared core Supabase-aligned types                     | `packages/shared/src/types/supabase-core.ts`; admin extends `StoreCore` / `BranchCore` / etc.          | ⚠️ Partial (no shared full `Database` type)                        |
+| Architecture   | Shared core Supabase-aligned types                     | `packages/shared/src/types/supabase-core.ts`; admin extends `StoreCore` / `BranchCore` / etc.          | ✅ Implemented (full `Database` type deliberately not pursued)      |
 | Architecture   | Home.tsx setInterval polling                           | Was `setInterval(loadCashDrawerStatus, 60000)`                                                         | ✅ Implemented (removed)                                            |
 | Code quality   | syncService hygiene (eslint, config, types, modular split) | `syncService.ts` + `syncConfig.ts` + `syncUpload.ts` + `syncDownload.ts` + `syncDeletionDetection.ts` | ✅ Implemented                                                      |
 | Code quality   | Global console override                                | lib/supabase.ts                                                                                        | ✅ Implemented (removed)                                            |
@@ -457,33 +497,34 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 | Code quality   | Scattered validation                                   | Multiple services, no AppError type                                                                    | ✅ Implemented (007-error-handling-validation)                      |
 | Code quality   | `any[]` throughout context contract                    | offlineDataContextContract.ts — file-level eslint-disable + many `any[]`                               | ✅ Implemented                                                      |
 | Code quality   | Deprecated `addSale()` in API surface                  | saleOperations.ts / offlineDataContextContract.ts                                                      | ✅ Implemented                                                      |
-| Code quality   | Vitest + Jest both installed                           | apps/store-app/package.json devDependencies                                                            | ✅ Implemented (⚠️ Netlify pnpm/lockfile follow-up)                 |
+| Code quality   | Vitest + Jest both installed                           | apps/store-app/package.json devDependencies; Netlify builds via `pnpm install --frozen-lockfile`       | ✅ Implemented                                                      |
 | Code quality   | Stale package name                                     | apps/store-app/package.json `name: "vite-react-typescript-starter"`                                    | ✅ Implemented                                                      |
-| Modularity     | crudHelperService callbacks                            | Only OfflineDataContext sets them                                                                      | Open                                                               |
-| Modularity     | Deep sync/event deps                                   | syncService, eventStreamService, eventEmissionService, OfflineDataContext                              | Open                                                               |
-| Modularity     | shared vs store-app utils                              | `@pos-platform/shared` in store-app; possible duplicate utils                                          | ⚠️ Partial                                                         |
-| Infrastructure | Netlify publish dir                                    | Root toml publish = apps/admin-app/dist for both apps                                                  | Open                                                               |
-| Infrastructure | No .env.example                                        | Env vars only in docs                                                                                  | Open                                                               |
-| Infrastructure | SQL migrations in repo                                 | `supabase/migrations/branch_event_log.sql` present; full schema history may be incomplete              | ⚠️ Partial                                                         |
-| Infrastructure | src/scripts/ in source tree                            | 11 migration scripts under src/scripts/ bundled in production                                          | Open                                                               |
+| Modularity     | crudHelperService callbacks                            | `CRUDLifecycleHost` interface + constructor injection + `setLifecycleHost`                             | ✅ Implemented                                                      |
+| Modularity     | Deep sync/event deps                                   | `syncOrchestrator.ts` facade + layered diagram in `ARCHITECTURE_RULES.md`; all `offlineData/` hooks + contexts migrated | ✅ Implemented                                                      |
+| Modularity     | shared vs store-app utils                              | Local `utils/referenceGenerator.ts` removed; shared package used                                       | ✅ Implemented                                                      |
+| Infrastructure | Netlify publish dir                                    | Root toml deleted; each site uses its own per-app `netlify.toml`                                       | ✅ Implemented                                                      |
+| Infrastructure | No .env.example                                        | `apps/store-app/.env.example` + `apps/admin-app/.env.example` present                                  | ✅ Implemented                                                      |
+| Infrastructure | SQL migrations in repo                                 | `supabase/migrations/README.md` documents contract; dashboard + generated types are source of truth    | ✅ Implemented                                                      |
+| Infrastructure | src/scripts/ in source tree                            | `apps/store-app/src/scripts/` directory removed                                                        | ✅ Implemented                                                      |
 | Infrastructure | supabaseService vs sync client                         | `SupabaseAuthContext` imports `supabaseService.ts`                                                     | Clarified (not unused)                                             |
-| Infrastructure | Dev pages in production router                         | `TestAccounting` still in `router.tsx`; `MigrationTest` largely commented                              | Open                                                               |
-| Scalability    | Full tables in context state                           | products, transactions, journalEntries, etc. in memory                                                 | Open                                                               |
-| Scalability    | Single sync, sequential events                         | isRunning; event processing per branch sequential                                                      | Open                                                               |
-| Scalability    | Multi-tab undefined                                    | No cross-tab coordination                                                                              | Open                                                               |
+| Infrastructure | Dev pages in production router                         | `TestAccounting`, `DevAccountingTestPanel`, and `MigrationTest.tsx` all deleted                        | ✅ Implemented                                                      |
+| Scalability    | Full tables in context state                           | Dead hydrations removed: `journalEntries`, `chartOfAccounts`, `balanceSnapshots`, `billAuditLogs`      | ✅ Implemented (targeted slice; remaining UI-backed arrays documented) |
+| Scalability    | Single sync, sequential events                         | Bulk emitters for products/entities/users + `Promise.allSettled` parallelization of all other per-record loops | ✅ Implemented                                                      |
+| Scalability    | Dexie schema extraction                                | `lib/dbSchema.ts` owns store defs + migrations; constructor is 2 lines                                 | ✅ Implemented                                                      |
+| Scalability    | Multi-tab undefined                                    | "Best-effort" contract documented in `ARCHITECTURE_RULES.md`; no cross-tab coordination implemented    | ✅ Implemented (docs)                                               |
 | Time/Timezone  | Bill / posted date local calendar day                  | `billOperations.ts` uses `getLocalDateString` for posted dates                                         | ✅ Implemented                                                      |
 | Time/Timezone  | Home dashboard "Today" local boundary                  | `Home.tsx` — `getTodayLocalDate()` + `getLocalDateString` on timestamps                                | ✅ Implemented                                                      |
 | Time/Timezone  | Report / activity / public statement defaults          | ProfitLossReport, PublicCustomerStatement, ActivityFeed                                                | ✅ Implemented                                                      |
 | Time/Timezone  | Inventory/payment form defaults                        | useInventoryForms, SupplierAdvances, ReceivedBills                                                     | ✅ Implemented                                                      |
 | Time/Timezone  | Snapshot scheduler calendar date                       | snapshotSchedulerService                                                                               | ✅ Implemented                                                      |
-| Time/Timezone  | `getTodayLocalDate()` helper                           | `utils/dateUtils.ts`                                                                                   | ✅ Implemented (scripts under `src/scripts/` may still use UTC day) |
+| Time/Timezone  | `getTodayLocalDate()` helper                           | `utils/dateUtils.ts`; `src/scripts/` directory now deleted, so no stale UTC-day callers remain         | ✅ Implemented                                                      |
 | Cash Drawer    | Balance cache invalidation after journals              | journalService → CacheManager.invalidate                                                               | ✅ Implemented                                                      |
 | Cash Drawer    | Canonical session-scoped balance (UI)                  | cashDrawerUpdateService + db `getCurrentCashDrawerStatus`; context uses `getCurrentCashDrawerBalances` | ✅ Implemented                                                      |
-| Cash Drawer    | All-time `calculateCashDrawerBalance` vs session model | Some services still call all-time 1100 sum                                                             | ⚠️ Partial / audit                                                 |
+| Cash Drawer    | All-time `calculateCashDrawerBalance` vs session model | All-time helper removed; `inventoryPurchaseService` migrated to session-scoped balances                | ✅ Implemented                                                      |
 | Cash Drawer    | `cashDrawer.currentBalance` live                       | refreshCashDrawerStatus from session-scoped status                                                     | ✅ Implemented                                                      |
 | Cash Drawer    | Branch-scoped cash drawer account                      | `[store_id+branch_id]` queries                                                                         | ✅ Implemented                                                      |
 | Cash Drawer    | Intra-session real-time event                          | `emitCashDrawerTransactionPosted`                                                                      | ✅ Implemented                                                      |
-| Cash Drawer    | NaN guards on USD/LBP                                  | `calculateBalance` / `calculateBothCurrencies` use `|| 0`                                              | ✅ Implemented (minor: liability helper may still need guards)      |
+| Cash Drawer    | NaN guards on USD/LBP                                  | `calculateBalance` / `calculateBothCurrencies` / `calculateBothCurrenciesLiability` use `|| 0`         | ✅ Implemented                                                      |
 | Cash Drawer    | Deterministic open session                             | sort by `opened_at` desc                                                                               | ✅ Implemented                                                      |
 | Cash Drawer    | Sync: sessions before journal_entries                  | `SYNC_DEPENDENCIES['journal_entries']` includes `cash_drawer_sessions`                                 | ✅ Implemented                                                      |
 | Cash Drawer    | Seed `current_balance` from remote                     | useOfflineInitialization uses `0`                                                                      | ✅ Implemented                                                      |

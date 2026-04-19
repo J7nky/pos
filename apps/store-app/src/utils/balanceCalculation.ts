@@ -190,49 +190,6 @@ export async function calculateEntityBalance(
 }
 
 /**
- * Calculate cash drawer balance from journal entries (TRUTH)
- * 
- * Cash drawer balance = sum of all cash account (1100) journal entries
- * for the specific branch and currency.
- * 
- * @param storeId - Store ID
- * @param branchId - Branch ID  
- * @param currency - Currency
- * @returns True cash drawer balance from journal entries
- */
-export async function calculateCashDrawerBalance(
-  storeId: string,
-  branchId: string,
-  currency: 'USD' | 'LBP'
-): Promise<number> {
-  try {
-    // Get all cash journal entries for this store and branch (both currencies in same entries)
-    const entries = await getDB().journal_entries
-      .where('[store_id+account_code]')
-      .equals([storeId, '1100'])
-      .and(e => e.is_posted === true && e.branch_id === branchId)
-      .toArray();
-
-    return calculateBalance(entries, currency);
-  } catch (error) {
-    // Fallback: If compound index doesn't exist, use simpler index and filter manually
-    console.warn('Compound index [store_id+account_code] not available, using fallback query');
-    
-    // Use store_id+branch_id index for exact match
-    const entries = await getDB().journal_entries
-      .where('[store_id+branch_id]')
-      .equals([storeId, branchId])
-      .and(e => 
-        e.account_code === '1100' &&
-        e.is_posted === true
-      )
-      .toArray();
-
-    return calculateBalance(entries, currency);
-  }
-}
-
-/**
  * Calculate expected cash drawer amount during a session
  * 
  * Expected = Opening Amount + Cash Inflows - Cash Outflows

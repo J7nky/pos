@@ -8,7 +8,15 @@ const db = getDB();
 
 type Tables = Database['public']['Tables'];
 
-interface CRUDCallbacks {
+/**
+ * CRUDLifecycleHost — the orchestration contract the CRUD helper depends on.
+ *
+ * After every write the helper calls back into its host so the surrounding
+ * app (context, UI state, sync timer) can react. The production host is
+ * wired once by `useSyncStateLayer`; tests may construct a fresh
+ * `new CRUDHelperService(stubHost)` with jest/vitest fns.
+ */
+export interface CRUDLifecycleHost {
   onRefreshData?: () => Promise<void>;
   onUpdateUnsyncedCount?: () => Promise<void>;
   onDebouncedSync?: () => void;
@@ -17,10 +25,23 @@ interface CRUDCallbacks {
 }
 
 export class CRUDHelperService {
-  private callbacks: CRUDCallbacks = {};
+  private host: CRUDLifecycleHost;
 
-  setCallbacks(callbacks: CRUDCallbacks) {
-    this.callbacks = callbacks;
+  /**
+   * The module-level singleton is constructed with an empty host; production
+   * code binds the real host through `setLifecycleHost` from
+   * `useSyncStateLayer`. Tests may pass a stub directly.
+   */
+  constructor(host: CRUDLifecycleHost = {}) {
+    this.host = host;
+  }
+
+  /**
+   * Bind or rebind the lifecycle host. Typically called once from the sync
+   * state layer; additional calls replace the prior host wholesale.
+   */
+  setLifecycleHost(host: CRUDLifecycleHost): void {
+    this.host = host;
   }
 
   /**
@@ -322,29 +343,29 @@ export class CRUDHelperService {
   private async triggerPostOperationCallbacks(): Promise<void> {
     console.log('🔧 CRUDHelper: Starting post-operation callbacks');
     
-    if (this.callbacks.onRefreshData) {
+    if (this.host.onRefreshData) {
       console.log('🔧 CRUDHelper: Calling onRefreshData callback');
-      await this.callbacks.onRefreshData();
+      await this.host.onRefreshData();
       console.log('🔧 CRUDHelper: onRefreshData callback completed');
     } else {
       console.log('🔧 CRUDHelper: No onRefreshData callback set');
     }
     
-    if (this.callbacks.onUpdateUnsyncedCount) {
+    if (this.host.onUpdateUnsyncedCount) {
       console.log('🔧 CRUDHelper: Calling onUpdateUnsyncedCount callback');
-      await this.callbacks.onUpdateUnsyncedCount();
+      await this.host.onUpdateUnsyncedCount();
       console.log('🔧 CRUDHelper: onUpdateUnsyncedCount callback completed');
     }
     
-    if (this.callbacks.onResetAutoSyncTimer) {
+    if (this.host.onResetAutoSyncTimer) {
       console.log('🔧 CRUDHelper: Calling onResetAutoSyncTimer callback');
-      this.callbacks.onResetAutoSyncTimer();
+      this.host.onResetAutoSyncTimer();
       console.log('🔧 CRUDHelper: onResetAutoSyncTimer callback completed');
     }
     
-    if (this.callbacks.onDebouncedSync) {
+    if (this.host.onDebouncedSync) {
       console.log('🔧 CRUDHelper: Calling onDebouncedSync callback');
-      this.callbacks.onDebouncedSync();
+      this.host.onDebouncedSync();
       console.log('🔧 CRUDHelper: onDebouncedSync callback completed');
     }
     
@@ -356,33 +377,35 @@ export class CRUDHelperService {
    * Now supports branch filtering for operational tables
    */
   async loadAllStoreData(storeId: string, branchId?: string | null) {
+    // IMPROVEMENTS_ENHANCEMENTS_REPORT §5.1: journal_entries, chart_of_accounts,
+    // bill_audit_logs, and balance_snapshots are no longer hydrated into context
+    // state — no UI consumer reads them, and the services that need them query
+    // Dexie directly via getDB(). Keep the result-shape stable by returning [].
     const operations = [
       // Store-level data (no branch filtering)
       () => this.getEntitiesByStore('products', storeId),
-      // Suppliers and customers migrated to entities table - query entities instead
-      () => this.getEntitiesByStore('entities', storeId).then(entities => 
+      () => this.getEntitiesByStore('entities', storeId).then(entities =>
         entities.filter((e: any) => e.entity_type === 'supplier')
       ),
-      () => this.getEntitiesByStore('entities', storeId).then(entities => 
+      () => this.getEntitiesByStore('entities', storeId).then(entities =>
         entities.filter((e: any) => e.entity_type === 'customer')
       ),
       () => this.getEntitiesByStore('users', storeId),
-      () => this.getEntitiesByStore('chart_of_accounts', storeId),
-      
+      () => Promise.resolve<any[]>([]), // chart_of_accounts — not hydrated (§5.1)
+
       // Branch-specific data (filtered by branch if provided)
       () => this.getEntitiesByStoreBranch('inventory_items', storeId, branchId),
       () => this.getEntitiesByStoreBranch('transactions', storeId, branchId),
       () => this.getEntitiesByStoreBranch('inventory_bills', storeId, branchId),
       () => this.getEntitiesByStoreBranch('bills', storeId, branchId),
       () => this.getEntitiesByStoreBranch('bill_line_items', storeId, branchId),
-      () => this.getEntitiesByStoreBranch('bill_audit_logs', storeId, branchId),
+      () => Promise.resolve<any[]>([]), // bill_audit_logs — not hydrated (§5.1)
       () => this.getEntitiesByStoreBranch('cash_drawer_accounts', storeId, branchId),
       () => this.getEntitiesByStoreBranch('cash_drawer_sessions', storeId, branchId),
       () => this.getEntitiesByStoreBranch('missed_products', storeId, branchId),
-      () => this.getEntitiesByStoreBranch('journal_entries', storeId, branchId),
-      // Entities are store-level (not branch-specific) - customers/suppliers have branch_id: null
+      () => Promise.resolve<any[]>([]), // journal_entries — not hydrated (§5.1)
       () => this.getEntitiesByStore('entities', storeId),
-      () => this.getEntitiesByStoreBranch('balance_snapshots', storeId, branchId),
+      () => Promise.resolve<any[]>([]), // balance_snapshots — not hydrated (§5.1)
     ];
 
     const startTime = Date.now();

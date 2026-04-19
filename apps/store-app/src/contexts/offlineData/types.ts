@@ -5,7 +5,7 @@
  */
 
 import type { Database } from '../../types/database';
-import type { SyncResult } from '../../services/syncService';
+import type { SyncResult } from '../../services/syncOrchestrator';
 import type { Branch, NotificationRecord, NotificationType, NotificationPreferences } from '../../types';
 
 export type Tables = Database['public']['Tables'];

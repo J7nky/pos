@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npx eslint *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(pnpm exec *)",
+      "Bash(pnpm run *)"
     ]
   }
 }

@@ -3,7 +3,7 @@ import { User } from '@supabase/supabase-js';
 import { SupabaseService } from '../services/supabaseService';
 import { supabase } from '../lib/supabase';
 import { getDB } from '../lib/db';
-import { syncService } from '../services/syncService';
+import { syncService } from '../services/syncOrchestrator';
 import { localAuthService } from '../services/localAuthService';
 import { credentialStorageService } from '../services/credentialStorageService';
 

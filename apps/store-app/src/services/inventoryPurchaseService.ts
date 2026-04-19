@@ -2,7 +2,6 @@ import { createId, getDB } from '../lib/db';
 import { getTodayLocalDate } from '../utils/dateUtils';
 import { cashDrawerUpdateService } from './cashDrawerUpdateService';
 import { TransactionService } from './transactionService';
-import { calculateCashDrawerBalance } from '../utils/balanceCalculation';
 import { currencyService } from './currencyService';
 import { journalService } from './journalService';
 import { accountingInitService } from './accountingInitService';
@@ -438,11 +437,11 @@ export class InventoryPurchaseService {
 
         // Get final cash drawer balance after fees
         if (feeTransactionIds.length > 0) {
-          const finalBalance = await calculateCashDrawerBalance(
+          const balances = await cashDrawerUpdateService.getCurrentCashDrawerBalances(
             data.store_id,
-            data.branch_id,
-            data.currency
+            data.branch_id
           );
+          const finalBalance = data.currency === 'USD' ? balances.USD : balances.LBP;
           totalCashDrawerImpact = finalBalance;
         }
       }
@@ -647,11 +646,11 @@ export class InventoryPurchaseService {
           cashDrawerImpact = -fees.total;
 
           // Get final cash drawer balance after fees
-          const finalBalance = await calculateCashDrawerBalance(
+          const balances = await cashDrawerUpdateService.getCurrentCashDrawerBalances(
             data.store_id,
-            data.branch_id,
-            data.currency
+            data.branch_id
           );
+          const finalBalance = data.currency === 'USD' ? balances.USD : balances.LBP;
 
           // Notify UI of cash drawer update
           cashDrawerUpdateService.notifyCashDrawerUpdate(
@@ -739,11 +738,11 @@ export class InventoryPurchaseService {
           cashDrawerImpact = -fees.total;
 
           // Get final cash drawer balance after fees
-          const finalBalance = await calculateCashDrawerBalance(
+          const balances = await cashDrawerUpdateService.getCurrentCashDrawerBalances(
             data.store_id,
-            data.branch_id,
-            data.currency
+            data.branch_id
           );
+          const finalBalance = data.currency === 'USD' ? balances.USD : balances.LBP;
 
           // Notify UI of cash drawer update
           cashDrawerUpdateService.notifyCashDrawerUpdate(
@@ -896,11 +895,11 @@ export class InventoryPurchaseService {
       const { totalAmount } = this.calculatePurchaseAmounts(data);
 
       // Get current cash drawer balance in the transaction currency (for informational purposes only)
-      const currentBalance = await calculateCashDrawerBalance(
+      const balances = await cashDrawerUpdateService.getCurrentCashDrawerBalances(
         data.store_id,
-        data.branch_id,
-        data.currency
+        data.branch_id
       );
+      const currentBalance = data.currency === 'USD' ? balances.USD : balances.LBP;
 
       // Format currency for informational purposes
       const formattedBalance = currencyService.formatCurrency(currentBalance, data.currency);

@@ -20,7 +20,7 @@ import type {
 } from '../../types';
 import type { InventoryItem } from '../../types/inventory';
 import type { BalanceSnapshot, ChartOfAccounts, JournalEntry } from '../../types/accounting';
-import type { SyncResult } from '../../services/syncService';
+import type { SyncResult } from '../../services/syncOrchestrator';
 
 type Tables = Database['public']['Tables'];
 
