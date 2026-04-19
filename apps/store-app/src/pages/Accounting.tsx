@@ -306,6 +306,16 @@ export default function Accounting() {
     }
   }, [flashingItemId]);
 
+  // Refresh balance hooks and data after undo so snapshot-cached values don't stay stale
+  useEffect(() => {
+    const handleUndoCompleted = async () => {
+      await customerBalances.refreshAll();
+      await supplierBalances.refreshAll();
+    };
+    window.addEventListener('undo-completed', handleUndoCompleted);
+    return () => window.removeEventListener('undo-completed', handleUndoCompleted);
+  }, [customerBalances.refreshAll, supplierBalances.refreshAll]);
+
   // Fetch cash drawer balance
   useEffect(() => {
     const fetchBalance = async () => {

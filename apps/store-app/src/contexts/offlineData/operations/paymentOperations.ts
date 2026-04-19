@@ -17,6 +17,7 @@ import { generatePaymentReference, generateAdvanceReference, generateReversalRef
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
+import { withUndoOperation } from './withUndoOperation';
 
 // ─── helper (used only in supplier advance functions) ──────────────────────
 function getSupplierAdvanceBalances(supplier: any) {
@@ -52,6 +53,7 @@ export interface ProcessEmployeePaymentDeps {
   exchangeRate: number;
   refreshData: () => Promise<void>;
   i18n: { en: any; ar: any };
+  pushUndo: (action: any) => void;
 }
 
 export interface SupplierAdvanceDeps {
@@ -132,8 +134,6 @@ export async function processPayment(
     }
 
     const isCustomer = entityType === 'customer';
-    const currentLbBalance = (entity as any).lb_balance || 0;
-    const currentUsdBalance = (entity as any).usd_balance || 0;
 
     const transactionDescription: MultilingualString = {
       en: (paymentDirection === 'receive'
@@ -152,67 +152,43 @@ export async function processPayment(
       source: 'web' as const
     };
 
-    let result: any;
+    await withUndoOperation('operation', pushUndo, async () => {
+      let result: any;
 
-    if (isCustomer) {
-      if (paymentDirection === 'receive') {
-        result = await transactionService.createCustomerPayment(
-          entityId, numAmount, currency, transactionDescription, context,
-          { reference: reference || generatePaymentReference(), updateCashDrawer: true }
-        );
+      if (isCustomer) {
+        if (paymentDirection === 'receive') {
+          result = await transactionService.createCustomerPayment(
+            entityId, numAmount, currency, transactionDescription, context,
+            { reference: reference || generatePaymentReference(), updateCashDrawer: true }
+          );
+        } else {
+          result = await transactionService.createTransaction({
+            category: TRANSACTION_CATEGORIES.CUSTOMER_REFUND,
+            amount: numAmount, currency, description: transactionDescription,
+            entityId, reference: reference || generatePaymentReference(),
+            context, updateBalances: true, updateCashDrawer: true, createAuditLog: true, _synced: false
+          });
+        }
       } else {
-        result = await transactionService.createTransaction({
-          category: TRANSACTION_CATEGORIES.CUSTOMER_REFUND,
-          amount: numAmount, currency, description: transactionDescription,
-          entityId, reference: reference || generatePaymentReference(),
-          context, updateBalances: true, updateCashDrawer: true, createAuditLog: true, _synced: false
-        });
+        if (paymentDirection === 'pay') {
+          result = await transactionService.createSupplierPayment(
+            entityId, numAmount, currency, transactionDescription, context,
+            { reference: reference || generatePaymentReference(), updateCashDrawer: true }
+          );
+        } else {
+          result = await transactionService.createTransaction({
+            category: TRANSACTION_CATEGORIES.SUPPLIER_REFUND,
+            amount: numAmount, currency, description: transactionDescription,
+            entityId, reference: reference || generatePaymentReference(),
+            context, updateBalances: true, updateCashDrawer: true, createAuditLog: true, _synced: false
+          });
+        }
       }
-    } else {
-      if (paymentDirection === 'pay') {
-        result = await transactionService.createSupplierPayment(
-          entityId, numAmount, currency, transactionDescription, context,
-          { reference: reference || generatePaymentReference(), updateCashDrawer: true }
-        );
-      } else {
-        result = await transactionService.createTransaction({
-          category: TRANSACTION_CATEGORIES.SUPPLIER_REFUND,
-          amount: numAmount, currency, description: transactionDescription,
-          entityId, reference: reference || generatePaymentReference(),
-          context, updateBalances: true, updateCashDrawer: true, createAuditLog: true, _synced: false
-        });
-      }
-    }
 
-    if (!result.success) {
-      return { success: false, error: result.error || 'Payment processing failed' };
-    }
-
-    if (result.cashDrawerImpact) {
-      try {
-        const baseUndoData = {
-          affected: [
-            { table: 'entities', id: entityId },
-            { table: 'transactions', id: result.transactionId }
-          ],
-          steps: [{
-            op: 'update', table: 'entities', id: entityId,
-            changes: currency === 'LBP'
-              ? { lb_balance: currentLbBalance, _synced: false }
-              : { usd_balance: currentUsdBalance, _synced: false }
-          }]
-        };
-        const undoData = createCashDrawerUndoData(
-          result.transactionId,
-          result.cashDrawerImpact.previousBalance,
-          undefined,
-          baseUndoData
-        );
-        pushUndo(undoData);
-      } catch (undoError) {
-        console.warn('Undo data creation failed (non-critical):', undoError);
+      if (!result.success) {
+        throw new Error(result.error || 'Payment processing failed');
       }
-    }
+    });
 
     try { await refreshData(); } catch (e) { console.warn('Data refresh failed (non-critical):', e); }
 
@@ -239,7 +215,7 @@ export async function processEmployeePayment(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { employeeId, amount, currency, description, reference, storeId, createdBy } = params;
-    const { currentBranchId, employees, exchangeRate, refreshData, i18n } = deps;
+    const { currentBranchId, employees, exchangeRate, refreshData, i18n, pushUndo } = deps;
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
@@ -272,81 +248,83 @@ export async function processEmployeePayment(
     const transactionId = createId();
     const postedDate = getLocalDateString(new Date().toISOString());
 
-    await getDB().transaction('rw', [
-      getDB().users,
-      getDB().transactions,
-      getDB().journal_entries,
-      getDB().entities,
-      getDB().chart_of_accounts,
-      getDB().cash_drawer_accounts,
-      getDB().cash_drawer_sessions
-    ], async () => {
-      let employeeEntity = await getDB().entities.get(employeeId);
-      if (!employeeEntity) {
-        const now = new Date().toISOString();
-        const newEntity = {
-          id: employeeId,
+    await withUndoOperation('operation', pushUndo, async () => {
+      await getDB().transaction('rw', [
+        getDB().users,
+        getDB().transactions,
+        getDB().journal_entries,
+        getDB().entities,
+        getDB().chart_of_accounts,
+        getDB().cash_drawer_accounts,
+        getDB().cash_drawer_sessions
+      ], async () => {
+        let employeeEntity = await getDB().entities.get(employeeId);
+        if (!employeeEntity) {
+          const now = new Date().toISOString();
+          const newEntity = {
+            id: employeeId,
+            store_id: storeId,
+            branch_id: currentBranchId,
+            entity_type: 'employee' as const,
+            entity_code: `EMP-${employeeId.slice(0, 8).toUpperCase()}`,
+            name: employee.name,
+            phone: employee.phone || null,
+            is_system_entity: false,
+            is_active: true,
+            customer_data: null,
+            supplier_data: null,
+            created_at: now,
+            updated_at: now,
+            _synced: false
+          };
+          await getDB().entities.add(newEntity);
+          employeeEntity = newEntity;
+        }
+
+        const transactionRecord: any = {
+          id: transactionId,
           store_id: storeId,
-          branch_id: currentBranchId,
-          entity_type: 'employee' as const,
-          entity_code: `EMP-${employeeId.slice(0, 8).toUpperCase()}`,
-          name: employee.name,
-          phone: employee.phone || null,
-          is_system_entity: false,
-          is_active: true,
-          customer_data: null,
-          supplier_data: null,
-          created_at: now,
-          updated_at: now,
+          type: 'expense' as const,
+          category: TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT,
+          amount: numAmount,
+          currency,
+          description: transactionDescription,
+          reference: reference || generatePaymentReference(),
+          entity_id: employeeId,
+          customer_id: null,
+          supplier_id: null,
+          employee_id: employeeId,
+          created_by: createdBy,
+          branch_id: currentBranchId || '',
+          is_reversal: false,
+          reversal_of_transaction_id: null,
+          metadata: {
+            payment_type: 'employee_salary',
+            original_currency: currency,
+            cash_drawer_amount: currency === 'USD' ? numAmount * exchangeRate : numAmount,
+            exchange_rate: currency === 'USD' ? exchangeRate : 1
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
           _synced: false
         };
-        await getDB().entities.add(newEntity);
-        employeeEntity = newEntity;
-      }
 
-      const transactionRecord: any = {
-        id: transactionId,
-        store_id: storeId,
-        type: 'expense' as const,
-        category: TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT,
-        amount: numAmount,
-        currency,
-        description: transactionDescription,
-        reference: reference || generatePaymentReference(),
-        entity_id: employeeId,
-        customer_id: null,
-        supplier_id: null,
-        employee_id: employeeId,
-        created_by: createdBy,
-        branch_id: currentBranchId || '',
-        is_reversal: false,
-        reversal_of_transaction_id: null,
-        metadata: {
-          payment_type: 'employee_salary',
-          original_currency: currency,
-          cash_drawer_amount: currency === 'USD' ? numAmount * exchangeRate : numAmount,
-          exchange_rate: currency === 'USD' ? exchangeRate : 1
-        },
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        _synced: false
-      };
+        await getDB().transactions.add(transactionRecord);
 
-      await getDB().transactions.add(transactionRecord);
-
-      await journalService.createJournalEntry({
-        transactionId,
-        debitAccount: '2200',
-        creditAccount: '1100',
-        amountUSD: currency === 'USD' ? numAmount : 0,
-        amountLBP: currency === 'LBP' ? numAmount : 0,
-        entityId: employeeId,
-        description: typeof transactionDescription === 'string'
-          ? transactionDescription
-          : getTranslatedString(transactionDescription, 'en', 'en'),
-        postedDate,
-        createdBy,
-        branchId: currentBranchId!
+        await journalService.createJournalEntry({
+          transactionId,
+          debitAccount: '2200',
+          creditAccount: '1100',
+          amountUSD: currency === 'USD' ? numAmount : 0,
+          amountLBP: currency === 'LBP' ? numAmount : 0,
+          entityId: employeeId,
+          description: typeof transactionDescription === 'string'
+            ? transactionDescription
+            : getTranslatedString(transactionDescription, 'en', 'en'),
+          postedDate,
+          createdBy,
+          branchId: currentBranchId!
+        });
       });
     });
 

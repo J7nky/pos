@@ -4,7 +4,29 @@
       "Bash(npx eslint *)",
       "Bash(git stash *)",
       "Bash(pnpm exec *)",
-      "Bash(pnpm run *)"
+      "Bash(pnpm run *)",
+      "Bash(node -e \"const Dexie = require\\('/home/janky/Desktop/pos-1/node_modules/dexie'\\); console.log\\(Object.keys\\(Dexie\\)\\)\")",
+      "Bash(.specify/scripts/bash/create-new-feature.sh Implement Dexie hook-based automatic undo tracking system:*)",
+      "Bash(.specify/scripts/bash/setup-plan.sh:*)",
+      "Bash(ls -la .claude/projects/*/memory/)",
+      "Bash(.specify/scripts/bash/check-prerequisites.sh:*)",
+      "Bash(pnpm parity:gate)",
+      "Bash(pnpm test:run src/services/__tests__/changeTracker.test.ts)",
+      "Bash(pnpm test:run src/services/__tests__/changeTracker.test.ts src/contexts/offlineData/operations/__tests__/withUndoOperation.test.ts)",
+      "Bash(./.specify/scripts/bash/check-prerequisites.sh:*)",
+      "mcp__plugin_claude-mem_mcp-search__smart_outline",
+      "Bash(pnpm test:run src/contexts/offlineData/operations/__tests__/withUndoOperation.test.ts)",
+      "Bash(pnpm dev:store)",
+      "Bash(echo \"Dev server started \\(PID: $!\\)\")",
+      "Read(//tmp/**)",
+      "Bash(pnpm test:run src/__tests__/integration/changeTracker.integration.test.ts)",
+      "Bash(pnpm test:run src/services/__tests__/changeTracker.integration.test.ts)",
+      "Bash(pnpm test:run)",
+      "Bash(chmod +x /tmp/phase3_candidates.sh)",
+      "Bash(/tmp/phase3_candidates.sh)",
+      "Bash(npx tsc:*)",
+      "Bash(find:*)",
+      "mcp__plugin_claude-mem_mcp-search__get_observations"
     ]
   }
 }

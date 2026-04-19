@@ -29,13 +29,14 @@ import {
   UserPermission,
   UserModuleAccess // @deprecated - kept for migration
 } from '../types';
-import { 
-  JournalEntry, 
-  BalanceSnapshot, 
-  Entity, 
-  ChartOfAccounts 
+import {
+  JournalEntry,
+  BalanceSnapshot,
+  Entity,
+  ChartOfAccounts
 } from '../types/accounting';
 import { calculateBothCurrencies } from '../utils/balanceCalculation';
+import { changeTracker } from '../services/changeTracker';
 
 
 // Base interface for all entities with sync support
@@ -199,10 +200,12 @@ class POSDatabase extends Dexie {
     for (const tableName of syncableTables) {
       const table = (this as any)[tableName];
       if (table) {
-        // Hook for create operations
-        table.hook('creating', this.triggerSyncOnUnsynced);
-        // Hook for update operations
-        table.hook('updating', this.triggerSyncOnUpdate);
+        // Hook for create operations — factory binds tableName via closure (avoids trans.table.name being undefined)
+        table.hook('creating', this.makeCreateTracker(tableName));
+        // Hook for update operations — factory binds tableName via closure
+        table.hook('updating', this.makeUpdateTracker(tableName));
+        // Hook for delete operations (undo tracking)
+        table.hook('deleting', this.makeDeleteTracker(tableName));
       }
     }
   }
@@ -897,43 +900,56 @@ class POSDatabase extends Dexie {
   };
 
   /**
-   * Hook to automatically trigger sync when _synced: false is detected
-   * This ensures all database write operations trigger sync, regardless of how they're called
-   * Safe to call from Dexie hooks - defers execution until after transaction completes
+   * Factory for the 'creating' hook. Binds tableName via closure so the correct
+   * table name is always available — trans.table.name can be undefined inside
+   * nested Dexie transactions (e.g. transactionService calls).
    */
-  private triggerSyncOnUnsynced = (primKey: any, obj: any, trans: any) => {
-    // Only trigger if record is marked as unsynced
-    if (obj._synced === false) {
-      console.log(`🔄 [DB Hook] Creating record with _synced: false - ${trans?.table?.name || 'unknown'}/${primKey}`);
-      // Defer execution to avoid blocking the transaction
-      // Import dynamically to avoid circular dependencies
-      setTimeout(() => {
-        import('../services/syncTriggerService').then(({ syncTriggerService }) => {
-          syncTriggerService.triggerSync();
-        }).catch(err => {
-          // Log error for debugging
-          console.warn('⚠️ [DB Hook] Sync trigger service not available:', err);
-        });
-      }, 0);
-    }
+  private makeCreateTracker = (tableName: string) => {
+    return (primKey: any, obj: any, _trans: any) => {
+      if (obj._synced === false) {
+        console.log(`🔄 [DB Hook] Creating record with _synced: false - ${tableName}/${primKey}`);
+        changeTracker.trackCreate(tableName, primKey, obj);
+        setTimeout(() => {
+          import('../services/syncTriggerService').then(({ syncTriggerService }) => {
+            syncTriggerService.triggerSync();
+          }).catch(err => {
+            console.warn('⚠️ [DB Hook] Sync trigger service not available:', err);
+          });
+        }, 0);
+      }
+    };
   };
 
   /**
-   * Hook for update operations - triggers sync when _synced: false is set
+   * Factory for the 'updating' hook. Binds tableName via closure — same reason
+   * as makeCreateTracker.
    */
-  private triggerSyncOnUpdate = (modifications: any, primKey: any, obj: any, trans: any) => {
-    // Only trigger if _synced is being set to false
-    if (modifications._synced === false || (modifications._synced === undefined && obj._synced === false)) {
-      console.log(`🔄 [DB Hook] Updating record with _synced: false - ${trans?.table?.name || 'unknown'}/${primKey}`);
-      // Defer execution to avoid blocking the transaction
-      setTimeout(() => {
-        import('../services/syncTriggerService').then(({ syncTriggerService }) => {
-          syncTriggerService.triggerSync();
-        }).catch(err => {
-          console.warn('⚠️ [DB Hook] Sync trigger service not available:', err);
-        });
-      }, 0);
-    }
+  private makeUpdateTracker = (tableName: string) => {
+    return (modifications: any, primKey: any, obj: any, _trans: any) => {
+      if (modifications._synced === false || (modifications._synced === undefined && obj._synced === false)) {
+        console.log(`🔄 [DB Hook] Updating record with _synced: false - ${tableName}/${primKey}`);
+        // obj = state BEFORE modifications; modifications = fields being changed
+        changeTracker.trackUpdate(tableName, primKey, obj, modifications);
+        setTimeout(() => {
+          import('../services/syncTriggerService').then(({ syncTriggerService }) => {
+            syncTriggerService.triggerSync();
+          }).catch(err => {
+            console.warn('⚠️ [DB Hook] Sync trigger service not available:', err);
+          });
+        }, 0);
+      }
+    };
+  };
+
+  /**
+   * Factory to create a deleting hook for a specific table.
+   * Tracks delete operations for undo system.
+   */
+  private makeDeleteTracker = (tableName: string) => {
+    return (primKey: any, obj: any, trans: any) => {
+      // Track this delete for undo system
+      changeTracker.trackDelete(tableName, primKey, obj);
+    };
   };
 
   // ⚠️ DEPRECATED: Hook for automatic cash drawer updates - NO LONGER USED

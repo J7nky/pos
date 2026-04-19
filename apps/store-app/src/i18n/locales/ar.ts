@@ -965,7 +965,9 @@ const ar = {
     previous: 'السابق',
     next: 'التالي',
     page: 'صفحة',
-    of: 'من'
+    of: 'من',
+    reminder: 'يوجد {{count}} عنصر غير مسعر، يرجى تسعيرها.',
+    goPrice: 'الذهاب إلى التسعير'
   },
   soldBills: {
     title: 'الفواتير المباعة',

@@ -8,7 +8,7 @@
  * or `refreshAll()` so the cache is invalidated and repopulated.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { entityBalanceService } from '../services/entityBalanceService';
 import { entityBalanceCache, type EntityType } from '../services/entityBalanceCache';
 
@@ -130,27 +130,61 @@ export function useEntityBalances(
     };
   }, [idsKey, entityType, useSnapshot, accountCode]);
 
-  // Subscribe so external invalidations/updates (e.g. another mounted hook
+  // Ref so the subscription closure always sees current fetch params
+  // without needing to be recreated when useSnapshot/accountCode change.
+  const fetchParamsRef = useRef({ entityIds, entityType, useSnapshot, accountCode });
+  fetchParamsRef.current = { entityIds, entityType, useSnapshot, accountCode };
+
+  // Subscribe so external invalidations/updates (e.g. undo, another mounted hook
   // refreshing after a payment) propagate into our state.
   useEffect(() => {
     const unsubscribe = entityBalanceCache.subscribe(() => {
+      const { entityIds: ids, entityType: type, useSnapshot: snap, accountCode: ac } = fetchParamsRef.current;
+      const toRefetch: string[] = [];
+
       setBalances((prev) => {
         const next = new Map(prev);
         let changed = false;
-        for (const id of entityIds) {
-          const cached = entityBalanceCache.get(entityType, id);
+        for (const id of ids) {
+          const cached = entityBalanceCache.get(type, id);
           if (cached) {
             const current = next.get(id);
             if (!current || current.USD !== cached.USD || current.LBP !== cached.LBP || current.error !== null) {
               next.set(id, { entityId: id, USD: cached.USD, LBP: cached.LBP, isLoading: false, error: null });
               changed = true;
             }
+          } else {
+            // Cache miss after a notification means the entry was invalidated.
+            // If we have a non-loading balance for this entity, schedule a re-fetch.
+            const current = prev.get(id);
+            if (current && !current.isLoading) {
+              next.set(id, { ...current, isLoading: true });
+              toRefetch.push(id);
+              changed = true;
+            }
           }
-          // Cache miss: leave current stale value in state; a future refresh
-          // will repopulate. Swapping to 0 here would be worse UX.
         }
         return changed ? next : prev;
       });
+
+      if (toRefetch.length > 0) {
+        void Promise.all(
+          toRefetch.map(async (id) => ({ id, result: await fetchBalance(id, type, snap, ac) })),
+        ).then((results) => {
+          setBalances((prev) => {
+            const next = new Map(prev);
+            for (const { id, result } of results) {
+              if (isError(result)) {
+                const existing = prev.get(id);
+                next.set(id, { entityId: id, USD: existing?.USD ?? 0, LBP: existing?.LBP ?? 0, isLoading: false, error: result.error });
+              } else {
+                next.set(id, { entityId: id, USD: result.USD, LBP: result.LBP, isLoading: false, error: null });
+              }
+            }
+            return next;
+          });
+        });
+      }
     });
     return unsubscribe;
   }, [idsKey, entityType]);
@@ -275,17 +309,36 @@ export function useEntityBalance(
     };
   }, [entityId, entityType, useSnapshot, accountCode]);
 
+  // Ref so the subscription closure always sees the current fetch params.
+  const singleFetchParamsRef = useRef({ entityId, entityType, useSnapshot, accountCode });
+  singleFetchParamsRef.current = { entityId, entityType, useSnapshot, accountCode };
+
   // Subscribe to cache updates for this entity
   useEffect(() => {
     if (!entityId) return;
     const unsubscribe = entityBalanceCache.subscribe(() => {
-      const cached = entityBalanceCache.get(entityType, entityId);
+      const { entityId: eid, entityType: type, useSnapshot: snap, accountCode: ac } = singleFetchParamsRef.current;
+      if (!eid) return;
+      const cached = entityBalanceCache.get(type, eid);
       if (cached) {
         setBalance((prev) =>
           prev.USD === cached.USD && prev.LBP === cached.LBP && prev.error === null
             ? prev
-            : { entityId, USD: cached.USD, LBP: cached.LBP, isLoading: false, error: null },
+            : { entityId: eid, USD: cached.USD, LBP: cached.LBP, isLoading: false, error: null },
         );
+      } else {
+        // Cache miss after notification: entry was invalidated — re-fetch.
+        setBalance((prev) => {
+          if (prev.isLoading) return prev; // already fetching
+          void fetchBalance(eid, type, snap, ac).then((result) => {
+            setBalance(
+              isError(result)
+                ? { entityId: eid, USD: 0, LBP: 0, isLoading: false, error: result.error }
+                : { entityId: eid, USD: result.USD, LBP: result.LBP, isLoading: false, error: null },
+            );
+          });
+          return { ...prev, isLoading: true, error: null };
+        });
       }
     });
     return unsubscribe;

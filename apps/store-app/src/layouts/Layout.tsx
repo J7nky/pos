@@ -43,10 +43,114 @@ export default function Layout() {
     );
   }
 
-  const { isOnline, getSyncStatus, getUserById, getRolePermissionsByRole } = useOfflineData();
+  const { isOnline, getSyncStatus, getUserById, getRolePermissionsByRole, sales, inventory, inventoryBills, notifications, createNotification, deleteNotification } = useOfflineData();
   const { unsyncedCount, isSyncing } = getSyncStatus();
   const prevIsSyncingRef = useRef(isSyncing);
   const prevIsOnlineRef = useRef(isOnline);
+
+  // Compute non-priced items count (same logic as Accounting.tsx)
+  const nonPricedCount = (() => {
+    const nonPricedSales = (sales || []).filter((s: any) => s.unit_price === 0).length;
+    const batchMap = new Map((inventoryBills || []).map((b: any) => [b.id, b]));
+    const nonPricedInventory = (inventory || []).filter((item: any) => {
+      if (!item.batch_id) return false;
+      const batch = batchMap.get(item.batch_id);
+      if (!batch || (batch.type !== 'credit' && batch.type !== 'cash')) return false;
+      return !item.price || item.price === 0 || isNaN(Number(item.price));
+    }).length;
+    return nonPricedSales + nonPricedInventory;
+  })();
+
+  // Badge: hide once user has visited the accounting page (mark as seen)
+  const NON_PRICED_SEEN_KEY = 'nonPricedLastSeenCount';
+  const [seenNonPricedCount, setSeenNonPricedCount] = useState<number>(
+    () => Number(localStorage.getItem(NON_PRICED_SEEN_KEY) ?? -1)
+  );
+  const showNonPricedBadge = nonPricedCount > 0 && nonPricedCount > seenNonPricedCount;
+
+  useEffect(() => {
+    if (location.pathname === '/accounting' && nonPricedCount !== seenNonPricedCount) {
+      setSeenNonPricedCount(nonPricedCount);
+      localStorage.setItem(NON_PRICED_SEEN_KEY, String(nonPricedCount));
+    }
+  }, [location.pathname, nonPricedCount]);
+
+  const [showNonPricedReminder, setShowNonPricedReminder] = useState(false);
+  const NON_PRICED_REMINDER_KEY = 'nonPricedReminderLastShown';
+  const NON_PRICED_REMINDER_INTERVAL = 10000 * 60 * 60 * 3 // 3 hours
+  const NON_PRICED_NOTIFICATION_SOURCE = 'non_priced_reminder';
+  const reminderDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fireReminder = () => {
+    setShowNonPricedReminder(true);
+    localStorage.setItem(NON_PRICED_REMINDER_KEY, String(Date.now()));
+    // Auto-dismiss popup after 5 seconds
+    if (reminderDismissTimer.current) clearTimeout(reminderDismissTimer.current);
+    reminderDismissTimer.current = setTimeout(() => setShowNonPricedReminder(false), 5000);
+  };
+
+  useEffect(() => {
+    if (nonPricedCount === 0) return;
+
+    const shouldShow = () => {
+      const last = localStorage.getItem(NON_PRICED_REMINDER_KEY);
+      if (!last) return true;
+      return Date.now() - Number(last) >= NON_PRICED_REMINDER_INTERVAL;
+    };
+
+    if (shouldShow()) {
+      fireReminder();
+      // Add to NotificationCenter if not already there
+      const alreadyExists = notifications.some(
+        n => n.metadata?.source === NON_PRICED_NOTIFICATION_SOURCE
+      );
+      if (!alreadyExists) {
+        createNotification(
+          'warning',
+          t('nonPriced.title'),
+          t('nonPriced.reminder', { count: nonPricedCount }),
+          {
+            priority: 'medium',
+            action_url: '/accounting',
+            action_label: t('nonPriced.goPrice'),
+            metadata: { source: NON_PRICED_NOTIFICATION_SOURCE }
+          }
+        );
+      }
+    }
+
+    const interval = setInterval(() => {
+      if (nonPricedCount > 0) {
+        fireReminder();
+        createNotification(
+          'warning',
+          t('nonPriced.title'),
+          t('nonPriced.reminder', { count: nonPricedCount }),
+          {
+            priority: 'medium',
+            action_url: '/accounting',
+            action_label: t('nonPriced.goPrice'),
+            metadata: { source: NON_PRICED_NOTIFICATION_SOURCE }
+          }
+        );
+      }
+    }, NON_PRICED_REMINDER_INTERVAL);
+
+    return () => {
+      clearInterval(interval);
+      if (reminderDismissTimer.current) clearTimeout(reminderDismissTimer.current);
+    };
+  }, [nonPricedCount]);
+
+  const handleGoPricing = () => {
+    setShowNonPricedReminder(false);
+    if (reminderDismissTimer.current) clearTimeout(reminderDismissTimer.current);
+    // Delete the non-priced reminder notification from NotificationCenter
+    const existing = notifications.find(
+      n => n.metadata?.source === NON_PRICED_NOTIFICATION_SOURCE
+    );
+    if (existing) deleteNotification(existing.id);
+  };
 
   // Debug: Log when isOnline changes
   useEffect(() => {
@@ -355,8 +459,13 @@ export default function Layout() {
               accessKey={item.label.charAt(0).toLowerCase()}
               aria-label={`${item.label} (Alt+${item.label.charAt(0).toUpperCase()})`}
             >
-              <item.icon className="w-5 h-5 mr-3" />
-              {item.label}
+              <item.icon className="w-5 h-5 mr-3 flex-shrink-0" />
+              <span className="flex-1">{item.label}</span>
+              {item.id === 'accounting' && showNonPricedBadge && (
+                <span className="ml-2 bg-red-500 text-white text-xs font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1">
+                  {nonPricedCount > 99 ? '99+' : nonPricedCount}
+                </span>
+              )}
             </Link>
           ))}
         </nav>
@@ -389,6 +498,28 @@ export default function Layout() {
       <SyncProgressIndicator />
       <UndoToastManager />
       <ErrorToastContainer />
+      {showNonPricedReminder && nonPricedCount > 0 && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-amber-50 border border-amber-400 text-amber-900 rounded-xl shadow-lg px-5 py-3 max-w-md w-full">
+          <span className="text-lg">⚠️</span>
+          <span className="flex-1 text-sm font-medium">
+            {t('nonPriced.reminder', { count: nonPricedCount })}
+          </span>
+          <Link
+            to="/accounting"
+            onClick={handleGoPricing}
+            className="text-xs font-semibold text-amber-700 underline hover:text-amber-900 whitespace-nowrap"
+          >
+            {t('nonPriced.goPrice')}
+          </Link>
+          <button
+            onClick={() => setShowNonPricedReminder(false)}
+            className="text-amber-600 hover:text-amber-900 ml-1"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

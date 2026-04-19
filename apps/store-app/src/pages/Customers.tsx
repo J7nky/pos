@@ -539,6 +539,16 @@ export default function Customers() {
     }
   }, [addCustomerRequestedFromPOS, clearAddCustomerRequest]);
 
+  // Refresh balances after undo (bypasses stale same-day snapshot)
+  useEffect(() => {
+    const handleUndoCompleted = async () => {
+      await customerBalances.refreshAll();
+      await supplierBalances.refreshAll();
+    };
+    window.addEventListener('undo-completed', handleUndoCompleted);
+    return () => window.removeEventListener('undo-completed', handleUndoCompleted);
+  }, [customerBalances.refreshAll, supplierBalances.refreshAll]);
+
 
   return (
     <div className="p-6">

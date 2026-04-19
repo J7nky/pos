@@ -683,6 +683,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     storeId, currentBranchId, employees: employeeLayer.employees,
     exchangeRate: settingsLayer.exchangeRate, refreshData,
     i18n: { en: enLocale, ar: arLocale },
+    pushUndo,
   };
 
   const supplierAdvanceDepsRef = useRef<paymentOps.SupplierAdvanceDeps>(null!);

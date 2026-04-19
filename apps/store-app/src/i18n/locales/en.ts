@@ -832,7 +832,9 @@ const en = {
     previous: 'Previous',
     next: 'Next',
     page: 'Page',
-    of: 'of'
+    of: 'of',
+    reminder: 'There are {{count}} non-priced items, please price them.',
+    goPrice: 'Go to Pricing'
   },
   soldBills: {
     title: 'Sold Bills',
