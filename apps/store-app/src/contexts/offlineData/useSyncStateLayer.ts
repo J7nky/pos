@@ -2,14 +2,13 @@
  * Sync state domain layer for OfflineDataContext (§1.3).
  * Provides performSync, debouncedSync, resetAutoSyncTimer, updateUnsyncedCount, getSyncStatus.
  * State (unsyncedCount, isSyncing, lastSync, isAutoSyncing) stays in context; adapter passes state + setters.
- * Wires crudHelperService.setCallbacks so other layers trigger refresh/sync via these callbacks.
+ * Wires crudHelperService.setLifecycleHost so other layers trigger refresh/sync via the host.
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import { syncService } from '../../services/syncService';
+import { syncService, type SyncResult } from '../../services/syncOrchestrator';
 import { crudHelperService } from '../../services/crudHelperService';
 import type { SyncStateLayerAdapter, SyncStateLayerResult } from './types';
-import type { SyncResult } from '../../services/syncService';
 import { invalidateCashDrawerBalanceCache } from '../../utils/cacheManager';
 
 function debug(...args: unknown[]) {
@@ -250,7 +249,7 @@ export function useSyncStateLayer(adapter: SyncStateLayerAdapter): SyncStateLaye
   );
 
   useEffect(() => {
-    crudHelperService.setCallbacks({
+    crudHelperService.setLifecycleHost({
       onRefreshData: refreshData,
       onUpdateUnsyncedCount: updateUnsyncedCount,
       onDebouncedSync: debouncedSync,

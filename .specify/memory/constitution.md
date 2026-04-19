@@ -1,38 +1,54 @@
 <!--
-  SYNC IMPACT REPORT — Constitution Amendment v1.3.0 → v1.4.0
-  Generated: 2026-04-14
+  SYNC IMPACT REPORT — Constitution Amendment v1.4.1 → v1.5.0
+  Generated: 2026-04-19
 
-  Version change:   1.3.0 → 1.4.0
-  Bump rationale:   MINOR — sync architecture updated: performSync / auto-sync
-                    now uses uploadOnly() (upload-only path); downloads are
-                    event-driven exclusively via eventStreamService.
-                    Deletion detection interval changed 5 min → 30 min with
-                    a 5-min startup grace period.
+  Prior amendment: v1.4.0 → v1.4.1 (2026-04-19, PATCH accuracy sweep — line
+  counts refreshed, anti-patterns marked RESOLVED, §12/§13 numbering fix).
 
-  Modified principles:
-    §3.III  Event-Driven Sync — clarified that performSync calls uploadOnly();
-            full sync() is reserved for initial hydration and fullResync.
-    §5.1    Write Path — updated to show uploadOnly() in performSync flow.
+  Version change:   1.4.1 → 1.5.0
+  Bump rationale:   MINOR — three new non-negotiable principles added with their
+                    corresponding Constitution Check gates. Existing gates CG-01
+                    through CG-11 are unchanged. Gates are renumbered only by
+                    extension (new IDs appended), so plans that cite CG-01…CG-11
+                    remain valid.
 
-  Added:
-    §4.5    syncService.ts — uploadOnly() method noted.
-    §4.4    useSyncStateLayer — updated to reflect uploadOnly() call.
+  Added principles / gates:
+    §3.XII   Testing Discipline                    `CG-12`
+             Services under /services and operations under /contexts/offlineData/
+             operations/ MUST ship Vitest coverage. Changes touching sync-affecting
+             files MUST pass `pnpm parity:gate`.
+    §3.XIII  Shared Package as the Source of Truth `CG-13`
+             Utilities, types, and constants used by more than one app MUST live
+             in @pos-platform/shared. Duplication across apps is a violation.
+    §3.XIV   Undo Payload Storage Boundary         `CG-14`
+             Undo state MUST live in sessionStorage only. Persisting undo payloads
+             to IndexedDB/Dexie or localStorage is FORBIDDEN. Codifies the decision
+             established in the 011-undo-system-fixes work.
 
-  Removed sections:   none
+  Modified sections:
+    §3       Core Architectural Principles — three principles appended (XII–XIV).
+    §10      Code Review Checklist — three new items added.
+    §12.2    Constitution Check Gate Mapping — three new rows (CG-12, CG-13, CG-14).
+    §12.3    `plan.md` alignment — gate count 11 → 14.
+
+  Removed principles / gates: none
 
   Templates requiring updates:
     ✅ .specify/memory/constitution.md (this file — now updated)
     ⚠  .specify/templates/plan-template.md
-         → Constitution Check section still uses a generic placeholder.
-           Plan authors should expand it with the CG-01–CG-11 gates defined in §12.
+         → Constitution Check placeholder should now enumerate CG-01 through CG-14.
     ⚠  .specify/templates/spec-template.md
-         → No project-specific constraints section; features touching date filtering,
-           reporting, or form defaults should reference CG-11 explicitly.
+         → Features exposing undo must reference CG-14; features adding services
+           or operations must reference CG-12; cross-app utilities must reference CG-13.
+    ⚠  .specify/templates/tasks-template.md
+         → Foundational phase guidance should mention Vitest test-file creation
+           alongside any new service or operation file (CG-12).
 
   Follow-up TODOs:
-    - Implement getTodayLocalDate() in utils/dateUtils.ts and replace all 9+
-      instances of new Date().toISOString().split('T')[0] across the codebase
-      (tracked in IMPROVEMENTS_ENHANCEMENTS_REPORT.md §6).
+    - Propagate CG-12..CG-14 into the three template files flagged above.
+    - Consider, in a future MINOR bump: CG-15 Observability (comprehensiveLoggingService
+      usage), CG-16 Security for public-token routes (§8.O), CG-17 Electron peripheral
+      access boundary.
 -->
 
 # Souq POS — Project Constitution
@@ -87,7 +103,7 @@ apps/store-app/src/
 ├── App.tsx                 ← Provider composition root
 ├── pages/                  ← 12 page files (~10k lines)
 ├── contexts/               ← 3 contexts + offlineData/ submodule
-│   ├── OfflineDataContext.tsx      ← Composer/orchestrator (1,067 lines)
+│   ├── OfflineDataContext.tsx      ← Composer/orchestrator (1,150 lines)
 │   ├── SupabaseAuthContext.tsx     ← Auth (865 lines)
 │   ├── CustomerFormContext.tsx     ← Lightweight cross-page form state
 │   └── offlineData/                ← Decomposed domain hooks + operations
@@ -100,7 +116,7 @@ apps/store-app/src/
 ├── components/             ← 80+ component files
 ├── hooks/                  ← 20 custom hooks
 ├── lib/
-│   ├── db.ts               ← Dexie POSDatabase (1,678 lines, 54 versions)
+│   ├── db.ts               ← Dexie POSDatabase (1,773 lines, 54 versions)
 │   └── supabase.ts         ← Supabase client singleton
 ├── types/                  ← database.ts, accounting.ts, index.ts, etc.
 ├── utils/                  ← 30+ utility files
@@ -254,6 +270,54 @@ bucketed on the wrong date.
 consistently is the only code change required to close the entire class of UTC/local-date
 bugs documented in `IMPROVEMENTS_ENHANCEMENTS_REPORT.md §6`.
 
+### XII. Testing Discipline `CG-12`
+Every new file under `apps/store-app/src/services/` or
+`apps/store-app/src/contexts/offlineData/operations/` MUST ship with at least one Vitest
+test covering the primary success path and the main failure path.
+
+Changes that touch **any** of the following sync-critical files MUST run `pnpm parity:gate`
+and ensure the golden snapshot passes before merge:
+- `services/syncService.ts`
+- `services/eventStreamService.ts`
+- `services/eventEmissionService.ts`
+- `services/crudHelperService.ts`
+- `services/transactionService.ts`
+- `services/journalService.ts`
+- Any file under `contexts/offlineData/operations/`
+
+**Rationale:** These files hold the financial and sync core. Silent regressions here can
+corrupt ledgers or cause divergent branch state across devices — the exact class of bug
+that is most expensive to recover from post-deploy. Vitest is the sole test runner (see
+§8.Q) so there is no ambiguity about where tests go.
+
+### XIII. Shared Package as the Source of Truth `CG-13`
+Any utility, type, or constant that is used (or will plausibly be used) by both
+`apps/store-app` and `apps/admin-app` MUST live in `packages/shared`
+(`@pos-platform/shared`) and be imported from there. Duplicating the implementation across
+apps is FORBIDDEN.
+
+Known existing duplication that MUST NOT be extended: `referenceGenerator.ts`,
+`multilingual.ts`. These should be consolidated into `@pos-platform/shared` the next time
+either is touched.
+
+**Rationale:** The store-app and admin-app operate on the same Supabase schema and share
+domain vocabulary. Duplicated utilities drift — one app fixes a bug, the other does not,
+and the resulting inconsistency surfaces as data corruption between the two surfaces
+(see §8.H). The shared package already exists and is the correct deduplication boundary.
+
+### XIV. Undo Payload Storage Boundary `CG-14`
+The undo payload consumed by `undoOperations.undoLastAction()` MUST be stored in
+`sessionStorage` only. Writing undo state to IndexedDB/Dexie (no `undo_history` table, no
+`_deleted`-flag tricks) or to `localStorage` is FORBIDDEN.
+
+**Rationale:** Undo is intentionally scoped to the current tab session. Persisting undo
+payloads across sessions creates two hazards: (1) stale undos can replay over state that
+has already been synced and superseded by events from other devices, silently rewinding
+work that other users have built on top of; (2) a crash recovery path could "resurrect" an
+undo that the user has already mentally discarded. `sessionStorage` auto-clears on tab
+close, which matches the intended lifetime exactly. This boundary was established in the
+`011-undo-system-fixes` work and is encoded here to prevent regression.
+
 ---
 
 ## 4. Key Modules Reference
@@ -268,21 +332,21 @@ bugs documented in `IMPROVEMENTS_ENHANCEMENTS_REPORT.md §6`.
 ### 4.2 Pages
 | File | Lines | Domain |
 |------|-------|--------|
-| `pages/POS.tsx` | 1,739 | Point-of-sale: cart/tabs, bill creation, payment, QR |
-| `pages/Accounting.tsx` | 1,563 | Journal entries, transactions, received/sold bills, payments |
-| `pages/Settings.tsx` | 1,399 | Store config: currency, exchange rate, receipt layout, RBAC |
-| `pages/Customers.tsx` | 1,116 | Unified entity ledger, account statements |
+| `pages/POS.tsx` | 1,975 | Point-of-sale: cart/tabs, bill creation, payment, QR |
+| `pages/Accounting.tsx` | 1,566 | Journal entries, transactions, received/sold bills, payments |
+| `pages/Settings.tsx` | 1,503 | Store config: currency, exchange rate, receipt layout, RBAC |
+| `pages/Customers.tsx` | 1,118 | Unified entity ledger, account statements |
 | `pages/Employees.tsx` | 929 | Employee management, payroll |
-| `pages/PublicCustomerStatement.tsx` | 794 | Tokenized, unauthenticated customer statement |
-| `pages/Home.tsx` | 716 | Dashboard: KPIs, cash drawer status, activity feed, reminders |
-| `pages/Inventory.tsx` | 520 | Inventory receiving, batches, stock view |
-| `pages/UnsyncedItems.tsx` | 416 | Shows all local unsynced records by table |
-| `pages/Reports.tsx` | 407 | P&L, weight comparisons, other reports |
+| `pages/PublicCustomerStatement.tsx` | 793 | Tokenized, unauthenticated customer statement |
+| `pages/Home.tsx` | 707 | Dashboard: KPIs, cash drawer status, activity feed, reminders |
+| `pages/Inventory.tsx` | 522 | Inventory receiving, batches, stock view |
+| `pages/UnsyncedItems.tsx` | 469 | Shows all local unsynced records by table |
+| `pages/Reports.tsx` | 408 | P&L, weight comparisons, other reports |
 
 ### 4.3 Contexts
 | File | Lines | Responsibility |
 |------|-------|----------------|
-| `contexts/OfflineDataContext.tsx` | 1,067 | **Central data facade.** Composes 17 domain hooks + 12 operation modules. Exposes `useOfflineData()`. |
+| `contexts/OfflineDataContext.tsx` | 1,150 | **Central data facade.** Composes 17 domain hooks + 12 operation modules. Exposes `useOfflineData()`. |
 | `contexts/SupabaseAuthContext.tsx` | 865 | Session, signIn/signOut, userProfile, offline local-auth fallback |
 | `contexts/CustomerFormContext.tsx` | ~50 | Cross-page "add customer" trigger from POS |
 
@@ -331,11 +395,11 @@ bugs documented in `IMPROVEMENTS_ENHANCEMENTS_REPORT.md §6`.
 
 | Service | Lines | Responsibility |
 |---------|-------|----------------|
-| `syncService.ts` | 2,862 | Two entry points: `uploadOnly()` (used by performSync/auto-sync — upload + deletion detection, no table-scan download) and `sync()` (full upload + download, used only for initial hydration and `fullResync()`); batch dependency ordering |
-| `transactionService.ts` | 1,782 | **Financial core.** All transactions; journal entry creation; cash drawer; audit logging; atomic rollback |
+| `syncService.ts` | 1,333 | Two entry points: `uploadOnly()` (used by performSync/auto-sync — upload + deletion detection, no table-scan download) and `sync()` (full upload + download, used only for initial hydration and `fullResync()`); batch dependency ordering |
+| `transactionService.ts` | 1,783 | **Financial core.** All transactions; journal entry creation; cash drawer; audit logging; atomic rollback |
 | `accountStatementService.ts` | 1,410 | Client-side account statement generation from IndexedDB |
-| `inventoryPurchaseService.ts` | 1,331 | Inventory receive workflow: bills, items, journal entries |
-| `eventStreamService.ts` | 1,055 | Realtime WebSocket subscription to `branch_event_log`; version-based catch-up; 5-min safety interval |
+| `eventStreamService.ts` | 1,396 | Realtime WebSocket subscription to `branch_event_log`; version-based catch-up; 5-min safety interval |
+| `inventoryPurchaseService.ts` | 1,333 | Inventory receive workflow: bills, items, journal entries |
 | `enhancedTransactionService.ts` | 851 | Extended transaction logic |
 | `dataValidationService.ts` | 790 | Schema validation before sync |
 | `cashDrawerUpdateService.ts` | 769 | Cash drawer balance + session management |
@@ -343,7 +407,7 @@ bugs documented in `IMPROVEMENTS_ENHANCEMENTS_REPORT.md §6`.
 | `accessControlService.ts` | 663 | RBAC enforcement: `checkModuleAccess()`, `checkOperationLimit()` |
 | `reportingService.ts` | 653 | Report data computation |
 | `profitLossService.ts` | 631 | P&L calculations |
-| `crudHelperService.ts` | 629 | Generic CRUD + `loadAllStoreData()` (bulk IndexedDB load on startup) |
+| `crudHelperService.ts` | 635 | Generic CRUD + `loadAllStoreData()` (bulk IndexedDB load on startup) |
 | `comprehensiveLoggingService.ts` | 610 | Audit/activity logging |
 | `missedProductsService.ts` | 610 | Out-of-stock product tracking |
 | `weightManagementService.ts` | 596 | Weight-based inventory management |
@@ -352,8 +416,8 @@ bugs documented in `IMPROVEMENTS_ENHANCEMENTS_REPORT.md §6`.
 | `reminderMonitoringService.ts` | 551 | Reminder due-date monitoring |
 | `snapshotService.ts` | 547 | Balance snapshot creation |
 | `auditLogService.ts` | 543 | Audit trail |
-| `eventEmissionService.ts` | 514 | Called by `syncService.uploadLocalChanges()` after each batch is confirmed uploaded; emits typed events to `branch_event_log` RPC (upload-then-emit contract) |
-| `journalService.ts` | 510 | Double-entry journal creation; validates debit = credit |
+| `eventEmissionService.ts` | 536 | Called by `syncService.uploadLocalChanges()` after each batch is confirmed uploaded; emits typed events to `branch_event_log` RPC (upload-then-emit contract) |
+| `journalService.ts` | 519 | Double-entry journal creation; validates debit = credit |
 | `receivedItemsJournalService.ts` | 451 | Journal entries for received inventory items |
 | `localAuthService.ts` | ~391 | bcrypt offline authentication; `localCredentials` table |
 | `rolePermissionService.ts` | 239 | RBAC: role defaults + user overrides |
@@ -361,7 +425,7 @@ bugs documented in `IMPROVEMENTS_ENHANCEMENTS_REPORT.md §6`.
 
 ### 4.6 Database Layer
 
-**`lib/db.ts`** — `POSDatabase extends Dexie`, schema version **54**, 1,678 lines.
+**`lib/db.ts`** — `POSDatabase extends Dexie`, schema version **54**, 1,773 lines.
 Key local-only tables: `sync_metadata`, `pending_syncs`, `sync_state` (tracks `last_seen_event_version` per branch), `localCredentials`, `localPasswords`.
 
 **Supabase tables** (inferred): `stores`, `branches`, `products`, `users`, `entities`, `inventory_items`, `inventory_bills`, `transactions`, `bills`, `bill_line_items`, `bill_audit_logs`, `cash_drawer_accounts`, `cash_drawer_sessions`, `missed_products`, `journal_entries`, `balance_snapshots`, `chart_of_accounts`, `role_permissions`, `user_permissions`, `reminders`, `notifications`, `notification_preferences`, `employee_attendance`, `public_access_tokens`, `branch_event_log`.
@@ -482,26 +546,34 @@ The `OfflineDataContextType` (defined in `offlineDataContextContract.ts`) expose
 ### A. `any` Type Overuse — HIGH PRIORITY
 `offlineDataContextContract.ts` has a file-level `eslint-disable @typescript-eslint/no-explicit-any` with **22 occurrences**. All major domain arrays (`inventory`, `bills`, `entities`, `journalEntries`, `chartOfAccounts`, etc.) are typed `any[]`. `storeId` is typed `any` instead of `string | null`. `syncService.ts` has a targeted `eslint-disable @typescript-eslint/no-explicit-any` (the previous blanket `@ts-nocheck` + `/* eslint-disable */` were removed; the targeted suppression remains because sync handles generic DB record shapes). **New code must not add `any` types. Existing `any` in the context contract should be narrowed to proper types when touching those files.**
 
-### B. Deprecated `addSale()` Still Present
-`addSale()` is marked `@deprecated` in the context but remains in the contract and codebase. The correct path is `createBill()`. **Do not use `addSale()` in any new code. Remove when refactoring.**
+### B. Deprecated `addSale()` Still Present — ✅ RESOLVED 2026-04-19
+`addSale()` has been removed from the active code path. The correct path is `createBill()`.
+The only residual occurrence is in `apps/store-app/src/lib/db_backup.ts` (see §8.R).
+**Do not reintroduce `addSale()` under any circumstances.**
 
 ### C. Monolithic Service Files
-- `syncService.ts` (2,862 lines) — upload, download, deletion detection, hash comparison, dependency ordering, retry logic all in one file.
-- `transactionService.ts` (1,782 lines) — handles every transaction type plus journaling, cash drawer, and audit.
+- `syncService.ts` (1,333 lines — down from 2,862; internal split landed) — upload, deletion detection, hash comparison, dependency ordering still colocated.
+- `transactionService.ts` (1,783 lines) — handles every transaction type plus journaling, cash drawer, and audit.
 - `accountStatementService.ts` (1,410 lines) — complex client-side computation in one file.
+- `eventStreamService.ts` (1,396 lines) — Realtime subscription, catch-up, version tracking, safety interval.
+- `inventoryPurchaseService.ts` (1,333 lines) — inventory receive workflow.
 - **Do not add more responsibility to these files. Extract into sub-services when adding new features.**
 
 ### D. Dexie Schema in One Giant File
-`lib/db.ts` (1,678 lines) contains all 54 schema versions. No pruning or splitting strategy. **When adding new tables/indexes, follow the existing versioning pattern exactly. Always increment the version number.**
+`lib/db.ts` (1,773 lines) contains all 54 schema versions. No pruning or splitting strategy. **When adding new tables/indexes, follow the existing versioning pattern exactly. Always increment the version number.**
 
-### E. `Home.tsx` Uses `setInterval` for Cash Drawer (Violates §III)
-`Home.tsx` polls `loadCashDrawerStatus()` every 60 seconds via `setInterval`. This violates the no-polling principle. **New code must not add polling. Home.tsx should be refactored to react to context state instead.**
+### E. `Home.tsx` Uses `setInterval` for Cash Drawer — ✅ RESOLVED 2026-04-19
+The 60-second `setInterval` in `Home.tsx` has been removed. The page now reacts to context
+state. **The no-polling principle (§III / CG-03) remains in force — do not reintroduce
+`setInterval` for UI refresh.**
 
 ### F. `ensureDataReady` Polls at 100ms Internally
 `OfflineDataContext` line ~658 polls `isDataReadyRef` every 100ms on startup. This is an acceptable one-time startup wait but is unusual. **Do not replicate this pattern.**
 
-### G. `src/scripts/` Should Not Be in Source Tree
-11 browser-runnable migration/test scripts (`migrateToEntitiesOnly.ts`, `runEntityMigration.ts`, etc.) live under `src/scripts/`. They have no place in the production bundle. **New migration scripts must not be placed here. These should be moved to `scripts/` outside `src/`.**
+### G. `src/scripts/` Should Not Be in Source Tree — ✅ RESOLVED 2026-04-19
+The `apps/store-app/src/scripts/` directory has been removed. **New migration scripts MUST
+NOT be placed under `src/`. Put them under a top-level `scripts/` directory so they are
+excluded from the production bundle.**
 
 ### H. Shared Package Underutilized
 `packages/shared` is used only by admin-app. Store-app duplicates `referenceGenerator.ts` and `multilingual.ts` utilities, creating drift risk. **When adding shared utilities, add them to `packages/shared` and consume from there in both apps.**
@@ -509,11 +581,14 @@ The `OfflineDataContextType` (defined in `offlineDataContextContract.ts`) expose
 ### I. Dead Code: Duplicate Supabase Service Files
 `supabaseService.ts` and `supabaseService.optimized.ts` (~120 lines each) exist as near-duplicates. Neither is the primary reference. **Do not import or extend these files. They should be deleted.**
 
-### J. Dev-Only Pages in Production Router
-`pages/TestAccounting.tsx` (78 lines) is registered at `/test-accounting` with no `ProtectedRoute`. `pages/MigrationTest.tsx` (289 lines) exists in pages/. Neither is guarded by environment flags. **Do not add new dev-only pages to the router. These must be removed before production hardening.**
+### J. Dev-Only Pages in Production Router — ⚠ PARTIALLY RESOLVED 2026-04-19
+`pages/TestAccounting.tsx` has been deleted. However, `pages/MigrationTest.tsx` still
+exists in the pages directory with no environment-flag guard. **Do not add new dev-only
+pages to the router. `MigrationTest.tsx` should be removed before production hardening.**
 
-### K. `DevAccountingTestPanel.tsx` in Production Source
-A developer testing panel component with no env-flag guard. **Do not import this in production flows.**
+### K. `DevAccountingTestPanel.tsx` in Production Source — ✅ RESOLVED 2026-04-19
+The component has been deleted from the source tree. **Do not reintroduce developer-only
+panels without an env-flag guard.**
 
 ### L. Missing SQL Migrations for Core Schema
 Only `branch_event_log.sql` is committed. The entire other Supabase schema is undocumented in the repo. **All new table definitions must be committed as SQL migrations in `supabase/migrations/`.**
@@ -527,11 +602,25 @@ The root `netlify.toml` attempts to handle both apps via a conditional build com
 ### O. Public Statement Token Security
 `/public/statement/:token` uses a URL token with unlimited lifetime and no rate limiting (documented in `docs/PUBLIC_STATEMENT_SECURITY_RECOMMENDATIONS.md`). **Any feature touching public tokens must consider token expiration and rate limiting.**
 
-### P. `vite-react-typescript-starter` — Stale Package Name
-`apps/store-app/package.json` still has `name: "vite-react-typescript-starter"`. **Fix this when touching `package.json`.**
+### P. `vite-react-typescript-starter` — Stale Package Name — ✅ RESOLVED 2026-04-19
+`apps/store-app/package.json` now declares `"name": "@pos-platform/store-app"`.
 
-### Q. Test Runner Duplication: Vitest + Jest Both Installed
-`apps/store-app/package.json` lists both `vitest` (integrated in `vite.config.ts`) and `jest`, `jest-environment-jsdom`, `ts-jest` in `devDependencies`. Two test runners serving the same purpose increase install size, create configuration ambiguity, and risk output inconsistencies. **All tests must be written for Vitest. Do not add new Jest test files. `jest`, `jest-environment-jsdom`, and `ts-jest` should be removed from `package.json`.**
+### Q. Test Runner Duplication: Vitest + Jest Both Installed — ✅ RESOLVED 2026-04-19
+Jest and its companions (`jest`, `jest-environment-jsdom`, `ts-jest`) have been removed
+from `package.json`. **Vitest is the sole test runner. Do not reintroduce Jest.**
+
+### R. `db_backup.ts` in `src/lib/`
+`apps/store-app/src/lib/db_backup.ts` is a backup copy of the Dexie schema living in the
+source tree. It is the last remaining carrier of the deprecated `addSale()` reference (see
+§8.B). Backups belong outside `src/`. **Do not import from `db_backup.ts`. It should be
+moved to an archive location or deleted once its contents are confirmed redundant with
+`lib/db.ts` history.**
+
+### S. Design-Doc Markdown Files Under `src/lib/`
+`apps/store-app/src/lib/DEXIE_CONSOLIDATION_GUIDE.md` and `DEXIE_MIGRATION_HISTORY.md` sit
+inside the source tree. Docs under `src/` risk bundler surprises and drift from the
+canonical `docs/` folder. **New design docs MUST go in the repo-level `docs/` directory.
+These two files should be moved there.**
 
 ---
 
@@ -581,7 +670,10 @@ When implementing any new feature, every item below must be verified:
 - [ ] All local-date extraction uses `getLocalDateString()` / `getTodayLocalDate()` — never `new Date().toISOString().split('T')[0]`
 - [ ] No new migration/test scripts placed under `src/scripts/`
 - [ ] No dead code (deprecated `addSale`, dev panels, duplicate service files) extended
-- [ ] `@pos-platform/shared` used for truly shared utilities (not duplicated)
+- [ ] Utilities/types/constants used by both apps live in `@pos-platform/shared`, not duplicated (CG-13)
+- [ ] New file under `services/` or `contexts/offlineData/operations/` ships with Vitest coverage (CG-12)
+- [ ] Changes to sync-critical files (§3.XII list) pass `pnpm parity:gate` (CG-12)
+- [ ] Undo payloads persist to `sessionStorage` only — never IndexedDB or `localStorage` (CG-14)
 
 ---
 
@@ -603,7 +695,7 @@ Each device tracks `last_seen_event_version` per branch in IndexedDB (`sync_stat
 This section explains how every spec-kit command interacts with this constitution so that
 AI agents produce consistent, constitution-compliant plans and tasks.
 
-### 13.1 Command → Constitution Flow
+### 12.1 Command → Constitution Flow
 
 | spec-kit command | Constitution sections consumed | Key action |
 |-----------------|-------------------------------|------------|
@@ -614,7 +706,7 @@ AI agents produce consistent, constitution-compliant plans and tasks.
 | `/speckit.analyze` | All sections | Flag any inconsistencies between implementation and constitution |
 | `/speckit.constitution` | This file | Amend, version, propagate to templates |
 
-### 13.2 Constitution Check Gate Mapping
+### 12.2 Constitution Check Gate Mapping
 
 When `/speckit.plan` runs the **Constitution Check**, it MUST evaluate each feature against
 these gates before proceeding past Phase 0 research:
@@ -632,6 +724,9 @@ these gates before proceeding past Phase 0 research:
 | CG-09 | Schema Consistency | Feature adds Supabase tables missing required fields, or skips SQL migration or Dexie version bump |
 | CG-10 | Multilingual | Feature hardcodes user-facing strings outside `createMultilingualFromString()` / `getTranslatedString()` |
 | CG-11 | Local Date Extraction | Feature uses `new Date().toISOString().split('T')[0]` (UTC date) instead of `getLocalDateString()` / `getTodayLocalDate()` for any local-date comparison, filter default, form default, or report range |
+| CG-12 | Testing Discipline | Feature adds a new file under `services/` or `contexts/offlineData/operations/` without an accompanying Vitest test, OR modifies a sync-critical file (§3.XII list) without `pnpm parity:gate` passing |
+| CG-13 | Shared Package Source of Truth | Feature duplicates a utility/type/constant across `apps/store-app` and `apps/admin-app` instead of adding it to `packages/shared` |
+| CG-14 | Undo Payload Storage Boundary | Feature writes undo payloads to IndexedDB/Dexie or `localStorage` instead of `sessionStorage` |
 
 **Gate evaluation rules:**
 - **PASS** — feature design does not trigger the violation condition.
@@ -641,7 +736,7 @@ these gates before proceeding past Phase 0 research:
 - **N/A** — gate is genuinely inapplicable (e.g. CG-08 for a UI-only cosmetic feature);
   MUST be documented explicitly in the Constitution Check section of `plan.md`.
 
-### 13.3 `plan.md` Section Alignment
+### 12.3 `plan.md` Section Alignment
 
 When filling `plan.md` sections, map them to constitution sections as follows:
 
@@ -654,11 +749,11 @@ When filling `plan.md` sections, map them to constitution sections as follows:
 | Technical Context — Target Platform | §2.4 |
 | Technical Context — Project Type | §2.4 |
 | Technical Context — Constraints | §2.4 |
-| Constitution Check (10 gates) | §3 + §13.2 gate table |
+| Constitution Check (14 gates) | §3 + §12.2 gate table |
 | Project Structure → Source Code | §2.2 (exact paths) |
 | Complexity Tracking (violations) | §8 (anti-patterns reference) |
 
-### 13.4 `tasks.md` Phase Structure for This Project
+### 12.4 `tasks.md` Phase Structure for This Project
 
 The standard spec-kit task phases map to this codebase as follows:
 
@@ -695,4 +790,4 @@ Any plan, spec, or task that would violate §3 (Core Architectural Principles) o
 
 ---
 
-**Version**: 1.4.0 | **Ratified**: 2026-03-22 | **Last Amended**: 2026-04-14
+**Version**: 1.5.0 | **Ratified**: 2026-03-22 | **Last Amended**: 2026-04-19

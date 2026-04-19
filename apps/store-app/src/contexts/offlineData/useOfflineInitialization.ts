@@ -1,6 +1,6 @@
 import { useCallback, useEffect, type Dispatch, type SetStateAction } from 'react';
 import { getDB } from '../../lib/db';
-import { syncService } from '../../services/syncService';
+import { syncService } from '../../services/syncOrchestrator';
 import { SYNC_TIERS } from '../../services/syncConfig';
 import type { OfflineSyncSessionState } from './offlineDataContextContract';
 import { receivedBillMonitoringService } from '../../services/receivedBillMonitoringService';

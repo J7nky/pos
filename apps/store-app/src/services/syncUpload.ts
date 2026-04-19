@@ -739,7 +739,7 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
           // 🎯 EMIT EVENTS: After successful upload to Supabase
           // This ensures the record exists when other devices receive the event
           if (tableName === 'bills') {
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 await eventEmissionService.emitSalePosted(
                   record.store_id,
@@ -748,18 +748,20 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                   record.created_by,
                   {
                     total: record.total_amount || 0,
-                    line_items_count: 0 // We don't have line items count here, but event still useful
+                    line_items_count: 0
                   }
                 );
                 console.log(`🎯 [Event] Emitted sale_posted event for bill ${record.id}`);
               } catch (eventError) {
-                // Event emission failure is not critical
                 console.error('[Event] Failed to emit sale_posted event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'transactions') {
-            // Emit events for transactions (affects cash drawer balance)
-            for (const record of batch as any[]) {
+            // Emit events for transactions (affects cash drawer balance).
+            // Each record may emit up to two RPCs (payment + cash drawer); per-record
+            // work stays sequential so the cash-drawer event is only attempted if the
+            // payment event succeeded.
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 if (record.is_reversal) {
                   await eventEmissionService.emitTransactionReversed(
@@ -801,7 +803,7 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit transaction event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'journal_entries') {
             // Emit events for journal entries (source of truth for cash drawer balance)
             // Group by transaction_id to emit one event per transaction
@@ -814,14 +816,13 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               transactionGroups.get(txId)!.push(record);
             }
             
-            for (const [txId, entries] of transactionGroups) {
+            await Promise.allSettled(Array.from(transactionGroups).map(async ([txId, entries]) => {
               try {
-                // Use first entry for store/branch info
                 const firstEntry = entries[0];
                 await eventEmissionService.emitJournalEntryCreated(
                   firstEntry.store_id,
                   firstEntry.branch_id,
-                  firstEntry.id, // Use first journal entry ID as entity_id
+                  firstEntry.id,
                   firstEntry.created_by,
                   {
                     entries_count: entries.length,
@@ -832,10 +833,9 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit journal_entry_created event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'cash_drawer_accounts') {
-            // Emit events for cash drawer account updates (balance changes)
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 await eventEmissionService.emitEvent({
                   store_id: record.store_id,
@@ -846,8 +846,6 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                   operation: 'update',
                   user_id: record.updated_by || null,
                   metadata: {
-                    // Note: current_balance is computed from journal entries, not stored
-                    // Including for informational purposes only
                     current_balance: record.current_balance || 0
                   }
                 });
@@ -855,10 +853,9 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit cash_drawer_account_updated event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'inventory_items') {
-            // Emit events for inventory item updates (quantity changes from sales)
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 await eventEmissionService.emitEvent({
                   store_id: record.store_id,
@@ -877,10 +874,9 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit inventory_item_updated event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'inventory_bills') {
-            // Emit events for inventory bills (inventory receipts)
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 await eventEmissionService.emitInventoryReceived(
                   record.store_id,
@@ -888,7 +884,7 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                   record.id,
                   record.created_by,
                   {
-                    items_count: 0, // We don't have count here, but event still useful
+                    items_count: 0,
                     total_value: 0
                   }
                 );
@@ -896,45 +892,65 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit inventory_received event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'entities') {
-            // Emit events for entity updates (customer/supplier balance changes)
-            for (const record of batch as any[]) {
+            // Emit events for entity updates (customer/supplier balance changes).
+            // Batches of 2+ collapse into a single bulk event to avoid RPC storms;
+            // single-record batches keep the per-entity event so existing consumers
+            // (which may look for customer_updated vs supplier_updated) still match.
+            const batchRecords = batch as any[];
+            if (batchRecords.length > 1) {
               try {
-                await eventEmissionService.emitEvent({
-                  store_id: record.store_id,
-                  branch_id: branchId || '', // Use current branch for store-level events
-                  event_type: record.entity_type === 'customer' ? 'customer_updated' : 'supplier_updated',
-                  entity_type: 'entity', // Database constraint requires 'entity', not 'customer' or 'supplier'
-                  entity_id: record.id,
-                  operation: 'update',
-                  user_id: record.updated_by || null,
-                  metadata: {
-                    name: record.name,
-                    entity_type: record.entity_type // Store actual type (customer/supplier) in metadata
-                    // Note: Balances are no longer stored on entities - calculated from journal entries
+                const anchor = batchRecords[0];
+                const entityIds = batchRecords.map(r => r.id);
+                await eventEmissionService.emitEntitiesBulkUpdated(
+                  anchor.store_id,
+                  branchId || '',
+                  entityIds,
+                  anchor.updated_by || undefined,
+                  {
+                    operation: 'update',
+                    operation_type: 'bulk_edit',
+                    count: entityIds.length,
                   }
-                });
-                console.log(`🎯 [Event] Emitted ${record.entity_type}_updated event for ${record.id}`);
+                );
+                console.log(`🎯 [Event] Emitted entities_bulk_updated for ${entityIds.length} entities`);
               } catch (eventError) {
-                console.error(`[Event] Failed to emit ${record.entity_type}_updated event:`, eventError);
+                console.error('[Event] Failed to emit entities_bulk_updated event:', eventError);
+              }
+            } else {
+              for (const record of batchRecords) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '',
+                    event_type: record.entity_type === 'customer' ? 'customer_updated' : 'supplier_updated',
+                    entity_type: 'entity',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      name: record.name,
+                      entity_type: record.entity_type
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted ${record.entity_type}_updated event for ${record.id}`);
+                } catch (eventError) {
+                  console.error(`[Event] Failed to emit ${record.entity_type}_updated event:`, eventError);
+                }
               }
             }
           } else if (tableName === 'stores') {
-            // Emit events for store settings updates
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
-                // Validate branch_id - must be a valid UUID for store-level events
                 if (!branchId || branchId === '') {
                   console.warn(`⚠️ [Event] Cannot emit store_updated event: branchId is missing or empty. Store: ${record.id}`);
-                  console.warn('   Store-level events require a branch_id. Skipping event emission.');
-                  continue;
+                  return;
                 }
-
                 console.log(`🎯 [Event] Emitting store_updated event for store ${record.id}, branch ${branchId}`);
                 await eventEmissionService.emitEvent({
                   store_id: record.id,
-                  branch_id: branchId, // Use current branch for store-level events
+                  branch_id: branchId,
                   event_type: 'store_updated',
                   entity_type: 'store',
                   entity_id: record.id,
@@ -951,16 +967,14 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                 console.log(`✅ [Event] Successfully emitted store_updated event for store ${record.id}`);
               } catch (eventError) {
                 console.error(`❌ [Event] Failed to emit store_updated event for store ${record.id}:`, eventError);
-                // Log the error details for debugging
                 if (eventError instanceof Error) {
                   console.error('   Error message:', eventError.message);
                   console.error('   Error stack:', eventError.stack);
                 }
               }
-            }
+            }));
           } else if (tableName === 'branches') {
-            // Emit events for branch updates
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 await eventEmissionService.emitEvent({
                   store_id: record.store_id,
@@ -979,55 +993,98 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit branch_updated event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'users') {
-            // Emit events for user updates
-            for (const record of batch as any[]) {
+            // Emit events for user updates — collapse to bulk event for batches of 2+.
+            const batchRecords = batch as any[];
+            if (batchRecords.length > 1) {
               try {
-                await eventEmissionService.emitEvent({
-                  store_id: record.store_id,
-                  branch_id: branchId || '',
-                  event_type: 'user_updated',
-                  entity_type: 'user',
-                  entity_id: record.id,
-                  operation: 'update',
-                  user_id: record.updated_by || record.id,
-                  metadata: {
-                    name: record.name,
-                    role: record.role
+                const anchor = batchRecords[0];
+                const userIds = batchRecords.map(r => r.id);
+                await eventEmissionService.emitUsersBulkUpdated(
+                  anchor.store_id,
+                  branchId || '',
+                  userIds,
+                  anchor.updated_by || anchor.id || undefined,
+                  {
+                    operation: 'update',
+                    operation_type: 'bulk_edit',
+                    count: userIds.length,
                   }
-                });
-                console.log(`🎯 [Event] Emitted user_updated event for user ${record.id}`);
+                );
+                console.log(`🎯 [Event] Emitted users_bulk_updated for ${userIds.length} users`);
               } catch (eventError) {
-                console.error('[Event] Failed to emit user_updated event:', eventError);
+                console.error('[Event] Failed to emit users_bulk_updated event:', eventError);
+              }
+            } else {
+              for (const record of batchRecords) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '',
+                    event_type: 'user_updated',
+                    entity_type: 'user',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || record.id,
+                    metadata: {
+                      name: record.name,
+                      role: record.role
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted user_updated event for user ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit user_updated event:', eventError);
+                }
               }
             }
           } else if (tableName === 'products') {
-            // Emit events for product updates
-            for (const record of batch as any[]) {
+            // Emit events for product updates — collapse to bulk event for batches of 2+.
+            const batchRecords = batch as any[];
+            if (batchRecords.length > 1) {
               try {
-                await eventEmissionService.emitEvent({
-                  store_id: record.store_id,
-                  branch_id: branchId || '',
-                  event_type: 'product_updated',
-                  entity_type: 'product',
-                  entity_id: record.id,
-                  operation: 'update',
-                  user_id: record.updated_by || null,
-                  metadata: {
-                    name: record.name,
-                    barcode: record.barcode,
-                    category: record.category
+                const anchor = batchRecords[0];
+                const productIds = batchRecords.map(r => r.id);
+                await eventEmissionService.emitProductsBulkUpdated(
+                  anchor.store_id,
+                  branchId || '',
+                  productIds,
+                  anchor.updated_by || undefined,
+                  {
+                    operation: 'update',
+                    operation_type: 'bulk_edit',
+                    count: productIds.length,
                   }
-                });
-                console.log(`🎯 [Event] Emitted product_updated event for product ${record.id}`);
+                );
+                console.log(`🎯 [Event] Emitted products_bulk_updated for ${productIds.length} products`);
               } catch (eventError) {
-                console.error('[Event] Failed to emit product_updated event:', eventError);
+                console.error('[Event] Failed to emit products_bulk_updated event:', eventError);
+              }
+            } else {
+              for (const record of batchRecords) {
+                try {
+                  await eventEmissionService.emitEvent({
+                    store_id: record.store_id,
+                    branch_id: branchId || '',
+                    event_type: 'product_updated',
+                    entity_type: 'product',
+                    entity_id: record.id,
+                    operation: 'update',
+                    user_id: record.updated_by || null,
+                    metadata: {
+                      name: record.name,
+                      barcode: record.barcode,
+                      category: record.category
+                    }
+                  });
+                  console.log(`🎯 [Event] Emitted product_updated event for product ${record.id}`);
+                } catch (eventError) {
+                  console.error('[Event] Failed to emit product_updated event:', eventError);
+                }
               }
             }
           } else if (tableName === 'chart_of_accounts') {
-            // Emit events for chart of account updates
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 await eventEmissionService.emitEvent({
                   store_id: record.store_id,
@@ -1046,10 +1103,9 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit chart_of_account_updated event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'role_permissions') {
-            // Emit events for role permission updates
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 await eventEmissionService.emitEvent({
                   store_id: record.store_id,
@@ -1069,10 +1125,9 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit role_permission_updated event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'user_permissions') {
-            // Emit events for user permission updates
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 await eventEmissionService.emitEvent({
                   store_id: record.store_id,
@@ -1092,10 +1147,9 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit user_permission_updated event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'cash_drawer_sessions') {
-            // Emit events for cash drawer session open/close
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 const eventType = record.status === 'open'
                   ? 'cash_drawer_session_opened'
@@ -1119,10 +1173,9 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit cash_drawer_session event:', eventError);
               }
-            }
+            }));
           } else if (tableName === 'reminders') {
-            // Emit events for reminder create/update/delete
-            for (const record of batch as any[]) {
+            await Promise.allSettled((batch as any[]).map(async (record) => {
               try {
                 await eventEmissionService.emitEvent({
                   store_id: record.store_id,
@@ -1142,7 +1195,7 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               } catch (eventError) {
                 console.error('[Event] Failed to emit reminder_updated event:', eventError);
               }
-            }
+            }));
           }
         }
       }

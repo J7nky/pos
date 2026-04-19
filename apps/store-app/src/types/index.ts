@@ -597,7 +597,7 @@ export interface CashDrawerAccount {
   is_active: boolean;
   /** 
    * @deprecated COMPUTED-ONLY: Never read or write this field. 
-   * Balance is calculated from journal entries (account_code = 1100) using calculateCashDrawerBalance().
+   * Balance is calculated from journal entries (account_code = 1100) using cashDrawerUpdateService.getCurrentCashDrawerBalances().
    * Kept in schema for backward compatibility only.
    */
   current_balance?: number | null;

@@ -8,7 +8,7 @@ import {
   getDB,
   createId,
 } from '../lib/db';
-import { syncService, SyncResult } from '../services/syncService';
+import { syncService, type SyncResult } from '../services/syncOrchestrator';
 import { crudHelperService } from '../services/crudHelperService';
 // import { PAYMENT_CATEGORIES } from '../constants/paymentCategories'; // Unused
 import enLocale from '../i18n/locales/en';

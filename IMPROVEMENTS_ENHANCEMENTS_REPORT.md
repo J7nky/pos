@@ -204,12 +204,12 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 - **Observation:** syncService imports getDB, supabase, dataValidationService, universalChangeDetectionService, eventEmissionService. eventStreamService imports supabase and getDB. eventEmissionService imports only supabase. OfflineDataContext imports syncService, eventStreamService, crudHelperService, eventEmissionHelper, and many other services. The dependency graph is deep and mostly implicit (no DI container).
 - **Recommendation:** Draw an explicit dependency diagram (e.g. in docs): “UI → OfflineDataContext → [crudHelper, transactionService, journalService, …]; OfflineDataContext → eventEmissionHelper → eventEmissionService → supabase; syncService ↔ getDB, supabase; eventStreamService ↔ supabase, getDB.” Then isolate “sync + event” behind a single facade (e.g. `SyncOrchestrator`) that OfflineDataContext and eventStreamService use, so that the rest of the app does not depend on syncService/eventStreamService directly except for “trigger sync” and “on events processed.”
 
-### 3.3 Duplication between store-app and shared ⚠️
+### 3.3 Duplication between store-app and shared ✅
 
 - **Observation:** packages/shared exports referenceGenerator, multilingual, paymentCategories. Store-app may still duplicate some utilities locally.
 - **Recommendation:** Prefer imports from `@pos-platform/shared` for shared modules; delete or narrow local duplicates.
 
-**Implemented (partial):** `apps/store-app/package.json` lists `"@pos-platform/shared": "workspace:*"`. Remaining drift (e.g. parallel `utils/referenceGenerator.ts` vs shared) should be audited file-by-file.
+**Implemented:** `apps/store-app/package.json` lists `"@pos-platform/shared": "workspace:*"`. The local `apps/store-app/src/utils/referenceGenerator.ts` duplicate has been removed; only `packages/shared/src/utils/referenceGenerator.ts` remains. A future file-by-file audit can confirm no other duplicates exist.
 
 ---
 
@@ -220,10 +220,12 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 - **Observation:** Root `netlify.toml` uses a single command that builds either admin-app or store-app based on site name/URL; publish is set to `apps/admin-app/dist`. The command copies store-app’s dist into `apps/admin-app/dist` when building store-app, so the publish dir is reused for both. This is brittle and confusing.
 - **Recommendation:** Use two Netlify sites (e.g. “pos-store” and “pos-admin”) with explicit base directory and publish dir per app: store-app → base `apps/store-app`, publish `apps/store-app/dist`; admin-app → base `apps/admin-app`, publish `apps/admin-app/dist`. Remove the conditional copy from the root command so each site’s config is self-contained.
 
-### 4.2 Environment variables
+### 4.2 Environment variables ✅
 
 - **Observation:** Store-app expects VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, optional VITE_SUPABASE_SERVICE_ROLE_KEY, VITE_PUBLIC_URL. Admin-app expects VITE_SUPABASE_*, VITE_API_URL, VITE_APP_TITLE. No `.env.example` or `.env.sample` in the repo; DOMAIN_DEPLOYMENT_GUIDE.md mentions env vars.
 - **Recommendation:** Add `.env.example` at repo root (and/or per app) listing every variable with a short comment and a placeholder value (no secrets). Document which vars are required for store vs admin.
+
+**Implemented:** Both `apps/store-app/.env.example` and `apps/admin-app/.env.example` are present, listing each required variable with placeholder values and short comments.
 
 ### 4.3 Database migrations ⚠️
 
@@ -232,10 +234,12 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 
 **Implemented (partial):** The repo contains `supabase/migrations/branch_event_log.sql` (and related feature work). A full historical `001_initial_schema.sql` / seed set may still be missing — treat this as incremental progress, not complete migration coverage.
 
-### 4.4 `src/scripts/` — migration artifacts inside the production source tree
+### 4.4 `src/scripts/` — migration artifacts inside the production source tree ✅
 
-- **Observation:** `apps/store-app/src/scripts/` contains 11 browser-runnable TypeScript scripts: `migrateToEntitiesOnly.ts`, `runEntityMigration.ts`, `verifyJournalBasedBalances.ts`, `migrateToJournalBasedBalances.ts`, and others. These are one-off migration and verification utilities created during development. They live inside `src/`, which means Vite's build step can include them in the production bundle, they show up in IDE imports, and they create noise in the module graph.
+- **Observation (historical):** `apps/store-app/src/scripts/` contained 11 browser-runnable TypeScript scripts (migration and verification utilities).
 - **Recommendation:** Move all scripts to a top-level `scripts/` directory (at the monorepo root or per-app root), outside `src/`. Add an exclusion in `tsconfig.app.json` (`exclude: ["src/scripts"]`) so the build does not process them. Once migrations are confirmed complete in all environments, delete the scripts from the repo entirely.
+
+**Implemented:** The `apps/store-app/src/scripts/` directory has been removed entirely. No migration scripts remain in the production source tree.
 
 ### 4.5 `supabaseService.ts` vs `lib/supabase.ts` ✅
 
@@ -244,13 +248,12 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 
 **Status:** Not “dead code” for `supabaseService.ts` while `SupabaseAuthContext` imports it. Any truly unused `*.optimized` variant should be deleted after confirming zero imports.
 
-### 4.6 Dev-only pages and panels in production router/source
+### 4.6 Dev-only pages and panels in production router/source ⚠️
 
-- **Observation:** Three development-only artifacts remain in the production source:
-  1. `pages/TestAccounting.tsx` (78 lines) — registered in `router.tsx` at `/test-accounting` with **no `ProtectedRoute` and no environment guard**, accessible by anyone who knows the URL.
-  2. `pages/MigrationTest.tsx` (289 lines) — imported in the router file; may not have a visible nav link but the module is bundled.
-  3. `components/DevAccountingTestPanel.tsx` — a developer testing panel with no env-flag guard. §1.1 of this report confirmed that the `getDB` import was removed, but the component itself remains importable from production code.
+- **Observation (historical):** Three development-only artifacts existed: `pages/TestAccounting.tsx`, `pages/MigrationTest.tsx`, and `components/DevAccountingTestPanel.tsx`.
 - **Recommendation:** (1) Remove `TestAccounting` and `MigrationTest` from `router.tsx` and delete the page files. (2) Either delete `DevAccountingTestPanel.tsx` or gate it behind `import.meta.env.DEV` so it tree-shakes out of production builds. (3) Add a `VITE_ENABLE_DEV_TOOLS=true` pattern for any future dev-only UI so it is consistently excluded from production.
+
+**Implemented (partial):** `TestAccounting.tsx` and `DevAccountingTestPanel.tsx` have been deleted; `router.tsx` no longer registers `/test-accounting`. `pages/MigrationTest.tsx` remains as an orphan file — its contents are fully commented out and no module imports it, so it is not bundled, but the file should still be removed to keep the source tree clean.
 
 ---
 
@@ -408,13 +411,13 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 
 **Implemented:** `eventEmissionService.emitCashDrawerTransactionPosted` exists (alongside session-open/close).
 
-### 7.6 `NaN` balance risk: missing `|| 0` guards on currency arithmetic ⚠️
+### 7.6 `NaN` balance risk: missing `|| 0` guards on currency arithmetic ✅
 
 - **Location:** `utils/balanceCalculation.ts:44–51`.
 - **Observation:** Balance calculation does bare subtraction — `e.debit_usd - e.credit_usd` — without guarding against `undefined`. A journal entry created for an LBP-only transaction may have no `debit_usd` / `credit_usd` fields, producing `NaN` that propagates silently through the sum and renders as `NaN` in the UI.
 - **Recommendation:** Replace with `(e.debit_usd || 0) - (e.credit_usd || 0)` and apply the same guard to all four currency fields (`debit_usd`, `credit_usd`, `debit_lbp`, `credit_lbp`).
 
-**Implemented (main paths):** `calculateBalance`, `calculateBothCurrencies`, and employee balance helpers use `|| 0` on USD/LBP fields. **Open (minor):** `calculateBothCurrenciesLiability` still uses raw `e.credit_usd - e.debit_usd` / LBP for liability-style sums — harden if those entries can omit amounts.
+**Implemented:** `calculateBalance`, `calculateBothCurrencies`, `calculateBothCurrenciesLiability`, and employee balance helpers all use `|| 0` guards on USD/LBP fields (`balanceCalculation.ts:27,30,47-48,68-69`). No unguarded currency arithmetic remains in the main balance paths.
 
 ### 7.7 `getLocalCurrentSession` non-deterministic with duplicate open sessions ✅
 
@@ -461,13 +464,13 @@ So: **UI → useOfflineData() → OfflineDataContext → crudHelperService + db 
 | Code quality   | Stale package name                                     | apps/store-app/package.json `name: "vite-react-typescript-starter"`                                    | ✅ Implemented                                                      |
 | Modularity     | crudHelperService callbacks                            | Only OfflineDataContext sets them                                                                      | Open                                                               |
 | Modularity     | Deep sync/event deps                                   | syncService, eventStreamService, eventEmissionService, OfflineDataContext                              | Open                                                               |
-| Modularity     | shared vs store-app utils                              | `@pos-platform/shared` in store-app; possible duplicate utils                                          | ⚠️ Partial                                                         |
+| Modularity     | shared vs store-app utils                              | Local `utils/referenceGenerator.ts` removed; shared package used                                       | ✅ Implemented                                                      |
 | Infrastructure | Netlify publish dir                                    | Root toml publish = apps/admin-app/dist for both apps                                                  | Open                                                               |
-| Infrastructure | No .env.example                                        | Env vars only in docs                                                                                  | Open                                                               |
+| Infrastructure | No .env.example                                        | `apps/store-app/.env.example` + `apps/admin-app/.env.example` present                                  | ✅ Implemented                                                      |
 | Infrastructure | SQL migrations in repo                                 | `supabase/migrations/branch_event_log.sql` present; full schema history may be incomplete              | ⚠️ Partial                                                         |
-| Infrastructure | src/scripts/ in source tree                            | 11 migration scripts under src/scripts/ bundled in production                                          | Open                                                               |
+| Infrastructure | src/scripts/ in source tree                            | `apps/store-app/src/scripts/` directory removed                                                        | ✅ Implemented                                                      |
 | Infrastructure | supabaseService vs sync client                         | `SupabaseAuthContext` imports `supabaseService.ts`                                                     | Clarified (not unused)                                             |
-| Infrastructure | Dev pages in production router                         | `TestAccounting` still in `router.tsx`; `MigrationTest` largely commented                              | Open                                                               |
+| Infrastructure | Dev pages in production router                         | `TestAccounting` + `DevAccountingTestPanel` deleted; orphan commented-out `MigrationTest.tsx` remains  | ⚠️ Partial                                                         |
 | Scalability    | Full tables in context state                           | products, transactions, journalEntries, etc. in memory                                                 | Open                                                               |
 | Scalability    | Single sync, sequential events                         | isRunning; event processing per branch sequential                                                      | Open                                                               |
 | Scalability    | Multi-tab undefined                                    | No cross-tab coordination                                                                              | Open                                                               |
