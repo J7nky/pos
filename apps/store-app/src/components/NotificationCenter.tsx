@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { Bell, X, Check, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { NotificationRecord } from '../types';
 
 export function NotificationCenter() {
   const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useOfflineData();
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -28,7 +30,7 @@ export function NotificationCenter() {
     }
     
     if (notification.action_url) {
-      window.location.href = notification.action_url;
+      navigate(notification.action_url);
       setIsOpen(false);
     }
   };

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
@@ -124,6 +125,16 @@ export default function Accounting() {
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
 
   const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer' | 'payments'>('accounting_active_tab', 'dashboard');
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    const valid = ['dashboard', 'nonpriced', 'bills-management', 'received-bills', 'cash-drawer', 'payments'];
+    if (tabParam && valid.includes(tabParam)) {
+      setActiveTab(tabParam as typeof activeTab);
+      searchParams.delete('tab');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams]);
   const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
   const [showForm, setShowForm] = useState<"receive" | "pay" | "expense" | null>(null);
   const [dashboardPeriod] = useLocalStorage<'today' | 'week' | 'month' | 'quarter' | 'year'>('accounting_dashboard_period', 'today');

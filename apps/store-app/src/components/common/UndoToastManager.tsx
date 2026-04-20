@@ -13,7 +13,19 @@ const UndoToastManager: React.FC = () => {
   const [feedbackType, setFeedbackType] = useState<'success' | 'error' | null>(null);
   const [actionType, setActionType] = useState<string | null>(null);
   const [progress, setProgress] = useState(100);
-  const lastUndoTimestamp = useRef<number>(0);
+  const lastUndoTimestamp = useRef<number>(
+    (() => {
+      if (typeof sessionStorage === 'undefined') return 0;
+      try {
+        const raw = sessionStorage.getItem(UNDO_STORAGE_KEY);
+        if (!raw) return 0;
+        const parsed = JSON.parse(raw);
+        return typeof parsed?.timestamp === 'number' ? parsed.timestamp : 0;
+      } catch {
+        return 0;
+      }
+    })()
+  );
   const autoHideTimer = useRef<NodeJS.Timeout | null>(null);
   const progressTimer = useRef<NodeJS.Timeout | null>(null);
   const feedbackClearTimer = useRef<NodeJS.Timeout | null>(null);
