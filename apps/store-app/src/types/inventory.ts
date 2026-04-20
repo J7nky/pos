@@ -39,6 +39,9 @@ export interface InventoryItem {
   createdAt: string;
   batch_id?: string | null;
   sku?: string | null;
+  is_archived?: boolean;
+  _synced?: boolean;
+  _deleted?: boolean;
 }
 
 export interface StockLevel {

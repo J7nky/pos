@@ -4,7 +4,7 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useInventoryForms } from '../hooks/useInventoryForms';
 import { useInventoryModals } from '../hooks/useInventoryModals';
-import { Plus, Search, Package, Truck } from 'lucide-react';
+import { Plus, Search, Package, Truck, Archive } from 'lucide-react';
 import ReceiveFormModal from '../components/inventory/ReceiveFormModal';
 import AddProductModal from '../components/inventory/AddProductModal';
 import EditProductModal from '../components/inventory/EditProductModal';
@@ -13,6 +13,7 @@ import EditInventoryModal from '../components/inventory/EditInventoryModal';
 import DeleteInventoryConfirm from '../components/inventory/DeleteInventoryConfirm';
 import RecentReceivesTable from '../components/inventory/RecentReceivesTable';
 import ProductTable from '../components/inventory/ProductTable';
+import ArchivedInventoryTab from '../components/inventory/ArchivedInventoryTab';
 import { Product, Supplier, InventoryItem } from '../types/inventory';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
@@ -43,14 +44,16 @@ const Inventory: React.FC = () => {
       created_at: i.created_at 
     };
   }) as InventoryItem[];
-  const { 
-    addSupplier, 
-    addProduct, 
-    updateProduct, 
-    deleteProduct, 
-    updateInventoryItem, 
+  const {
+    addSupplier,
+    addProduct,
+    updateProduct,
+    deleteProduct,
+    updateInventoryItem,
     deleteInventoryItem,
-    defaultCommissionRate 
+    archiveInventoryItem,
+    unarchiveInventoryItem,
+    defaultCommissionRate
   } = raw;
   const { userProfile } = useSupabaseAuth();
 
@@ -58,7 +61,7 @@ const Inventory: React.FC = () => {
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('inventory_recent_suppliers', []);
 
   // Main state
-  const [activeTab, setActiveTab] = useState<'receive' | 'stock'>('receive');
+  const [activeTab, setActiveTab] = useState<'receive' | 'stock' | 'archived'>('receive');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Custom hooks
@@ -103,17 +106,15 @@ const Inventory: React.FC = () => {
   } = useInventoryModals();
 
 
-  // Recent receives - sorted by date (newest first), no limit (pagination handled in table)
-  // Filter out items from closed bills
+  const archivedInventory = inventory.filter(item => item.is_archived === true);
+
+  // Recent receives — active only, exclude archived and closed bills
   const recentReceives = inventory
     .filter((item) => {
-      // If item has a batch_id, check if the bill is closed
+      if (item.is_archived) return false;
       if (item.batch_id) {
         const batch = batchMap.get(item.batch_id);
-        // Exclude items from closed bills
-        if (batch?.status === 'CLOSED' || batch?.closed_at) {
-          return false;
-        }
+        if (batch?.status === 'CLOSED' || batch?.closed_at) return false;
       }
       return true;
     })
@@ -162,10 +163,30 @@ const Inventory: React.FC = () => {
   const handleDeleteInventoryItem = async (item: any) => {
     try {
       await deleteInventoryItem(item.id);
-      showToast('success', 'Inventory item deleted successfully!');
+      showToast('success', t('inventory.deleteSuccess') || 'Inventory item deleted successfully!');
     } catch (error) {
       handleError(error);
-      showToast('error', 'Failed to delete inventory item.');
+      showToast('error', t('inventory.deleteFailure') || 'Failed to delete inventory item.');
+    }
+  };
+
+  const handleArchiveInventoryItem = async (item: any) => {
+    try {
+      await archiveInventoryItem(item.id);
+      showToast('success', t('inventory.archiveSuccess'));
+    } catch (error) {
+      handleError(error);
+      showToast('error', t('inventory.archiveFailure'));
+    }
+  };
+
+  const handleUnarchiveInventoryItem = async (item: any) => {
+    try {
+      await unarchiveInventoryItem(item.id);
+      showToast('success', t('inventory.unarchiveSuccess'));
+    } catch (error) {
+      handleError(error);
+      showToast('error', t('inventory.unarchiveFailure'));
     }
   };
 
@@ -270,6 +291,12 @@ return (
             {t('inventory.addProduct')}
           </button>
         )}
+        {activeTab === 'archived' && archivedInventory.length > 0 && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 text-sm font-medium">
+            <Archive className="w-4 h-4" />
+            {archivedInventory.length}
+          </span>
+        )}
       </div>
 
       {/* Tabs */}
@@ -277,8 +304,8 @@ return (
         <button
           onClick={() => setActiveTab('receive')}
           className={`px-4 py-2 rounded-md transition-colors ${
-            activeTab === 'receive' 
-              ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' 
+            activeTab === 'receive'
+              ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm'
               : 'text-gray-600 dark:text-slate-300'
           }`}
         >
@@ -288,17 +315,42 @@ return (
         <button
           onClick={() => setActiveTab('stock')}
           className={`px-4 py-2 rounded-md transition-colors ${
-            activeTab === 'stock' 
-              ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' 
+            activeTab === 'stock'
+              ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm'
               : 'text-gray-600 dark:text-slate-300'
           }`}
         >
           <Package className="w-4 h-4 inline mr-2" />
           {t('inventory.stockProducts')}
         </button>
+        <button
+          onClick={() => setActiveTab('archived')}
+          className={`px-4 py-2 rounded-md transition-colors flex items-center gap-1.5 ${
+            activeTab === 'archived'
+              ? 'bg-white dark:bg-slate-900 text-amber-600 shadow-sm'
+              : 'text-gray-600 dark:text-slate-300'
+          }`}
+        >
+          <Archive className="w-4 h-4" />
+          {t('inventory.archivedItems')}
+          {archivedInventory.length > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 font-medium">
+              {archivedInventory.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* Content based on active tab */}
+      {activeTab === 'archived' && (
+        <ArchivedInventoryTab
+          items={archivedInventory}
+          products={products}
+          onUnarchive={handleUnarchiveInventoryItem}
+          onDelete={handleDeleteInventoryItem}
+        />
+      )}
+
       {activeTab === 'receive' && (
         <div className="space-y-6">
           <RecentReceivesTable 
@@ -397,6 +449,10 @@ return (
           onClose={() => setDeleteItem(null)}
           onDelete={async (item: any) => {
             await handleDeleteInventoryItem(item);
+            setDeleteItem(null);
+          }}
+          onArchive={async (item: any) => {
+            await handleArchiveInventoryItem(item);
             setDeleteItem(null);
           }}
         />

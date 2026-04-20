@@ -200,6 +200,50 @@ export async function checkInventoryItemReferences(id: string): Promise<{
   }
 }
 
+export async function archiveInventoryItem(
+  deps: Pick<InventoryItemDeps, 'storeId' | 'pushUndo' | 'resetAutoSyncTimer' | 'refreshData'>,
+  id: string
+): Promise<void> {
+  const { storeId, pushUndo, resetAutoSyncTimer, refreshData } = deps;
+  if (!storeId) throw new Error('No store ID available');
+
+  const originalItem = await getDB().inventory_items.get(id);
+  if (!originalItem) throw new Error('Inventory item not found');
+
+  await getDB().inventory_items.update(id, { is_archived: true, _synced: false });
+
+  pushUndo({
+    type: 'archive_inventory_item',
+    affected: [{ table: 'inventory_items', id }],
+    steps: [{ op: 'update', table: 'inventory_items', id, changes: { is_archived: false, _synced: false } }],
+  });
+
+  resetAutoSyncTimer();
+  await refreshData();
+}
+
+export async function unarchiveInventoryItem(
+  deps: Pick<InventoryItemDeps, 'storeId' | 'pushUndo' | 'resetAutoSyncTimer' | 'refreshData'>,
+  id: string
+): Promise<void> {
+  const { storeId, pushUndo, resetAutoSyncTimer, refreshData } = deps;
+  if (!storeId) throw new Error('No store ID available');
+
+  const originalItem = await getDB().inventory_items.get(id);
+  if (!originalItem) throw new Error('Inventory item not found');
+
+  await getDB().inventory_items.update(id, { is_archived: false, _synced: false });
+
+  pushUndo({
+    type: 'unarchive_inventory_item',
+    affected: [{ table: 'inventory_items', id }],
+    steps: [{ op: 'update', table: 'inventory_items', id, changes: { is_archived: true, _synced: false } }],
+  });
+
+  resetAutoSyncTimer();
+  await refreshData();
+}
+
 export async function deleteInventoryItem(
   deps: InventoryItemDeps,
   id: string
@@ -220,15 +264,9 @@ export async function deleteInventoryItem(
       .and(item => !item._deleted)
       .toArray();
 
-    const missedProducts = await getDB().missed_products
-      .where('inventory_item_id')
-      .equals(id)
-      .and(item => !item._deleted)
-      .toArray();
-
-    const hasReferences = sales.length > 0 || missedProducts.length > 0;
-    const affectedRecords: any[] = [{ table: 'inventory_items', id }];
-    const undoSteps: any[] = [];
+    if (sales.length > 0) {
+      throw new Error(`HAS_SALES:${sales.length}`);
+    }
 
     if (!userProfileId) throw new Error('User not authenticated');
 
@@ -258,21 +296,13 @@ export async function deleteInventoryItem(
         }
       }
 
-      if (hasReferences) {
-        await getDB().inventory_items.update(id, { _deleted: true, _synced: false });
-        undoSteps.push({ op: 'update', table: 'inventory_items', id, changes: { _deleted: false, _synced: false } });
-        for (const s of sales) affectedRecords.push({ table: 'bill_line_items', id: s.id });
-        for (const m of missedProducts) affectedRecords.push({ table: 'missed_products', id: m.id });
-      } else {
-        await getDB().inventory_items.delete(id);
-        undoSteps.push({ op: 'add', table: 'inventory_items', id, changes: originalItem });
-      }
+      await getDB().inventory_items.delete(id);
     });
 
     pushUndo({
       type: 'delete_inventory_item',
-      affected: affectedRecords,
-      steps: undoSteps
+      affected: [{ table: 'inventory_items', id }],
+      steps: [{ op: 'add', table: 'inventory_items', id, changes: originalItem }],
     });
 
     resetAutoSyncTimer();

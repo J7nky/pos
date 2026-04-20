@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 55;
+export const CURRENT_DB_VERSION = 56;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -57,6 +57,10 @@ export const V55_STORES = {
   pending_syncs: 'id, table_name, record_id, operation, created_at, retry_count, status',
 } as const;
 
+export const V56_STORES = {
+  inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, is_archived, [store_id+branch_id], _synced, _deleted',
+} as const;
+
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
   console.log('🔧 Initializing database schema v54');
   console.log('   ✅ Database schema initialized');
@@ -80,4 +84,15 @@ export async function upgradeV55(tx: DexieTransaction): Promise<void> {
       if (row.status === undefined) row.status = 'pending';
     });
   console.log('   ✅ v55 migration complete');
+}
+
+export async function upgradeV56(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v55 → v56 (inventory_items archive support)');
+  await tx
+    .table('inventory_items')
+    .toCollection()
+    .modify((row: any) => {
+      if (row.is_archived === undefined) row.is_archived = false;
+    });
+  console.log('   ✅ v56 migration complete');
 }

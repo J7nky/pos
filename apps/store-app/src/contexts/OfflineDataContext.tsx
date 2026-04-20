@@ -556,6 +556,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       id
     );
 
+  const archiveInventoryItem = (id: string): Promise<void> =>
+    inventoryItemOps.archiveInventoryItem(
+      { storeId, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, refreshData },
+      id
+    );
+
+  const unarchiveInventoryItem = (id: string): Promise<void> =>
+    inventoryItemOps.unarchiveInventoryItem(
+      { storeId, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, refreshData },
+      id
+    );
+
   const deductInventoryQuantity = (productId: string, quantity: number) =>
     inventoryItemOps.deductInventoryQuantity(
       { storeId, refreshData, updateUnsyncedCount: syncStateLayer.updateUnsyncedCount, debouncedSync: syncStateLayer.debouncedSync },
@@ -910,6 +922,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateInventoryItem: async () => {},
         checkInventoryItemReferences: async () => ({ salesCount: 0, variancesCount: 0, hasReferences: false }),
         deleteInventoryItem: async () => {},
+        archiveInventoryItem: async () => {},
+        unarchiveInventoryItem: async () => {},
         addInventoryBatch: async () => ({ batchId: '' }),
         updateSale: async () => {},
         deleteSale: async () => {},
@@ -1063,6 +1077,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateInventoryItem,
       checkInventoryItemReferences,
       deleteInventoryItem,
+      archiveInventoryItem,
+      unarchiveInventoryItem,
       addInventoryBatch: addInventoryBatchDelegate,
       updateInventoryBatch: updateInventoryBatchDelegate,
       deleteInventoryBatch: deleteInventoryBatchDelegate,

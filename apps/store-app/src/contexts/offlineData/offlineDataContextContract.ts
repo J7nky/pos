@@ -317,6 +317,8 @@ export interface OfflineDataContextType {
     hasReferences: boolean;
   }>;
   deleteInventoryItem: (id: string) => Promise<void>;
+  archiveInventoryItem: (id: string) => Promise<void>;
+  unarchiveInventoryItem: (id: string) => Promise<void>;
   addInventoryBatch: (args: {
     supplier_id: string;
     created_by: string;

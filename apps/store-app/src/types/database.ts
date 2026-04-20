@@ -397,6 +397,7 @@ export interface Database {
           batch_id: string | null;
           sku: string | null;
           updated_at: string;
+          is_archived: boolean | null;
         };
         Insert:{
           id: string;
@@ -412,6 +413,7 @@ export interface Database {
           batch_id?: string | null;
           sku?: string | null;
           updated_at?: string;
+          is_archived?: boolean | null;
         };
         Update: {
           id: string;
@@ -427,6 +429,7 @@ export interface Database {
           batch_id?: string | null;
           sku?: string | null;
           updated_at?: string;
+          is_archived?: boolean | null;
         };
       };
       bills: {

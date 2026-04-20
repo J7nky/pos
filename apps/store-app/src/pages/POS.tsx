@@ -533,7 +533,7 @@ ${dashSeparator}`;
 
   // Get total available stock for a product across all suppliers (subtract reservations across all tabs)
   const getProductStock = (productId: string) => {
-    const items = inventory.filter(item => item.product_id === productId && item.quantity > 0);
+    const items = inventory.filter(item => item.product_id === productId && item.quantity > 0 && !item.is_archived);
     const totalStock = items.reduce((total, item) => total + (item.quantity || 0), 0);
     const reservedAcrossTabs = activeTabs.reduce((sum, tab) => {
       return (
@@ -551,7 +551,7 @@ ${dashSeparator}`;
   const getProductInventoryItems = (productId: string) => {
     // Get all individual inventory items for this product
     const productInventoryItems = inventory
-      .filter(item => item.product_id === productId && item.quantity > 0)
+      .filter(item => item.product_id === productId && item.quantity > 0 && !item.is_archived)
       .sort((a, b) => new Date(a.received_at || a.created_at).getTime() - new Date(b.received_at || b.created_at).getTime());
 
     // Helper: reserved qty for a specific inventory item across ALL open tabs
@@ -595,8 +595,8 @@ ${dashSeparator}`;
   const findInventoryItemBySku = (sku: string) => {
     if (!sku || !sku.trim()) return null;
     const normalizedSku = sku.trim().toUpperCase();
-    return inventory.find(item => 
-      item.sku && item.sku.toUpperCase() === normalizedSku && !item._deleted
+    return inventory.find(item =>
+      item.sku && item.sku.toUpperCase() === normalizedSku && !item._deleted && !item.is_archived
     );
   };
 
