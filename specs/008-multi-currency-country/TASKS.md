@@ -24,6 +24,55 @@ Dual-ledger accounting columns (`debit_usd`, `credit_usd`, `debit_lbp`, `credit_
 
 ---
 
+## Phased Rollout (for Speckit)
+
+Speckit operates on small, independently shippable phases rather than the full 18-task plan at once. The tasks below are grouped into 12 phases, each of which compiles, passes type-checks, and is safe to merge on its own. Each phase maps directly to a speckit spec/plan/tasks cycle.
+
+| Phase | Scope | Tasks | Blast radius |
+|---|---|---|---|
+| **1 — Shared foundation** | `CurrencyCode` + country map in shared package | 1, 2 | None (pure types) |
+| **2 — Schema widening** | DB migration + type propagation for `country` / `accepted_currencies` | 3, 4, 5, 6 | Both apps compile; no behavior change |
+| **3 — CurrencyService refactor** | Multi-currency-aware service + call-site updates | 7 | store-app service layer |
+| **4 — Admin form wiring** | `StoreForm` country selector + admin service payload | 8, 9 | admin-app only |
+| **5 — Store-app context surface** | Expose `acceptedCurrencies` / `preferredCurrency` / `formatAmount` via context | 10 | store-app context |
+| **6 — Inventory multi-currency** | Required `currency`, insert guard, inventory form UI | 11a, 11b, 11c | Inventory flow |
+| **7 — POS sell flow enforcement** | Bill currency, line-item conversion, fallback removals | 12a–12e | **Highest-risk — ship alone with parity run** |
+| **8 — Sync guards + misc cleanup** | `syncUpload` currency validation, balance/subscription service tweaks | 13, 15 | Sync + admin services |
+| **9 — Parity tests** | Fixture updates + non-Lebanon (UAE/AED) test | 14 | Test suite only |
+| **10 — Multi-rate support** | `exchange_rates` JSONB, service + Dexie + admin UI | 17a–17e | Stores + admin form |
+| **11 — Accounting columns generalization** | JSONB `amounts`/`balances` maps, split into 4 sub-phases | 16a–16g | Ledger read/write paths |
+| **12 — Store-app settings UI** | Self-serve currency management | 18 | store-app settings |
+
+### Phase 11 sub-phase split (dual-write safety)
+
+Task 16 is the largest single task; splitting it along the dual-write transition boundaries keeps each ship reversible:
+
+| Sub-phase | Scope | Sub-tasks |
+|---|---|---|
+| **11a** | Migration + types + Dexie v56 (columns co-exist, nothing reads yet) | 16a, 16b, 16g |
+| **11b** | Helper utilities + write paths (dual-write to both old columns and `amounts`) | 16c, 16d |
+| **11c** | Read paths migrated to `amounts` / `balances` map | 16e |
+| **11d** | Drop deprecated columns — **staging-verified gate** | 16f |
+
+### Phase ordering and parallelism
+
+```
+Phase 1  →  Phase 2  →  Phase 3  →  Phase 5  ┐
+                    ↘                        ├→  Phase 6  →  Phase 7  →  Phase 8  →  Phase 9
+                      Phase 4 (parallel)     ┘                                      ↓
+                                                                           Phase 10  →  Phase 11a → 11b → 11c → 11d
+                                                                                      ↓
+                                                                                  Phase 12
+```
+
+- Phase 4 (admin) can run in parallel with Phases 3/5/6/7 (store-app).
+- Phase 10 (multi-rate) is independent of Phase 11 (accounting JSONB) but both build on Phase 3's `CurrencyService`.
+- Phase 12 depends on Phases 10 (rates UI contract) and 5 (context surface).
+
+Each phase should be fed to speckit as its own `/speckit.specify` → `/speckit.plan` → `/speckit.tasks` → `/speckit.implement` cycle.
+
+---
+
 ## Task 1 — Define a generic `CurrencyCode` type in `@pos-platform/shared`
 
 **File:** `packages/shared/src/types/currency.ts` *(new file)*
