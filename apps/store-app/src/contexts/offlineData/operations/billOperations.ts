@@ -15,6 +15,8 @@ import { validateBillCreation } from '../../../services/businessValidationServic
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
 import type { CurrencyCode } from '@pos-platform/shared';
+import { currencyService } from '../../../services/currencyService';
+import { assertValidCurrency } from '../../../utils/currencyValidation';
 
 export interface BillUpdateDeleteDeps {
   storeId: string | null | undefined;
@@ -407,7 +409,7 @@ export async function createBill(
     storeId,
     currentBranchId,
     userProfileId,
-    currency,
+    currency: _legacyDepsCurrency,
     pushUndo,
     refreshData,
     updateUnsyncedCount,
@@ -421,6 +423,12 @@ export async function createBill(
   if (!storeId) throw new Error('No store ID available');
   if (!userProfileId) throw new Error('No user ID available - user not authenticated');
   if (!currentBranchId) throw new Error('No branch selected. Please select a branch before creating a bill.');
+
+  const billCurrency = assertValidCurrency(
+    billData.currency,
+    currencyService.getAcceptedCurrencies(),
+    { storeId }
+  );
 
   // Pre-write validation via centralized businessValidationService
   const bvsResult = await validateBillCreation({
@@ -493,7 +501,8 @@ export async function createBill(
     created_at: now,
     updated_at: now,
     _synced: false,
-    ...billDataWithEntity
+    ...billDataWithEntity,
+    currency: billCurrency,
   };
 
   const mappedLineItems = lineItems.map(item => ({
@@ -640,7 +649,7 @@ export async function createBill(
         type: 'income',
         category,
         amount: customerBalanceUpdate.amountDue,
-        currency,
+        currency: billCurrency,
         description: creditSaleDescription,
         reference: bill.bill_number,
         entity_id: customerBalanceUpdate.customerId,
@@ -660,7 +669,7 @@ export async function createBill(
       const debitAccountCode = (entityType === 'customer' || entityType === 'employee') ? '1200' : '2100';
       const creditAccountCode = '4100';
 
-      const isUSD = currency === 'USD';
+      const isUSD = billCurrency === 'USD';
       const debitEntry = {
         id: createId(),
         store_id: storeId,
@@ -718,7 +727,7 @@ export async function createBill(
         const totalCashAmount = bill.amount_paid || bill.total_amount || 0;
         cashDrawerResult = await createCashDrawerTransactionAtomic(
           totalCashAmount,
-          'LBP',
+          billCurrency,
           `Cash sale - Bill ${bill.bill_number}`,
           bill.bill_number,
           undefined,

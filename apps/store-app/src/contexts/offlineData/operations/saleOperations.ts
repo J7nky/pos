@@ -10,6 +10,46 @@ import { BillLineItemTransforms } from '../../../types';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import { getLocalDateString } from '../../../utils/dateUtils';
 import { getFiscalPeriodForDate } from '../../../utils/fiscalPeriod';
+import type { CurrencyCode } from '@pos-platform/shared';
+import { CURRENCY_META } from '@pos-platform/shared';
+import { currencyService } from '../../../services/currencyService';
+import { roundHalfEven } from '../../../utils/currencyRounding';
+import { LegacyCurrencyMissingError, CurrencyLockError } from '../../../errors/currencyErrors';
+
+/** Line-item unit price in `billCurrency` (identity or convert + banker's round). */
+// transactionService.createTransaction uses finalized cart line `unit_price` values from the bill payload — no second conversion in the service layer.
+export function computeLineUnitPrice(
+  item: { selling_price: number | null | undefined; currency?: CurrencyCode | null },
+  billCurrency: CurrencyCode
+): number {
+  if (item.currency == null) {
+    throw new LegacyCurrencyMissingError({ storeId: '', reason: 'inventory-currency-null' });
+  }
+  const itemCurrency = item.currency as CurrencyCode;
+  const rawPrice = item.selling_price ?? 0;
+  if (itemCurrency === billCurrency) {
+    return rawPrice;
+  }
+  const converted = currencyService.convert(rawPrice, itemCurrency, billCurrency);
+  const decimals = CURRENCY_META[billCurrency]?.decimals ?? 2;
+  return roundHalfEven(converted, decimals);
+}
+
+export async function changeBillCurrency(billId: string, newCurrency: CurrencyCode): Promise<void> {
+  const lines = await getDB()
+    .bill_line_items.where('bill_id')
+    .equals(billId)
+    .filter(r => !r._deleted)
+    .count();
+  if (lines >= 1) {
+    throw new CurrencyLockError({
+      storeId: '',
+      bill_id: billId,
+      attemptedCurrency: newCurrency,
+      reason: 'lines-present',
+    });
+  }
+}
 
 export interface SaleDeps {
   storeId: string | null | undefined;
@@ -92,7 +132,7 @@ export async function updateSale(
                 ? TRANSACTION_CATEGORIES.SUPPLIER_CREDIT_SALE
                 : TRANSACTION_CATEGORIES.CUSTOMER_CREDIT_SALE,
             amount: amountDueIncrease,
-            currency: currency as 'USD' | 'LBP',
+            currency: currency as CurrencyCode,
             description: `payments.creditSaleBill`,
             reference: `BILL-${bill.bill_number}`,
             entity_id: bill.entity_id,
@@ -128,7 +168,7 @@ export async function updateSale(
             entity_type: entityType,
             debit: amountDueIncrease,
             credit: 0,
-            currency: currency as 'USD' | 'LBP',
+            currency: currency as CurrencyCode,
             description: `payments.creditSaleBill`,
             posted_date: postedDate,
             fiscal_period: fiscalPeriod,
@@ -149,7 +189,7 @@ export async function updateSale(
             entity_type: entityType,
             debit: 0,
             credit: amountDueIncrease,
-            currency: currency as 'USD' | 'LBP',
+            currency: currency as CurrencyCode,
             description: `payments.creditSaleBill`,
             posted_date: postedDate,
             fiscal_period: fiscalPeriod,

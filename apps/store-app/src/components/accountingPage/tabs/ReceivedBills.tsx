@@ -20,6 +20,7 @@ import { ReceivedBillDetailsModal } from './receivedBills/ReceivedBillDetailsMod
 import { ReceivedBillSalesLogsModal } from './receivedBills/ReceivedBillSalesLogsModal';
 import { ReceivedBill } from './receivedBills/types';
 import { getLocalDateString, getTodayLocalDate } from '../../../utils/dateUtils';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { normalizeNameForComparison } from '../../../utils/nameNormalization';
 
 type ReceivedBillsProps = {
@@ -42,7 +43,7 @@ type ReceivedBillsProps = {
   addSupplier?: (supplier: any) => Promise<void>;
   flashingItemId?: string | null;
   autoExpandGroupId?: string | null;
-  preferredCurrency: 'USD' | 'LBP';
+  preferredCurrency: CurrencyCode;
 };
 
 export default function ReceivedBills({
@@ -66,7 +67,7 @@ export default function ReceivedBills({
   autoExpandGroupId,
   preferredCurrency
 }: ReceivedBillsProps) {
-  const { getInventoryBatch } = useOfflineData();
+  const { getInventoryBatch, acceptedCurrencies: storeAcceptedCurrencies } = useOfflineData();
   // Filter entities by type
   const suppliers = useMemo(() => 
     entities.filter((e: any) => e.entity_type === 'supplier' && !e._deleted),
@@ -1157,6 +1158,7 @@ export default function ReceivedBills({
         suppliers={suppliers}
         defaultCommissionRate={defaultCommissionRate}
         preferredCurrency={preferredCurrency}
+        acceptedCurrencies={storeAcceptedCurrencies}
         recentSuppliers={recentSuppliers}
         setRecentSuppliers={setRecentSuppliers}
         form={batchEditForm}

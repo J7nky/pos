@@ -9,6 +9,9 @@ import type { Database } from '../../../types/database';
 import type { InventoryItem } from '../../../types';
 import { receivedItemsJournalService } from '../../../services/receivedItemsJournalService';
 import { crudHelperService } from '../../../services/crudHelperService';
+import type { CurrencyCode } from '@pos-platform/shared';
+import { currencyService } from '../../../services/currencyService';
+import { assertValidCurrency } from '../../../utils/currencyValidation';
 
 type Tables = Database['public']['Tables'];
 
@@ -26,7 +29,6 @@ export interface InventoryItemDeps {
 
 export interface AddInventoryItemDeps {
   storeId: string | null | undefined;
-  currency: string;
   pushUndo: (undoData: any) => void;
   resetAutoSyncTimer: () => void;
 }
@@ -35,10 +37,16 @@ export async function addInventoryItem(
   deps: AddInventoryItemDeps,
   itemData: Omit<Database['public']['Tables']['inventory_items']['Insert'], 'store_id'>
 ): Promise<void> {
-  const { storeId, currency, pushUndo, resetAutoSyncTimer } = deps;
+  const { storeId, pushUndo, resetAutoSyncTimer } = deps;
   if (!storeId) throw new Error('No store ID available');
 
   const itemId = (itemData as any).id || createId();
+
+  const rowCurrency = assertValidCurrency(
+    itemData.currency,
+    currencyService.getAcceptedCurrencies(),
+    { storeId }
+  );
 
   const preparedData = {
     id: itemId,
@@ -48,7 +56,7 @@ export async function addInventoryItem(
     received_quantity: itemData.received_quantity ?? (itemData.quantity ?? 0),
     weight: itemData.weight ?? null,
     price: itemData.price ?? null,
-    currency: (itemData as any).currency ?? currency,
+    currency: rowCurrency,
     selling_price: (itemData as any).selling_price ?? null,
     batch_id: itemData.batch_id ?? null,
     sku: (itemData as any).sku ?? null
@@ -70,12 +78,20 @@ export async function updateInventoryItem(
   id: string,
   updates: Tables['inventory_items']['Update']
 ): Promise<void> {
-  const { storeId, currentBranchId, userProfileId, currency, pushUndo, resetAutoSyncTimer } = deps;
+  const { storeId, currentBranchId, userProfileId, pushUndo, resetAutoSyncTimer } = deps;
   if (!storeId) throw new Error('No store ID available');
   if (!currentBranchId) throw new Error('No branch ID available');
 
   const originalItem = await getDB().inventory_items.get(id);
   if (!originalItem) throw new Error('Inventory item not found');
+
+  if (updates.currency !== undefined) {
+    assertValidCurrency(
+      updates.currency as CurrencyCode,
+      currencyService.getAcceptedCurrencies(),
+      { storeId }
+    );
+  }
 
   const oldAmount = receivedItemsJournalService.calculateItemAmount(originalItem);
   const newItem = { ...originalItem, ...updates };

@@ -120,6 +120,13 @@ const fr = {
     cashInDrawer: 'Caisse ({{currency}})', notOpenedToday: 'Non ouvert aujourd\'hui', openCashDrawer: 'Ouvrir la caisse', todaysExpenses: 'Dépenses du jour ({{currency}})', todaysIncome: 'Revenu du jour ({{currency}})', lowStockItems: 'Articles à faible stock', needAttention: 'Nécessite une attention', alertsDisabled: 'Alertes désactivées', lowStockAlert: 'Alerte de stock faible', allWellStocked: 'Tous les produits sont bien approvisionnés !', recentActions: 'Actions récentes', noRecentSales: 'Aucune action récente', showBothCurrencies: 'Afficher les deux devises', showCombined: 'Afficher le solde combiné'
   },
   inventory: {
+    currencyNotAccepted: 'Cette devise n\'est pas acceptée dans ce magasin. Acceptées : {{list}}',
+    currencyRequired: 'Sélectionnez une devise avant d\'enregistrer.',
+    missingCurrency: 'Cette ligne d\'inventaire n\'a pas de devise (données héritées).',
+    batchFeeCurrency: 'Devise des frais de lot',
+    lineItemCurrency: 'Devise de la ligne',
+    currency: 'Devise',
+    fixInInventoryHint: 'Corriger dans l\'inventaire',
     trade: 'Trade',
     supplierName: 'Nom du fournisseur',
     phone: 'Téléphone',
@@ -540,6 +547,16 @@ const fr = {
     allSynced: 'Tous les éléments sont synchronisés',
     noPendingItems: 'Il n\'y a pas d\'éléments en attente de synchronisation.',
     offlineWarning: 'Vous êtes actuellement hors ligne. Les éléments seront synchronisés lorsque la connexion sera rétablie.'
+  },
+  bill: {
+    settlementPickerLabel: 'Devise de la facture',
+    settlementNotAccepted: 'Cette devise n\'est pas acceptée pour ce magasin.',
+    conversionRateMissing: 'Pas de taux de change de {{from}} vers {{to}}. Mettez à jour les taux dans les paramètres.',
+    currencyLocked: 'La devise est verrouillée après la première ligne du panier.',
+  },
+  transaction: {
+    currencyMissing: 'La devise de la transaction est obligatoire.',
+    currencyNotAccepted: 'Cette devise n\'est pas acceptée pour ce magasin.',
   },
   errors: {
     transaction: {

@@ -26,6 +26,8 @@ import { uploadLocalChanges, isUnrecoverableError, deleteProblematicRecord } fro
 import { downloadRemoteChanges, applyStoreFilter } from './syncDownload';
 import { detectAndSyncDeletions } from './syncDeletionDetection';
 import { comprehensiveLoggingService } from './comprehensiveLoggingService';
+import { getDefaultCurrenciesForCountry } from '@pos-platform/shared';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { notificationService } from './notificationService';
 
 // Keep SyncTable import for use within the class
@@ -601,35 +603,44 @@ export class SyncService {
         return;
       }
 
-      if (remoteStore) {
-        await getDB().stores.put({
-          ...(remoteStore as Record<string, unknown>),
-          _synced: true,
-          _lastSyncedAt: new Date().toISOString()
-        } as Store);
-      } else {
-        const defaultStore = {
-          id: storeId,
-          name: 'Default Store',
-          address: 'Default Address',
-          phone: '000-000-0000',
-          email: 'store@example.com',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          preferred_commission_rate: 0,
-          preferred_language: 'en',
-          preferred_currency: 'USD'
-        };
-
-        await (supabase as any).from('stores').insert(defaultStore);
-        await getDB().stores.put({
-          ...defaultStore,
-          _synced: true,
-          _lastSyncedAt: new Date().toISOString()
-        } as Store);
+      if (!remoteStore) {
+        const msg = `ensureStoreExists: cannot seed store ${storeId} — no remote row and no local row`;
+        comprehensiveLoggingService.error(msg, { storeId });
+        throw new Error(msg);
       }
+
+      const row = remoteStore as Record<string, unknown>;
+      const country = typeof row.country === 'string' ? row.country : '';
+      let accepted = Array.isArray(row.accepted_currencies)
+        ? (row.accepted_currencies as CurrencyCode[]).filter(Boolean)
+        : [];
+      if (!accepted.length) {
+        if (country) {
+          accepted = getDefaultCurrenciesForCountry(country);
+        }
+      }
+      if (!accepted.length) {
+        const msg = `ensureStoreExists: cannot determine accepted_currencies for store ${storeId}`;
+        comprehensiveLoggingService.error(msg, { storeId });
+        throw new Error(msg);
+      }
+
+      let preferred = row.preferred_currency as CurrencyCode | undefined;
+      if (!preferred || !accepted.includes(preferred)) {
+        preferred = accepted[0];
+      }
+
+      await getDB().stores.put({
+        ...row,
+        country: country || row.country,
+        accepted_currencies: accepted,
+        preferred_currency: preferred,
+        _synced: true,
+        _lastSyncedAt: new Date().toISOString(),
+      } as Store);
     } catch (error) {
       console.error(`Error ensuring store exists:`, error);
+      throw error;
     }
   }
 

@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { universalChangeDetectionService, TABLES_WITH_UPDATED_AT } from './universalChangeDetectionService';
 import { normalizeBillDateFromRemote } from '../utils/dateUtils';
 import { SYNC_CONFIG, SYNC_TABLES, SyncTable, validateDependencies } from './syncConfig';
+import { comprehensiveLoggingService } from './comprehensiveLoggingService';
 
 const db = getDB();
 
@@ -69,8 +70,46 @@ async function resolveCashDrawerAccountConflict(localRecord: any, remoteRecord: 
       // Get store's preferred currency to ensure currency matches store preference
       const storeId = localRecord.store_id || remoteRecord.store_id;
       const store = storeId ? await getDB().stores.get(storeId) : null;
-      const storePreferredCurrency = store?.preferred_currency || 'LBP';
-      
+      if (!store) {
+        comprehensiveLoggingService.warn({
+          operation: 'syncDownload.resolveCashDrawerAccountConflict',
+          storeId: storeId || '',
+          reason: 'store-row-absent',
+          action: 'skip',
+        });
+        const updateData: any = {
+          name: remoteRecord.name,
+          ...(remoteRecord.currency != null ? { currency: remoteRecord.currency } : {}),
+          is_active: remoteRecord.is_active,
+          account_code: remoteRecord.account_code,
+          updated_at: new Date().toISOString(),
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString(),
+        };
+        await getDB().cash_drawer_accounts.update(localRecord.id, updateData);
+        return true;
+      }
+      const storePreferredCurrency = store.preferred_currency;
+      if (!storePreferredCurrency) {
+        comprehensiveLoggingService.warn({
+          operation: 'syncDownload.resolveCashDrawerAccountConflict',
+          storeId: storeId || '',
+          reason: 'store-row-absent',
+          action: 'skip',
+        });
+        const updateData: any = {
+          name: remoteRecord.name,
+          ...(remoteRecord.currency != null ? { currency: remoteRecord.currency } : {}),
+          is_active: remoteRecord.is_active,
+          account_code: remoteRecord.account_code,
+          updated_at: new Date().toISOString(),
+          _synced: true,
+          _lastSyncedAt: new Date().toISOString(),
+        };
+        await getDB().cash_drawer_accounts.update(localRecord.id, updateData);
+        return true;
+      }
+
       // Update non-balance fields only
       // Balance fields (current_balance, usd_balance, lbp_balance) are NEVER synced - computed from journal entries only
       const updateData: any = {
@@ -98,12 +137,20 @@ async function resolveCashDrawerAccountConflict(localRecord: any, remoteRecord: 
         // Get store's preferred currency to ensure currency matches store preference
         const storeId = localRecord.store_id || remoteRecord.store_id;
         const store = storeId ? await getDB().stores.get(storeId) : null;
-        const storePreferredCurrency = store?.preferred_currency || 'LBP';
-        
+        if (!store?.preferred_currency) {
+          comprehensiveLoggingService.warn({
+            operation: 'syncDownload.resolveCashDrawerAccountConflict.fallback',
+            storeId: storeId || '',
+            reason: 'store-row-absent',
+            action: 'skip',
+          });
+        }
+        const storePreferredCurrency = store?.preferred_currency ?? remoteRecord.currency;
+
         // Update non-balance fields only (balance is computed from journals)
         const updateData: any = {
           ...remoteRecord,
-          currency: storePreferredCurrency, // Use store's preferred currency instead of remote currency
+          ...(storePreferredCurrency != null ? { currency: storePreferredCurrency } : {}),
           _synced: true,
           _lastSyncedAt: new Date().toISOString()
         };

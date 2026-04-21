@@ -41,7 +41,9 @@
       "Bash(pnpm --filter admin-app lint)",
       "Bash(pnpm --filter store-app lint)",
       "Bash(pnpm --filter store-app build)",
-      "Bash(pnpm --filter admin-app build)"
+      "Bash(pnpm --filter admin-app build)",
+      "Bash(node -e \"const v=0.1235; const f=1000; console.log\\(v*f\\); console.log\\(\\(v*f\\).toPrecision\\(20\\)\\);\")",
+      "Bash(node -e ' *)"
     ]
   }
 }

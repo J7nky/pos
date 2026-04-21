@@ -352,6 +352,13 @@ const ar = {
     noRecentSales: 'لا توجد إجراءات حديثة'
   },
   inventory: {
+    currencyNotAccepted: 'هذه العملة غير مقبولة في هذا المتجر. المقبولة: {{list}}',
+    currencyRequired: 'اختر العملة قبل الحفظ.',
+    missingCurrency: 'هذا الصف لا يحتوي على عملة (بيانات قديمة).',
+    batchFeeCurrency: 'عملة رسوم الدفعة',
+    lineItemCurrency: 'عملة السطر',
+    currency: 'العملة',
+    fixInInventoryHint: 'صحح من المخزون',
     insufficientCashDrawerBalance: 'رصيد الدرج غير كافي. الرصيد الحالي: {{currentBalance}}, المطلوب: {{requiredAmount}}',
     failedToReceiveInventory: 'فشل في استلام المخزون.',
     supplierRequiredForCommissionPurchases: 'يتطلب المورد لشراء بالعمولة.',
@@ -626,8 +633,6 @@ const ar = {
     totalProfit: 'إجمالي الربح',
     noActiveAdvances: 'لا توجد سلفات مدفوعة للموردين',
     balanceSettings: 'إعدادات الرصيد',
-    initialLBPBalance: 'رصيد اولي بالليرة اللبنانية',
-    initialUSDBalance: 'رصيد اولي بالدولار',
     maxLBPBalance: 'الحد الأقصى لرصيد بالليرة اللبنانية',
     maxUSDBalance: 'الحد الأقصى للرصيد بالدولار',
     noLimit: 'لا حدود',
@@ -676,7 +681,6 @@ const ar = {
     inactive: 'غير نشط',
     editCustomer: 'تعديل الزبون',
     editSupplier: 'تعديل المورد',
-    recordPayment: 'تسجيل دفعة',
     makePayment: 'إجراء دفعة',
     viewAccountStatement: 'عرض كشف الحساب',
     addNewCustomer: 'إضافة زبون جديد',
@@ -1316,6 +1320,16 @@ const ar = {
     allSynced: 'جميع العناصر متزامنة',
     noPendingItems: 'لا توجد عناصر في انتظار المزامنة.',
     offlineWarning: 'أنت غير متصل حاليًا. سيتم مزامنة العناصر عند استعادة الاتصال.'
+  },
+  bill: {
+    settlementPickerLabel: 'عملة الفاتورة',
+    settlementNotAccepted: 'هذه العملة غير مقبولة لهذا المتجر.',
+    conversionRateMissing: 'لا يوجد سعر صرف من {{from}} إلى {{to}}. حدّث الأسعار في الإعدادات.',
+    currencyLocked: 'تُقفل العملة بعد أول بند في السلة.',
+  },
+  transaction: {
+    currencyMissing: 'عملة المعاملة مطلوبة.',
+    currencyNotAccepted: 'هذه العملة غير مقبولة لهذا المتجر.',
   },
   errors: {
     transaction: {

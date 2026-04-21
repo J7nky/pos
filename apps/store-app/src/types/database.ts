@@ -402,7 +402,7 @@ export interface Database {
           sku: string | null;
           updated_at: string;
           is_archived: boolean | null;
-          currency: CurrencyCode;
+          currency: CurrencyCode | null;
         };
         Insert:{
           id: string;
@@ -419,7 +419,7 @@ export interface Database {
           sku?: string | null;
           updated_at?: string;
           is_archived?: boolean | null;
-          currency?: CurrencyCode;
+          currency: CurrencyCode;
         };
         Update: {
           id: string;
@@ -459,6 +459,7 @@ export interface Database {
           updated_at: string;
           last_modified_by: string | null;
           last_modified_at: string | null;
+          currency: CurrencyCode;
         };
         Insert: {
           id?: string;
@@ -479,6 +480,7 @@ export interface Database {
           updated_at?: string;
           last_modified_by?: string | null;
           last_modified_at?: string | null;
+          currency: CurrencyCode;
         };
         Update: {
           id?: string;
@@ -498,6 +500,7 @@ export interface Database {
           updated_at?: string;
           last_modified_by?: string | null;
           last_modified_at?: string | null;
+          currency?: CurrencyCode;
         };
       };
       public_access_tokens: {

@@ -3,7 +3,9 @@ import { useI18n } from '../../i18n';
 import { Pagination } from '../common/Pagination';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
 import { getProductImageUrl, handleImageError } from '../../constants/productImages';
-import { Search } from 'lucide-react';
+import { Search, AlertTriangle } from 'lucide-react';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { parseMultilingualString } from '../../utils/multilingual';
 import { normalizeNameForComparison } from '../../utils/nameNormalization';
 
@@ -50,6 +52,7 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
   onDelete 
 }) => {
   const { t } = useI18n();
+  const { formatAmount, preferredCurrency } = useOfflineData();
   const { getProductName } = useProductMultilingual();
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
@@ -247,6 +250,9 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                     {t('common.labels.quantity')}
                   </th>
                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                    {t('inventory.sellingPrice')}
+                  </th>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
                     {t('common.labels.received')}
                   </th>
                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
@@ -290,6 +296,24 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                       </td>
                       <td className="px-6 py-4 text-gray-900 dark:text-slate-100 rtl:text-right ltr:text-left">
                         {item.quantity} {translateUnit(item.unit)}
+                      </td>
+                      <td className="px-6 py-4 text-gray-900 dark:text-slate-100 rtl:text-right ltr:text-left">
+                        <div className="inline-flex items-center gap-1.5">
+                          {item.selling_price != null && item.selling_price !== '' ? (
+                            <span>
+                              {item.currency != null
+                                ? formatAmount(Number(item.selling_price), item.currency as CurrencyCode)
+                                : formatAmount(Number(item.selling_price), preferredCurrency)}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                          {item.currency == null && (
+                            <span title={t('inventory.missingCurrency')} className="text-amber-600 dark:text-amber-400">
+                              <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden />
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-gray-500 dark:text-slate-400 rtl:text-right ltr:text-left">
                         {new Date(item.created_at).toLocaleDateString()}

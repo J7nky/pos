@@ -33,6 +33,10 @@ import { accountingInitService } from '../services/accountingInitService';
 import { useProductMultilingual } from '../hooks/useMultilingual';
 import { parseMultilingualString } from '../utils/multilingual';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
+import { computeLineUnitPrice } from '../contexts/offlineData/operations/saleOperations';
+import { MissingExchangeRateError } from '../services/currencyService';
+import { LegacyCurrencyMissingError } from '../errors/currencyErrors';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 
 interface BillTab {
@@ -44,6 +48,8 @@ interface BillTab {
   amountReceived: string;
   notes: string;
   createdAt: string;
+  /** Bill settlement currency (locked after first cart line). Omitted on legacy persisted tabs until next save. */
+  settlementCurrency?: CurrencyCode;
 }
 
 export default function POS() {
@@ -88,7 +94,7 @@ export default function POS() {
   const inventoryBills = (raw.inventoryBills || []) as Array<any>;
 
   const { userProfile } = useSupabaseAuth();
-  const { formatCurrency } = useCurrency();
+  const { formatCurrency, acceptedCurrencies, preferredCurrency } = useCurrency();
   const { t } = useI18n();
   const { handleError } = useErrorHandler();
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
@@ -435,7 +441,8 @@ ${dashSeparator}`;
       paymentMethod: 'cash',
       amountReceived: '',
       notes: '',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      settlementCurrency: raw.preferredCurrency,
     };
     const updatedTabs = [...activeTabs, newTab];
     setActiveTabs(updatedTabs);
@@ -483,7 +490,8 @@ ${dashSeparator}`;
         paymentMethod: 'cash',
         amountReceived: '',
         notes: '',
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        settlementCurrency: raw.preferredCurrency,
       };
       const updatedTabs = [...activeTabs, newTab];
       setActiveTabs(updatedTabs); 
@@ -493,7 +501,22 @@ ${dashSeparator}`;
     if (activeTabs.length === 0) {
       createNewTab();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap first tab once on mount
   }, []);
+
+  React.useEffect(() => {
+    setActiveTabs(prev => {
+      let changed = false;
+      const next = prev.map(tab => {
+        if (!(tab as BillTab).settlementCurrency) {
+          changed = true;
+          return { ...tab, settlementCurrency: raw.preferredCurrency };
+        }
+        return tab;
+      });
+      return changed ? next : prev;
+    });
+  }, [raw.preferredCurrency, setActiveTabs]);
 
   const closeTab = (tabId: string) => {
     const updatedTabs = activeTabs.filter(tab => tab.id !== tabId);
@@ -661,6 +684,34 @@ ${dashSeparator}`;
     const supplier = supplierId ? suppliers.find(s => s.id === supplierId) : null;
     if (!supplier || !supplierId) return;
 
+    const billCurrency = (activeTab.settlementCurrency ?? raw.preferredCurrency) as CurrencyCode;
+
+    let unitPrice: number;
+    try {
+      unitPrice = computeLineUnitPrice(
+        { selling_price: inventoryItem.selling_price, currency: inventoryItem.currency },
+        billCurrency
+      );
+    } catch (err) {
+      if (err instanceof LegacyCurrencyMissingError) {
+        showToast(
+          'error',
+          `${t('inventory.missingCurrency')} — ${t('inventory.fixInInventoryHint', { defaultValue: 'Fix in Inventory' })}`
+        );
+        return;
+      }
+      if (err instanceof MissingExchangeRateError) {
+        showToast(
+          'error',
+          t('bill.conversionRateMissing', { from: err.from, to: err.to })
+        );
+        return;
+      }
+      handleError(err);
+      showToast('error', err instanceof Error ? err.message : 'Unknown error');
+      return;
+    }
+
     // Compute available considering what's already reserved across all tabs for this inventory item
     const reserved = activeTabs.reduce((sum, tab) => {
       return (
@@ -675,13 +726,16 @@ ${dashSeparator}`;
     const existingItem = activeTab.cart.find(item => 
       item.inventoryItemId === inventoryItemId
     );
-    console.log(existingItem,'existingItem in addToCart');
     if (existingItem) {
       // If this specific inventory item is already in cart, increase quantity if available
       if (available > 0) {
         const updatedCart = activeTab.cart.map(item =>
           item.inventoryItemId === inventoryItemId
-            ? { ...item, quantity: item.quantity + 1, totalPrice: Math.round(((item.quantity + 1) * item.unitPrice) * 100) / 100 }
+            ? {
+                ...item,
+                quantity: item.quantity + 1,
+                lineTotal: Math.round((item.quantity + 1) * (item.unitPrice ?? 0) * 100) / 100,
+              }
             : item
         );
         updateActiveTab({ cart: updatedCart });
@@ -695,13 +749,13 @@ ${dashSeparator}`;
         createdBy: userProfile?.id || '',
         storeId: raw.storeId,
         billId: activeTab.id,
-        lineTotal: 0.00,
+        lineTotal: Math.round(unitPrice * 100) / 100,
         receivedValue: 0.00,
         productId,
         supplierId: supplierId,
         quantity: 1,
         weight: undefined, // Weight will be entered manually during sale
-        unitPrice:0.00, // Use price from this specific inventory item
+        unitPrice,
         paymentMethod: activeTab.paymentMethod, // Set payment method from current tab
         notes: inventoryItem.notes || null,
         inventoryType: inventoryItem.type || 'cash', // Track the inventory type
@@ -1048,6 +1102,8 @@ ${dashSeparator}`;
         entity_id: activeTab.selectedCustomer || null, // Unified field for customer, supplier, or employee
         subtotal: total, // Same as total for now
         total_amount: total,
+        amount_due: amountDue,
+        currency: (activeTab.settlementCurrency ?? raw.preferredCurrency) as CurrencyCode,
         payment_method: activeTab.paymentMethod,
         payment_status: paymentStatus,
         amount_paid: amountReceived,
@@ -1242,6 +1298,30 @@ ${dashSeparator}`;
           </button>
         </div>
       </div>
+
+      {acceptedCurrencies.length > 1 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <label className="text-sm text-gray-700" htmlFor="pos-settlement-currency">
+            {t('bill.settlementPickerLabel')}
+          </label>
+          <select
+            id="pos-settlement-currency"
+            className="border rounded px-2 py-1 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
+            value={(activeTab.settlementCurrency ?? raw.preferredCurrency) as string}
+            disabled={activeTab.cart.length > 0}
+            title={activeTab.cart.length > 0 ? t('bill.currencyLocked') : undefined}
+            onChange={e =>
+              updateActiveTab({ settlementCurrency: e.target.value as CurrencyCode })
+            }
+          >
+            {acceptedCurrencies.map(c => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Add spinner overlay for isProcessing, isPrinting, or loading.products */}
       {(isProcessing || isPrinting || raw.loading.products) && (

@@ -1,9 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Package, Eye, Upload, Truck } from 'lucide-react';
 import SearchableSelect from '../common/SearchableSelect';
 import SupplierFormModal from '../common/SupplierFormModal';
-import CurrencySwitch from '../common/CurrencySwitch';
+import AcceptedCurrencySelect from '../common/AcceptedCurrencySelect';
 import MoneyInput from '../common/MoneyInput';
+import type { CurrencyCode } from '@pos-platform/shared';
+import { CURRENCY_META } from '@pos-platform/shared';
 import { useI18n } from '../../i18n';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
 import { saveProductTag, saveNote, getLastThreeNotes, getMatchingNotes, getAllNotes } from '../../utils/productTags';
@@ -11,6 +13,18 @@ import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
 import { inventoryPurchaseService } from '../../services/inventoryPurchaseService';
 import { getTodayLocalDate } from '../../utils/dateUtils';
+
+function normalizeToAccepted(value: unknown, accepted: CurrencyCode[], fallback: CurrencyCode): CurrencyCode {
+  if (typeof value === 'string' && (accepted as string[]).includes(value)) return value as CurrencyCode;
+  return fallback;
+}
+
+function currencyLabel(t: (k: string) => string, code: CurrencyCode): string {
+  const key = `common.currency.${code}`;
+  const tr = t(key);
+  return tr !== key ? tr : CURRENCY_META[code]?.code ?? code;
+}
+
 interface ReceiveFormModalProps {
   open: boolean;
   onClose: () => void;
@@ -18,7 +32,8 @@ interface ReceiveFormModalProps {
   products: any[];
   suppliers: any[];
   defaultCommissionRate: number;
-  preferredCurrency: 'USD' | 'LBP';
+  preferredCurrency: CurrencyCode;
+  acceptedCurrencies: CurrencyCode[];
   recentSuppliers: string[];
   setRecentSuppliers: (suppliers: string[]) => void;
   form: any;
@@ -40,6 +55,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   suppliers,
   defaultCommissionRate,
   preferredCurrency,
+  acceptedCurrencies,
   recentSuppliers,
   setRecentSuppliers,
   form,
@@ -58,9 +74,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     quantity: string; 
     unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen'; 
     price?: string;
-    price_currency?: 'USD' | 'LBP';
+    price_currency?: CurrencyCode;
     selling_price?: string;
-    selling_price_currency?: 'USD' | 'LBP';
+    selling_price_currency?: CurrencyCode;
     weight?: string;
     sku?: string;
   }>>({});
@@ -73,6 +89,12 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  const { t } = useI18n();
+  const acList = useMemo(
+    () => (acceptedCurrencies.length > 0 ? acceptedCurrencies : [preferredCurrency]),
+    [acceptedCurrencies, preferredCurrency]
+  );
 
   // // Auto-focus first field when modal opens
   // useEffect(() => {
@@ -105,16 +127,12 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         updates.received_at = today;
       }
       
-      // Auto-set currency fields to store's preferred currency if not already set
-      if (!form.porterage_currency || form.porterage_currency !== preferredCurrency) {
-        updates.porterage_currency = preferredCurrency;
-      }
-      if (!form.transfer_currency || form.transfer_currency !== preferredCurrency) {
-        updates.transfer_currency = preferredCurrency;
-      }
-      if (!form.plastic_currency || form.plastic_currency !== preferredCurrency) {
-        updates.plastic_currency = preferredCurrency;
-      }
+      const feeBase = normalizeToAccepted(form.porterage_currency, acList, preferredCurrency);
+      if (form.porterage_currency !== feeBase) updates.porterage_currency = feeBase;
+      const xfer = normalizeToAccepted(form.transfer_currency, acList, feeBase);
+      if (form.transfer_currency !== xfer) updates.transfer_currency = xfer;
+      const plas = normalizeToAccepted(form.plastic_currency, acList, feeBase);
+      if (form.plastic_currency !== plas) updates.plastic_currency = plas;
       
       // Ensure Trade supplier is set for cash purchases
       if (form.type === 'cash') {
@@ -136,7 +154,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         setForm({ ...form, ...updates });
       }
     }
-  }, [open, suppliers, form.type, preferredCurrency]);
+  }, [open, suppliers, form.type, preferredCurrency, acceptedCurrencies, form.porterage_currency, form.transfer_currency, form.plastic_currency, setForm, form, acList]);
 
   // Capture original form values when modal opens in edit mode
   useEffect(() => {
@@ -157,6 +175,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         // Use item.id if available, otherwise use index with timestamp to ensure uniqueness
         const productId = item.id ? `edit_${item.id}` : `edit_${index}_${Date.now()}`;
         newBulkProducts.push(productId);
+        const ic = normalizeToAccepted((item as any).currency, acList, preferredCurrency);
         newBulkItems[productId] = {
           product_id: item.product_id || '',
           quantity: (item.received_quantity || item.quantity || '').toString(),
@@ -165,7 +184,8 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           selling_price: item.selling_price ? item.selling_price.toString() : '',
           weight: item.weight ? item.weight.toString() : '',
           sku: (item as any).sku || '',
-          
+          price_currency: ic,
+          selling_price_currency: ic,
         };
       });
 
@@ -176,7 +196,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       // Only add default product row for new entries
       addProductRow();
     }
-  }, [open, isEditMode, existingBatchItems]);
+  }, [open, isEditMode, existingBatchItems, acceptedCurrencies, preferredCurrency, acList]);
 
   // Keyboard support - Escape to close
   useEffect(() => {
@@ -342,7 +362,6 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     }
   }, [bulkProducts, bulkItems, form.status]);
 
-  const { t } = useI18n();
   const { getProductName } = useProductMultilingual();
   const raw = useOfflineData();
   const { userProfile } = useSupabaseAuth();
@@ -448,12 +467,14 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
 
     setLoading(true);
     try {
-      // Always use bulk mode now
-      const batchCurrency = form.porterage_currency || preferredCurrency;
+      const batchCurrency = normalizeToAccepted(form.porterage_currency, acList, preferredCurrency);
       const items = bulkProducts.map(pid => {
         const bi = bulkItems[pid];
-        // Use item currency if set, otherwise use batch currency, otherwise use preferred currency
-        const itemCurrency = bi.price_currency || bi.selling_price_currency || batchCurrency || preferredCurrency;
+        const itemCurrency = normalizeToAccepted(
+          bi.price_currency || bi.selling_price_currency,
+          acList,
+          batchCurrency
+        );
         return {
           product_id: bi.product_id as string,
           supplier_id: form.type === 'cash' ? 'trade' : form.supplier_id,
@@ -486,7 +507,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           type: form.type,
           plastic_fee: plasticFee,
           received_at: form.received_at,
-          currency: form.porterage_currency || preferredCurrency,
+          currency: batchCurrency,
           items
         }
       });
@@ -513,6 +534,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
       }
 
       // Reset form after successful submission - preserve supplier selection
+      const feeReset = normalizeToAccepted(preferredCurrency, acList, preferredCurrency);
       setForm({
         supplier_id: form.supplier_id, // Preserve current supplier selection
         type: form.type, // Preserve current type
@@ -523,6 +545,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         empty_plastic: false,
         plastic_count: '',
         plastic_price: '',
+        porterage_currency: feeReset,
+        transfer_currency: feeReset,
+        plastic_currency: feeReset,
         received_at: getTodayLocalDate() // Today's date in YYYY-MM-DD format
       });
       setBulkProducts([]);
@@ -579,6 +604,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     const arrayLength = bulkProducts.length;
     const newProductId = `new_${timestamp}_${randomSuffix}_${arrayLength}`;
     setBulkProducts(prev => [...prev, newProductId]);
+    const rowCur = normalizeToAccepted(preferredCurrency, acList, preferredCurrency);
     setBulkItems(prev => ({
       ...prev,
       [newProductId]: { 
@@ -586,9 +612,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         quantity: '', 
         unit: 'box', 
         price: '', 
-        price_currency: preferredCurrency,
+        price_currency: rowCur,
         selling_price: '', 
-        selling_price_currency: preferredCurrency,
+        selling_price_currency: rowCur,
         weight: '' 
       }
     }));
@@ -687,15 +713,19 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <CurrencySwitch
-                      value={form.porterage_currency || preferredCurrency}
-                      onChange={(currency) => setForm({ 
-                        ...form, 
-                        porterage_currency: currency,
-                        transfer_currency: currency,
-                        plastic_currency: currency
-                      })}
+                    <AcceptedCurrencySelect
+                      acceptedCurrencies={acList}
+                      value={normalizeToAccepted(form.porterage_currency, acList, preferredCurrency)}
+                      onChange={(currency) =>
+                        setForm({
+                          ...form,
+                          porterage_currency: currency,
+                          transfer_currency: currency,
+                          plastic_currency: currency,
+                        })
+                      }
                       size="md"
+                      aria-label={t('inventory.batchFeeCurrency')}
                     />
                   </div>
                   <button
@@ -736,12 +766,14 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                       </span>
                       {form.porterage_fee && (
                         <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                          {t('receivedBills.porterage')}: {form.porterage_fee} {t(`customers.${form.porterage_currency || preferredCurrency}`)}
+                          {t('receivedBills.porterage')}: {form.porterage_fee}{' '}
+                          {currencyLabel(t, normalizeToAccepted(form.porterage_currency, acList, preferredCurrency))}
                         </span>
                       )}
                       {form.transfer_fee && (
                         <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                          {t('receivedBills.transferFee')}: {form.transfer_fee} {t(`customers.${form.transfer_currency || preferredCurrency}`)}
+                          {t('receivedBills.transferFee')}: {form.transfer_fee}{' '}
+                          {currencyLabel(t, normalizeToAccepted(form.transfer_currency, acList, preferredCurrency))}
                         </span>
                       )}
                     </div>
@@ -924,6 +956,11 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                           <MoneyInput
                             value={form.plastic_price}
                             onChange={(value) => setForm({ ...form, plastic_price: value })}
+                            prefix={
+                              CURRENCY_META[
+                                normalizeToAccepted(form.plastic_currency, acList, normalizeToAccepted(form.porterage_currency, acList, preferredCurrency))
+                              ]?.symbol
+                            }
                             label={`${t('inventory.plasticPrice')} *`}
                             placeholder="0"
                             required
@@ -1049,6 +1086,13 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                     <tbody key={`tbody-instance-${modalInstanceRef.current}`} className="divide-y divide-gray-200">
                       {bulkProducts.map((productId) => {
                         const item = bulkItems[productId] || { product_id: '', quantity: '', unit: 'box', price: '', selling_price: '', weight: '', sku: '' };
+                        const batchFee = normalizeToAccepted(form.porterage_currency, acList, preferredCurrency);
+                        const lineCur = normalizeToAccepted(
+                          item.price_currency || item.selling_price_currency,
+                          acList,
+                          batchFee
+                        );
+                        const lineSym = CURRENCY_META[lineCur]?.symbol ?? lineCur;
                         const product = products.find((p: any) => p.id === item.product_id);
                         const productName = product?.name || '';
                         
@@ -1164,6 +1208,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                     ...prev,
                                     [productId]: { ...prev[productId], price: value }
                                   }))}
+                                  prefix={lineSym}
                                   placeholder="0"
                                   className={`text-sm ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : ''}`}
                                 />
@@ -1181,21 +1226,30 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                       ...prev,
                                       [productId]: { ...prev[productId], selling_price: value }
                                     }))}
+                                    prefix={lineSym}
                                     placeholder="0"
                                     className={`text-sm ${errors[`selling_price_${productId}`] ? 'border-red-500 ring-red-500' : ''}`}
                                   />
                                 </div>
-                                <CurrencySwitch
-                                  value={item.price_currency || item.selling_price_currency || preferredCurrency}
-                                  onChange={(currency) => setBulkItems(prev => ({
-                                    ...prev,
-                                    [productId]: { 
-                                      ...prev[productId], 
-                                      price_currency: currency,
-                                      selling_price_currency: currency 
-                                    }
-                                  }))}
+                                <AcceptedCurrencySelect
+                                  acceptedCurrencies={acList}
+                                  value={normalizeToAccepted(
+                                    item.price_currency || item.selling_price_currency,
+                                    acList,
+                                    batchFee
+                                  )}
+                                  onChange={(currency) =>
+                                    setBulkItems((prev) => ({
+                                      ...prev,
+                                      [productId]: {
+                                        ...prev[productId],
+                                        price_currency: currency,
+                                        selling_price_currency: currency,
+                                      },
+                                    }))
+                                  }
                                   size="sm"
+                                  aria-label={t('inventory.lineItemCurrency')}
                                 />
                               </div>
                               {errors[`selling_price_${productId}`] && (

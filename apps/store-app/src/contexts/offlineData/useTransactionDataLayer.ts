@@ -1,6 +1,11 @@
 /**
  * Transaction domain layer for OfflineDataContext (§1.3).
  * Owns transactions state and add/update transaction; composer calls hydrate() from refreshData.
+ *
+ * Caller audit (Feature 016):
+ * - `pages/Accounting.tsx`: addTransaction calls include `currency` (USD after conversion).
+ * - `billOperations.createBill`: writes transactions with `billCurrency` from validated bill header.
+ * - `saleOperations.updateSale`: passes `deps.currency` from context (`preferredCurrency`); bill-level settlement should match bill row when extended.
  */
 
 import { useState, useCallback } from 'react';
@@ -10,6 +15,10 @@ import { transactionService } from '../../services/transactionService';
 import { TRANSACTION_CATEGORIES } from '../../constants/transactionCategories';
 import type { Transaction } from '../../types';
 import type { TransactionDataLayerAdapter, TransactionDataLayerResult, Tables } from './types';
+import { currencyService } from '../../services/currencyService';
+import { assertValidCurrency } from '../../utils/currencyValidation';
+import { notificationService } from '../../services/notificationService';
+import { InvalidCurrencyError } from '../../errors/currencyErrors';
 
 export function useTransactionDataLayer(
   adapter: TransactionDataLayerAdapter
@@ -53,6 +62,31 @@ export function useTransactionDataLayer(
 
       if (!isValidCategory) {
         const entityId = (transactionData as any).entity_id || null;
+        let directCurrency: Tables['transactions']['Insert']['currency'];
+        try {
+          directCurrency = assertValidCurrency(
+            transactionData.currency,
+            currencyService.getAcceptedCurrencies(),
+            { storeId }
+          );
+        } catch (e) {
+          if (e instanceof InvalidCurrencyError && storeId) {
+            try {
+              await notificationService.createNotification(
+                storeId,
+                'sync_error',
+                e.payload.reason === 'missing' ? 'Transaction currency required' : 'Transaction currency not accepted',
+                e.payload.reason === 'missing'
+                  ? 'Add a valid currency to this transaction.'
+                  : `Currency must be one of: ${(e.payload.acceptedCurrencies ?? []).join(', ')}`,
+                { priority: 'high' }
+              );
+            } catch {
+              /* non-fatal */
+            }
+          }
+          throw e;
+        }
         const transaction: Transaction = {
           ...transactionData,
           id: transactionId,
@@ -62,16 +96,45 @@ export function useTransactionDataLayer(
           created_at: new Date().toISOString(),
           _synced: false,
           amount: transactionData.amount,
+          currency: directCurrency,
           reference: transactionData.reference ?? null,
           is_reversal: (transactionData as any).is_reversal ?? false,
           reversal_of_transaction_id: (transactionData as any).reversal_of_transaction_id ?? null,
         };
         await getDB().transactions.add(transaction);
       } else {
+        let txnCurrency: Tables['transactions']['Insert']['currency'];
+        try {
+          txnCurrency = assertValidCurrency(
+            transactionData.currency,
+            currencyService.getAcceptedCurrencies(),
+            { storeId }
+          );
+        } catch (e) {
+          if (e instanceof InvalidCurrencyError && storeId) {
+            const title =
+              e.payload.reason === 'missing'
+                ? 'Transaction currency required'
+                : 'Transaction currency not accepted';
+            const msg =
+              e.payload.reason === 'missing'
+                ? 'Add a valid currency to this transaction.'
+                : `Currency must be one of: ${(e.payload.acceptedCurrencies ?? []).join(', ')}`;
+            try {
+              await notificationService.createNotification(storeId, 'sync_error', title, msg, {
+                priority: 'high',
+              });
+            } catch {
+              /* non-fatal */
+            }
+          }
+          throw e;
+        }
+
         const result = await transactionService.createTransaction({
           category: mappedCategory as any,
           amount: transactionData.amount,
-          currency: (transactionData.currency as 'USD' | 'LBP') || 'USD',
+          currency: txnCurrency,
           description: transactionData.description || '',
           reference: transactionData.reference ?? undefined,
           entityId: transactionData.entity_id ?? undefined,

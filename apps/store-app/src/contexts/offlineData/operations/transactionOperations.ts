@@ -8,6 +8,8 @@ import type { Transaction } from '../../../types';
 import type { Database } from '../../../types/database';
 import { transactionService } from '../../../services/transactionService';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
+import { currencyService } from '../../../services/currencyService';
+import { assertValidCurrency } from '../../../utils/currencyValidation';
 
 type TransactionInsert = Omit<Database['public']['Tables']['transactions']['Insert'], 'store_id'>;
 
@@ -48,6 +50,11 @@ export async function addTransaction(
 
   if (!isValidCategory) {
     console.warn(`⚠️ Unknown transaction category: ${transactionData.category}. Using direct DB write.`);
+    const currency = assertValidCurrency(
+      transactionData.currency,
+      currencyService.getAcceptedCurrencies(),
+      { storeId }
+    );
     const transaction: Transaction = {
       ...transactionData,
       id: transactionId,
@@ -57,16 +64,22 @@ export async function addTransaction(
       created_at: new Date().toISOString(),
       _synced: false,
       amount: transactionData.amount,
+      currency,
       reference: transactionData.reference ?? null,
       is_reversal: (transactionData as any).is_reversal ?? false,
       reversal_of_transaction_id: (transactionData as any).reversal_of_transaction_id ?? null
     };
     await getDB().transactions.add(transaction);
   } else {
+    const currency = assertValidCurrency(
+      transactionData.currency,
+      currencyService.getAcceptedCurrencies(),
+      { storeId }
+    );
     await transactionService.createTransaction({
       category: mappedCategory as any,
       amount: transactionData.amount,
-      currency: (transactionData.currency as 'USD' | 'LBP') || 'USD',
+      currency,
       description: transactionData.description || '',
       reference: transactionData.reference ?? undefined,
       entityId: transactionData.entity_id ?? undefined,

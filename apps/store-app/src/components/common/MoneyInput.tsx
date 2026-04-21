@@ -3,6 +3,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 interface MoneyInputProps {
   value: string | number;
   onChange: (value: string) => void;
+  /** Optional leading symbol (e.g. currency) — adds left padding to the field. */
+  prefix?: React.ReactNode;
   placeholder?: string;
   className?: string;
   step?: string;
@@ -20,6 +22,7 @@ interface MoneyInputProps {
 export default function MoneyInput({
   value,
   onChange,
+  prefix,
   placeholder = "0.00",
   className = "text-xs text-gray-500",
   step = "1000",
@@ -142,6 +145,11 @@ export default function MoneyInput({
         </label>
       )}
       
+      {prefix != null && prefix !== false && (
+        <span className="pointer-events-none absolute left-3 top-[11px] z-[1] text-sm text-gray-500 dark:text-slate-400 select-none">
+          {prefix}
+        </span>
+      )}
       <input
         ref={inputRef}
         id={id}
@@ -155,9 +163,9 @@ export default function MoneyInput({
         onChange={handleInputChange}
         onFocus={handleInputFocus}
         onBlur={handleInputBlur}
-        className={`w-full border border-gray-300 rounded px-3 py-1.5 mb-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
-          showRecommendation && recommendedValue ? 'pr-20' : 'pr-3'
-        } ${className}`}
+        className={`w-full border border-gray-300 rounded py-1.5 mb-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
+          prefix != null && prefix !== false ? 'pl-9' : 'px-3'
+        } ${showRecommendation && recommendedValue ? 'pr-20' : 'pr-3'} ${className}`}
         placeholder={placeholder}
         disabled={disabled}
         required={required}

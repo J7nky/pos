@@ -236,6 +236,13 @@ const en = {
     cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", todaysIncome: "Today's Income ({{currency}})", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled', showBothCurrencies: 'Show both currencies', showCombined: 'Show combined balance'
   },
   inventory: {
+    currencyNotAccepted: 'That currency is not accepted at this store. Accepted: {{list}}',
+    currencyRequired: 'Select a currency before saving.',
+    missingCurrency: 'This inventory row has no currency (legacy data).',
+    batchFeeCurrency: 'Batch fee currency',
+    lineItemCurrency: 'Line item currency',
+    currency: 'Currency',
+    fixInInventoryHint: 'Fix in Inventory',
     insufficientCashDrawerBalance: 'Insufficient cash drawer balance. Current balance: {{currentBalance}}, Required: {{requiredAmount}}',
     failedToReceiveInventory: 'Failed to receive inventory.',
     default: 'Default',
@@ -464,8 +471,6 @@ const en = {
     from: 'from',
     to: 'to',
     balanceSettings: 'Balance Settings',
-    initialLBPBalance: 'Initial LBP Balance',
-    initialUSDBalance: 'Initial USD Balance',
     maxLBPBalance: 'Max LBP Balance (Optional)',
     maxUSDBalance: 'Max USD Balance (Optional)',
     noLimit: 'No Limit',
@@ -1188,6 +1193,16 @@ const en = {
     allSynced: 'All Items Synced',
     noPendingItems: 'There are no items waiting to be synchronized.',
     offlineWarning: 'You are currently offline. Items will sync when connection is restored.',
+  },
+  bill: {
+    settlementPickerLabel: 'Bill currency',
+    settlementNotAccepted: 'That currency is not accepted for this store.',
+    conversionRateMissing: 'No exchange rate from {{from}} to {{to}}. Update store rates in Settings.',
+    currencyLocked: 'Currency is locked after the first line item.',
+  },
+  transaction: {
+    currencyMissing: 'Transaction currency is required.',
+    currencyNotAccepted: 'That currency is not accepted for this store.',
   },
   errors: {
     transaction: {

@@ -23,6 +23,7 @@ export function useBillDataLayer(adapter: BillDataLayerAdapter): BillDataLayerRe
     async (billsData: any[], billLineItemsData: any[]): Promise<void> => {
       setBills(billsData);
       setBillLineItems(billLineItemsData);
+      // unit_price is taken from persisted bill_line_items only — never re-derived from live inventory pricing (Feature 016 / T023).
       const transformedSaleItems: BillLineItem[] = billLineItemsData.map((item: any) =>
         BillLineItemTransforms.fromDbRow({
           id: item.id,

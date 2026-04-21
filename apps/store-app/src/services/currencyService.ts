@@ -3,6 +3,18 @@ import { CURRENCY_META } from '@pos-platform/shared';
 
 const UNKNOWN_FORMAT_WARNED = new Set<string>();
 
+export class MissingExchangeRateError extends Error {
+  readonly from: CurrencyCode;
+  readonly to: CurrencyCode;
+
+  constructor(from: CurrencyCode, to: CurrencyCode, message?: string) {
+    super(message ?? `No exchange rate available for ${from} → ${to}`);
+    this.name = 'MissingExchangeRateError';
+    this.from = from;
+    this.to = to;
+  }
+}
+
 export class CurrencyService {
   private static instance: CurrencyService;
 
@@ -68,10 +80,10 @@ export class CurrencyService {
     const rateTo = to === 'USD' ? 1 : this.rates[to];
 
     if (from !== 'USD' && (rateFrom === undefined || rateFrom <= 0)) {
-      throw new Error(`No exchange rate available for ${from} → ${to}`);
+      throw new MissingExchangeRateError(from, to);
     }
     if (to !== 'USD' && (rateTo === undefined || rateTo <= 0)) {
-      throw new Error(`No exchange rate available for ${from} → ${to}`);
+      throw new MissingExchangeRateError(from, to);
     }
 
     const amountUsd = from === 'USD' ? amount : amount / (rateFrom as number);

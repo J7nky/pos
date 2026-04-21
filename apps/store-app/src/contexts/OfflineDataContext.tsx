@@ -574,7 +574,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // ─── Inventory CRUD ────────────────────────────────────────────────────────
   const addInventoryItem = (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> =>
-    inventoryItemOps.addInventoryItem({ storeId, currency: preferredCurrency, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer }, itemData);
+    inventoryItemOps.addInventoryItem({ storeId, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer }, itemData);
 
   const updateInventoryItem = (id: string, updates: Tables['inventory_items']['Update']): Promise<void> =>
     inventoryItemOps.updateInventoryItem(

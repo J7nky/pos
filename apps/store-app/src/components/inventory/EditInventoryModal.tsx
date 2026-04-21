@@ -1,5 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Package, Eye, Upload } from 'lucide-react';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
+import { useI18n } from '../../i18n';
+import AcceptedCurrencySelect from '../common/AcceptedCurrencySelect';
+import { CURRENCY_META } from '@pos-platform/shared';
+import type { CurrencyCode } from '@pos-platform/shared';
+import { assertValidCurrency } from '../../utils/currencyValidation';
+import { currencyService } from '../../services/currencyService';
 
 interface EditInventoryModalProps {
   item: any;
@@ -9,7 +16,13 @@ interface EditInventoryModalProps {
 }
 
 const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, onSave, inventoryBills = [] }) => {
-  const [form, setForm] = useState({ ...item });
+  const { acceptedCurrencies, preferredCurrency, storeId } = useOfflineData();
+  const { t } = useI18n();
+  const acList = acceptedCurrencies.length > 0 ? acceptedCurrencies : [preferredCurrency];
+  const [form, setForm] = useState(() => ({
+    ...item,
+    currency: (item.currency ?? preferredCurrency) as CurrencyCode,
+  }));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<any>({});
@@ -21,6 +34,10 @@ const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, 
     const batch = inventoryBills.find(bill => bill.id === item.batch_id);
     return batch?.type === 'commission';
   }, [item.batch_id, inventoryBills]);
+
+  useEffect(() => {
+    setForm({ ...item, currency: (item.currency ?? preferredCurrency) as CurrencyCode });
+  }, [item.id, preferredCurrency, item]);
 
   // Auto-focus first field when modal opens
   useEffect(() => {
@@ -51,6 +68,14 @@ const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, 
     // Skip price validation for commission bills
     if (!isCommissionBill && form.price && (isNaN(Number(form.price)) || Number(form.price) < 0)) {
       errors.price = 'Price must be a valid positive number.';
+    }
+
+    if (!isCommissionBill) {
+      try {
+        assertValidCurrency(form.currency ?? null, currencyService.getAcceptedCurrencies(), { storeId });
+      } catch {
+        errors.currency = t('inventory.currencyRequired');
+      }
     }
 
     if (form.weight && (isNaN(Number(form.weight)) || Number(form.weight) < 0)) {
@@ -185,19 +210,38 @@ const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, 
 
                 <div className="space-y-4">
                   {!isCommissionBill && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Price (optional)</label>
-                      <input
-                        type="number"
-                        value={form.price || ''}
-                        onChange={e => setForm((f: any) => ({ ...f, price: e.target.value }))}
-                        className={`w-full border ${errors.price ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                        min="0"
-                        step="0.01"
-                        placeholder="Enter price per unit"
-                      />
-                      {errors.price && <p className="text-xs text-red-600 mt-1">{errors.price}</p>}
-                    </div>
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
+                          {t('inventory.currency')} *
+                        </label>
+                        <AcceptedCurrencySelect
+                          acceptedCurrencies={acList}
+                          value={(form.currency ?? preferredCurrency) as CurrencyCode}
+                          onChange={(c) => setForm((f: any) => ({ ...f, currency: c }))}
+                          aria-label={t('inventory.currencyRequired')}
+                        />
+                        {errors.currency && <p className="text-xs text-red-600 mt-1">{errors.currency}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Price (optional)</label>
+                        <div className="relative">
+                          <span className="pointer-events-none absolute left-3 top-2.5 z-[1] text-sm text-gray-500 dark:text-slate-400">
+                            {CURRENCY_META[(form.currency ?? preferredCurrency) as CurrencyCode]?.symbol ?? ''}
+                          </span>
+                          <input
+                            type="number"
+                            value={form.price || ''}
+                            onChange={e => setForm((f: any) => ({ ...f, price: e.target.value }))}
+                            className={`w-full border ${errors.price ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg pl-9 pr-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                            min="0"
+                            step="0.01"
+                            placeholder="Enter price per unit"
+                          />
+                        </div>
+                        {errors.price && <p className="text-xs text-red-600 mt-1">{errors.price}</p>}
+                      </div>
+                    </>
                   )}
 
                   <div>

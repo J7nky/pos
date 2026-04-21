@@ -271,6 +271,8 @@ export interface Bill {
   created_at: string;
   updated_at: string;
   last_modified_by: string | null;
+  /** Settlement currency (required on new bills after feature 016). */
+  currency?: CurrencyCode;
   _synced?: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;

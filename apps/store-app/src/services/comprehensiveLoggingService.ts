@@ -390,6 +390,40 @@ export class ComprehensiveLoggingService {
     return entry.id;
   }
 
+  /** Structured WARN for sync / operational skips (e.g. absent local store row). */
+  public warn(payload: {
+    operation: string;
+    storeId: string;
+    reason: string;
+    action: string;
+  }): void {
+    this.logSystemActivity({
+      action: payload.operation,
+      description: `[warn] ${JSON.stringify(payload)}`,
+      context: {
+        userId: 'system',
+        module: 'sync',
+        source: 'system',
+      },
+      severity: 'medium',
+      metadata: { ...payload },
+    });
+  }
+
+  public error(message: string, metadata?: Record<string, unknown>): void {
+    this.logSystemActivity({
+      action: 'sync_fatal',
+      description: message,
+      context: {
+        userId: 'system',
+        module: 'sync',
+        source: 'system',
+      },
+      severity: 'high',
+      metadata,
+    });
+  }
+
   // Query and analysis methods
   public getLogs(params: {
     startDate?: string;

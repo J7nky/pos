@@ -76,7 +76,7 @@ const Inventory: React.FC = () => {
     receiveErrors,
     setReceiveErrors,
     resetSupplierForm,
-  } = useInventoryForms(defaultCommissionRate);
+  } = useInventoryForms(defaultCommissionRate, raw.preferredCurrency);
 
   const {
     showReceiveForm,
@@ -152,6 +152,7 @@ const Inventory: React.FC = () => {
         id: item.id,
         quantity: Number(item.quantity),
         price: item.price ? Number(item.price) : null,
+        currency: item.currency,
       });
       showToast('success', 'Inventory item updated successfully!');
     } catch (error) {
@@ -397,7 +398,8 @@ return (
         products={products}
         suppliers={suppliers}
         defaultCommissionRate={defaultCommissionRate}
-        preferredCurrency={raw.currency}
+        preferredCurrency={raw.preferredCurrency}
+        acceptedCurrencies={raw.acceptedCurrencies}
         recentSuppliers={recentSuppliers}
         setRecentSuppliers={setRecentSuppliers}
         form={receiveForm}
