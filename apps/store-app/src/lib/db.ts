@@ -1,7 +1,16 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { generateBillReference } from '@pos-platform/shared';
-import { V54_STORES, V55_STORES, V56_STORES, upgradeV54, upgradeV55, upgradeV56 } from './dbSchema';
+import {
+  V54_STORES,
+  V55_STORES,
+  V56_STORES,
+  V57_STORES,
+  upgradeV54,
+  upgradeV55,
+  upgradeV56,
+  upgradeV57,
+} from './dbSchema';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
   Product, 
@@ -150,6 +159,7 @@ class POSDatabase extends Dexie {
     this.version(54).stores(V54_STORES).upgrade(upgradeV54);
     this.version(55).stores(V55_STORES).upgrade(upgradeV55);
     this.version(56).stores(V56_STORES).upgrade(upgradeV56);
+    this.version(57).stores(V57_STORES).upgrade(upgradeV57);
 
     // Add hooks for cash drawer tables
     this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);

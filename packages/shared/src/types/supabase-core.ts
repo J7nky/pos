@@ -21,14 +21,28 @@
  * **Extension rule:** Each app may add fields outside these interfaces; do not duplicate core field definitions locally.
  */
 
+import type { CurrencyCode } from './currency';
+
 export interface StoreCore {
   id: string;
   name: string;
-  preferred_currency: 'USD' | 'LBP';
+  country: string;
+  preferred_currency: CurrencyCode;
+  accepted_currencies: CurrencyCode[];
   preferred_language: 'en' | 'ar' | 'fr';
   exchange_rate: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface StoreCoreInsert {
+  id?: string;
+  name: string;
+  country?: string;
+  preferred_currency?: CurrencyCode;
+  accepted_currencies?: CurrencyCode[];
+  preferred_language?: 'en' | 'ar' | 'fr';
+  exchange_rate?: number;
 }
 
 export interface BranchCore {

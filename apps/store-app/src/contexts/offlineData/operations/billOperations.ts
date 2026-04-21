@@ -14,6 +14,7 @@ import { journalService } from '../../../services/journalService';
 import { validateBillCreation } from '../../../services/businessValidationService';
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export interface BillUpdateDeleteDeps {
   storeId: string | null | undefined;
@@ -29,7 +30,7 @@ export interface BillCreateDeps {
   storeId: string | null | undefined;
   currentBranchId: string | null;
   userProfileId: string | undefined;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   pushUndo: (undoData: any) => void;
   refreshData: () => Promise<void>;
   updateUnsyncedCount: () => Promise<void>;
@@ -37,7 +38,7 @@ export interface BillCreateDeps {
   debouncedSync: () => void;
   createCashDrawerTransactionAtomic: (
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     reference: string,
     customerId: string | undefined,

@@ -1,8 +1,10 @@
 // Multilingual data types
 import type { MultilingualString } from '../utils/multilingual';
+import type { CurrencyCode } from './currency';
 
 export type {
   StoreCore,
+  StoreCoreInsert,
   BranchCore,
   UserCore,
   StoreSubscriptionCore,
@@ -34,7 +36,7 @@ export interface Transaction {
   type: 'income' | 'expense' | 'sale' | 'payment' | 'credit_sale';
   category: string;
   amount: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   description: MultilingualString; // Supports both string (backwards compatible) and multilingual object
   reference: string | null;
   store_id: string;
@@ -53,3 +55,8 @@ export interface Transaction {
 // Re-export MultilingualString for convenience
 export type { MultilingualString, SupportedLanguage } from '../utils/multilingual';
 
+export type { CurrencyCode, CurrencyMeta } from './currency';
+export { CURRENCY_META } from './currency';
+
+export type { CountryConfig } from './countries';
+export { COUNTRY_CONFIGS, COUNTRY_MAP, getDefaultCurrenciesForCountry } from './countries';

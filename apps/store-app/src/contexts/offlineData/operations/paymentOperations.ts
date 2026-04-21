@@ -14,6 +14,7 @@ import { getAccountMapping, getJournalDescription } from '../../../utils/account
 import { getLocalDateString } from '../../../utils/dateUtils';
 import { createMultilingualFromString, getTranslatedString } from '../../../utils/multilingual';
 import { generatePaymentReference, generateAdvanceReference, generateReversalReference } from '@pos-platform/shared';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
@@ -65,14 +66,14 @@ export interface SupplierAdvanceDeps {
   exchangeRate: number;
   createCashDrawerExpenseAtomic: (
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     reference: string,
     supplierId: string | undefined
   ) => Promise<CashDrawerAtomicResult>;
   createCashDrawerPaymentAtomic: (
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     reference: string,
     entityId: string | undefined
@@ -98,7 +99,7 @@ export async function processPayment(
     entityType: 'customer' | 'supplier';
     entityId: string;
     amount: string;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     description: string;
     reference: string;
     storeId: string;
@@ -206,7 +207,7 @@ export async function processEmployeePayment(
   params: {
     employeeId: string;
     amount: string;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     description: string;
     reference: string;
     storeId: string;
@@ -344,7 +345,7 @@ export async function processSupplierAdvance(
   params: {
     supplierId: string;
     amount: number;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     type: 'give' | 'deduct';
     description: string;
     date: string;
@@ -626,7 +627,7 @@ export async function updateSupplierAdvance(
   updates: {
     supplierId: string;
     amount: number;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     type: 'give' | 'deduct';
     description: string;
     date: string;

@@ -21,13 +21,15 @@ import { getAccountMapping, getEntityCodeForTransaction, getJournalDescription }
 import { getSystemEntity } from '../constants/systemEntities';
 import type { MultilingualString } from '../utils/multilingual';
 import { createMultilingualFromString } from '../utils/multilingual';
-import { 
-  generatePaymentReference, 
-  generateExpenseReference, 
-  generateARReference, 
+import {
+  generatePaymentReference,
+  generateExpenseReference,
+  generateARReference,
   generateAPReference,
-  generateReference 
+  generateReference,
+  CURRENCY_META,
 } from '@pos-platform/shared';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { getLocalDateString } from '../utils/dateUtils';
 import { createId } from '../lib/db';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
@@ -187,9 +189,9 @@ export class TransactionService {
       const type = getTransactionType(params.category);
       
       // Convert amount to USD for balance calculations
-      const amountInUSD = currencyService.convertCurrency(
-        params.amount, 
-        params.currency, 
+      const amountInUSD = currencyService.convert(
+        params.amount,
+        params.currency as CurrencyCode,
         'USD'
       );
 
@@ -1008,7 +1010,7 @@ export class TransactionService {
                 
                 // Convert USD change to LBP and add to total
                 if (usdChange !== 0) {
-                  const usdInLbp = currencyService.convertCurrency(usdChange, 'USD', 'LBP');
+                  const usdInLbp = currencyService.convert(usdChange, 'USD', 'LBP');
                   originalBalanceChange += usdInLbp;
                 }
                 
@@ -1214,7 +1216,11 @@ export class TransactionService {
         };
       }
 
-      const amountInUSD = currencyService.convertCurrency(transaction.amount, transaction.currency, 'USD');
+      const amountInUSD = currencyService.convert(
+        transaction.amount,
+        transaction.currency as CurrencyCode,
+        'USD'
+      );
       let entityName: string | null = null;
       let entityType: 'customer' | 'supplier' | null = null;
       let entityId: string | null = null;
@@ -1280,12 +1286,12 @@ export class TransactionService {
     }
 
     // Validate currency
-    if (!params.currency || !['USD', 'LBP'].includes(params.currency)) {
-      errors.push('Currency must be USD or LBP');
+    if (!params.currency || !(params.currency in CURRENCY_META)) {
+      errors.push('Currency must be a supported ISO code');
     }
 
-    // Validate currency amount
-    if (!currencyService.validateCurrencyAmount(params.amount, params.currency)) {
+    const meta = CURRENCY_META[params.currency as CurrencyCode];
+    if (meta && meta.decimals === 0 && params.amount % 1 !== 0) {
       errors.push('Invalid currency amount');
     }
 
@@ -1585,7 +1591,7 @@ export class TransactionService {
       entityType: 'transaction',
       entityId: transaction.id,
       entityName: `${transaction.category} - ${transaction.description}`,
-      description: `Transaction created: ${currencyService.formatCurrency(transaction.amount, transaction.currency)} - ${transaction.description}`,
+      description: `Transaction created: ${currencyService.format(transaction.amount, transaction.currency as CurrencyCode)} - ${transaction.description}`,
       userId: context.userId,
       userEmail: context.userEmail,
       userName: context.userName,

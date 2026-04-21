@@ -7,14 +7,14 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { BalanceVerificationService, balanceVerificationService } from '../balanceVerificationService';
 import { TransactionService } from '../transactionService';
 import { auditLogService } from '../auditLogService';
-import { currencyService } from '../currencyService';
+import { currencyService } from '../../currencyService';
 import { getDB } from '../../lib/db';
 // Import removed - not used in balance verification tests
 
 // Mock dependencies
 vi.mock('../../lib/db');
 vi.mock('../auditLogService');
-vi.mock('../currencyService');
+vi.mock('../../currencyService');
 vi.mock('../transactionService');
 
 describe('BalanceVerificationService', () => {
@@ -30,7 +30,7 @@ describe('BalanceVerificationService', () => {
     (TransactionService.getInstance as any).mockReturnValue(mockTransactionService);
 
     // Mock currency service
-    (currencyService.formatCurrency as any).mockImplementation((amount: number, currency: string) => 
+    (currencyService.format as any).mockImplementation((amount: number, currency: string) =>
       `${currency} ${amount.toFixed(2)}`
     );
 

@@ -80,7 +80,7 @@ export class EnhancedTransactionService {
       };
 
       const balanceBefore = customer.balance || 0; // Updated to use balance field with null safety
-      const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
+      const amountInUSD = currencyService.convert(amount, currency, 'USD');
       // RULE 5 FIX: When receiving payment FROM customer, DECREASE their balance (reduce their debt to us)
       const balanceAfter = Math.max(0, balanceBefore - amountInUSD); // Prevent negative debt
 
@@ -145,7 +145,7 @@ export class EnhancedTransactionService {
           entityType: 'customer',
           entityId: customerId,
           entityName: customer.name,
-          description: `Balance updated from ${currencyService.formatCurrency(balanceBefore, 'USD')} to ${currencyService.formatCurrency(balanceAfter, 'USD')} due to payment`,
+          description: `Balance updated from ${currencyService.format(balanceBefore, 'USD')} to ${currencyService.format(balanceAfter, 'USD')} due to payment`,
           userId: context.userId,
           userEmail: context.userEmail,
           userName: context.userName,
@@ -259,7 +259,7 @@ export class EnhancedTransactionService {
         sum + ap.amountDue, 0
       );
 
-      const amountInUSD = currencyService.convertCurrency(amount, currency, 'USD');
+      const amountInUSD = currencyService.convert(amount, currency, 'USD');
       // RULE 5 FIX: When making payment TO supplier, DECREASE their balance (reduce what we owe them)
       const balanceAfter = Math.max(0, balanceBefore - amountInUSD);
 
@@ -800,10 +800,10 @@ export class EnhancedTransactionService {
   private generateActivitySummary(action: string, data: any): string {
     switch (action) {
       case 'customer_payment':
-        return `Payment received from ${data.customerName}: ${data.currency} ${data.amount}${data.paymentMethod ? ` via ${data.paymentMethod}` : ''}. Balance: ${currencyService.formatCurrency(data.balanceBefore, data.currency)} → ${currencyService.formatCurrency(data.balanceAfter, data.currency)}`;
+        return `Payment received from ${data.customerName}: ${data.currency} ${data.amount}${data.paymentMethod ? ` via ${data.paymentMethod}` : ''}. Balance: ${currencyService.format(data.balanceBefore, data.currency)} → ${currencyService.format(data.balanceAfter, data.currency)}`;
       
       case 'supplier_payment':
-        return `Payment sent to ${data.supplierName}: ${data.currency} ${data.amount}${data.paymentMethod ? ` via ${data.paymentMethod}` : ''}. Balance: ${currencyService.formatCurrency(data.balanceBefore, data.currency)} → ${currencyService.formatCurrency(data.balanceAfter, data.currency)}`;
+        return `Payment sent to ${data.supplierName}: ${data.currency} ${data.amount}${data.paymentMethod ? ` via ${data.paymentMethod}` : ''}. Balance: ${currencyService.format(data.balanceBefore, data.currency)} → ${currencyService.format(data.balanceAfter, data.currency)}`;
       case 'sale':
         return `Sale to ${data.customerName}: ${data.itemCount} items, Total: $${data.total}${data.amountDue > 0 ? ` (Credit: $${data.amountDue})` : ''}`;
       

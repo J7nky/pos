@@ -35,16 +35,15 @@ vi.mock('../../lib/db', () => ({
   }
 }));
 
-vi.mock('../currencyService', () => ({
+vi.mock('../../currencyService', () => ({
   currencyService: {
-    convertCurrency: vi.fn((amount, from, to) => {
+    convert: vi.fn((amount, from, to) => {
       if (from === 'LBP' && to === 'USD') return amount / 89500;
       if (from === 'USD' && to === 'LBP') return amount * 89500;
       return amount;
     }),
-    validateCurrencyAmount: vi.fn(() => true),
-    formatCurrency: vi.fn((amount, currency) => `${currency} ${amount}`)
-  }
+    format: vi.fn((amount, currency) => `${currency} ${amount}`),
+  },
 }));
 
 vi.mock('../auditLogService', () => ({

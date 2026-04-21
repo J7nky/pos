@@ -902,8 +902,8 @@ export class InventoryPurchaseService {
       const currentBalance = data.currency === 'USD' ? balances.USD : balances.LBP;
 
       // Format currency for informational purposes
-      const formattedBalance = currencyService.formatCurrency(currentBalance, data.currency);
-      const formattedAmount = currencyService.formatCurrency(totalAmount, data.currency);
+      const formattedBalance = currencyService.format(currentBalance, data.currency);
+      const formattedAmount = currencyService.format(totalAmount, data.currency);
 
       // Always return valid - negative balances are allowed
       return { isValid: true, currentBalance, requiredAmount: totalAmount, formattedBalance, formattedAmount };

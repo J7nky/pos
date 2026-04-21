@@ -5,6 +5,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { getDB } from '../../lib/db';
 import type { StoreSettingsDataLayerAdapter, StoreSettingsDataLayerResult } from './types';
 
@@ -38,9 +39,10 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
     performSync,
     resetAutoSyncTimer,
     debouncedSync,
+    reloadCurrencyState,
   } = adapter;
 
-  const [currency, setCurrency] = useState<'USD' | 'LBP'>('LBP');
+  const [currency, setCurrency] = useState<CurrencyCode>('LBP');
   const [exchangeRate, setExchangeRate] = useState(89500);
   const [language, setLanguage] = useState<'en' | 'ar' | 'fr'>('ar');
   const [receiptSettings, setReceiptSettings] = useState<any>(() => {
@@ -75,10 +77,6 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
     if (storeData.low_stock_alert !== undefined) setLowStockAlertsEnabled(storeData.low_stock_alert);
     if (storeData.exchange_rate !== undefined) {
       setExchangeRate(storeData.exchange_rate);
-      if (storeId) {
-        const { CurrencyService } = await import('../../services/currencyService');
-        await CurrencyService.getInstance().refreshExchangeRate(storeId);
-      }
     }
     if (storeData.preferred_language) setLanguage(storeData.preferred_language);
     setReceiptSettings((prev: any) => {
@@ -140,7 +138,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
   );
 
   const updateCurrency = useCallback(
-    async (newCurrency: 'USD' | 'LBP') => {
+    async (newCurrency: CurrencyCode) => {
       if (!storeId) return;
       const prev = currency;
       try {
@@ -150,6 +148,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           _synced: false,
           updated_at: new Date().toISOString(),
         });
+        await reloadCurrencyState?.(storeId);
         await updateUnsyncedCount();
         resetAutoSyncTimer();
         if (isOnline && !isSyncing) performSync(true);
@@ -159,7 +158,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         setCurrency(prev);
       }
     },
-    [storeId, currency, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync]
+    [storeId, currency, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
   );
 
   const updateExchangeRate = useCallback(
@@ -173,6 +172,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           _synced: false,
           updated_at: new Date().toISOString(),
         });
+        await reloadCurrencyState?.(storeId);
         await updateUnsyncedCount();
         resetAutoSyncTimer();
         if (isOnline && !isSyncing) performSync(true);
@@ -182,7 +182,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         setExchangeRate(prev);
       }
     },
-    [storeId, exchangeRate, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync]
+    [storeId, exchangeRate, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
   );
 
   const updateLanguage = useCallback(

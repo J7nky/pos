@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Pagination } from '../../common/Pagination';
 import Toast from '../../common/Toast';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 interface RecentPaymentsProps {
   formatCurrency: (amount: number, currency?: string) => string;
@@ -35,7 +36,7 @@ interface PaymentRow {
   entityType: 'customer' | 'supplier' | 'employee';
   entityId?: string; // Entity ID for balance calculations
   amount: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   status: PaymentStatus;
   reference: string | null;
   createdByName: string;
@@ -44,7 +45,7 @@ interface PaymentRow {
   reversalOfTransactionId?: string | null;
   reversalTransactions?: PaymentRow[]; // Child reversals for this transaction
   originalAmount?: number; // Original amount for corrected payments
-  originalCurrency?: 'USD' | 'LBP'; // Original currency for corrected payments
+  originalCurrency?: CurrencyCode; // Original currency for corrected payments
   isCorrected?: boolean; // Whether this is a corrected payment
 }
 
@@ -130,7 +131,7 @@ export default function RecentPayments({
   }, []);
   const [editForm, setEditForm] = useState({
     amount: '',
-    currency: 'USD' as 'USD' | 'LBP',
+    currency: 'USD' as CurrencyCode,
     description: '',
     reference: ''
   });
@@ -221,7 +222,7 @@ export default function RecentPayments({
 
     // Build a map of corrected transaction IDs to their original amounts and currencies
     // This helps us identify which transactions are corrections and what their original amounts were
-    const correctedTransactionMap = new Map<string, { amount: number; currency: 'USD' | 'LBP' }>();
+    const correctedTransactionMap = new Map<string, { amount: number; currency: CurrencyCode }>();
     transactions.forEach(t => {
       const transactionWithMetadata = t as any;
       if (transactionWithMetadata.metadata?.corrected === true && transactionWithMetadata.metadata?.correctedTransactionId) {
@@ -230,7 +231,7 @@ export default function RecentPayments({
         const correctedTransactionId = transactionWithMetadata.metadata.correctedTransactionId as string;
         correctedTransactionMap.set(correctedTransactionId, {
           amount: t.amount,
-          currency: t.currency as 'USD' | 'LBP'
+          currency: t.currency as CurrencyCode
         });
       }
     });
@@ -1179,7 +1180,7 @@ export default function RecentPayments({
                 </label>
                 <select
                   value={editForm.currency}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, currency: e.target.value as CurrencyCode }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="USD">USD</option>

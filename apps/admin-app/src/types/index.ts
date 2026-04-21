@@ -7,6 +7,7 @@ import type {
   StoreSubscriptionCore,
   UserCore,
 } from '@pos-platform/shared';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 // ============================================================================
 // STORE TYPES
@@ -34,22 +35,27 @@ export interface StoreWithStats extends Store {
 
 export interface CreateStoreInput {
   name: string;
+  country: string;
   address?: string;
   phone?: string;
   email?: string;
-  preferred_currency?: 'USD' | 'LBP';
+  preferred_currency: CurrencyCode;
+  accepted_currencies: CurrencyCode[];
   preferred_language?: 'en' | 'ar' | 'fr';
   preferred_commission_rate?: number;
   exchange_rate?: number;
+  subscription_plan?: 'starter' | 'professional' | 'premium';
 }
 
 export interface UpdateStoreInput {
   name?: string;
+  country?: string;
   address?: string;
   phone?: string;
   email?: string;
   logo?: string | null;
-  preferred_currency?: 'USD' | 'LBP';
+  preferred_currency?: CurrencyCode;
+  accepted_currencies?: CurrencyCode[];
   preferred_language?: 'en' | 'ar' | 'fr';
   preferred_commission_rate?: number;
   exchange_rate?: number;

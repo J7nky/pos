@@ -8,14 +8,14 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { TransactionService } from '../transactionService';
 import { auditLogService } from '../auditLogService';
-import { currencyService } from '../currencyService';
+import { currencyService } from '../../currencyService';
 import { getDB } from '../../lib/db';
 import { TRANSACTION_CATEGORIES } from '../../constants/transactionCategories';
 
 // Mock dependencies
 vi.mock('../../lib/db');
 vi.mock('../auditLogService');
-vi.mock('../currencyService');
+vi.mock('../../currencyService');
 
 describe('Atomic Transactions', () => {
   let transactionService: TransactionService;
@@ -48,15 +48,14 @@ describe('Atomic Transactions', () => {
     (getDB().cash_drawer_sessions.update as any) = vi.fn().mockResolvedValue(undefined);
 
     // Mock currency service
-    (currencyService.convertCurrency as any) = vi.fn().mockImplementation((amount, from, to) => {
+    (currencyService.convert as any) = vi.fn().mockImplementation((amount, from, to) => {
       if (from === to) return amount;
       if (from === 'LBP' && to === 'USD') return amount / 1500;
       if (from === 'USD' && to === 'LBP') return amount * 1500;
       return amount;
     });
 
-    (currencyService.validateCurrencyAmount as any) = vi.fn().mockReturnValue(true);
-    (currencyService.formatCurrency as any) = vi.fn().mockImplementation((amount, currency) => 
+    (currencyService.format as any) = vi.fn().mockImplementation((amount, currency) =>
       `${currency} ${amount.toFixed(2)}`
     );
 
@@ -539,7 +538,7 @@ describe('Atomic Transactions', () => {
       expect(result.success).toBe(true);
 
       // Verify currency conversion was used for balance calculation
-      expect(currencyService.convertCurrency).toHaveBeenCalledWith(75000, 'LBP', 'USD');
+      expect(currencyService.convert).toHaveBeenCalledWith(75000, 'LBP', 'USD');
 
       // Balance should be updated in LBP
       expect(getDB().customers.update).toHaveBeenCalledWith('customer-123', 

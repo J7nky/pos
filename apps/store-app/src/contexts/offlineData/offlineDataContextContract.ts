@@ -21,6 +21,7 @@ import type {
 import type { InventoryItem } from '../../types/inventory';
 import type { BalanceSnapshot, ChartOfAccounts, JournalEntry } from '../../types/accounting';
 import type { SyncResult } from '../../services/syncOrchestrator';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 type Tables = Database['public']['Tables'];
 
@@ -127,7 +128,7 @@ type CashDrawerViewState = {
   accountId: string;
   status: 'open' | 'closed';
   currentBalance: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   lastUpdated: string;
 };
 
@@ -267,7 +268,10 @@ export interface OfflineDataContextType {
   lowStockAlertsEnabled: boolean;
   lowStockThreshold: number;
   defaultCommissionRate: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
+  preferredCurrency: CurrencyCode;
+  acceptedCurrencies: CurrencyCode[];
+  formatAmount: (amount: number, currency: CurrencyCode) => string;
   exchangeRate: number;
   language: 'en' | 'ar' | 'fr';
   cashDrawer: CashDrawerViewState | null;
@@ -329,7 +333,7 @@ export interface OfflineDataContextType {
     commission_rate?: number;
     type: string;
     plastic_fee?: number | null;
-    currency?: 'USD' | 'LBP';
+    currency?: CurrencyCode;
     items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
   }) => Promise<{ batchId: string; financialResult?: unknown }>;
   updateSale: (id: string, updates: Partial<BillLineItem>) => Promise<void>;
@@ -366,7 +370,7 @@ export interface OfflineDataContextType {
   toggleLowStockAlerts: (enabled: boolean) => Promise<void>;
   updateLowStockThreshold: (threshold: number) => void;
   updateDefaultCommissionRate: (rate: number) => Promise<void>;
-  updateCurrency: (newCurrency: 'USD' | 'LBP') => Promise<void>;
+  updateCurrency: (newCurrency: CurrencyCode) => Promise<void>;
   updateExchangeRate: (rate: number) => Promise<void>;
   updateLanguage: (language: 'en' | 'ar' | 'fr') => Promise<void>;
   receiptSettings: Partial<ReceiptSettings>;
@@ -393,7 +397,7 @@ export interface OfflineDataContextType {
     transactionData: {
       type: 'sale' | 'payment' | 'expense' | 'refund';
       amount: number;
-      currency: 'USD' | 'LBP';
+      currency: CurrencyCode;
       description: string;
       reference: string;
       customerId?: string;
@@ -428,7 +432,7 @@ export interface OfflineDataContextType {
     entityType: 'customer' | 'supplier';
     entityId: string;
     amount: string;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     description: string;
     reference: string;
     storeId: string;
@@ -442,7 +446,7 @@ export interface OfflineDataContextType {
   processSupplierAdvance: (params: {
     supplierId: string;
     amount: number;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     type: 'give' | 'deduct';
     description: string;
     date: string;
@@ -452,7 +456,7 @@ export interface OfflineDataContextType {
   updateSupplierAdvance: (transactionId: string, updates: {
     supplierId: string;
     amount: number;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     type: 'give' | 'deduct';
     description: string;
     date: string;
@@ -464,7 +468,7 @@ export interface OfflineDataContextType {
   processEmployeePayment: (params: {
     employeeId: string;
     amount: string;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     description: string;
     reference: string;
     storeId: string;

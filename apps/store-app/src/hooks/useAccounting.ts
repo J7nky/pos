@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { currencyService } from '../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { dataSyncService } from '../services/dataSyncService';
 import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable } from '../types';
 
@@ -150,9 +151,9 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
         const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
         if (originalLBPAmount) {
           const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
-          return sum + currencyService.getConvertedAmount(originalAmount, 'LBP');
+          return sum + currencyService.convert(originalAmount, 'LBP', 'USD');
         }
-        return sum + currencyService.getConvertedAmount(t.amount, t.currency || 'USD');
+        return sum + currencyService.convert(t.amount, (t.currency || 'USD') as CurrencyCode, 'USD');
       }, 0);
 
     const expenses = filteredTransactions
@@ -161,9 +162,9 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
         const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
         if (originalLBPAmount) {
           const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
-          return sum + currencyService.getConvertedAmount(originalAmount, 'LBP');
+          return sum + currencyService.convert(originalAmount, 'LBP', 'USD');
         }
-        return sum + currencyService.getConvertedAmount(t.amount, t.currency || 'USD');
+        return sum + currencyService.convert(t.amount, (t.currency || 'USD') as CurrencyCode, 'USD');
       }, 0);
 
     const netProfit = income - expenses;
@@ -182,11 +183,11 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
 
     const prevIncome = prevTransactions
       .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + currencyService.getConvertedAmount(t.amount, 'USD'), 0);
+      .reduce((sum, t) => sum + currencyService.convert(t.amount, 'USD', 'USD'), 0);
 
     const prevExpenses = prevTransactions
       .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + currencyService.getConvertedAmount(t.amount, 'USD'), 0);
+      .reduce((sum, t) => sum + currencyService.convert(t.amount, 'USD', 'USD'), 0);
 
     const incomeChange = prevIncome > 0 ? ((income - prevIncome) / prevIncome) * 100 : 0;
     const expenseChange = prevExpenses > 0 ? ((expenses - prevExpenses) / prevExpenses) * 100 : 0;
@@ -225,9 +226,9 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
         let amount;
         if (originalLBPAmount) {
           const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
-          amount = currencyService.getConvertedAmount(originalAmount, 'LBP');
+          amount = currencyService.convert(originalAmount, 'LBP', 'USD');
         } else {
-          amount = currencyService.getConvertedAmount(t.amount, t.currency || 'USD');
+          amount = currencyService.convert(t.amount, (t.currency || 'USD') as CurrencyCode, 'USD');
         }
         
         if (t.type === 'income') acc[day].income += amount;

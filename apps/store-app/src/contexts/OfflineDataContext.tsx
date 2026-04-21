@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- legacy offline context; narrow types incrementally */
 import { createContext, useContext, useState, useRef, useCallback, useMemo, ReactNode } from 'react';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
@@ -9,6 +10,7 @@ import {
   createId,
 } from '../lib/db';
 import { syncService, type SyncResult } from '../services/syncOrchestrator';
+import { currencyService } from '../services/currencyService';
 import { crudHelperService } from '../services/crudHelperService';
 // import { PAYMENT_CATEGORIES } from '../constants/paymentCategories'; // Unused
 import enLocale from '../i18n/locales/en';
@@ -202,18 +204,50 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   });
 
   // StoreSettings needs performSync (via stable ref)
+  const reloadCurrencyStateRef = useRef<(sid: string | null) => Promise<void>>(async () => {});
+
+  const [acceptedCurrencies, setAcceptedCurrencies] = useState<CurrencyCode[]>(['USD']);
+  const [preferredCurrency, setPreferredCurrency] = useState<CurrencyCode>('USD');
+
   const settingsLayer = useStoreSettingsDataLayer({
     storeId, isOnline, isSyncing,
     updateUnsyncedCount: stableUpdateUnsyncedCount,
     performSync: stablePerformSync,
     resetAutoSyncTimer: stableResetAutoSyncTimer,
     debouncedSync: stableDebouncedSync,
+    reloadCurrencyState: async (sid) => {
+      await reloadCurrencyStateRef.current(sid);
+    },
   });
+
+  const reloadCurrencyState = useCallback(async (sid: string | null) => {
+    if (!sid) return;
+    await currencyService.loadFromStore(sid);
+    const row = await getDB().stores.get(sid);
+    if (row) await settingsLayer.hydrate(row);
+    setPreferredCurrency(currencyService.getPreferredCurrency());
+    setAcceptedCurrencies(currencyService.getAcceptedCurrencies());
+  }, [settingsLayer.hydrate]);
+
+  reloadCurrencyStateRef.current = reloadCurrencyState;
+
+  const formatAmount = useCallback(
+    (amount: number, currency: CurrencyCode) => currencyService.format(amount, currency),
+    [preferredCurrency]
+  );
+
+  const settingsHydrateWithCurrency = useCallback(
+    async (storeData: Tables['stores']['Row'] | null) => {
+      if (storeData && storeId) await reloadCurrencyState(storeId);
+      else await settingsLayer.hydrate(storeData);
+    },
+    [storeId, reloadCurrencyState, settingsLayer.hydrate]
+  );
 
   // CashDrawer needs currency + exchangeRate from settingsLayer
   const cashDrawerLayer = useCashDrawerDataLayer({
     storeId, currentBranchId,
-    currency: settingsLayer.currency,
+    currency: preferredCurrency,
     exchangeRate: settingsLayer.exchangeRate,
     pushUndo: stablePushUndo,
     updateUnsyncedCount: stableUpdateUnsyncedCount,
@@ -377,7 +411,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
       // Load store settings from DB
       const storeData = await getDB().stores.get(storeId);
-      if (storeData) await settingsLayer.hydrate(storeData);
+      if (storeData && storeId) await reloadCurrencyState(storeId);
 
       // Notifications
       if (storeId) await notificationsLayer.loadNotifications(storeId);
@@ -409,7 +443,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     productLayer.hydrate, entityLayer.hydrate, employeeLayer.hydrate,
     transactionLayer.hydrate, billLayer.hydrate, inventoryLayer.hydrate,
     accountingLayer.hydrate, branchLayer.hydrate,
-    settingsLayer.hydrate, notificationsLayer.loadNotifications,
+    reloadCurrencyState, notificationsLayer.loadNotifications,
     cashDrawerLayer.refreshCashDrawerStatus,
   ]);
 
@@ -450,7 +484,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     refreshData,
     updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     performSync: syncStateLayer.performSync,
-    settingsHydrate: settingsLayer.hydrate,
+    settingsHydrate: settingsHydrateWithCurrency,
     refreshCashDrawerStatus: cashDrawerLayer.refreshCashDrawerStatus,
     setLoading,
     setIsDataReady,
@@ -540,11 +574,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // ─── Inventory CRUD ────────────────────────────────────────────────────────
   const addInventoryItem = (itemData: Omit<Tables['inventory_items']['Insert'], 'store_id'>): Promise<void> =>
-    inventoryItemOps.addInventoryItem({ storeId, currency: settingsLayer.currency, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer }, itemData);
+    inventoryItemOps.addInventoryItem({ storeId, currency: preferredCurrency, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer }, itemData);
 
   const updateInventoryItem = (id: string, updates: Tables['inventory_items']['Update']): Promise<void> =>
     inventoryItemOps.updateInventoryItem(
-      { storeId, currentBranchId, userProfileId: userProfile?.id, currency: settingsLayer.currency, pushUndo, refreshData, updateUnsyncedCount: syncStateLayer.updateUnsyncedCount, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, debouncedSync: syncStateLayer.debouncedSync },
+      { storeId, currentBranchId, userProfileId: userProfile?.id, currency: preferredCurrency, pushUndo, refreshData, updateUnsyncedCount: syncStateLayer.updateUnsyncedCount, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, debouncedSync: syncStateLayer.debouncedSync },
       id, updates
     );
 
@@ -552,7 +586,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const deleteInventoryItem = (id: string): Promise<void> =>
     inventoryItemOps.deleteInventoryItem(
-      { storeId, currentBranchId, userProfileId: userProfile?.id, currency: settingsLayer.currency, pushUndo, refreshData, updateUnsyncedCount: syncStateLayer.updateUnsyncedCount, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, debouncedSync: syncStateLayer.debouncedSync },
+      { storeId, currentBranchId, userProfileId: userProfile?.id, currency: preferredCurrency, pushUndo, refreshData, updateUnsyncedCount: syncStateLayer.updateUnsyncedCount, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, debouncedSync: syncStateLayer.debouncedSync },
       id
     );
 
@@ -582,7 +616,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // ─── Sale CRUD ─────────────────────────────────────────────────────────────
   const _buildSaleDeps = (): saleOps.SaleDeps => ({
-    storeId, currentBranchId, userProfileId: userProfile?.id, currency: settingsLayer.currency,
+    storeId, currentBranchId, userProfileId: userProfile?.id, currency: preferredCurrency,
     pushUndo, refreshData, updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, debouncedSync: syncStateLayer.debouncedSync,
     deductInventoryQuantity: (productId, quantity) => inventoryItemOps.deductInventoryQuantity(
@@ -615,7 +649,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const billCreateDepsRef = useRef<billOperations.BillCreateDeps>(null!);
   billCreateDepsRef.current = {
     storeId, currentBranchId, userProfileId: userProfile?.id,
-    currency: settingsLayer.currency, pushUndo, refreshData,
+    currency: preferredCurrency, pushUndo, refreshData,
     updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer,
     debouncedSync: syncStateLayer.debouncedSync,
@@ -657,7 +691,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const inventoryBatchDepsRef = useRef<inventoryBatchOps.InventoryBatchDeps>(null!);
   inventoryBatchDepsRef.current = {
     storeId, currentBranchId, userProfileId: userProfile?.id,
-    currency: settingsLayer.currency, pushUndo, refreshData,
+    currency: preferredCurrency, pushUndo, refreshData,
     updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer,
     debouncedSync: syncStateLayer.debouncedSync,
@@ -895,6 +929,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         lowStockThreshold: 10,
         defaultCommissionRate: 10,
         currency: 'LBP',
+        preferredCurrency: 'LBP',
+        acceptedCurrencies: ['LBP', 'USD'],
+        formatAmount: () => '$0.00',
         exchangeRate: 89500,
         language: 'ar',
         cashDrawer: null,
@@ -1033,7 +1070,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       lowStockAlertsEnabled: settingsLayer.lowStockAlertsEnabled,
       lowStockThreshold: settingsLayer.lowStockThreshold,
       defaultCommissionRate: settingsLayer.defaultCommissionRate,
-      currency: settingsLayer.currency,
+      currency: preferredCurrency,
+      preferredCurrency,
+      acceptedCurrencies,
+      formatAmount,
       exchangeRate: settingsLayer.exchangeRate,
       language: settingsLayer.language,
       receiptSettings: settingsLayer.receiptSettings,

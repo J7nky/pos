@@ -4,6 +4,7 @@
  * and return state + CRUD methods + hydrate (so the composer can refresh after loadAllStoreData).
  */
 
+import type { CurrencyCode } from '@pos-platform/shared';
 import type { Database } from '../../types/database';
 import type { SyncResult } from '../../services/syncOrchestrator';
 import type { Branch, NotificationRecord, NotificationType, NotificationPreferences } from '../../types';
@@ -198,7 +199,7 @@ export interface AccountingDataLayerResult {
 export interface CashDrawerDataLayerAdapter {
   storeId: string | null;
   currentBranchId: string | null;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   exchangeRate: number;
   pushUndo: (data: { type: string; affected: Array<{ table: string; id: string }>; steps: any[] }) => void;
   updateUnsyncedCount: () => Promise<void>;
@@ -232,11 +233,13 @@ export interface StoreSettingsDataLayerAdapter {
   performSync: (isAutomatic?: boolean) => Promise<unknown>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
+  /** Keeps CurrencyService + reactive context in sync after local store row changes. */
+  reloadCurrencyState?: (storeId: string) => Promise<void>;
 }
 
 /** Return type of useStoreSettingsDataLayer. */
 export interface StoreSettingsDataLayerResult {
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   exchangeRate: number;
   language: 'en' | 'ar' | 'fr';
   receiptSettings: any;
@@ -247,7 +250,7 @@ export interface StoreSettingsDataLayerResult {
   toggleLowStockAlerts: (enabled: boolean) => Promise<void>;
   updateLowStockThreshold: (threshold: number) => void;
   updateDefaultCommissionRate: (rate: number) => Promise<void>;
-  updateCurrency: (newCurrency: 'USD' | 'LBP') => Promise<void>;
+  updateCurrency: (newCurrency: CurrencyCode) => Promise<void>;
   updateExchangeRate: (rate: number) => Promise<void>;
   updateLanguage: (newLanguage: 'en' | 'ar' | 'fr') => Promise<void>;
   updateReceiptSettings: (newSettings: any) => Promise<void>;

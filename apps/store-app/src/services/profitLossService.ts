@@ -1,5 +1,4 @@
 import { getDB } from '../lib/db';
-import { CurrencyService } from './currencyService';
 import type { BillPLData } from '../types/profitLoss';
 import type { inventory_bills, InventoryItem, BillLineItem, Bill } from '../types';
 

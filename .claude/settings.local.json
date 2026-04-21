@@ -27,7 +27,21 @@
       "Bash(npx tsc:*)",
       "Bash(find:*)",
       "mcp__plugin_claude-mem_mcp-search__get_observations",
-      "Bash(claude doctor:*)"
+      "Bash(claude doctor:*)",
+      "Bash(.specify/scripts/bash/create-new-feature.sh *)",
+      "Bash(.specify/scripts/bash/update-agent-context.sh claude *)",
+      "Bash(pnpm --filter @pos-platform/shared test)",
+      "Bash(pnpm --filter @pos-platform/shared build)",
+      "Bash(pnpm --filter store-app exec tsc --noEmit)",
+      "Bash(pnpm --filter admin-app exec tsc --noEmit)",
+      "Bash(wait)",
+      "Bash(pnpm lint *)",
+      "Bash(pnpm --filter store-app parity:gate)",
+      "Bash(pnpm --filter store-app test:run -- currencyService.test.ts)",
+      "Bash(pnpm --filter admin-app lint)",
+      "Bash(pnpm --filter store-app lint)",
+      "Bash(pnpm --filter store-app build)",
+      "Bash(pnpm --filter admin-app build)"
     ]
   }
 }

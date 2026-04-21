@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 56;
+export const CURRENT_DB_VERSION = 57;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -61,6 +61,12 @@ export const V56_STORES = {
   inventory_items: 'id, store_id, branch_id, product_id, unit, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, is_archived, [store_id+branch_id], _synced, _deleted',
 } as const;
 
+/** v57: ISO country + accepted_currencies on store rows; inventory_items.currency back-fill (014-country-currency-schema). */
+export const V57_STORES = {
+  stores:
+    'id, name, country, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+} as const;
+
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
   console.log('🔧 Initializing database schema v54');
   console.log('   ✅ Database schema initialized');
@@ -95,4 +101,27 @@ export async function upgradeV56(tx: DexieTransaction): Promise<void> {
       if (row.is_archived === undefined) row.is_archived = false;
     });
   console.log('   ✅ v56 migration complete');
+}
+
+export async function upgradeV57(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v56 → v57 (store country, accepted_currencies, inventory currency)');
+  await tx.table('stores').toCollection().modify((store: Record<string, unknown>) => {
+    if (!store.country) {
+      store.country = 'LB';
+    }
+    const preferred = store.preferred_currency as string | undefined;
+    const acc = store.accepted_currencies as string[] | undefined;
+    if (!acc || acc.length === 0) {
+      store.accepted_currencies = preferred === 'USD' ? ['USD'] : [preferred ?? 'LBP', 'USD'];
+    }
+  });
+  const stores = await tx.table('stores').toArray();
+  const storesById = new Map(stores.map((s: { id: string }) => [s.id, s]));
+  await tx.table('inventory_items').toCollection().modify((item: Record<string, unknown>) => {
+    if (!item.currency) {
+      const parent = storesById.get(item.store_id as string) as { preferred_currency?: string } | undefined;
+      item.currency = parent?.preferred_currency ?? 'USD';
+    }
+  });
+  console.log('   ✅ v57 migration complete');
 }

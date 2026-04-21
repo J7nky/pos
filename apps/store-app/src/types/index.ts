@@ -1,6 +1,6 @@
 // Multilingual data types
 import type { MultilingualString } from '../utils/multilingual';
-import type { BranchCore } from '@pos-platform/shared';
+import type { BranchCore, CurrencyCode } from '@pos-platform/shared';
 
 // Core type definitions for the ERP system
 export interface User {
@@ -192,7 +192,7 @@ export interface InventoryItem {
   unit: 'kg' | 'piece' | 'box' | 'bag'|'bundle';
   weight?: number | null;
   price?: number | null;
-  currency?: 'USD' | 'LBP';
+  currency?: CurrencyCode;
   selling_price?: number | null;
   type?: string | null;
   created_at: string;
@@ -560,11 +560,13 @@ export interface Store {
   id: string;
   store_id: string;
   name: string;
+  country?: string | null;
+  accepted_currencies?: CurrencyCode[];
   address: string;
   phone: string;
   email: string;
   logo?: string | null;
-  preferred_currency: 'USD' | 'LBP';
+  preferred_currency: CurrencyCode;
   preferred_language: 'en' | 'ar' | 'fr';
   preferred_commission_rate: number;
   exchange_rate: number;

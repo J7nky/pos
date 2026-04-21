@@ -1,4 +1,4 @@
-import type { BranchCore, StoreCore, UserCore } from '@pos-platform/shared';
+import type { BranchCore, StoreCore, CurrencyCode, UserCore } from '@pos-platform/shared';
 
 export interface Database {
   public: {
@@ -28,7 +28,7 @@ export interface Database {
            * Kept in schema for backward compatibility only.
            */
           lbp_balance?: number;
-          currency: 'USD' | 'LBP';
+          currency: CurrencyCode;
           is_active: boolean;
           created_at: string;
           updated_at: string;
@@ -56,7 +56,7 @@ export interface Database {
            * Kept in schema for backward compatibility only.
            */
           lbp_balance?: number;
-          currency?: 'USD' | 'LBP';
+          currency?: CurrencyCode;
           is_active?: boolean;
           created_at?: string;
           updated_at?: string;
@@ -84,7 +84,7 @@ export interface Database {
            * Kept in schema for backward compatibility only.
            */
           lbp_balance?: number;
-          currency?: 'USD' | 'LBP';
+          currency?: CurrencyCode;
           is_active?: boolean;
           updated_at?: string;
         };
@@ -205,7 +205,9 @@ export interface Database {
         };
         Insert: {
           id?: string;
-          preferred_currency?: 'USD' | 'LBP';
+          country?: string | null;
+          accepted_currencies?: CurrencyCode[];
+          preferred_currency?: CurrencyCode;
           preferred_language?: 'en' | 'ar'|'fr';
           preferred_commission_rate?: number;
           exchange_rate?: number;
@@ -220,7 +222,9 @@ export interface Database {
           updated_at?: string;
         };
         Update: {
-          preferred_currency?: 'USD' | 'LBP';
+          country?: string | null;
+          accepted_currencies?: CurrencyCode[];
+          preferred_currency?: CurrencyCode;
           preferred_language?: 'en' | 'ar'|'fr';
           preferred_commission_rate?: number;
           exchange_rate?: number;
@@ -398,6 +402,7 @@ export interface Database {
           sku: string | null;
           updated_at: string;
           is_archived: boolean | null;
+          currency: CurrencyCode;
         };
         Insert:{
           id: string;
@@ -414,6 +419,7 @@ export interface Database {
           sku?: string | null;
           updated_at?: string;
           is_archived?: boolean | null;
+          currency?: CurrencyCode;
         };
         Update: {
           id: string;
@@ -430,6 +436,7 @@ export interface Database {
           sku?: string | null;
           updated_at?: string;
           is_archived?: boolean | null;
+          currency?: CurrencyCode;
         };
       };
       bills: {
@@ -700,7 +707,7 @@ export interface Database {
           type: 'income' | 'expense';
           category: string;
           amount: number;
-          currency: 'USD' | 'LBP';
+          currency: CurrencyCode;
           description: string;
           reference: string | null;
           store_id: string;
@@ -718,7 +725,7 @@ export interface Database {
           type: 'income' | 'expense';
           category: string;
           amount: number;
-          currency: 'USD' | 'LBP';
+          currency: CurrencyCode;
           description: string;
           reference?: string | null;
           store_id: string;

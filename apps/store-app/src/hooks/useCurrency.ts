@@ -1,65 +1,33 @@
 import { useOfflineData } from '../contexts/OfflineDataContext';
+import { currencyService } from '../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export function useCurrency() {
-  const { currency, exchangeRate } = useOfflineData();
-  const USD_TO_LBP_RATE = exchangeRate || 89500; // Use store's exchange rate
+  const { acceptedCurrencies, preferredCurrency, formatAmount, exchangeRate, currency } = useOfflineData();
 
-  const formatCurrency = (amount: number, fromCurrency: 'USD' | 'LBP' = 'LBP'): string => {
-    if (amount == null || isNaN(amount)) {
-      return currency === 'LBP' ? `0 ل.ل` : `$0.00`;
-    }
-    
-    // Convert from storage currency (LBP) to display currency if needed
-    let displayAmount = amount;
-    if (fromCurrency === 'LBP' && currency === 'USD') {
-      displayAmount = amount / USD_TO_LBP_RATE;
-    } else if (fromCurrency === 'USD' && currency === 'LBP') {
-      displayAmount = amount * USD_TO_LBP_RATE;
-    }
-    
-    if (currency === 'LBP') {
-      return `${Math.round(displayAmount).toLocaleString()} ل.ل`;
-    }
-    return `$${displayAmount.toFixed(2)}`;
-  };
+  const formatCurrency = (amount: number, fromCurrency: CurrencyCode = 'LBP'): string =>
+    formatAmount(currencyService.convert(amount, fromCurrency, preferredCurrency), preferredCurrency);
 
-  const formatCurrencyWithSymbol = (amount: number, curr: 'USD' | 'LBP'): string => {
-    if (amount == null || isNaN(amount)) {
-      return curr === 'LBP' ? `0 ل.ل` : `$0.00`;
-    }
-    if (curr === 'LBP') {
-      return `${Math.round(amount).toLocaleString()} ل.ل`;
-    }
-    return `$${amount.toFixed(2)}`;
-  };
+  const formatCurrencyWithSymbol = (amount: number, curr: CurrencyCode): string => formatAmount(amount, curr);
 
-  const convertCurrency = (amount: number, fromCurrency: 'USD' | 'LBP', toCurrency: 'USD' | 'LBP'): number => {
-    if (fromCurrency === toCurrency) return amount;
-    
-    if (fromCurrency === 'USD' && toCurrency === 'LBP') {
-      return amount * USD_TO_LBP_RATE;
-    }
-    
-    if (fromCurrency === 'LBP' && toCurrency === 'USD') {
-      return amount / USD_TO_LBP_RATE;
-    }
-    
-    return amount;
-  };
+  const convertCurrency = (amount: number, from: CurrencyCode, to: CurrencyCode): number =>
+    currencyService.convert(amount, from, to);
 
-  const getConvertedAmount = (amount: number, originalCurrency: 'USD' | 'LBP'): number => {
-    return convertCurrency(amount, originalCurrency, currency);
-  };
-  const getCurrencySymbol = (): string => {
-    return currency === 'LBP' ? 'ل.ل' : '$';
-  };
+  const getConvertedAmount = (amount: number, originalCurrency: CurrencyCode): number =>
+    currencyService.convert(amount, originalCurrency, preferredCurrency);
+
+  const getCurrencySymbol = (): string => currencyService.getMeta(preferredCurrency).symbol;
 
   return {
     currency,
+    preferredCurrency,
+    acceptedCurrencies,
     formatCurrency,
     formatCurrencyWithSymbol,
+    formatAmount,
     convertCurrency,
     getConvertedAmount,
-    getCurrencySymbol
+    getCurrencySymbol,
+    exchangeRate,
   };
 }

@@ -8,6 +8,7 @@ import { InventoryPurchaseService } from '../../../services/inventoryPurchaseSer
 import { receivedItemsJournalService } from '../../../services/receivedItemsJournalService';
 import { receivedBillMonitoringService } from '../../../services/receivedBillMonitoringService';
 import type { Database } from '../../../types/database';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 type Tables = Database['public']['Tables'];
 
@@ -15,7 +16,7 @@ export interface InventoryBatchDeps {
   storeId: string | null | undefined;
   currentBranchId: string | null;
   userProfileId: string | undefined;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   pushUndo: (data: any) => void;
   refreshData: () => Promise<void>;
   updateUnsyncedCount: () => Promise<void>;
@@ -35,7 +36,7 @@ export async function addInventoryBatch(
     commission_rate?: number;
     type: string;
     plastic_fee?: number | null;
-    currency?: 'USD' | 'LBP';
+    currency?: CurrencyCode;
     items: Array<Omit<Tables['inventory_items']['Insert'], 'store_id' | 'received_at'>>;
   }
 ): Promise<{ batchId: string; financialResult?: any }> {
@@ -247,7 +248,7 @@ export async function updateInventoryBatch(
     await getDB().inventory_bills.update(id, processedUpdates);
 
     if (supplierChanged) {
-      const batchCurrency = ((originalBatch as any).currency || currency) as 'USD' | 'LBP';
+      const batchCurrency = ((originalBatch as any).currency || currency) as CurrencyCode;
       const batchType = (processedUpdates.type || originalBatch.type) as 'cash' | 'credit' | 'commission';
       await receivedItemsJournalService.updateJournalEntriesForSupplierChange(
         id,
@@ -263,7 +264,7 @@ export async function updateInventoryBatch(
     } else if (amountChanged && (originalBatch.type === 'cash' || originalBatch.type === 'credit')) {
       const difference = newBatchTotal - oldBatchTotal;
       if (Math.abs(difference) > 0.01) {
-        const batchCurrency = ((originalBatch as any).currency || currency) as 'USD' | 'LBP';
+        const batchCurrency = ((originalBatch as any).currency || currency) as CurrencyCode;
         const { inventoryPurchaseService } = await import('../../../services/inventoryPurchaseService');
         const originalTransaction = await inventoryPurchaseService.findOriginalTransactionForBatch(id, storeId);
         if (originalTransaction) {

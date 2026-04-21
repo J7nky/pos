@@ -18,7 +18,8 @@ import {
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 
 import Toast from '../components/common/Toast';
-import { CurrencyService } from '../services/currencyService';
+import { currencyService } from '../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
 import ReceivedBills from '../components/accountingPage/tabs/ReceivedBills';
 import SoldBills from '../components/accountingPage/tabs/SoldBills';
 import DashboardOverview from '../components/accountingPage/tabs/DashboardOverview';
@@ -1116,7 +1117,11 @@ export default function Accounting() {
 
       // Add commission transaction (if applicable)
       if (fees.commission > 0) {
-        const safeCommissionAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.commission, currency as 'USD' | 'LBP');
+        const safeCommissionAmount = {
+          amount: currencyService.convert(fees.commission, currency as CurrencyCode, 'USD'),
+          currency: 'USD' as CurrencyCode,
+          wasConverted: currency !== 'USD',
+        };
         await addTransaction({
           id: raw.createId?.() || crypto.randomUUID(),
           type: 'income',
@@ -1140,7 +1145,11 @@ export default function Accounting() {
 
       // Add supplier payment transaction
       if (fees.supplierAmount > 0) {
-        const safeSupplierAmount = CurrencyService.getInstance().safeConvertForDatabase(fees.supplierAmount, currency as 'USD' | 'LBP');
+        const safeSupplierAmount = {
+          amount: currencyService.convert(fees.supplierAmount, currency as CurrencyCode, 'USD'),
+          currency: 'USD' as CurrencyCode,
+          wasConverted: currency !== 'USD',
+        };
         await addTransaction({
           id: raw.createId?.() || crypto.randomUUID(),
           supplier_id: bill.supplier_id,

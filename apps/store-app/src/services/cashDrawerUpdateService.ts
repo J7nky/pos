@@ -533,7 +533,7 @@ export class CashDrawerUpdateService {
     }
     
     try {
-      return currencyService.convertCurrency(amount, transactionCurrency, storeCurrency);
+      return currencyService.convert(amount, transactionCurrency, storeCurrency);
     } catch (error) {
       console.error('Currency conversion failed, using original amount:', error);
       return amount;

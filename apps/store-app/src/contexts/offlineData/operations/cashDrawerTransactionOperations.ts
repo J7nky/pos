@@ -16,6 +16,7 @@ import {
 } from '../../../utils/accountMapping';
 import { getSystemEntity } from '../../../constants/systemEntities';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export interface CashDrawerAtomicsDeps {
   storeId: string | null | undefined;
@@ -36,7 +37,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
 
   async function createCashDrawerExpenseAtomic(
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     reference: string,
     supplierId: string | undefined
@@ -118,7 +119,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
     for (const entry of cashJournalEntries) {
       const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
       const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-      if (usdChange !== 0) balanceChange += currencyService.convertCurrency(usdChange, 'USD', 'LBP');
+      if (usdChange !== 0) balanceChange += currencyService.convert(usdChange, 'USD', 'LBP');
       balanceChange += lbpChange;
     }
 
@@ -133,7 +134,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
 
   async function createCashDrawerPaymentAtomic(
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     reference: string,
     supplierId: string | undefined
@@ -215,7 +216,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
     for (const entry of cashJournalEntries) {
       const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
       const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-      if (usdChange !== 0) balanceChange += currencyService.convertCurrency(usdChange, 'USD', 'LBP');
+      if (usdChange !== 0) balanceChange += currencyService.convert(usdChange, 'USD', 'LBP');
       balanceChange += lbpChange;
     }
 
@@ -230,7 +231,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
 
   async function createCashDrawerTransactionAtomic(
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     reference: string,
     customerId: string | undefined,
@@ -309,7 +310,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
     for (const entry of cashJournalEntries) {
       const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
       const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-      if (usdChange !== 0) balanceChange += currencyService.convertCurrency(usdChange, 'USD', 'LBP');
+      if (usdChange !== 0) balanceChange += currencyService.convert(usdChange, 'USD', 'LBP');
       balanceChange += lbpChange;
     }
 
@@ -340,7 +341,7 @@ export interface ProcessCashDrawerTransactionDeps {
 export interface ProcessCashDrawerTransactionParams {
   type: 'sale' | 'payment' | 'expense' | 'refund';
   amount: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   description: string;
   reference: string;
   customerId?: string;

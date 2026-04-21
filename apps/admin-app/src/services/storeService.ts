@@ -9,6 +9,7 @@ import {
   UpdateStoreInput,
   StoreFilters,
 } from '../types';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 // ============================================================================
 // STORE CRUD OPERATIONS
@@ -125,16 +126,45 @@ export async function getStore(storeId: string): Promise<StoreWithStats | null> 
  * 2. System entities (via RPC - to be called separately)
  * 3. Chart of accounts (via RPC - to be called separately)
  */
+export async function checkCurrencyUsage(
+  storeId: string,
+  currencies: CurrencyCode[]
+): Promise<Record<CurrencyCode, { inventory: number; transactions: number; openBills: number }>> {
+  const result = {} as Record<CurrencyCode, { inventory: number; transactions: number; openBills: number }>;
+  await Promise.all(
+    currencies.map(async (c) => {
+      const [inv, tx, bills] = await Promise.all([
+        supabase.from('inventory_items').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('currency', c),
+        supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('currency', c),
+        supabase
+          .from('bills')
+          .select('id', { count: 'exact', head: true })
+          .eq('store_id', storeId)
+          .eq('currency', c)
+          .is('settled_at', null),
+      ]);
+      result[c] = {
+        inventory: inv.count ?? 0,
+        transactions: tx.count ?? 0,
+        openBills: bills.count ?? 0,
+      };
+    })
+  );
+  return result;
+}
+
 export async function createStore(input: CreateStoreInput): Promise<Store> {
   const storeData = {
     name: input.name,
+    country: input.country,
     address: input.address || null,
     phone: input.phone || null,
     email: input.email || null,
-    preferred_currency: input.preferred_currency || 'USD',
+    preferred_currency: input.preferred_currency,
+    accepted_currencies: input.accepted_currencies,
     preferred_language: input.preferred_language || 'en',
-    preferred_commission_rate: input.preferred_commission_rate || 0,
-    exchange_rate: input.exchange_rate || 89500,
+    preferred_commission_rate: input.preferred_commission_rate ?? 10,
+    exchange_rate: input.exchange_rate ?? 1,
     low_stock_alert: true,
     status: 'active' as const,
   };
