@@ -474,11 +474,12 @@ ${dashSeparator}`;
   //   return () => clearTimeout(timer);
   // }, []);
 
-  // Ensure there is always a valid active bill tab when entering POS. Runs once on mount.
-  // Handles three cases: (a) empty tabs → create one; (b) tabs exist but activeTabId
-  // points to nothing (stale localStorage) → activate the first; (c) already valid → no-op.
+  // Ensure there is always a valid active bill tab when entering POS, and migrate any
+  // legacy tabs that predate settlementCurrency. Merged into a single on-mount effect so
+  // that only one setActiveTabs call runs per commit cycle — useLocalStorage's setValue
+  // captures storedValue via stale closure, so a second effect calling setActiveTabs in
+  // the same commit would overwrite this one's [newTab] with the stale [].
   React.useEffect(() => {
-    const hasValidActive = activeTabs.some(tab => tab.id === activeTabId);
     if (activeTabs.length === 0) {
       const newTab: BillTab = {
         id: uuidv4(),
@@ -493,25 +494,23 @@ ${dashSeparator}`;
       };
       setActiveTabs([newTab]);
       setActiveTabId(newTab.id);
-    } else if (!hasValidActive) {
-      setActiveTabId(activeTabs[0].id);
+      return;
     }
+
+    const needsCurrencyMigration = activeTabs.some(tab => !(tab as BillTab).settlementCurrency);
+    const migratedTabs = needsCurrencyMigration
+      ? activeTabs.map(tab =>
+          (tab as BillTab).settlementCurrency
+            ? tab
+            : { ...tab, settlementCurrency: raw.preferredCurrency }
+        )
+      : activeTabs;
+    if (needsCurrencyMigration) setActiveTabs(migratedTabs);
+
+    const hasValidActive = migratedTabs.some(tab => tab.id === activeTabId);
+    if (!hasValidActive) setActiveTabId(migratedTabs[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once on mount
   }, []);
-
-  React.useEffect(() => {
-    setActiveTabs(prev => {
-      let changed = false;
-      const next = prev.map(tab => {
-        if (!(tab as BillTab).settlementCurrency) {
-          changed = true;
-          return { ...tab, settlementCurrency: raw.preferredCurrency };
-        }
-        return tab;
-      });
-      return changed ? next : prev;
-    });
-  }, [raw.preferredCurrency, setActiveTabs]);
 
   const closeTab = (tabId: string) => {
     const updatedTabs = activeTabs.filter(tab => tab.id !== tabId);
