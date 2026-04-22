@@ -59,12 +59,7 @@ export default function POS() {
   const [activeTabs, setActiveTabs] = useLocalStorage<BillTab[]>('pos_active_tabs', []);
   const [activeTabId, setActiveTabId] = useLocalStorage<string>('pos_active_tab_id', '');
   
-  // Early return check - must happen after localStorage hooks but before other hooks
   const activeTab = activeTabs.find(tab => tab.id === activeTabId);
-  if (!activeTab && activeTabs.length > 0) {
-    // If we have tabs but no active tab, set the first one as active
-    setActiveTabId(activeTabs[0].id);
-  }
 
   // Refs for keyboard navigation
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -479,12 +474,15 @@ ${dashSeparator}`;
   //   return () => clearTimeout(timer);
   // }, []);
 
-  // Initialize with first tab if no tabs exist
+  // Ensure there is always a valid active bill tab when entering POS. Runs once on mount.
+  // Handles three cases: (a) empty tabs → create one; (b) tabs exist but activeTabId
+  // points to nothing (stale localStorage) → activate the first; (c) already valid → no-op.
   React.useEffect(() => {
-    const createNewTab = () => {
+    const hasValidActive = activeTabs.some(tab => tab.id === activeTabId);
+    if (activeTabs.length === 0) {
       const newTab: BillTab = {
         id: uuidv4(),
-        name: `${t('common.labels.bill')} ${activeTabs.length + 1}`,
+        name: `${t('common.labels.bill')} 1`,
         cart: [],
         selectedCustomer: '',
         paymentMethod: 'cash',
@@ -493,15 +491,12 @@ ${dashSeparator}`;
         createdAt: new Date().toISOString(),
         settlementCurrency: raw.preferredCurrency,
       };
-      const updatedTabs = [...activeTabs, newTab];
-      setActiveTabs(updatedTabs); 
+      setActiveTabs([newTab]);
       setActiveTabId(newTab.id);
-    };
-
-    if (activeTabs.length === 0) {
-      createNewTab();
+    } else if (!hasValidActive) {
+      setActiveTabId(activeTabs[0].id);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap first tab once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once on mount
   }, []);
 
   React.useEffect(() => {

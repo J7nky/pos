@@ -19,6 +19,32 @@ import { currencyService } from '../../services/currencyService';
 import { assertValidCurrency } from '../../utils/currencyValidation';
 import { notificationService } from '../../services/notificationService';
 import { InvalidCurrencyError } from '../../errors/currencyErrors';
+import enLocale from '../../i18n/locales/en';
+import arLocale from '../../i18n/locales/ar';
+import frLocale from '../../i18n/locales/fr';
+
+async function notifyCurrencyError(
+  storeId: string,
+  reason: 'missing' | 'not-accepted' | string | undefined,
+  acceptedCurrencies: readonly string[] | undefined
+): Promise<void> {
+  try {
+    const store = await getDB().stores.get(storeId);
+    const lang = (store?.preferred_language as 'en' | 'ar' | 'fr') || 'en';
+    const locale = lang === 'ar' ? arLocale : lang === 'fr' ? frLocale : enLocale;
+    const key = reason === 'missing' ? 'currencyMissing' : 'currencyNotAccepted';
+    const title = locale.transaction?.[key] ?? enLocale.transaction[key];
+    const message =
+      reason === 'missing'
+        ? title
+        : `${title} (${(acceptedCurrencies ?? []).join(', ')})`;
+    await notificationService.createNotification(storeId, 'sync_error', title, message, {
+      priority: 'high',
+    });
+  } catch {
+    /* non-fatal */
+  }
+}
 
 export function useTransactionDataLayer(
   adapter: TransactionDataLayerAdapter
@@ -71,19 +97,7 @@ export function useTransactionDataLayer(
           );
         } catch (e) {
           if (e instanceof InvalidCurrencyError && storeId) {
-            try {
-              await notificationService.createNotification(
-                storeId,
-                'sync_error',
-                e.payload.reason === 'missing' ? 'Transaction currency required' : 'Transaction currency not accepted',
-                e.payload.reason === 'missing'
-                  ? 'Add a valid currency to this transaction.'
-                  : `Currency must be one of: ${(e.payload.acceptedCurrencies ?? []).join(', ')}`,
-                { priority: 'high' }
-              );
-            } catch {
-              /* non-fatal */
-            }
+            await notifyCurrencyError(storeId, e.payload.reason, e.payload.acceptedCurrencies);
           }
           throw e;
         }
@@ -112,21 +126,7 @@ export function useTransactionDataLayer(
           );
         } catch (e) {
           if (e instanceof InvalidCurrencyError && storeId) {
-            const title =
-              e.payload.reason === 'missing'
-                ? 'Transaction currency required'
-                : 'Transaction currency not accepted';
-            const msg =
-              e.payload.reason === 'missing'
-                ? 'Add a valid currency to this transaction.'
-                : `Currency must be one of: ${(e.payload.acceptedCurrencies ?? []).join(', ')}`;
-            try {
-              await notificationService.createNotification(storeId, 'sync_error', title, msg, {
-                priority: 'high',
-              });
-            } catch {
-              /* non-fatal */
-            }
+            await notifyCurrencyError(storeId, e.payload.reason, e.payload.acceptedCurrencies);
           }
           throw e;
         }

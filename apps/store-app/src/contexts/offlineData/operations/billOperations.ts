@@ -32,7 +32,6 @@ export interface BillCreateDeps {
   storeId: string | null | undefined;
   currentBranchId: string | null;
   userProfileId: string | undefined;
-  currency: CurrencyCode;
   pushUndo: (undoData: any) => void;
   refreshData: () => Promise<void>;
   updateUnsyncedCount: () => Promise<void>;
@@ -409,7 +408,6 @@ export async function createBill(
     storeId,
     currentBranchId,
     userProfileId,
-    currency: _legacyDepsCurrency,
     pushUndo,
     refreshData,
     updateUnsyncedCount,

@@ -649,7 +649,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const billCreateDepsRef = useRef<billOperations.BillCreateDeps>(null!);
   billCreateDepsRef.current = {
     storeId, currentBranchId, userProfileId: userProfile?.id,
-    currency: preferredCurrency, pushUndo, refreshData,
+    pushUndo, refreshData,
     updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer,
     debouncedSync: syncStateLayer.debouncedSync,

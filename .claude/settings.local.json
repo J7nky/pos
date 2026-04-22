@@ -43,7 +43,11 @@
       "Bash(pnpm --filter store-app build)",
       "Bash(pnpm --filter admin-app build)",
       "Bash(node -e \"const v=0.1235; const f=1000; console.log\\(v*f\\); console.log\\(\\(v*f\\).toPrecision\\(20\\)\\);\")",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(awk 'NR>=50 && NR<=250' /home/janky/Desktop/pos-1/apps/store-app/src/services/syncDownload.ts)",
+      "Bash(pnpm --filter store-app test:run)",
+      "Bash(pnpm --filter store-app dev --port 5178)",
+      "Bash(kill %1 wait)"
     ]
   }
 }
