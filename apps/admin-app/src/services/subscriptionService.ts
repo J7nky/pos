@@ -114,6 +114,7 @@ export async function createTrialSubscription(
       start_date: now.toISOString(),
       end_date: trialEnd.toISOString(),
       amount: planPricing[plan],
+      // Subscriptions are billed in USD globally regardless of the store's local currency. Intentional — see spec 008 Task 15 / feature 017.
       currency: 'USD',
       allowed_branches: plan === 'starter' ? 1 : plan === 'professional' ? 3 : 10,
       cancelled_at: null,

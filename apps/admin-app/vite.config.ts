@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
@@ -34,6 +34,11 @@ export default defineConfig({
       (process.env.NODE_ENV === 'production' ? 'https://super.souq-trablous.com' : 'http://localhost:5176')
     ),
     'import.meta.env.PROD': JSON.stringify(process.env.NODE_ENV === 'production'),
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    include: ['src/**/*.test.ts'],
   },
 });
 

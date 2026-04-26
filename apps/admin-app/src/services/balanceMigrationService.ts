@@ -1,5 +1,7 @@
+import type { CurrencyCode } from '@pos-platform/shared';
 import { supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
+import { getStore } from './storeService';
 
 export interface ExcelRow {
   entityName: string;
@@ -30,6 +32,8 @@ export interface MigrationSession {
   validRows: number;
   importedRows: number;
   errorRows: number;
+  /** In-memory cache of store.preferred_currency; never persisted (see saveSessions). */
+  preferredCurrency?: CurrencyCode;
 }
 
 export interface ImportResult {
@@ -298,10 +302,9 @@ export class BalanceMigrationService {
   async executeMigration(
     sessionId: string,
     validRows: ExcelRow[],
-    options: { useBulk?: boolean; currency?: 'USD' | 'LBP' } = {}
+    options: { useBulk?: boolean; currency?: CurrencyCode } = {}
   ): Promise<ImportResult> {
-    // Default to individual processing (more reliable, bulk RPC may not be deployed)
-    const { useBulk = false, currency = 'LBP' } = options;
+    const { useBulk = false, currency: currencyOverride } = options;
     const importedRows: ExcelRow[] = [];
     const errors: string[] = [];
 
@@ -317,6 +320,8 @@ export class BalanceMigrationService {
 
       console.log('📍 Session found:', { storeId: session.storeId, branchId: session.branchId });
 
+      const resolvedCurrency = await this.resolveMigrationCurrency(session, currencyOverride);
+
       // Get current user ID (if authenticated)
       const { data: { user } } = await supabase.auth.getUser();
       const userId = user?.id || null;
@@ -325,7 +330,7 @@ export class BalanceMigrationService {
       if (useBulk && validRows.length > 1) {
         // Use bulk RPC for better performance
         console.log('🚀 Using bulk migration...');
-        const result = await this.executeBulkMigration(session, validRows, currency, userId);
+        const result = await this.executeBulkMigration(session, validRows, resolvedCurrency, userId);
         importedRows.push(...result.importedRows);
         errors.push(...result.errors);
       } else {
@@ -335,7 +340,7 @@ export class BalanceMigrationService {
           const row = validRows[i];
           console.log(`Processing row ${i + 1}/${validRows.length}: ${row.entityName}`);
           try {
-            await this.migrateOpeningBalance(session, row, currency, userId);
+            await this.migrateOpeningBalance(session, row, resolvedCurrency, userId);
             importedRows.push(row);
           } catch (error) {
             const errorMsg = `Failed to import ${row.entityName}: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -373,10 +378,36 @@ export class BalanceMigrationService {
    * - Journal entry creation (balanced debit/credit)
    * - Event emission for real-time sync
    */
+  private async resolveMigrationCurrency(
+    session: MigrationSession,
+    override: CurrencyCode | undefined
+  ): Promise<CurrencyCode> {
+    if (override) {
+      return override;
+    }
+    if (session.preferredCurrency) {
+      return session.preferredCurrency;
+    }
+    const row = await getStore(session.storeId);
+    if (!row) {
+      throw new Error(
+        `Cannot resolve migration currency: store ${session.storeId} was not found in Supabase.`
+      );
+    }
+    const pref = row.preferred_currency as CurrencyCode | null | undefined;
+    if (pref == null) {
+      throw new Error(
+        `Cannot migrate opening balances for store ${session.storeId}: preferred_currency is missing in Supabase. Set the store currency in admin or pass an explicit currency override.`
+      );
+    }
+    session.preferredCurrency = pref;
+    return pref;
+  }
+
   private async migrateOpeningBalance(
     session: MigrationSession,
     row: ExcelRow,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     userId: string | null
   ): Promise<MigrationRPCResult> {
     console.log(`🔄 Migrating balance for ${row.entityName}:`, {
@@ -430,7 +461,7 @@ export class BalanceMigrationService {
   private async executeBulkMigration(
     session: MigrationSession,
     rows: ExcelRow[],
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     userId: string | null
   ): Promise<{ importedRows: ExcelRow[]; errors: string[] }> {
     const importedRows: ExcelRow[] = [];
@@ -498,7 +529,11 @@ export class BalanceMigrationService {
    * Save migration sessions
    */
   private saveSessions(sessions: MigrationSession[]): void {
-    localStorage.setItem('balanceMigrationSessions', JSON.stringify(sessions));
+    const sanitized = sessions.map((s) => {
+      const { preferredCurrency: _omit, ...rest } = s;
+      return rest;
+    });
+    localStorage.setItem('balanceMigrationSessions', JSON.stringify(sanitized));
   }
 }
 

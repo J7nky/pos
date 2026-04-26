@@ -53,7 +53,10 @@
       "Bash(awk '/^## Phase/ || /^- \\\\[/' specs/016-inventory-pos-currency/tasks.md)",
       "Bash(xargs wc *)",
       "Bash(wc *)",
-      "Bash(pnpm --filter store-app exec eslint src/layouts/Layout.tsx)"
+      "Bash(pnpm --filter store-app exec eslint src/layouts/Layout.tsx)",
+      "Bash(pnpm --filter store-app test:run -- syncUpload.currency)",
+      "Bash(pnpm --filter admin-app test)",
+      "Bash(echo \"Exit code: $?\")"
     ]
   }
 }

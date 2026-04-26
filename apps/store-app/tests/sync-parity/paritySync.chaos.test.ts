@@ -85,6 +85,8 @@ async function seedMinimalStoreAndBranch(unsynced: boolean): Promise<void> {
     phone: '',
     email: 'parity@test.local',
     preferred_currency: 'USD',
+    country: 'LB',
+    accepted_currencies: ['LBP', 'USD'],
     preferred_language: 'en',
     preferred_commission_rate: 0,
     exchange_rate: 1,

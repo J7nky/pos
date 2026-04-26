@@ -1,10 +1,65 @@
+import { CURRENCY_META } from '@pos-platform/shared';
 import { getDB } from '../lib/db';
 import { supabase } from '../lib/supabase';
+import { comprehensiveLoggingService } from './comprehensiveLoggingService';
 import { dataValidationService } from './dataValidationService';
 import { eventEmissionService } from './eventEmissionService';
 import { SYNC_CONFIG, SYNC_TABLES, validateDependencies } from './syncConfig';
 
 const db = getDB();
+
+export type UploadCurrencyRejectReason = 'invalid-currency' | 'unknown-currency';
+
+export interface UploadCurrencyError {
+  table: 'inventory_items' | 'transactions';
+  recordId: string;
+  reason: UploadCurrencyRejectReason;
+  attemptedValue: unknown;
+  detectedAt: string;
+}
+
+export type UploadCurrencyValidationResult =
+  | { ok: true }
+  | { ok: false; reason: UploadCurrencyRejectReason; attemptedValue: unknown };
+
+let currencyErrorList: UploadCurrencyError[] = [];
+
+function isCurrencySoftDeletePayload(record: Record<string, unknown>): boolean {
+  if (record.is_deleted === true) return true;
+  if (record._deleted === 1 || record._deleted === true) return true;
+  return false;
+}
+
+/**
+ * Pre-upload guard: valid currency for guarded tables only. Pure (no I/O).
+ * @see specs/017-currency-sync-guards-parity/contracts/upload-currency-guard.contract.md
+ */
+export function validateRecordCurrency(
+  tableName: string,
+  record: Record<string, unknown>
+): UploadCurrencyValidationResult {
+  if (tableName !== 'inventory_items' && tableName !== 'transactions') {
+    return { ok: true };
+  }
+  if (isCurrencySoftDeletePayload(record)) {
+    return { ok: true };
+  }
+  const cur = record.currency as unknown;
+  if (cur === undefined || cur === null || cur === '') {
+    return { ok: false, reason: 'invalid-currency', attemptedValue: cur };
+  }
+  if (typeof cur !== 'string' || !(cur in CURRENCY_META)) {
+    return { ok: false, reason: 'unknown-currency', attemptedValue: cur };
+  }
+  return { ok: true };
+}
+
+/** Explicit test export — do not use from production code. */
+export const validateRecordCurrencyForTests = validateRecordCurrency;
+
+export function getCurrencyErrorListForTesting(): UploadCurrencyError[] {
+  return [...currencyErrorList];
+}
 
 /**
  * Classifies errors to determine if they are unrecoverable.
@@ -355,6 +410,7 @@ async function handleCashDrawerSessionConflict(cleanedBatch: any[], originalBatc
 
 export async function uploadLocalChanges(storeId: string, branchId?: string) {
   const result = { uploaded: 0, errors: [] as string[], uploadedTables: new Set<string>() };
+  currencyErrorList = [];
 
   // Get detailed count for debugging (M6: wrapped in try-catch — debug utilities must not abort sync)
   let detailedCount: { total: number; summary: unknown; byTable: Record<string, { active: number; deleted: number }> } | null = null;
@@ -679,6 +735,40 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
           );
         }
 
+        if (tableName === 'inventory_items' || tableName === 'transactions') {
+          const validCleaned: any[] = [];
+          for (const rec of cleanedBatch as any[]) {
+            const v = validateRecordCurrency(tableName, rec as Record<string, unknown>);
+            if (v.ok) {
+              validCleaned.push(rec);
+              continue;
+            }
+            const recordId = String(rec.id ?? '');
+            currencyErrorList.push({
+              table: tableName,
+              recordId,
+              reason: v.reason,
+              attemptedValue: v.attemptedValue,
+              detectedAt: new Date().toISOString(),
+            });
+            comprehensiveLoggingService.warn({
+              operation: 'syncUpload.currency_guard',
+              storeId,
+              reason: v.reason,
+              action: 'skip_upload',
+              table: tableName,
+              recordId,
+              attemptedValue: v.attemptedValue,
+            });
+          }
+          if (validCleaned.length === 0) {
+            continue;
+          }
+          const validIds = new Set(validCleaned.map((r: any) => String(r.id)));
+          cleanedBatch = validCleaned;
+          batch = (batch as any[]).filter((r: any) => validIds.has(String(r.id)));
+        }
+
         const { error } = await supabase
           .from(tableName as any)
           .upsert(cleanedBatch, { onConflict: 'id' });
@@ -773,6 +863,12 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                   );
                   console.log(`🎯 [Event] Emitted transaction_reversed event for transaction ${record.id}`);
                 } else {
+                  const emissionCurrency = record.currency;
+                  if (!emissionCurrency) {
+                    throw new Error(
+                      `syncUpload: transaction ${record.id} reached payment_posted emission without currency (currency guard should have prevented this)`
+                    );
+                  }
                   await eventEmissionService.emitPaymentPosted(
                     record.store_id,
                     record.branch_id,
@@ -780,7 +876,7 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                     record.created_by,
                     {
                       amount: record.amount || 0,
-                      currency: record.currency || 'USD',
+                      currency: emissionCurrency,
                       method: record.payment_method || 'cash'
                     }
                   );

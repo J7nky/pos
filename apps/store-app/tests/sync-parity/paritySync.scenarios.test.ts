@@ -42,6 +42,24 @@ const JOURNAL_ENTRY_CREDIT_ID = '00000000-0000-4000-8000-000000000041';
 const INVENTORY_BILL_ID = '00000000-0000-4000-8000-000000000050';
 const INVENTORY_ITEM_ID = '00000000-0000-4000-8000-000000000051';
 
+/** Parity store fixtures: country + accepted_currencies (feature 017 / spec 008 phase 9). */
+function fixtureStoreCountryFields(preferredCurrency: string): {
+  country: string;
+  accepted_currencies: string[];
+} {
+  if (preferredCurrency === 'LBP') return { country: 'LB', accepted_currencies: ['LBP', 'USD'] };
+  if (preferredCurrency === 'AED') return { country: 'AE', accepted_currencies: ['AED', 'USD'] };
+  return { country: 'LB', accepted_currencies: ['LBP', 'USD'] };
+}
+
+const UAE_STORE_ID = '11111111-0000-4000-8000-000000000011';
+const UAE_BRANCH_ID = '11111111-0000-4000-8000-000000000012';
+const UAE_PRODUCT_ID = '11111111-0000-4000-8000-000000000013';
+const UAE_ENTITY_ID = '11111111-0000-4000-8000-000000000014';
+const UAE_INVENTORY_BILL_ID = '11111111-0000-4000-8000-000000000015';
+const UAE_INVENTORY_ITEM_ID = '11111111-0000-4000-8000-000000000016';
+const UAE_TRANSACTION_ID = '11111111-0000-4000-8000-000000000017';
+
 import { syncService } from '../../src/services/syncService';
 
 function goldenPath(scenarioId: string): string {
@@ -79,6 +97,7 @@ async function seedMinimalStoreAndBranch(unsynced: boolean): Promise<void> {
   const { getDB } = await import('../../src/lib/db');
   const db = getDB();
   const ts = '2024-01-15T12:00:00.000Z';
+  const geo = fixtureStoreCountryFields('USD');
   await db.stores.put({
     id: STORE_ID,
     store_id: STORE_ID,
@@ -87,6 +106,8 @@ async function seedMinimalStoreAndBranch(unsynced: boolean): Promise<void> {
     phone: '',
     email: 'parity@test.local',
     preferred_currency: 'USD',
+    country: geo.country,
+    accepted_currencies: geo.accepted_currencies,
     preferred_language: 'en',
     preferred_commission_rate: 0,
     exchange_rate: 1,
@@ -220,6 +241,8 @@ describe('sync parity scenarios', () => {
       phone: '',
       email: 'parity@test.local',
       preferred_currency: 'USD',
+      country: 'LB',
+      accepted_currencies: ['LBP', 'USD'],
       preferred_language: 'en',
       preferred_commission_rate: 0,
       exchange_rate: 1,
@@ -682,6 +705,7 @@ describe('sync parity scenarios', () => {
       weight: null,
       price: 5.0,
       selling_price: 10.0,
+      currency: 'USD',
       type: 'purchase',
       received_at: ts,
       created_at: ts,
@@ -787,5 +811,235 @@ describe('sync parity scenarios', () => {
       'entities',
     ]);
     assertMatchesGolden('delete_propagation', payload as unknown as Record<string, unknown>);
+  });
+
+  it('round-trips a UAE store with AED inventory and transactions', async () => {
+    const ts = '2024-01-15T12:00:00.000Z';
+    const { getDB: gdb } = await import('../../src/lib/db');
+    mockState.reset();
+    await resetDbSingletonForTests();
+    resetSyncServiceInternals();
+    universalChangeDetectionService.clearCache();
+
+    const uaeGeo = fixtureStoreCountryFields('AED');
+    await gdb().stores.put({
+      id: UAE_STORE_ID,
+      store_id: UAE_STORE_ID,
+      name: 'UAE Parity Store',
+      address: '',
+      phone: '',
+      email: 'uae-parity@test.local',
+      preferred_currency: 'AED',
+      country: uaeGeo.country,
+      accepted_currencies: uaeGeo.accepted_currencies,
+      preferred_language: 'en',
+      preferred_commission_rate: 0,
+      exchange_rate: 3.6725,
+      low_stock_alert: false,
+      created_at: ts,
+      updated_at: ts,
+      _synced: false,
+    } as any);
+    await gdb().branches.put({
+      id: UAE_BRANCH_ID,
+      store_id: UAE_STORE_ID,
+      name: 'UAE Parity Branch',
+      address: null,
+      phone: null,
+      is_active: true,
+      created_at: ts,
+      updated_at: ts,
+      _synced: false,
+    } as any);
+    await gdb().entities.put({
+      id: UAE_ENTITY_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      entity_type: 'supplier',
+      entity_code: 'SUP-UAE',
+      name: 'UAE Supplier',
+      phone: null,
+      is_system_entity: false,
+      is_active: true,
+      customer_data: null,
+      supplier_data: null,
+      created_at: ts,
+      updated_at: ts,
+      _synced: false,
+    } as any);
+    await gdb().products.put({
+      id: UAE_PRODUCT_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      name: 'UAE Parity Product',
+      category: 'c',
+      image: '',
+      is_global: false,
+      created_at: ts,
+      updated_at: ts,
+      price: 1,
+      _synced: false,
+    } as any);
+    await gdb().inventory_bills.put({
+      id: UAE_INVENTORY_BILL_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      supplier_id: UAE_ENTITY_ID,
+      received_at: ts,
+      created_by: 'user-1',
+      type: 'direct',
+      created_at: ts,
+      updated_at: ts,
+      _synced: false,
+    } as any);
+    await gdb().inventory_items.put({
+      id: UAE_INVENTORY_ITEM_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      product_id: UAE_PRODUCT_ID,
+      batch_id: UAE_INVENTORY_BILL_ID,
+      unit: 'pcs',
+      quantity: 12,
+      received_quantity: 12,
+      weight: null,
+      price: 10,
+      selling_price: 18.5,
+      currency: 'AED',
+      type: 'purchase',
+      received_at: ts,
+      created_at: ts,
+      updated_at: ts,
+      _synced: false,
+    } as any);
+    await gdb().transactions.put({
+      id: UAE_TRANSACTION_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      type: 'income',
+      category: 'misc',
+      amount: 125.25,
+      currency: 'AED' as any,
+      description: 'UAE parity tx',
+      reference: null,
+      created_by: 'user-1',
+      created_at: ts,
+      updated_at: ts,
+      entity_id: UAE_ENTITY_ID,
+      _synced: false,
+    } as any);
+
+    mockState.seed('stores', UAE_STORE_ID, {
+      id: UAE_STORE_ID,
+      store_id: UAE_STORE_ID,
+      name: 'UAE Parity Store',
+      address: '',
+      phone: '',
+      email: 'uae-parity@test.local',
+      preferred_currency: 'AED',
+      country: uaeGeo.country,
+      accepted_currencies: uaeGeo.accepted_currencies,
+      preferred_language: 'en',
+      preferred_commission_rate: 0,
+      exchange_rate: 3.6725,
+      low_stock_alert: false,
+      created_at: ts,
+      updated_at: ts,
+    });
+    mockState.seed('branches', UAE_BRANCH_ID, {
+      id: UAE_BRANCH_ID,
+      store_id: UAE_STORE_ID,
+      name: 'UAE Parity Branch',
+      address: null,
+      phone: null,
+      is_active: true,
+      created_at: ts,
+      updated_at: ts,
+    });
+    mockState.seed('entities', UAE_ENTITY_ID, {
+      id: UAE_ENTITY_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      entity_type: 'supplier',
+      entity_code: 'SUP-UAE',
+      name: 'UAE Supplier',
+      phone: null,
+      is_system_entity: false,
+      is_active: true,
+      customer_data: null,
+      supplier_data: null,
+      created_at: ts,
+      updated_at: ts,
+    });
+    mockState.seed('products', UAE_PRODUCT_ID, {
+      id: UAE_PRODUCT_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      name: 'UAE Parity Product',
+      category: 'c',
+      image: '',
+      is_global: false,
+      created_at: ts,
+      updated_at: ts,
+      price: 1,
+    });
+    mockState.seed('inventory_bills', UAE_INVENTORY_BILL_ID, {
+      id: UAE_INVENTORY_BILL_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      supplier_id: UAE_ENTITY_ID,
+      received_at: ts,
+      created_by: 'user-1',
+      type: 'direct',
+      created_at: ts,
+      updated_at: ts,
+    });
+    mockState.seed('inventory_items', UAE_INVENTORY_ITEM_ID, {
+      id: UAE_INVENTORY_ITEM_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      product_id: UAE_PRODUCT_ID,
+      batch_id: UAE_INVENTORY_BILL_ID,
+      unit: 'pcs',
+      quantity: 12,
+      received_quantity: 12,
+      weight: null,
+      price: 10,
+      selling_price: 18.5,
+      currency: 'AED',
+      type: 'purchase',
+      received_at: ts,
+      created_at: ts,
+      updated_at: ts,
+    });
+    mockState.seed('transactions', UAE_TRANSACTION_ID, {
+      id: UAE_TRANSACTION_ID,
+      store_id: UAE_STORE_ID,
+      branch_id: UAE_BRANCH_ID,
+      type: 'income',
+      category: 'misc',
+      amount: 125.25,
+      currency: 'AED',
+      description: 'UAE parity tx',
+      reference: null,
+      created_by: 'user-1',
+      created_at: ts,
+      updated_at: ts,
+      entity_id: UAE_ENTITY_ID,
+    });
+
+    const result = await syncService.sync(UAE_STORE_ID);
+    expect(result.success).toBe(true);
+
+    const payload = await buildScenarioResult(
+      'uae_aed_inventory_and_transactions',
+      mockState,
+      result,
+      ['stores', 'branches', 'entities', 'products', 'inventory_bills', 'inventory_items', 'transactions']
+    );
+    const invRows = (payload.localSnapshot as { inventory_items?: { id: string; currency?: string }[] })
+      .inventory_items ?? [];
+    const uaeItem = invRows.find((r) => r.id === UAE_INVENTORY_ITEM_ID);
+    expect(uaeItem?.currency).toBe('AED');
+    assertMatchesGolden('uae_aed_inventory_and_transactions', payload as unknown as Record<string, unknown>);
   });
 });

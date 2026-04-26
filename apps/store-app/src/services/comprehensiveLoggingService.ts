@@ -396,6 +396,9 @@ export class ComprehensiveLoggingService {
     storeId: string;
     reason: string;
     action: string;
+    table?: string;
+    recordId?: string;
+    attemptedValue?: unknown;
   }): void {
     this.logSystemActivity({
       action: payload.operation,

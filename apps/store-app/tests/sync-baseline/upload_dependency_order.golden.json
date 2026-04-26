@@ -24,7 +24,12 @@
       {
         "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
         "_synced": true,
+        "accepted_currencies": [
+          "LBP",
+          "USD"
+        ],
         "address": "",
+        "country": "LB",
         "created_at": "PARITY_FIXED_TIMESTAMP",
         "email": "parity@test.local",
         "exchange_rate": 1,
@@ -56,7 +61,12 @@
     ],
     "stores": [
       {
+        "accepted_currencies": [
+          "LBP",
+          "USD"
+        ],
         "address": "",
+        "country": "LB",
         "created_at": "PARITY_FIXED_TIMESTAMP",
         "email": "parity@test.local",
         "exchange_rate": 1,

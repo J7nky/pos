@@ -1,0 +1,420 @@
+{
+  "localSnapshot": {
+    "branches": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "address": null,
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "11111111-0000-4000-8000-000000000012",
+        "is_active": true,
+        "name": "UAE Parity Branch",
+        "phone": null,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "entities": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "customer_data": null,
+        "entity_code": "SUP-UAE",
+        "entity_type": "supplier",
+        "id": "11111111-0000-4000-8000-000000000014",
+        "is_active": true,
+        "is_system_entity": false,
+        "name": "UAE Supplier",
+        "phone": null,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "supplier_data": null,
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "inventory_bills": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "id": "11111111-0000-4000-8000-000000000015",
+        "received_at": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "supplier_id": "11111111-0000-4000-8000-000000000014",
+        "type": "direct",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "inventory_items": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "batch_id": "11111111-0000-4000-8000-000000000015",
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "currency": "AED",
+        "id": "11111111-0000-4000-8000-000000000016",
+        "price": 10,
+        "product_id": "11111111-0000-4000-8000-000000000013",
+        "quantity": 12,
+        "received_at": "PARITY_FIXED_TIMESTAMP",
+        "received_quantity": 12,
+        "selling_price": 18.5,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "type": "purchase",
+        "unit": "pcs",
+        "updated_at": "PARITY_FIXED_TIMESTAMP",
+        "weight": null
+      }
+    ],
+    "products": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "category": "c",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "11111111-0000-4000-8000-000000000013",
+        "image": "",
+        "is_global": false,
+        "name": "UAE Parity Product",
+        "price": 1,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "stores": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "accepted_currencies": [
+          "AED",
+          "USD"
+        ],
+        "address": "",
+        "country": "AE",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "email": "uae-parity@test.local",
+        "exchange_rate": 3.6725,
+        "id": "11111111-0000-4000-8000-000000000011",
+        "low_stock_alert": false,
+        "name": "UAE Parity Store",
+        "phone": "",
+        "preferred_commission_rate": 0,
+        "preferred_currency": "AED",
+        "preferred_language": "en",
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "transactions": [
+      {
+        "_lastSyncedAt": "PARITY_FIXED_TIMESTAMP",
+        "_synced": true,
+        "amount": 125.25,
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "category": "misc",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "currency": "AED",
+        "description": "UAE parity tx",
+        "entity_id": "11111111-0000-4000-8000-000000000014",
+        "id": "11111111-0000-4000-8000-000000000017",
+        "reference": null,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "type": "income",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ]
+  },
+  "scenarioId": "uae_aed_inventory_and_transactions",
+  "serverSnapshot": {
+    "branches": [
+      {
+        "address": null,
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "11111111-0000-4000-8000-000000000012",
+        "is_active": true,
+        "name": "UAE Parity Branch",
+        "phone": null,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "entities": [
+      {
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "customer_data": null,
+        "entity_code": "SUP-UAE",
+        "entity_type": "supplier",
+        "id": "11111111-0000-4000-8000-000000000014",
+        "is_active": true,
+        "is_system_entity": false,
+        "name": "UAE Supplier",
+        "phone": null,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "supplier_data": null,
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "inventory_bills": [
+      {
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "id": "11111111-0000-4000-8000-000000000015",
+        "received_at": "PARITY_FIXED_TIMESTAMP",
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "supplier_id": "11111111-0000-4000-8000-000000000014",
+        "type": "direct",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "inventory_items": [
+      {
+        "batch_id": "11111111-0000-4000-8000-000000000015",
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "currency": "AED",
+        "id": "11111111-0000-4000-8000-000000000016",
+        "price": 10,
+        "product_id": "11111111-0000-4000-8000-000000000013",
+        "quantity": 12,
+        "received_at": "PARITY_FIXED_TIMESTAMP",
+        "received_quantity": 12,
+        "selling_price": 18.5,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "type": "purchase",
+        "unit": "pcs",
+        "weight": null
+      }
+    ],
+    "products": [
+      {
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "category": "c",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "id": "11111111-0000-4000-8000-000000000013",
+        "image": "",
+        "is_global": false,
+        "name": "UAE Parity Product",
+        "price": 1,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "stores": [
+      {
+        "accepted_currencies": [
+          "AED",
+          "USD"
+        ],
+        "address": "",
+        "country": "AE",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "email": "uae-parity@test.local",
+        "exchange_rate": 3.6725,
+        "id": "11111111-0000-4000-8000-000000000011",
+        "low_stock_alert": false,
+        "name": "UAE Parity Store",
+        "phone": "",
+        "preferred_commission_rate": 0,
+        "preferred_currency": "AED",
+        "preferred_language": "en",
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "updated_at": "PARITY_FIXED_TIMESTAMP"
+      }
+    ],
+    "transactions": [
+      {
+        "amount": 125.25,
+        "branch_id": "11111111-0000-4000-8000-000000000012",
+        "category": "misc",
+        "created_at": "PARITY_FIXED_TIMESTAMP",
+        "created_by": "user-1",
+        "currency": "AED",
+        "description": "UAE parity tx",
+        "entity_id": "11111111-0000-4000-8000-000000000014",
+        "id": "11111111-0000-4000-8000-000000000017",
+        "reference": null,
+        "store_id": "11111111-0000-4000-8000-000000000011",
+        "type": "income"
+      }
+    ]
+  },
+  "syncMetadata": [
+    {
+      "hydration_complete": false,
+      "id": "balance_snapshots",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "balance_snapshots"
+    },
+    {
+      "hydration_complete": false,
+      "id": "bill_audit_logs",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "bill_audit_logs"
+    },
+    {
+      "hydration_complete": false,
+      "id": "bill_line_items",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "bill_line_items"
+    },
+    {
+      "hydration_complete": false,
+      "id": "bills",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "bills"
+    },
+    {
+      "hydration_complete": false,
+      "id": "branches",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "branches"
+    },
+    {
+      "hydration_complete": false,
+      "id": "cash_drawer_accounts",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "cash_drawer_accounts"
+    },
+    {
+      "hydration_complete": false,
+      "id": "cash_drawer_sessions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "cash_drawer_sessions"
+    },
+    {
+      "hydration_complete": false,
+      "id": "chart_of_accounts",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "chart_of_accounts"
+    },
+    {
+      "hydration_complete": false,
+      "id": "entities",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "entities"
+    },
+    {
+      "hydration_complete": false,
+      "id": "inventory_bills",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "inventory_bills"
+    },
+    {
+      "hydration_complete": false,
+      "id": "inventory_items",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "inventory_items"
+    },
+    {
+      "hydration_complete": false,
+      "id": "journal_entries",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "journal_entries"
+    },
+    {
+      "hydration_complete": false,
+      "id": "missed_products",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "missed_products"
+    },
+    {
+      "hydration_complete": false,
+      "id": "products",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "products"
+    },
+    {
+      "hydration_complete": false,
+      "id": "reminders",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "reminders"
+    },
+    {
+      "hydration_complete": false,
+      "id": "role_permissions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "role_permissions"
+    },
+    {
+      "hydration_complete": false,
+      "id": "stores",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "stores"
+    },
+    {
+      "hydration_complete": false,
+      "id": "transactions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "transactions"
+    },
+    {
+      "hydration_complete": false,
+      "id": "user_permissions",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "user_permissions"
+    },
+    {
+      "hydration_complete": false,
+      "id": "users",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "11111111-0000-4000-8000-000000000011",
+      "table_name": "users"
+    }
+  ],
+  "syncResult": {
+    "conflicts": 0,
+    "errors": [],
+    "success": true,
+    "synced": {
+      "downloaded": 0,
+      "uploaded": 6
+    }
+  }
+}
