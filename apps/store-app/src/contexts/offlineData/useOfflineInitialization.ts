@@ -278,6 +278,14 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
             void (async () => {
               try {
                 await syncService.downloadTier('tier2', capturedStoreId, capturedBranchId, { signal: bgController.signal });
+                // Re-hydrate React state so balances, inventory, transactions, etc.
+                // appear without requiring a full app reload.
+                await refreshData();
+                await updateUnsyncedCount();
+                // journal_entries are now in Dexie. Invalidate cached zero-balances
+                // so useEntityBalances re-fetches and customer/supplier balances render.
+                const { entityBalanceCache } = await import('../../services/entityBalanceCache');
+                entityBalanceCache.invalidateAll();
               } catch (e) {
                 if ((e as Error)?.name !== 'AbortError') console.warn('Tier 2 background sync:', e);
               } finally {
@@ -287,6 +295,8 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
             void (async () => {
               try {
                 await syncService.downloadTier('tier3', capturedStoreId, capturedBranchId, { signal: bgController.signal });
+                await refreshData();
+                await updateUnsyncedCount();
               } catch (e) {
                 if ((e as Error)?.name !== 'AbortError') console.warn('Tier 3 background sync:', e);
               } finally {

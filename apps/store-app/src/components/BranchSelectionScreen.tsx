@@ -90,13 +90,7 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
       try {
         // Ensure database is open before querying
         await ensureDataReady();
-        
-        // If sync just completed, wait a bit longer to ensure transaction is fully committed
-        if (branchSyncStatus.isComplete && attemptNumber === 0) {
-          // Wait longer after sync completion to ensure IndexedDB transaction is visible
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-        
+
         // Get all branches for the store
         // Pass role and branch_id directly to avoid database lookup (user might not be synced yet)
         const accessibleBranches = await BranchAccessValidationService.getAccessibleBranches(

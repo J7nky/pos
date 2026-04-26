@@ -1,7 +1,7 @@
 import { OfflineIndicator } from '../components/OfflineIndicator';
 import { SyncProgressIndicator } from '../components/SyncProgressIndicator';
 import { ErrorToastContainer } from '../components/common/ErrorToastContainer';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import KeyboardShortcutsHelp from '../components/common/KeyboardShortcutsHelp';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import UndoToastManager from '../components/common/UndoToastManager';
@@ -27,10 +27,28 @@ import {
   CloudOff
 } from 'lucide-react';
 
+// Layout-independent navigation shortcuts. `key` drives the native HTML
+// accessKey attribute (always ASCII so Arabic locale doesn't break it), and
+// `code` matches KeyboardEvent.code (physical QWERTY position) so Alt+<key>
+// works under any keyboard layout — including Arabic — via the global
+// keydown handler below.
+const NAV_SHORTCUTS: Record<string, { key: string; code: string }> = {
+  home: { key: 'h', code: 'KeyH' },
+  inventory: { key: 'i', code: 'KeyI' },
+  pos: { key: 'p', code: 'KeyP' },
+  accounts: { key: 'c', code: 'KeyC' },
+  accounting: { key: 'a', code: 'KeyA' },
+  reports: { key: 'r', code: 'KeyR' },
+  unsynced: { key: 'u', code: 'KeyU' },
+  settings: { key: 's', code: 'KeyS' },
+  employees: { key: 'e', code: 'KeyE' },
+};
+
 export default function Layout() {
   const { userProfile, signOut } = useSupabaseAuth();
   const { t } = useI18n();
   const location = useLocation();
+  const navigate = useNavigate();
 
   if (!userProfile) {
     return (
@@ -111,7 +129,7 @@ export default function Layout() {
           t('nonPriced.reminder', { count: nonPricedCount }),
           {
             priority: 'medium',
-            action_url: '/accounting',
+            action_url: '/accounting?tab=nonpriced',
             action_label: t('nonPriced.goPrice'),
             metadata: { source: NON_PRICED_NOTIFICATION_SOURCE }
           }
@@ -128,7 +146,7 @@ export default function Layout() {
           t('nonPriced.reminder', { count: nonPricedCount }),
           {
             priority: 'medium',
-            action_url: '/accounting',
+            action_url: '/accounting?tab=nonpriced',
             action_label: t('nonPriced.goPrice'),
             metadata: { source: NON_PRICED_NOTIFICATION_SOURCE }
           }
@@ -362,10 +380,34 @@ export default function Layout() {
   const menuItems = allMenuItems.filter(item => {
     // Always show items without module requirement (home, accounts, unsynced)
     if (!item.module) return true;
-    
+
     // Check module access for protected items
     return moduleAccess[item.module] === true;
   });
+
+  // Global Alt+<key> navigation. Uses KeyboardEvent.code (physical QWERTY
+  // position) so it fires identically under English and Arabic keyboard
+  // layouts — the native HTML accessKey attribute is silently ignored by
+  // browsers when given non-ASCII characters, which is why the Arabic UI
+  // appeared to advertise shortcuts that never fired.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+          return;
+        }
+      }
+      const item = menuItems.find(it => NAV_SHORTCUTS[it.id]?.code === e.code);
+      if (!item) return;
+      e.preventDefault();
+      navigate(item.path);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [menuItems, navigate]);
 
   // Define shortcuts based on current page
   const getShortcutsForPage = () => {
@@ -382,6 +424,7 @@ export default function Layout() {
           'Alt+C': 'Accounts',
           'Alt+A': 'Accounting',
           'Alt+R': 'Reports',
+          'Alt+U': 'Unsynced',
           'Alt+S': 'Settings',
           'Alt+E': 'Employees'
         }
@@ -456,8 +499,10 @@ export default function Layout() {
                 location.pathname === item.path ? 'bg-blue-50 border-r-2 border-blue-500 text-blue-600' : 'text-gray-600'
               }`}
               tabIndex={index + 1}
-              accessKey={item.label.charAt(0).toLowerCase()}
-              aria-label={`${item.label} (Alt+${item.label.charAt(0).toUpperCase()})`}
+              accessKey={NAV_SHORTCUTS[item.id]?.key}
+              aria-label={NAV_SHORTCUTS[item.id]
+                ? `${item.label} (Alt+${NAV_SHORTCUTS[item.id].key.toUpperCase()})`
+                : item.label}
             >
               <item.icon className="w-5 h-5 mr-3 flex-shrink-0" />
               <span className="flex-1">{item.label}</span>

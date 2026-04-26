@@ -47,7 +47,13 @@
       "Bash(awk 'NR>=50 && NR<=250' /home/janky/Desktop/pos-1/apps/store-app/src/services/syncDownload.ts)",
       "Bash(pnpm --filter store-app test:run)",
       "Bash(pnpm --filter store-app dev --port 5178)",
-      "Bash(kill %1 wait)"
+      "Bash(kill %1 wait)",
+      "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(awk '/^## Phase/ || /^- \\\\[/' specs/016-inventory-pos-currency/tasks.md)",
+      "Bash(xargs wc *)",
+      "Bash(wc *)",
+      "Bash(pnpm --filter store-app exec eslint src/layouts/Layout.tsx)"
     ]
   }
 }

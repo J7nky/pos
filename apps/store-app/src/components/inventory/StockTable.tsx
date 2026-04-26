@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
 import { getProductImageUrl, handleImageError } from '../../constants/productImages';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
+import { useI18n } from '../../i18n';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 interface StockTableProps {
   filteredStockLevels: any[];
@@ -9,13 +13,15 @@ interface StockTableProps {
   lowStockThreshold: number;
 }
 
-const StockTable: React.FC<StockTableProps> = ({ 
-  filteredStockLevels, 
-  products, 
-  lowStockAlertsEnabled, 
-  lowStockThreshold 
+const StockTable: React.FC<StockTableProps> = ({
+  filteredStockLevels,
+  products,
+  lowStockAlertsEnabled,
+  lowStockThreshold
 }) => {
   const { getProductName } = useProductMultilingual();
+  const { formatAmount, preferredCurrency } = useOfflineData();
+  const { t } = useI18n();
   // Pagination state
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
@@ -91,6 +97,8 @@ const StockTable: React.FC<StockTableProps> = ({
               )[0];
               const unitPrice = latestInventory?.price || 0;
               const totalValue = unitPrice * item.current_stock;
+              const itemCurrency = (latestInventory?.currency ?? null) as CurrencyCode | null;
+              const displayCurrency = itemCurrency ?? preferredCurrency;
               
               return (
                 <tr key={item.product_id} className="hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
@@ -114,13 +122,20 @@ const StockTable: React.FC<StockTableProps> = ({
                     </span>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-gray-900 dark:text-slate-100">
-                      {unitPrice ? `$${unitPrice.toFixed(2)}` : '-'}
-                    </span>
+                    <div className="inline-flex items-center gap-1.5">
+                      <span className="text-gray-900 dark:text-slate-100">
+                        {unitPrice ? formatAmount(unitPrice, displayCurrency) : '-'}
+                      </span>
+                      {unitPrice > 0 && itemCurrency == null && (
+                        <span title={t('inventory.missingCurrency')} className="text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden />
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-gray-900 dark:text-slate-100">
-                      {unitPrice ? `$${totalValue.toFixed(2)}` : '-'}
+                      {unitPrice ? formatAmount(totalValue, displayCurrency) : '-'}
                     </span>
                   </td>
                   <td className="px-6 py-4">

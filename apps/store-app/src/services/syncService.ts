@@ -1263,49 +1263,6 @@ export class SyncService {
       
       if (result.success) {
         console.log(`✅ Stores and branches synced: ${result.synced.downloaded} records downloaded`);
-        
-        // Verify branches are actually queryable after sync
-        // This ensures IndexedDB transaction has committed and data is visible
-        // Use multiple verification attempts with increasing delays
-        try {
-          // Ensure database is open before querying
-          await getDB().ensureOpen();
-          
-          // Wait a bit for transaction to fully commit
-          await new Promise(resolve => setTimeout(resolve, 200));
-          
-          let branchCount = 0;
-          let verificationAttempts = 0;
-          const maxVerificationAttempts = 5;
-          
-          while (verificationAttempts < maxVerificationAttempts) {
-            branchCount = await getDB().branches
-              .where('store_id')
-              .equals(storeId)
-              .filter(b => !(b._deleted === true))
-              .count();
-            
-            if (branchCount > 0) {
-              console.log(`✅ Verified ${branchCount} branches are queryable after ${verificationAttempts + 1} attempt(s)`);
-              break;
-            }
-            
-            verificationAttempts++;
-            if (verificationAttempts < maxVerificationAttempts) {
-              // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms
-              const delay = 100 * Math.pow(2, verificationAttempts - 1);
-              console.log(`⏳ Branches not yet queryable, retrying verification in ${delay}ms (attempt ${verificationAttempts + 1}/${maxVerificationAttempts})...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-            }
-          }
-          
-          if (branchCount === 0 && branchesResult.synced.downloaded > 0) {
-            console.warn('⚠️ Branches synced but not queryable after verification attempts - data may be available shortly');
-          }
-        } catch (verifyError) {
-          console.warn('⚠️ Failed to verify branches after sync:', verifyError);
-          // Don't fail the sync if verification fails, but log the warning
-        }
       } else {
         console.error(`❌ Stores and branches sync had errors:`, result.errors);
       }

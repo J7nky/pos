@@ -73,34 +73,7 @@ export function useBranchBootstrapEffects({
         const syncResult = await syncService.syncStoresAndBranches(storeId);
         if (syncResult.success) {
           console.log(`✅ Branches synced successfully: ${syncResult.synced.downloaded} branches downloaded`);
-          await new Promise(resolve => setTimeout(resolve, 300));
-          try {
-            await getDB().ensureOpen();
-            const branchCount = await getDB()
-              .branches.where('store_id')
-              .equals(storeId)
-              .filter(b => !(b._deleted === true))
-              .count();
-            if (branchCount > 0 || syncResult.synced.downloaded === 0) {
-              setBranchSyncStatus({ isSyncing: false, isComplete: true, error: null });
-            } else {
-              console.log('⏳ Waiting for branches to become queryable...');
-              await new Promise(resolve => setTimeout(resolve, 500));
-              const retryCount = await getDB()
-                .branches.where('store_id')
-                .equals(storeId)
-                .filter(b => !(b._deleted === true))
-                .count();
-              setBranchSyncStatus({
-                isSyncing: false,
-                isComplete: retryCount > 0,
-                error: retryCount === 0 ? 'Branches synced but not yet queryable' : null,
-              });
-            }
-          } catch (verifyError) {
-            console.warn('⚠️ Failed to verify branches after sync:', verifyError);
-            setBranchSyncStatus({ isSyncing: false, isComplete: true, error: null });
-          }
+          setBranchSyncStatus({ isSyncing: false, isComplete: true, error: null });
         } else {
           console.error('❌ Failed to sync branches:', syncResult.errors);
           setBranchSyncStatus({ isSyncing: false, isComplete: false, error: syncResult.errors.join(', ') });
@@ -139,7 +112,6 @@ export function useBranchBootstrapEffects({
           console.log(
             `✅ Branches synced successfully for ${userProfile.role}: ${syncResult.synced.downloaded} branches downloaded`
           );
-          await new Promise(resolve => setTimeout(resolve, 300));
           const branchAfterSync = await getDB().branches.get(userProfile.branch_id);
           if (branchAfterSync && !branchAfterSync._deleted && branchAfterSync.store_id === storeId) {
             console.log(`✅ Assigned branch is now available after sync: ${userProfile.branch_id}`);
