@@ -17,6 +17,11 @@ import type { MultilingualString } from '../../../utils/multilingual';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { currencyService } from '../../../services/currencyService';
 import { assertValidCurrency } from '../../../utils/currencyValidation';
+import {
+  reverseAmounts,
+  amountsFromLegacyEntry,
+  buildEntryAmounts,
+} from '../../../services/accountingCurrencyHelpers';
 
 export interface BillUpdateDeleteDeps {
   storeId: string | null | undefined;
@@ -289,6 +294,9 @@ export async function deleteBill(
             credit_usd: entry.debit_usd,
             debit_lbp: entry.credit_lbp,
             credit_lbp: entry.debit_lbp,
+            // Phase 11 dual-write: per-currency reversal preserves the
+            // original entry's currency identity (e.g. AED stays AED).
+            amounts: reverseAmounts(amountsFromLegacyEntry(entry)),
             description: `payments.billCancellation`,
             posted_date: postedDate,
             fiscal_period: fiscalPeriod,
@@ -668,6 +676,16 @@ export async function createBill(
       const creditAccountCode = '4100';
 
       const isUSD = billCurrency === 'USD';
+      // Phase 11 dual-write: build a self-describing amounts map keyed by
+      // the actual bill currency so non-USD/LBP stores (AED, EUR, …)
+      // also produce correct journal data.
+      const debitAmounts = buildEntryAmounts([
+        { currency: billCurrency, debit: customerBalanceUpdate.amountDue, credit: 0 },
+      ]);
+      const creditAmounts = buildEntryAmounts([
+        { currency: billCurrency, debit: 0, credit: customerBalanceUpdate.amountDue },
+      ]);
+
       const debitEntry = {
         id: createId(),
         store_id: storeId,
@@ -681,6 +699,7 @@ export async function createBill(
         credit_usd: 0,
         debit_lbp: !isUSD ? customerBalanceUpdate.amountDue : 0,
         credit_lbp: 0,
+        amounts: debitAmounts,
         description: 'payments.creditSaleBill',
         posted_date: postedDate,
         fiscal_period: fiscalPeriod,
@@ -705,6 +724,7 @@ export async function createBill(
         credit_usd: isUSD ? customerBalanceUpdate.amountDue : 0,
         debit_lbp: 0,
         credit_lbp: !isUSD ? customerBalanceUpdate.amountDue : 0,
+        amounts: creditAmounts,
         description: 'payments.creditSaleBill',
         posted_date: postedDate,
         fiscal_period: fiscalPeriod,
@@ -909,6 +929,9 @@ export async function reactivateBill(
           credit_usd: reversalEntry.debit_usd,
           debit_lbp: reversalEntry.credit_lbp,
           credit_lbp: reversalEntry.debit_lbp,
+          // Phase 11 dual-write: re-reverse the reversal entry's per-currency
+          // map to recover the original entry's currency identity.
+          amounts: reverseAmounts(amountsFromLegacyEntry(reversalEntry)),
           description: 'payments.billReactivation',
           posted_date: postedDate,
           fiscal_period: fiscalPeriod,

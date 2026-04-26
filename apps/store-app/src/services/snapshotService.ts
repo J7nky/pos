@@ -9,6 +9,7 @@ import { BalanceSnapshot } from '../types/accounting';
 import { journalService } from './journalService';
 import { createId } from '../lib/db';
 import { getLocalDateString } from '../utils/dateUtils';
+import { buildBalances } from './accountingCurrencyHelpers';
 
 export interface SnapshotResult {
   success: boolean;
@@ -201,13 +202,18 @@ export class SnapshotService {
         entity_id: entityId,
         balance_usd: balance.USD,
         balance_lbp: balance.LBP,
+        // Phase 11 dual-write: also write the self-describing balances map.
+        balances: buildBalances([
+          { currency: 'USD', balance: balance.USD },
+          { currency: 'LBP', balance: balance.LBP },
+        ]),
         snapshot_date: snapshotDate,
         snapshot_type: 'daily',
         verified: false, // Will be verified later
         created_at: new Date().toISOString(),
         _synced: false
       };
-      
+
       return snapshot;
       
     } catch (error) {

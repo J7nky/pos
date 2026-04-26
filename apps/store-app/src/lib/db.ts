@@ -6,10 +6,14 @@ import {
   V55_STORES,
   V56_STORES,
   V57_STORES,
+  V58_STORES,
+  V59_STORES,
   upgradeV54,
   upgradeV55,
   upgradeV56,
   upgradeV57,
+  upgradeV58,
+  upgradeV59,
 } from './dbSchema';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
@@ -160,6 +164,8 @@ class POSDatabase extends Dexie {
     this.version(55).stores(V55_STORES).upgrade(upgradeV55);
     this.version(56).stores(V56_STORES).upgrade(upgradeV56);
     this.version(57).stores(V57_STORES).upgrade(upgradeV57);
+    this.version(58).stores(V58_STORES).upgrade(upgradeV58);
+    this.version(59).stores(V59_STORES).upgrade(upgradeV59);
 
     // Add hooks for cash drawer tables
     this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);

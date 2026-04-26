@@ -372,6 +372,12 @@ export interface OfflineDataContextType {
   updateDefaultCommissionRate: (rate: number) => Promise<void>;
   updateCurrency: (newCurrency: CurrencyCode) => Promise<void>;
   updateExchangeRate: (rate: number) => Promise<void>;
+  /** Phase 12: write a per-currency rate into stores.exchange_rates. */
+  updateExchangeRateFor: (currency: CurrencyCode, rate: number) => Promise<void>;
+  /** Phase 12: append `currency` to stores.accepted_currencies (with rate seed). */
+  addAcceptedCurrency: (currency: CurrencyCode, rate?: number) => Promise<void>;
+  /** Phase 12: remove `currency` from stores.accepted_currencies (rejects if in use). */
+  removeAcceptedCurrency: (currency: CurrencyCode) => Promise<void>;
   updateLanguage: (language: 'en' | 'ar' | 'fr') => Promise<void>;
   receiptSettings: Partial<ReceiptSettings>;
   updateReceiptSettings: (settings: Partial<ReceiptSettings>) => Promise<void>;

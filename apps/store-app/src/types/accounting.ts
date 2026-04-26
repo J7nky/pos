@@ -1,11 +1,26 @@
 // Accounting Foundation Types - Explicit Double-Entry with Audit Trails
 // Based on ACCOUNTING_FOUNDATION_MIGRATION_PLAN.md
 
+import type { CurrencyCode } from '@pos-platform/shared';
+
+/**
+ * Per-currency debit/credit map for a journal entry (Phase 11 generalization).
+ * Each row is self-describing — the keys carry the currency identity, so
+ * a row written for an AED store is always interpretable regardless of
+ * the store's later configuration changes.
+ */
+export type JournalEntryAmounts = Partial<Record<CurrencyCode, { debit: number; credit: number }>>;
+
+/** Per-currency running balance map for a balance snapshot (Phase 11). */
+export type BalanceSnapshotMap = Partial<Record<CurrencyCode, number>>;
+
 /**
  * Journal Entry - Source of Truth for all financial transactions
  * Every financial transaction creates at least two journal entries (debit + credit)
- * 
- * Uses base currency fields to support both USD and LBP in a single entry
+ *
+ * Phase 11 dual-write: rows now carry both the deprecated USD/LBP scalar
+ * columns and the self-describing `amounts` map. The map is the
+ * authority for new code; the scalars are kept until 11d (column drop).
  */
 export interface JournalEntry {
   id: string;
@@ -14,10 +29,16 @@ export interface JournalEntry {
   transaction_id: string;         // Groups debit + credit entries
   account_code: string;           // '1100', '1200', etc.
   account_name: string;
-  debit_usd: number;              // USD debit amount
-  credit_usd: number;              // USD credit amount
-  debit_lbp: number;               // LBP debit amount
-  credit_lbp: number;              // LBP credit amount
+  /** @deprecated Phase 11 — use `amounts` map. Kept during dual-write. */
+  debit_usd: number;
+  /** @deprecated Phase 11 — use `amounts` map. */
+  credit_usd: number;
+  /** @deprecated Phase 11 — use `amounts` map. */
+  debit_lbp: number;
+  /** @deprecated Phase 11 — use `amounts` map. */
+  credit_lbp: number;
+  /** Self-describing per-currency map (Phase 11). Immutable once written. */
+  amounts: JournalEntryAmounts;
   entity_id: string;              // NEVER NULL - references entities table
   entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
   posted_date: string;
@@ -35,7 +56,10 @@ export interface JournalEntry {
 
 /**
  * Balance Snapshots - Performance optimization for historical queries
- * Stores account balances at specific points in time
+ * Stores account balances at specific points in time.
+ *
+ * Phase 11 dual-write: rows now carry both the deprecated USD/LBP
+ * scalar columns and the self-describing `balances` map.
  */
 export interface BalanceSnapshot {
   id: string;
@@ -43,8 +67,12 @@ export interface BalanceSnapshot {
   branch_id: string | null;
   account_code: string;
   entity_id: string | null;
+  /** @deprecated Phase 11 — use `balances` map. */
   balance_usd: number;
+  /** @deprecated Phase 11 — use `balances` map. */
   balance_lbp: number;
+  /** Self-describing per-currency map (Phase 11). */
+  balances: BalanceSnapshotMap;
   snapshot_date: string;
   snapshot_type: 'hourly' | 'daily' | 'end_of_day';
   verified: boolean;

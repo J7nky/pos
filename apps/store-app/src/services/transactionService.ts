@@ -35,6 +35,7 @@ import { createId } from '../lib/db';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import type { JournalEntry } from '../types/accounting';
 import { validateTransactionCreation } from './businessValidationService';
+import { reverseAmounts, amountsFromLegacyEntry } from './accountingCurrencyHelpers';
 // ============================================================================
 // TYPES & INTERFACES
 // ============================================================================
@@ -885,6 +886,9 @@ export class TransactionService {
         credit_usd: entry.debit_usd, // Swap: original debit becomes credit
         debit_lbp: entry.credit_lbp,
         credit_lbp: entry.debit_lbp,
+        // Phase 11 dual-write: reversal mirrors the original amounts map with
+        // debit/credit swapped per currency (preserves currency identity).
+        amounts: reverseAmounts(amountsFromLegacyEntry(entry)),
         description: description,
         posted_date: postedDate,
         fiscal_period: fiscalPeriod,

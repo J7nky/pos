@@ -167,8 +167,19 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
       const prev = exchangeRate;
       try {
         setExchangeRate(rate);
+        // Keep the legacy scalar in sync with the rate map's entry for the
+        // primary local currency so Phase 11/older read paths keep working.
+        const store = await getDB().stores.get(storeId);
+        const preferred = (store?.preferred_currency as CurrencyCode | undefined) ?? 'USD';
+        const ratesMap: Partial<Record<CurrencyCode, number>> = {
+          ...(store?.exchange_rates ?? {}),
+        };
+        if (preferred !== 'USD' && rate > 0) {
+          ratesMap[preferred] = rate;
+        }
         await getDB().stores.update(storeId, {
           exchange_rate: rate,
+          exchange_rates: ratesMap,
           _synced: false,
           updated_at: new Date().toISOString(),
         });
@@ -183,6 +194,152 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
       }
     },
     [storeId, exchangeRate, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
+  );
+
+  /**
+   * Phase 12: write a per-currency rate into stores.exchange_rates.
+   * If `currency` is the store's preferred_currency, the legacy scalar
+   * `exchange_rate` is kept in sync.
+   */
+  const updateExchangeRateFor = useCallback(
+    async (currencyCode: CurrencyCode, rate: number) => {
+      if (!storeId) return;
+      if (currencyCode === 'USD') return;
+      try {
+        const store = await getDB().stores.get(storeId);
+        const prevMap: Partial<Record<CurrencyCode, number>> = { ...(store?.exchange_rates ?? {}) };
+        const nextMap: Partial<Record<CurrencyCode, number>> = { ...prevMap };
+        if (rate > 0) nextMap[currencyCode] = rate;
+        else delete nextMap[currencyCode];
+
+        const preferred = (store?.preferred_currency as CurrencyCode | undefined) ?? 'USD';
+        const updates: Record<string, unknown> = {
+          exchange_rates: nextMap,
+          _synced: false,
+          updated_at: new Date().toISOString(),
+        };
+        if (currencyCode === preferred) {
+          updates.exchange_rate = rate;
+          setExchangeRate(rate);
+        }
+        await getDB().stores.update(storeId, updates);
+        await reloadCurrencyState?.(storeId);
+        await updateUnsyncedCount();
+        resetAutoSyncTimer();
+        if (isOnline && !isSyncing) performSync(true);
+        else debouncedSync();
+      } catch (error) {
+        console.error('Error updating per-currency rate:', error);
+        throw error;
+      }
+    },
+    [storeId, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
+  );
+
+  /**
+   * Phase 12: append a currency to stores.accepted_currencies (idempotent).
+   * If `rate` is provided and the new currency is non-USD, also seed the
+   * exchange_rates map.
+   */
+  const addAcceptedCurrency = useCallback(
+    async (currencyCode: CurrencyCode, rate?: number) => {
+      if (!storeId) return;
+      try {
+        const store = await getDB().stores.get(storeId);
+        if (!store) return;
+        const list = ((store.accepted_currencies as CurrencyCode[] | undefined) ?? []).slice();
+        if (!list.includes(currencyCode)) list.push(currencyCode);
+        const ratesMap: Partial<Record<CurrencyCode, number>> = { ...(store.exchange_rates ?? {}) };
+        if (currencyCode !== 'USD' && rate !== undefined && rate > 0) {
+          ratesMap[currencyCode] = rate;
+        }
+        await getDB().stores.update(storeId, {
+          accepted_currencies: list,
+          exchange_rates: ratesMap,
+          _synced: false,
+          updated_at: new Date().toISOString(),
+        });
+        await reloadCurrencyState?.(storeId);
+        await updateUnsyncedCount();
+        resetAutoSyncTimer();
+        if (isOnline && !isSyncing) performSync(true);
+        else debouncedSync();
+      } catch (error) {
+        console.error('Error adding accepted currency:', error);
+        throw error;
+      }
+    },
+    [storeId, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
+  );
+
+  /**
+   * Phase 12: remove a currency from stores.accepted_currencies. The
+   * currency cannot be the preferred_currency, cannot be USD, and must
+   * not be in use by any local inventory_item / open bill / transaction.
+   * Local-only check — the parity test for the same rule on Supabase
+   * lives in admin-app/storeService.checkCurrencyUsage.
+   */
+  const removeAcceptedCurrency = useCallback(
+    async (currencyCode: CurrencyCode) => {
+      if (!storeId) return;
+      if (currencyCode === 'USD') {
+        throw new Error('USD cannot be removed.');
+      }
+      const store = await getDB().stores.get(storeId);
+      if (!store) return;
+      if (store.preferred_currency === currencyCode) {
+        throw new Error('Cannot remove the preferred currency. Switch preferred currency first.');
+      }
+
+      const db = getDB();
+      const [invCount, txCount, billCount] = await Promise.all([
+        db.inventory_items
+          .where('store_id')
+          .equals(storeId)
+          .filter((it) => (it as { currency?: string }).currency === currencyCode && !it._deleted)
+          .count(),
+        db.transactions
+          .where('store_id')
+          .equals(storeId)
+          .filter((tx) => (tx as { currency?: string }).currency === currencyCode && !tx._deleted)
+          .count(),
+        db.bills
+          .where('store_id')
+          .equals(storeId)
+          .filter(
+            (bill) =>
+              (bill as { currency?: string }).currency === currencyCode &&
+              bill.status !== 'cancelled' &&
+              !bill._deleted
+          )
+          .count(),
+      ]);
+
+      if (invCount > 0 || txCount > 0 || billCount > 0) {
+        throw new Error(
+          `Cannot remove ${currencyCode}: ${invCount} inventory items, ${txCount} transactions, ${billCount} bills are still using it.`
+        );
+      }
+
+      const list = ((store.accepted_currencies as CurrencyCode[] | undefined) ?? []).filter(
+        (c) => c !== currencyCode
+      );
+      const ratesMap: Partial<Record<CurrencyCode, number>> = { ...(store.exchange_rates ?? {}) };
+      delete ratesMap[currencyCode];
+
+      await db.stores.update(storeId, {
+        accepted_currencies: list,
+        exchange_rates: ratesMap,
+        _synced: false,
+        updated_at: new Date().toISOString(),
+      });
+      await reloadCurrencyState?.(storeId);
+      await updateUnsyncedCount();
+      resetAutoSyncTimer();
+      if (isOnline && !isSyncing) performSync(true);
+      else debouncedSync();
+    },
+    [storeId, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
   );
 
   const updateLanguage = useCallback(
@@ -232,6 +389,9 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
     updateDefaultCommissionRate,
     updateCurrency,
     updateExchangeRate,
+    updateExchangeRateFor,
+    addAcceptedCurrency,
+    removeAcceptedCurrency,
     updateLanguage,
     updateReceiptSettings,
   };

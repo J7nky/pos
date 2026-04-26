@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 57;
+export const CURRENT_DB_VERSION = 59;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -67,6 +67,39 @@ export const V57_STORES = {
     'id, name, country, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
 } as const;
 
+/**
+ * v58 (008-multi-currency-country Phase 10 / Task 17d):
+ * Adds the per-currency `exchange_rates` JSONB map on store rows. Not indexed —
+ * Dexie does not range-query JSON blobs, and reads always go through
+ * `currencyService` which decodes the map into its in-memory rates table.
+ *
+ * Schema row is identical to v57 (Dexie indexes by primary key + listed
+ * scalars; non-indexed columns travel transparently). The version bump
+ * exists so the upgrade hook below can back-fill the new column for
+ * stores that synced down before the column existed.
+ */
+export const V58_STORES = {
+  stores:
+    'id, name, country, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+} as const;
+
+/**
+ * v59 (008-multi-currency-country Phase 11 / Tasks 16a + 16g):
+ * Adds the self-describing `amounts` JSONB map on `journal_entries` and the
+ * `balances` JSONB map on `balance_snapshots`. The deprecated USD/LBP scalar
+ * columns are kept for the dual-write transition (Phase 11d will drop them).
+ *
+ * Neither map is indexed (Dexie cannot range-query JSON), so the schema
+ * row for both tables is identical to v54 — the upgrade hook is the only
+ * thing that matters for v59.
+ */
+export const V59_STORES = {
+  journal_entries:
+    'id, store_id, branch_id, transaction_id, entity_id, account_code, posted_date, bill_id, reversal_of_journal_entry_id, created_at, [store_id+branch_id], [store_id+account_code], [entity_id+account_code], [transaction_id], [bill_id], [reversal_of_journal_entry_id], _synced, _deleted',
+  balance_snapshots:
+    'id, store_id, branch_id, account_code, entity_id, balance_usd, balance_lbp, snapshot_date, snapshot_type, verified, created_at, [store_id+branch_id], [store_id+account_code+entity_id+snapshot_date], [store_id+account_code+entity_id], [store_id+snapshot_date+snapshot_type], [store_id+snapshot_date], _synced, _deleted',
+} as const;
+
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
   console.log('🔧 Initializing database schema v54');
   console.log('   ✅ Database schema initialized');
@@ -124,4 +157,75 @@ export async function upgradeV57(tx: DexieTransaction): Promise<void> {
     }
   });
   console.log('   ✅ v57 migration complete');
+}
+
+/**
+ * v58 (Phase 10): back-fill `exchange_rates` JSONB map on store rows.
+ * For legacy rows the map is reconstructed from the scalar `exchange_rate`
+ * keyed by `preferred_currency` (USD itself is implicit and omitted).
+ */
+export async function upgradeV58(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v57 → v58 (store exchange_rates JSONB map)');
+  await tx
+    .table('stores')
+    .toCollection()
+    .modify((store: Record<string, unknown>) => {
+      const existing = store.exchange_rates as Record<string, number> | undefined;
+      if (existing && typeof existing === 'object' && Object.keys(existing).length > 0) return;
+
+      const preferred = store.preferred_currency as string | undefined;
+      const legacy = store.exchange_rate as number | undefined;
+      const map: Record<string, number> = {};
+      if (preferred && preferred !== 'USD' && typeof legacy === 'number' && legacy > 0) {
+        map[preferred] = legacy;
+      }
+      store.exchange_rates = map;
+    });
+  console.log('   ✅ v58 migration complete');
+}
+
+/**
+ * v59 (Phase 11a / 16g): back-fill `amounts` map on journal_entries and
+ * `balances` map on balance_snapshots from the deprecated USD/LBP scalar
+ * columns. Rows that already carry a non-empty map are left alone.
+ *
+ * Only currency entries with at least one non-zero side are written to
+ * keep the map shape minimal.
+ */
+export async function upgradeV59(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v58 → v59 (accounting amounts/balances JSONB maps)');
+
+  await tx
+    .table('journal_entries')
+    .toCollection()
+    .modify((row: Record<string, unknown>) => {
+      const existing = row.amounts as Record<string, { debit: number; credit: number }> | undefined;
+      if (existing && typeof existing === 'object' && Object.keys(existing).length > 0) return;
+
+      const amounts: Record<string, { debit: number; credit: number }> = {};
+      const debitUsd = Number(row.debit_usd ?? 0) || 0;
+      const creditUsd = Number(row.credit_usd ?? 0) || 0;
+      const debitLbp = Number(row.debit_lbp ?? 0) || 0;
+      const creditLbp = Number(row.credit_lbp ?? 0) || 0;
+      if (debitUsd !== 0 || creditUsd !== 0) amounts.USD = { debit: debitUsd, credit: creditUsd };
+      if (debitLbp !== 0 || creditLbp !== 0) amounts.LBP = { debit: debitLbp, credit: creditLbp };
+      row.amounts = amounts;
+    });
+
+  await tx
+    .table('balance_snapshots')
+    .toCollection()
+    .modify((row: Record<string, unknown>) => {
+      const existing = row.balances as Record<string, number> | undefined;
+      if (existing && typeof existing === 'object' && Object.keys(existing).length > 0) return;
+
+      const balances: Record<string, number> = {};
+      const usd = Number(row.balance_usd ?? 0) || 0;
+      const lbp = Number(row.balance_lbp ?? 0) || 0;
+      if (usd !== 0) balances.USD = usd;
+      if (lbp !== 0) balances.LBP = lbp;
+      row.balances = balances;
+    });
+
+  console.log('   ✅ v59 migration complete');
 }

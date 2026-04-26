@@ -12,6 +12,7 @@ import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { createId } from '../lib/db';
 import { getLocalDateString } from '../utils/dateUtils';
 import { CacheManager, CacheKeys } from '../utils/cacheManager';
+import { buildLegacyDualAmounts } from './accountingCurrencyHelpers';
 
 /**
  * Service for creating and managing journal entries
@@ -92,6 +93,9 @@ export class JournalService {
     const now = new Date().toISOString();
     
     // Create debit and credit entries with base currency fields
+    // Phase 11 dual-write: also build the self-describing `amounts` map so
+    // new read paths can consume it. The deprecated scalar columns stay
+    // until 11d (column drop) for backward compatibility.
     const debitEntry: JournalEntry = {
       id: createId(),
       store_id: storeId,
@@ -103,6 +107,12 @@ export class JournalService {
       credit_usd: 0,
       debit_lbp: finalAmountLBP,
       credit_lbp: 0,
+      amounts: buildLegacyDualAmounts({
+        debit_usd: finalAmountUSD,
+        credit_usd: 0,
+        debit_lbp: finalAmountLBP,
+        credit_lbp: 0,
+      }),
       entity_id: entityId,
       entity_type: entity.entity_type,
       posted_date: postedDate,
@@ -113,7 +123,7 @@ export class JournalService {
       created_by: createdBy,
       _synced: false
     };
-    
+
     const creditEntry: JournalEntry = {
       id: createId(),
       store_id: storeId,
@@ -125,6 +135,12 @@ export class JournalService {
       credit_usd: finalAmountUSD,
       debit_lbp: 0,
       credit_lbp: finalAmountLBP,
+      amounts: buildLegacyDualAmounts({
+        debit_usd: 0,
+        credit_usd: finalAmountUSD,
+        debit_lbp: 0,
+        credit_lbp: finalAmountLBP,
+      }),
       entity_id: entityId,
       entity_type: entity.entity_type,
       posted_date: postedDate,

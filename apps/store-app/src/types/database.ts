@@ -1,4 +1,15 @@
-import type { BranchCore, StoreCore, CurrencyCode, UserCore } from '@pos-platform/shared';
+import type { BranchCore, StoreCore, CurrencyCode, UserCore, ExchangeRatesMap } from '@pos-platform/shared';
+
+/**
+ * Per-currency debit/credit amounts on a single journal_entries row (Phase 11).
+ * The map is self-describing: every currency present in the entry carries
+ * its own debit/credit pair, so a row written for an AED store is always
+ * interpretable regardless of the store's later configuration changes.
+ */
+export type JournalEntryAmounts = Partial<Record<CurrencyCode, { debit: number; credit: number }>>;
+
+/** Per-currency running balance map on a balance_snapshots row (Phase 11). */
+export type BalanceSnapshotMap = Partial<Record<CurrencyCode, number>>;
 
 export interface Database {
   public: {
@@ -211,6 +222,7 @@ export interface Database {
           preferred_language?: 'en' | 'ar'|'fr';
           preferred_commission_rate?: number;
           exchange_rate?: number;
+          exchange_rates?: ExchangeRatesMap;
           low_stock_alert?: boolean;
           name: string;
           address?: string | null;
@@ -228,6 +240,7 @@ export interface Database {
           preferred_language?: 'en' | 'ar'|'fr';
           preferred_commission_rate?: number;
           exchange_rate?: number;
+          exchange_rates?: ExchangeRatesMap;
           low_stock_alert?: boolean;
           id?: string;
           name?: string;
@@ -922,10 +935,16 @@ export interface Database {
           transaction_id: string;
           account_code: string;
           account_name: string;
+          /** @deprecated Phase 11 — use `amounts` map. Kept during dual-write transition. */
           debit_usd: number;
+          /** @deprecated Phase 11 — use `amounts` map. */
           credit_usd: number;
+          /** @deprecated Phase 11 — use `amounts` map. */
           debit_lbp: number;
+          /** @deprecated Phase 11 — use `amounts` map. */
           credit_lbp: number;
+          /** Self-describing per-currency debit/credit map. Immutable once written. */
+          amounts: JournalEntryAmounts;
           entity_id: string;
           entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
           posted_date: string;
@@ -950,6 +969,7 @@ export interface Database {
           credit_usd?: number;
           debit_lbp?: number;
           credit_lbp?: number;
+          amounts?: JournalEntryAmounts;
           entity_id: string;
           entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
           posted_date?: string;
@@ -974,6 +994,7 @@ export interface Database {
           credit_usd?: number;
           debit_lbp?: number;
           credit_lbp?: number;
+          amounts?: JournalEntryAmounts;
           entity_id?: string;
           entity_type?: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
           posted_date?: string;
@@ -995,8 +1016,12 @@ export interface Database {
           branch_id: string | null;
           account_code: string;
           entity_id: string | null;
+          /** @deprecated Phase 11 — use `balances` map. */
           balance_usd: number;
+          /** @deprecated Phase 11 — use `balances` map. */
           balance_lbp: number;
+          /** Self-describing per-currency running balance map. */
+          balances: BalanceSnapshotMap;
           snapshot_date: string;
           snapshot_type: 'hourly' | 'daily' | 'end_of_day';
           verified: boolean;
@@ -1009,8 +1034,9 @@ export interface Database {
           branch_id: string | null;
           account_code: string;
           entity_id: string | null;
-          balance_usd: number;
-          balance_lbp: number;
+          balance_usd?: number;
+          balance_lbp?: number;
+          balances?: BalanceSnapshotMap;
           snapshot_date: string;
           snapshot_type: 'hourly' | 'daily' | 'end_of_day';
           verified: boolean;
@@ -1025,6 +1051,7 @@ export interface Database {
           entity_id?: string | null;
           balance_usd?: number;
           balance_lbp?: number;
+          balances?: BalanceSnapshotMap;
           snapshot_date?: string;
           snapshot_type?: 'hourly' | 'daily' | 'end_of_day';
           verified?: boolean;

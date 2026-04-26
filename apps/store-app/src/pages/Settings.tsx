@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import BranchSelectionScreen from '../components/BranchSelectionScreen';
 import packageJson from '../../package.json';
-import { 
+import { CURRENCY_META, type CurrencyCode } from '@pos-platform/shared';
+import {
   Settings as SettingsIcon,
   Bell,
   Package,
@@ -23,6 +24,8 @@ import {
   RefreshCw,
   Briefcase,
   Trash2,
+  Plus,
+  X,
 } from 'lucide-react';
 
 type SettingsTab = 'account' | 'business' | 'inventory' | 'receipt' | 'preferences';
@@ -76,7 +79,7 @@ export default function Settings() {
 
   const [tempThreshold, setTempThreshold] = useState(lowStockThreshold?.toString() || '10');
   const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate?.toString() || '10');
-  const [tempCurrency, setTempCurrency] = useState<'USD' | 'LBP'>(currency);
+  const [tempCurrency, setTempCurrency] = useState<CurrencyCode>(currency);
   const [tempExchangeRate, setTempExchangeRate] = useState(exchangeRate?.toString() || '89500');
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -394,11 +397,14 @@ export default function Settings() {
                   <div className="flex items-center space-x-3">
                     <select
                       value={tempCurrency}
-                      onChange={(e) => setTempCurrency(e.target.value as 'USD' | 'LBP')}
+                      onChange={(e) => setTempCurrency(e.target.value as CurrencyCode)}
                       className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                     >
-                      <option value="USD">USD ($)</option>
-                      <option value="LBP">LBP (ل.ل)</option>
+                      {(offlineData?.acceptedCurrencies ?? ['USD']).map((c) => (
+                        <option key={c} value={c}>
+                          {CURRENCY_META[c]?.name ?? c} ({c})
+                        </option>
+                      ))}
                     </select>
                     <button
                       onClick={handleCurrencySave}
@@ -409,39 +415,13 @@ export default function Settings() {
                       {t('settings.save')}
                     </button>
                   </div>
-                  <p className="text-xs text-gray-500 mt-2">{t('settings.currentCurrency', { value: currency === 'USD' ? 'USD ($)' : 'LBP (ل.ل)' })}</p>
+                  <p className="text-xs text-gray-500 mt-2">
+                    {t('settings.currentCurrency', { value: `${CURRENCY_META[currency]?.name ?? currency} (${currency})` })}
+                  </p>
                 </div>
 
-                <div className="p-4 border border-gray-200 rounded-lg">
-                  <div className="flex items-center mb-3">
-                    <DollarSign className="w-5 h-5 text-green-500 mr-3" />
-                    <h3 className="font-medium text-gray-900">Exchange Rate (USD to LBP)</h3>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-3">
-                    Set the exchange rate for converting between USD and LBP (e.g., 1 USD = 89500 LBP)
-                  </p>
-                  <div className="flex items-center space-x-3">
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={tempExchangeRate}
-                      onChange={(e) => setTempExchangeRate(e.target.value)}
-                      className="w-32 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="89500"
-                    />
-                    <span className="text-gray-600">LBP per USD</span>
-                    <button
-                      onClick={handleExchangeRateSave}
-                      disabled={tempExchangeRate === (exchangeRate?.toString() || '89500')}
-                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
-                    >
-                      <Save className="w-4 h-4 mr-2" />
-                      {t('settings.save')}
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2">Current rate: 1 USD = {exchangeRate} LBP</p>
-                </div>
+                {/* Phase 12: Self-serve accepted currencies + per-rate management */}
+                <CurrencyManagerSection />
               </div>
             </div>
           </>
@@ -586,6 +566,327 @@ export default function Settings() {
         )}
       </div>
 
+    </div>
+  );
+}
+
+/**
+ * Currency Manager Section (Phase 12 — store-app self-serve currency settings).
+ * Lets the store user:
+ *   - View their accepted currencies and the current per-currency rate vs USD
+ *   - Add a currency from the remaining CurrencyCode options (with rate seed)
+ *   - Update an existing per-currency rate inline
+ *   - Remove a currency (blocked if it's in use by inventory/transactions/bills)
+ *
+ * Backed by `addAcceptedCurrency`, `removeAcceptedCurrency`, and
+ * `updateExchangeRateFor` exposed by OfflineDataContext / useStoreSettingsDataLayer.
+ */
+function CurrencyManagerSection() {
+  const { handleError } = useErrorHandler();
+  const { userProfile } = useSupabaseAuth();
+  const offlineData = useOfflineData();
+  const acceptedCurrencies = offlineData?.acceptedCurrencies ?? ['USD'];
+  const preferredCurrency = offlineData?.preferredCurrency ?? 'USD';
+  const exchangeRate = offlineData?.exchangeRate ?? 0;
+  const storeId = userProfile?.store_id ?? null;
+
+  const [storeRates, setStoreRates] = useState<Partial<Record<CurrencyCode, number>>>({});
+  const [pendingRateInput, setPendingRateInput] = useState<Partial<Record<CurrencyCode, string>>>({});
+  const [showAddPicker, setShowAddPicker] = useState(false);
+  const [newCurrency, setNewCurrency] = useState<CurrencyCode | ''>('');
+  const [newRate, setNewRate] = useState('');
+  const [savingFor, setSavingFor] = useState<CurrencyCode | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  const flashOk = (msg: string) => {
+    setStatusMessage(msg);
+    setStatusError(null);
+    setTimeout(() => setStatusMessage(null), 2500);
+  };
+  const flashError = (msg: string) => {
+    setStatusError(msg);
+    setStatusMessage(null);
+    setTimeout(() => setStatusError(null), 4000);
+  };
+
+  // Hydrate the rates map from the local Dexie store row whenever the
+  // underlying store changes (via reload after mutations).
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!storeId) return;
+      try {
+        const { getDB } = await import('../lib/db');
+        const row = await getDB().stores.get(storeId);
+        if (cancelled) return;
+        const map: Partial<Record<CurrencyCode, number>> = {
+          ...((row?.exchange_rates as Partial<Record<CurrencyCode, number>>) ?? {}),
+        };
+        // Mirror the legacy scalar onto the preferred currency for display
+        // when the new map hasn't been populated yet.
+        if (
+          preferredCurrency !== 'USD' &&
+          map[preferredCurrency] === undefined &&
+          exchangeRate > 0
+        ) {
+          map[preferredCurrency] = exchangeRate;
+        }
+        setStoreRates(map);
+        setPendingRateInput((prev) => {
+          const next: Partial<Record<CurrencyCode, string>> = { ...prev };
+          for (const c of acceptedCurrencies) {
+            if (c === 'USD') continue;
+            if (next[c] === undefined) next[c] = map[c] !== undefined ? String(map[c]) : '';
+          }
+          return next;
+        });
+      } catch (err) {
+        handleError(err);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [storeId, acceptedCurrencies.join('|'), preferredCurrency, exchangeRate]);
+
+  const availableToAdd = useMemo(
+    () =>
+      (Object.keys(CURRENCY_META) as CurrencyCode[])
+        .filter((c) => !acceptedCurrencies.includes(c))
+        .sort(),
+    [acceptedCurrencies]
+  );
+
+  const handleSaveRate = async (currency: CurrencyCode) => {
+    if (currency === 'USD') return;
+    const raw = pendingRateInput[currency] ?? '';
+    const parsed = parseFloat(raw);
+    if (isNaN(parsed) || parsed <= 0) {
+      flashError(`Enter a positive rate for ${currency}`);
+      return;
+    }
+    if (!offlineData?.updateExchangeRateFor) {
+      flashError('Update function not available.');
+      return;
+    }
+    try {
+      setSavingFor(currency);
+      await offlineData.updateExchangeRateFor(currency, parsed);
+      setStoreRates((prev) => ({ ...prev, [currency]: parsed }));
+      flashOk(`Rate for ${currency} saved`);
+    } catch (err) {
+      handleError(err);
+      flashError(err instanceof Error ? err.message : 'Failed to save rate');
+    } finally {
+      setSavingFor(null);
+    }
+  };
+
+  const handleAddCurrency = async () => {
+    if (!newCurrency) {
+      flashError('Choose a currency to add');
+      return;
+    }
+    const rate = parseFloat(newRate);
+    if (newCurrency !== 'USD' && (isNaN(rate) || rate <= 0)) {
+      flashError(`Enter a positive rate for ${newCurrency}`);
+      return;
+    }
+    if (!offlineData?.addAcceptedCurrency) {
+      flashError('Add function not available.');
+      return;
+    }
+    try {
+      setBusy(true);
+      await offlineData.addAcceptedCurrency(newCurrency as CurrencyCode, isNaN(rate) ? undefined : rate);
+      flashOk(`${newCurrency} added`);
+      setShowAddPicker(false);
+      setNewCurrency('');
+      setNewRate('');
+    } catch (err) {
+      handleError(err);
+      flashError(err instanceof Error ? err.message : 'Failed to add currency');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemoveCurrency = async (currency: CurrencyCode) => {
+    if (currency === 'USD') {
+      flashError('USD cannot be removed.');
+      return;
+    }
+    if (currency === preferredCurrency) {
+      flashError('Cannot remove the preferred currency. Switch preferred currency first.');
+      return;
+    }
+    if (!offlineData?.removeAcceptedCurrency) {
+      flashError('Remove function not available.');
+      return;
+    }
+    if (!window.confirm(`Remove ${currency} from accepted currencies?`)) return;
+    try {
+      setBusy(true);
+      await offlineData.removeAcceptedCurrency(currency);
+      flashOk(`${currency} removed`);
+    } catch (err) {
+      handleError(err);
+      flashError(err instanceof Error ? err.message : 'Failed to remove currency');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="p-4 border border-gray-200 rounded-lg space-y-4">
+      <div className="flex items-center mb-1">
+        <DollarSign className="w-5 h-5 text-purple-500 mr-3" />
+        <h3 className="font-medium text-gray-900">Accepted Currencies</h3>
+      </div>
+      <p className="text-sm text-gray-600">
+        Manage the currencies your store accepts and the per-currency exchange rates against USD.
+        USD is always available and is the pivot currency for conversions.
+      </p>
+
+      {statusMessage && (
+        <div className="flex items-center px-3 py-2 bg-green-100 text-green-800 rounded">
+          <CheckCircle className="w-4 h-4 mr-2" />
+          {statusMessage}
+        </div>
+      )}
+      {statusError && (
+        <div className="flex items-center px-3 py-2 bg-red-100 text-red-800 rounded">
+          <AlertTriangle className="w-4 h-4 mr-2" />
+          {statusError}
+        </div>
+      )}
+
+      <div className="divide-y divide-gray-100">
+        {acceptedCurrencies.map((c) => {
+          const meta = CURRENCY_META[c];
+          const isPreferred = c === preferredCurrency;
+          const isUSD = c === 'USD';
+          const inputValue = pendingRateInput[c] ?? '';
+          const storeRate = storeRates[c];
+          const dirty = !isUSD && parseFloat(inputValue || '0') !== (storeRate ?? 0);
+          return (
+            <div key={c} className="flex flex-wrap items-center gap-3 py-2">
+              <div className="min-w-[120px]">
+                <span className="font-medium text-gray-900">{c}</span>
+                <span className="ml-2 text-sm text-gray-500">{meta?.name ?? c}</span>
+                {isPreferred && (
+                  <span className="ml-2 text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                    Preferred
+                  </span>
+                )}
+              </div>
+              {isUSD ? (
+                <span className="text-sm text-gray-500">Pivot currency (always 1.00)</span>
+              ) : (
+                <>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={inputValue}
+                    onChange={(e) =>
+                      setPendingRateInput((prev) => ({ ...prev, [c]: e.target.value }))
+                    }
+                    className="w-32 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="rate"
+                  />
+                  <span className="text-xs text-gray-500">{c} per 1 USD</span>
+                  <button
+                    onClick={() => handleSaveRate(c)}
+                    disabled={!dirty || savingFor === c}
+                    className="bg-blue-600 text-white px-3 py-1.5 text-sm rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
+                  >
+                    <Save className="w-3.5 h-3.5 mr-1" />
+                    {savingFor === c ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => handleRemoveCurrency(c)}
+                    disabled={busy || isPreferred}
+                    title={isPreferred ? 'Switch preferred currency before removing' : 'Remove'}
+                    className="ml-auto text-red-600 hover:text-red-700 disabled:text-gray-300 p-1.5"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="pt-2">
+        {!showAddPicker ? (
+          <button
+            onClick={() => setShowAddPicker(true)}
+            disabled={availableToAdd.length === 0}
+            className="flex items-center px-3 py-1.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            <Plus className="w-4 h-4 mr-1" />
+            Add currency
+          </button>
+        ) : (
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Currency</label>
+              <select
+                value={newCurrency}
+                onChange={(e) => setNewCurrency(e.target.value as CurrencyCode | '')}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Choose…</option>
+                {availableToAdd.map((c) => (
+                  <option key={c} value={c}>
+                    {c} — {CURRENCY_META[c]?.name ?? c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {newCurrency && newCurrency !== 'USD' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Rate ({newCurrency} per 1 USD)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={newRate}
+                  onChange={(e) => setNewRate(e.target.value)}
+                  className="w-40 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="e.g. 89500"
+                />
+              </div>
+            )}
+            <button
+              onClick={handleAddCurrency}
+              disabled={busy || !newCurrency}
+              className="flex items-center px-3 py-1.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              <Save className="w-3.5 h-3.5 mr-1" />
+              Save
+            </button>
+            <button
+              onClick={() => {
+                setShowAddPicker(false);
+                setNewCurrency('');
+                setNewRate('');
+              }}
+              className="flex items-center px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+            >
+              <X className="w-3.5 h-3.5 mr-1" />
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

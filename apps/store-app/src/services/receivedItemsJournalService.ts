@@ -9,6 +9,7 @@ import { accountingInitService } from './accountingInitService';
 import { createId } from '../lib/db';
 import { getLocalDateString } from '../utils/dateUtils';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
+import { reverseAmounts, amountsFromLegacyEntry } from './accountingCurrencyHelpers';
 
 export class ReceivedItemsJournalService {
   /**
@@ -72,6 +73,8 @@ export class ReceivedItemsJournalService {
         credit_usd: entry.debit_usd, // Swap: original debit becomes credit
         debit_lbp: entry.credit_lbp,
         credit_lbp: entry.debit_lbp,
+        // Phase 11 dual-write: full per-currency reversal preserves AED/EUR/etc.
+        amounts: reverseAmounts(amountsFromLegacyEntry(entry)),
         description: `Reversal: ${entry.description || reason}`,
         posted_date: postedDate,
         fiscal_period: fiscalPeriod,
@@ -178,6 +181,22 @@ export class ReceivedItemsJournalService {
         continue;
       }
 
+      // Phase 11 dual-write: build a reversed, proportional amounts map
+      // by walking every currency present in the original entry. This
+      // also covers AED/EUR/etc. — not just USD/LBP.
+      const originalAmounts = amountsFromLegacyEntry(entry);
+      const reversedProportional: typeof originalAmounts = {};
+      for (const [code, { debit, credit }] of Object.entries(originalAmounts) as Array<
+        [keyof typeof originalAmounts, { debit: number; credit: number }]
+      >) {
+        const propDebit = (debit ?? 0) * itemRatio;
+        const propCredit = (credit ?? 0) * itemRatio;
+        if (propDebit !== 0 || propCredit !== 0) {
+          // Swap: the reversal's debit is the original's credit, etc.
+          reversedProportional[code] = { debit: propCredit, credit: propDebit };
+        }
+      }
+
       const reversalEntry: JournalEntry = {
         id: createId(),
         store_id: entry.store_id,
@@ -191,6 +210,7 @@ export class ReceivedItemsJournalService {
         credit_usd: proportionalDebitUSD, // Swap
         debit_lbp: proportionalCreditLBP,
         credit_lbp: proportionalDebitLBP,
+        amounts: reversedProportional,
         description: `Reversal: ${entry.description || reason} (Item: ${itemId})`,
         posted_date: postedDate,
         fiscal_period: fiscalPeriod,

@@ -994,6 +994,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateDefaultCommissionRate: async () => {},
         updateCurrency: async () => {},
         updateExchangeRate: async () => {},
+        updateExchangeRateFor: async () => {},
+        addAcceptedCurrency: async () => {},
+        removeAcceptedCurrency: async () => {},
         updateLanguage: async () => {},
         sync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
         fullResync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
@@ -1083,6 +1086,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateDefaultCommissionRate: settingsLayer.updateDefaultCommissionRate,
       updateCurrency: settingsLayer.updateCurrency,
       updateExchangeRate: settingsLayer.updateExchangeRate,
+      updateExchangeRateFor: settingsLayer.updateExchangeRateFor,
+      addAcceptedCurrency: settingsLayer.addAcceptedCurrency,
+      removeAcceptedCurrency: settingsLayer.removeAcceptedCurrency,
       updateLanguage: settingsLayer.updateLanguage,
 
       // Cash drawer from cashDrawerLayer

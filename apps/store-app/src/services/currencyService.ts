@@ -59,15 +59,53 @@ export class CurrencyService {
         return true;
       });
 
+      // Phase 10: hydrate the rates map from the new exchange_rates JSONB,
+      // falling back to the legacy scalar exchange_rate for the primary
+      // local currency when the map is empty (older synced rows).
       this.rates = { USD: 1 };
-      const rate = store.exchange_rate;
-      if (pref !== 'USD' && typeof rate === 'number' && rate > 0) {
-        this.rates[pref] = rate;
+      const ratesMap = (store as { exchange_rates?: Partial<Record<CurrencyCode, number>> }).exchange_rates;
+      if (ratesMap && typeof ratesMap === 'object') {
+        for (const [code, value] of Object.entries(ratesMap)) {
+          if (typeof value === 'number' && value > 0 && code !== 'USD') {
+            this.rates[code as CurrencyCode] = value;
+          }
+        }
+      }
+      const legacyRate = store.exchange_rate;
+      if (pref !== 'USD' && this.rates[pref] === undefined && typeof legacyRate === 'number' && legacyRate > 0) {
+        this.rates[pref] = legacyRate;
       }
       this.isInitialized = true;
     } catch (error) {
       console.warn('CurrencyService.loadFromStore failed:', error);
     }
+  }
+
+  /**
+   * Returns a defensive copy of the active per-currency rates map (units-per-USD).
+   * USD is always included as 1.
+   */
+  public getRates(): Partial<Record<CurrencyCode, number>> {
+    return { ...this.rates };
+  }
+
+  /**
+   * Returns the rate for `currency` (units of `currency` per 1 USD), or undefined
+   * if no rate is loaded. USD always returns 1.
+   */
+  public getRate(currency: CurrencyCode): number | undefined {
+    if (currency === 'USD') return 1;
+    return this.rates[currency];
+  }
+
+  /**
+   * In-memory rate update (call after a Dexie write so subsequent
+   * conversions use the new rate without a full reload).
+   */
+  public setRate(currency: CurrencyCode, rate: number): void {
+    if (currency === 'USD') return;
+    if (rate > 0) this.rates[currency] = rate;
+    else delete this.rates[currency];
   }
 
   public convert(amount: number, from: CurrencyCode, to: CurrencyCode): number {

@@ -252,6 +252,16 @@ export interface StoreSettingsDataLayerResult {
   updateDefaultCommissionRate: (rate: number) => Promise<void>;
   updateCurrency: (newCurrency: CurrencyCode) => Promise<void>;
   updateExchangeRate: (rate: number) => Promise<void>;
+  /** Phase 12: write a per-currency rate into stores.exchange_rates. */
+  updateExchangeRateFor: (currency: CurrencyCode, rate: number) => Promise<void>;
+  /** Phase 12: append `currency` to stores.accepted_currencies (with rate seed). */
+  addAcceptedCurrency: (currency: CurrencyCode, rate?: number) => Promise<void>;
+  /**
+   * Phase 12: remove `currency` from stores.accepted_currencies. Throws if
+   * the currency is in use by inventory_items / open bills / transactions
+   * — caller surfaces the message.
+   */
+  removeAcceptedCurrency: (currency: CurrencyCode) => Promise<void>;
   updateLanguage: (newLanguage: 'en' | 'ar' | 'fr') => Promise<void>;
   updateReceiptSettings: (newSettings: any) => Promise<void>;
 }
