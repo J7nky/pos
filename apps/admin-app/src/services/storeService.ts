@@ -165,6 +165,7 @@ export async function createStore(input: CreateStoreInput): Promise<Store> {
     preferred_language: input.preferred_language || 'en',
     preferred_commission_rate: input.preferred_commission_rate ?? 10,
     exchange_rate: input.exchange_rate ?? 1,
+    exchange_rates: input.exchange_rates ?? {},
     low_stock_alert: true,
     status: 'active' as const,
   };

@@ -38,6 +38,32 @@ export default function StoreForm({
 }: StoreFormProps) {
   const isEditing = !!store;
 
+  const initialAcceptedCurrencies: CurrencyCode[] = store?.accepted_currencies?.length
+    ? store.accepted_currencies
+    : store
+      ? ([store.preferred_currency || 'USD', 'USD'] as CurrencyCode[]).filter((c, i, a) => a.indexOf(c) === i)
+      : (['USD'] as CurrencyCode[]);
+
+  // Per-currency rate inputs are kept as strings so partial typing works
+  // ("0.", empty) without coercing to NaN. Keys are CurrencyCode.
+  const initialRateInputs = (() => {
+    const out: Partial<Record<CurrencyCode, string>> = {};
+    const map = (store as { exchange_rates?: Partial<Record<CurrencyCode, number>> } | undefined)
+      ?.exchange_rates;
+    for (const c of initialAcceptedCurrencies) {
+      if (c === 'USD') continue;
+      if (map && typeof map[c] === 'number') {
+        out[c] = String(map[c]);
+      } else if (c === store?.preferred_currency && store?.exchange_rate != null) {
+        // Legacy: scalar exchange_rate carries the rate for the primary local currency
+        out[c] = String(store.exchange_rate);
+      } else {
+        out[c] = '';
+      }
+    }
+    return out;
+  })();
+
   const [formData, setFormData] = useState({
     name: store?.name || '',
     country: store?.country ?? '',
@@ -45,14 +71,10 @@ export default function StoreForm({
     phone: store?.phone || '',
     email: store?.email || '',
     preferred_currency: (store?.preferred_currency || 'USD') as CurrencyCode,
-    accepted_currencies: (store?.accepted_currencies?.length
-      ? store.accepted_currencies
-      : store
-        ? ([store.preferred_currency || 'USD', 'USD'] as CurrencyCode[]).filter((c, i, a) => a.indexOf(c) === i)
-        : (['USD'] as CurrencyCode[])) as CurrencyCode[],
+    accepted_currencies: initialAcceptedCurrencies,
     preferred_language: store?.preferred_language || 'en',
     preferred_commission_rate: store?.preferred_commission_rate?.toString() || '10',
-    exchange_rate: store?.exchange_rate != null ? String(store.exchange_rate) : '',
+    rate_inputs: initialRateInputs as Partial<Record<CurrencyCode, string>>,
     subscription_plan: 'premium' as SubscriptionPlan,
   });
 
@@ -90,12 +112,17 @@ export default function StoreForm({
       for (const c of config.defaultCurrencies) {
         if (!merged.includes(c)) merged.push(c);
       }
+      const nextRateInputs: Partial<Record<CurrencyCode, string>> = { ...prev.rate_inputs };
+      for (const c of merged) {
+        if (c === 'USD') continue;
+        if (nextRateInputs[c] === undefined) nextRateInputs[c] = '';
+      }
       return {
         ...prev,
         country: countryCode,
         preferred_currency: config.localCurrency,
         accepted_currencies: merged,
-        exchange_rate: '',
+        rate_inputs: nextRateInputs,
       };
     });
   };
@@ -108,8 +135,25 @@ export default function StoreForm({
           ? prev.accepted_currencies
           : [...prev.accepted_currencies, currency]
         : prev.accepted_currencies.filter((c) => c !== currency);
-      return { ...prev, accepted_currencies: next };
+      const nextRateInputs: Partial<Record<CurrencyCode, string>> = { ...prev.rate_inputs };
+      if (checked && currency !== 'USD' && nextRateInputs[currency] === undefined) {
+        nextRateInputs[currency] = '';
+      }
+      if (!checked) {
+        delete nextRateInputs[currency];
+      }
+      return { ...prev, accepted_currencies: next, rate_inputs: nextRateInputs };
     });
+  };
+
+  const handleRateChange = (currency: CurrencyCode, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      rate_inputs: { ...prev.rate_inputs, [currency]: value },
+    }));
+    if (errors[`rate_${currency}`]) {
+      setErrors((prev) => ({ ...prev, [`rate_${currency}`]: '' }));
+    }
   };
 
   const validate = () => {
@@ -144,10 +188,13 @@ export default function StoreForm({
       newErrors.preferred_currency = 'Preferred currency must be in accepted currencies';
     }
 
-    if (formData.preferred_currency !== 'USD') {
-      const exchangeRate = parseFloat(formData.exchange_rate);
-      if (isNaN(exchangeRate) || exchangeRate <= 0) {
-        newErrors.exchange_rate = 'Exchange rate must be a positive number for non-USD stores';
+    // Validate one positive rate per non-USD accepted currency.
+    for (const c of formData.accepted_currencies) {
+      if (c === 'USD') continue;
+      const raw = formData.rate_inputs[c];
+      const rate = parseFloat(raw ?? '');
+      if (isNaN(rate) || rate <= 0) {
+        newErrors[`rate_${c}`] = `Enter a positive rate for ${c}`;
       }
     }
 
@@ -178,6 +225,21 @@ export default function StoreForm({
       }
     }
 
+    // Build per-currency exchange_rates map from the inputs. USD is implicit
+    // and never written into the map.
+    const exchangeRatesMap: Partial<Record<CurrencyCode, number>> = {};
+    for (const c of formData.accepted_currencies) {
+      if (c === 'USD') continue;
+      const r = parseFloat(formData.rate_inputs[c] ?? '');
+      if (!isNaN(r) && r > 0) exchangeRatesMap[c] = r;
+    }
+    // Keep the legacy scalar exchange_rate in sync with the primary local
+    // currency's rate so older read paths keep working until 11d/Phase 17 cleanup.
+    const scalarRate =
+      formData.preferred_currency === 'USD'
+        ? undefined
+        : exchangeRatesMap[formData.preferred_currency];
+
     const base = {
       name: formData.name.trim(),
       country: formData.country,
@@ -188,8 +250,8 @@ export default function StoreForm({
       accepted_currencies: formData.accepted_currencies,
       preferred_language: formData.preferred_language as 'en' | 'ar' | 'fr',
       preferred_commission_rate: parseFloat(formData.preferred_commission_rate),
-      exchange_rate:
-        formData.preferred_currency === 'USD' ? undefined : parseFloat(formData.exchange_rate),
+      exchange_rate: scalarRate,
+      exchange_rates: exchangeRatesMap,
     };
 
     const data: CreateStoreInput | UpdateStoreInput = isEditing
@@ -328,19 +390,36 @@ export default function StoreForm({
                 error={errors.preferred_commission_rate}
                 helperText="Default commission rate for suppliers"
               />
-              {formData.preferred_currency !== 'USD' && (
-                <Input
-                  label="Exchange Rate"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={formData.exchange_rate}
-                  onChange={(e) => handleChange('exchange_rate', e.target.value)}
-                  error={errors.exchange_rate}
-                  helperText={`Rate of 1 USD expressed in ${formData.preferred_currency}`}
-                />
-              )}
             </div>
+
+            {formData.accepted_currencies.some((c) => c !== 'USD') && (
+              <div className="mt-4">
+                <span className="block text-sm font-medium text-gray-700 mb-2">
+                  Exchange rates (per 1 USD)
+                </span>
+                <div className="space-y-2">
+                  {formData.accepted_currencies
+                    .filter((c) => c !== 'USD')
+                    .map((c) => (
+                      <Input
+                        key={c}
+                        label={`${c} per 1 USD`}
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={formData.rate_inputs[c] ?? ''}
+                        onChange={(e) => handleRateChange(c, e.target.value)}
+                        error={errors[`rate_${c}`]}
+                        helperText={
+                          c === formData.preferred_currency
+                            ? `Rate of 1 USD in ${c} (primary local currency)`
+                            : `Rate of 1 USD in ${c}`
+                        }
+                      />
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {!isEditing && (

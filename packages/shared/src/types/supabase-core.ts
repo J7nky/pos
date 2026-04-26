@@ -23,6 +23,16 @@
 
 import type { CurrencyCode } from './currency';
 
+/**
+ * Map of CurrencyCode → units-per-USD. USD itself is implicit (always 1)
+ * and is intentionally omitted from the map. Stores that accept multiple
+ * non-USD currencies (e.g. LBP + EUR) carry one entry per non-USD code.
+ *
+ * The scalar `exchange_rate` field below is kept in sync with the
+ * primary local currency's entry for legacy reads.
+ */
+export type ExchangeRatesMap = Partial<Record<CurrencyCode, number>>;
+
 export interface StoreCore {
   id: string;
   name: string;
@@ -30,7 +40,9 @@ export interface StoreCore {
   preferred_currency: CurrencyCode;
   accepted_currencies: CurrencyCode[];
   preferred_language: 'en' | 'ar' | 'fr';
+  /** @deprecated kept in sync with exchange_rates[preferred_currency]; will be removed in 009-live-rates. */
   exchange_rate: number;
+  exchange_rates: ExchangeRatesMap;
   created_at: string;
   updated_at: string;
 }
@@ -43,6 +55,7 @@ export interface StoreCoreInsert {
   accepted_currencies?: CurrencyCode[];
   preferred_language?: 'en' | 'ar' | 'fr';
   exchange_rate?: number;
+  exchange_rates?: ExchangeRatesMap;
 }
 
 export interface BranchCore {

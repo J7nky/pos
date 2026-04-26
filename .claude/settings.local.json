@@ -56,7 +56,15 @@
       "Bash(pnpm --filter store-app exec eslint src/layouts/Layout.tsx)",
       "Bash(pnpm --filter store-app test:run -- syncUpload.currency)",
       "Bash(pnpm --filter admin-app test)",
-      "Bash(echo \"Exit code: $?\")"
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(echo \"---exit:$?---\")",
+      "Bash(pnpm --filter admin-app test:run)",
+      "Bash(pnpm install *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(psql --version)",
+      "Bash(echo \"STORE_EXIT=$?\")",
+      "Bash(pnpm --filter @pos-platform/admin-app exec tsc --noEmit)",
+      "Bash(echo \"ADMIN_EXIT=$?\")"
     ]
   }
 }

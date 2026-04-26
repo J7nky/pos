@@ -8,6 +8,7 @@ export type {
   BranchCore,
   UserCore,
   StoreSubscriptionCore,
+  ExchangeRatesMap,
 } from './supabase-core';
 
 // Core type definitions for the ERP system

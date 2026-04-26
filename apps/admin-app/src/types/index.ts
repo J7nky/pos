@@ -6,6 +6,7 @@ import type {
   StoreCore,
   StoreSubscriptionCore,
   UserCore,
+  ExchangeRatesMap,
 } from '@pos-platform/shared';
 import type { CurrencyCode } from '@pos-platform/shared';
 
@@ -44,6 +45,7 @@ export interface CreateStoreInput {
   preferred_language?: 'en' | 'ar' | 'fr';
   preferred_commission_rate?: number;
   exchange_rate?: number;
+  exchange_rates?: ExchangeRatesMap;
   subscription_plan?: 'starter' | 'professional' | 'premium';
 }
 
@@ -59,6 +61,7 @@ export interface UpdateStoreInput {
   preferred_language?: 'en' | 'ar' | 'fr';
   preferred_commission_rate?: number;
   exchange_rate?: number;
+  exchange_rates?: ExchangeRatesMap;
   low_stock_alert?: boolean;
   status?: 'active' | 'suspended' | 'archived';
 }
