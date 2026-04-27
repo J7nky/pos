@@ -1,5 +1,6 @@
 import { getDB, LocalSaleItem, InventoryItem } from '../lib/db';
 import { SaleItem, inventory_bills } from '../types';
+import { getTranslatedString } from '@pos-platform/shared';
 
 export interface WeightSummary {
   productId: string;
@@ -253,7 +254,7 @@ export class WeightManagementService {
 
       return {
         productId,
-        productName: product.name,
+        productName: getTranslatedString(product.name as any, 'en'),
         supplierId,
         supplierName: supplier.name,
         receivedWeight,
@@ -412,7 +413,7 @@ export class WeightManagementService {
               type: status === 'over_sold' ? 'over_sold' : 'under_sold',
               severity,
               productId: product.id,
-              productName: product.name,
+              productName: getTranslatedString(product.name as any, 'en'),
               supplierId: supplier.id,
               supplierName: supplier.name,
               discrepancyAmount: Math.abs(difference),

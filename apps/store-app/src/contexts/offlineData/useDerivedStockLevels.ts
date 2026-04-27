@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- mirrors composer stockLevels shape */
 import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
+import { getTranslatedString } from '@pos-platform/shared';
 import type { Database } from '../../types/database';
 
 type Tables = Database['public']['Tables'];
@@ -49,7 +50,7 @@ export function useDerivedStockLevels({
       return {
         id: product.id,
         productId: product.id,
-        productName: product.name,
+        productName: getTranslatedString(product.name as any, 'en'),
         currentStock: totalStock,
         suppliers: supplierStocks,
         lowStockAlert: lowStockAlertsEnabled && totalStock <= lowStockThreshold,

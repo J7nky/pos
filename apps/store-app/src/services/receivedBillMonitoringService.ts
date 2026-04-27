@@ -1,6 +1,7 @@
 import { getDB } from '../lib/db';
 import { notificationService } from './notificationService';
 import { InventoryItem, inventory_bills, BillLineItem } from '../types';
+import { getTranslatedString } from '@pos-platform/shared';
 
 /**
  * Received Bill Monitoring Service
@@ -171,7 +172,7 @@ export class ReceivedBillMonitoringService {
         if (progress >= 100) {
           completedBills.push({
             id: item.id,
-            productName: product.name,
+            productName: getTranslatedString(product.name as any, 'en'),
             supplierName: supplier.name,
             progress,
             totalRevenue
@@ -336,7 +337,7 @@ export class ReceivedBillMonitoringService {
         if (product && supplier) {
           await this.handleCompletedBill(storeId, {
             id: inventoryItem.id,
-            productName: product.name,
+            productName: getTranslatedString(product.name as any, 'en'),
             supplierName: supplier.name,
             progress,
             totalRevenue

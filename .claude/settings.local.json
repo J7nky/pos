@@ -64,7 +64,10 @@
       "Bash(psql --version)",
       "Bash(echo \"STORE_EXIT=$?\")",
       "Bash(pnpm --filter @pos-platform/admin-app exec tsc --noEmit)",
-      "Bash(echo \"ADMIN_EXIT=$?\")"
+      "Bash(echo \"ADMIN_EXIT=$?\")",
+      "Bash(grep -r \"\\\\${.*\\\\.name\" /c/Users/User/Desktop/pos/apps/store-app/src --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(grep -rn \"\\\\\\\\.name\\\\}\" /c/Users/User/Desktop/pos/apps/admin-app/src --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(grep -n \"ReceivedBill\\\\|bill\\\\\\\\.productName\\\\|getBillLabel\" /c/Users/User/Desktop/pos/apps/store-app/src/components/accountingPage/tabs/ReceivedBills.tsx)"
     ]
   }
 }

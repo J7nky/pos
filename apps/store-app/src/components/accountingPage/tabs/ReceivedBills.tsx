@@ -14,6 +14,7 @@ import { Bill } from '../../../types';
 import { useOfflineData } from '../../../contexts/OfflineDataContext';
 import ReceiveFormModal from '../../inventory/ReceiveFormModal';
 import { useI18n } from '../../../i18n';
+import { useProductMultilingual } from '../../../hooks/useMultilingual';
 import { Pagination } from '../../../components/common/Pagination';
 import { useModal } from '../../../hooks/useModal';
 import { ReceivedBillDetailsModal } from './receivedBills/ReceivedBillDetailsModal';
@@ -93,6 +94,7 @@ export default function ReceivedBills({
     setRecentEntities([...supplierIds, ...otherEntities]);
   };
   const { t } = useI18n();
+  const { getProductName } = useProductMultilingual();
   const [receivedBillsSearchTerm, setReceivedBillsSearchTerm] = useState('');
   // const [receivedBills, setReceivedBills] = useState<Bill[]>([]);
   const [receivedBillsSupplierFilter, setReceivedBillsSupplierFilter] = useState('');
@@ -365,7 +367,7 @@ export default function ReceivedBills({
           id: item.id,
           batchId: item.batch_id || null,
           productId: item.product_id,
-          productName: product.name,
+          productName: getProductName(product),
           supplierId: supplierId, // Now from batch if available, otherwise from item
           supplierName: supplier.name,
           type: batchType,
@@ -846,7 +848,7 @@ export default function ReceivedBills({
             <select value={receivedBillsProductFilter} onChange={(e) => setReceivedBillsProductFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
               <option value="">{t('receivedBills.allProducts')}</option>
               {products.filter(p => p).map(product => (
-                <option key={product.id} value={product.id}>{product.name}</option>
+                <option key={product.id} value={product.id}>{getProductName(product)}</option>
               ))}
             </select>
           </div>

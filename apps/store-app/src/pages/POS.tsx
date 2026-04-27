@@ -28,7 +28,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { useQRCodeGeneration } from '../hooks/useQRCodeGeneration';
-import { generateBillReference } from '@pos-platform/shared';
+import { generateBillReference, getTranslatedString } from '@pos-platform/shared';
 import { accountingInitService } from '../services/accountingInitService';
 import { useProductMultilingual } from '../hooks/useMultilingual';
 import { parseMultilingualString } from '../utils/multilingual';
@@ -916,7 +916,7 @@ ${dashSeparator}`;
       const fmtedLineItems = lineItemsData.map((item: any) => {
         const product = products.find((p: any) => p.id === item.product_id);
         return {
-          productName: product ? (typeof product.name === 'object' ? (product.name.ar || product.name.en || 'Product') : product.name) : 'Unknown Product',
+          productName: product ? (getTranslatedString(product.name as any, 'en') || 'Product') : 'Unknown Product',
           quantity: item.quantity || 0,
           weight: item.weight || null,
           unit_price: item.unit_price || 0,

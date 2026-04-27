@@ -84,7 +84,7 @@ const CashBalanceModal: React.FC<{
             <input
               type="number"
               step="0.01"
-              value={actualAmount}
+              value={actualAmount.toFixed(storePreferredCurrency === 'USD' ? 2 : 0)}
               onChange={(e) => setActualAmount(parseFloat(e.target.value) || 0)}
               className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                 actualAmount <= 0 ? 'border-red-300' : 'border-gray-300'

@@ -102,7 +102,7 @@ interface SoldBillsProps {
 export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = {}) {
   const { userProfile } = useSupabaseAuth();
   const raw = useOfflineData();
-  const { formatCurrency } = useCurrency();
+  const { formatCurrency, formatCurrencyWithSymbol, preferredCurrency } = useCurrency();
   const { t } = useI18n();
   const { getProductName } = useProductMultilingual();
   const storeId = userProfile?.store_id;
@@ -1514,11 +1514,11 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="rtl:text-right">
                                 <div className="text-sm font-medium text-gray-900">
-                                  {formatCurrency(bill.total_amount)}
+                                  {formatCurrencyWithSymbol(bill.total_amount, bill.currency ?? preferredCurrency)}
                                 </div>
                                 {bill.total_amount - bill.amount_paid > 0 && (
                                   <div className="text-xs text-red-600">
-                                    {t('soldBills.due')}: {formatCurrency(bill.total_amount - bill.amount_paid)}
+                                    {t('soldBills.due')}: {formatCurrencyWithSymbol(bill.total_amount - bill.amount_paid, bill.currency ?? preferredCurrency)}
                                   </div>
                                 )}
                               </div>
