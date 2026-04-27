@@ -89,7 +89,7 @@ export default function POS() {
   const inventoryBills = (raw.inventoryBills || []) as Array<any>;
 
   const { userProfile } = useSupabaseAuth();
-  const { formatCurrency, acceptedCurrencies, preferredCurrency } = useCurrency();
+  const { formatCurrency, formatCurrencyWithSymbol, acceptedCurrencies, preferredCurrency } = useCurrency();
   const { t } = useI18n();
   const { handleError } = useErrorHandler();
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
@@ -810,6 +810,7 @@ ${dashSeparator}`;
   };
 
   const total = activeTab?.cart?.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0) ?? 0;
+  const billCurrency = (activeTab?.settlementCurrency ?? raw.preferredCurrency) as CurrencyCode;
 
   const change = activeTab?.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
@@ -1403,10 +1404,11 @@ ${dashSeparator}`;
         <div className="lg:col-span-2 space-y-6">
           {/* Cart */}
           <Cart
-            activeTab={activeTab} 
-            updateCartItem={updateCartItem} 
-            removeFromCart={removeFromCart} 
-            formatCurrency={formatCurrency} 
+            activeTab={activeTab}
+            updateCartItem={updateCartItem}
+            removeFromCart={removeFromCart}
+            formatCurrencyWithSymbol={formatCurrencyWithSymbol}
+            billCurrency={billCurrency}
             inventory={inventory}
             products={products}
             suppliers={suppliers}
@@ -1419,7 +1421,7 @@ ${dashSeparator}`;
 
                 <div className="flex justify-between font-semibold border-t pt-2">
                   <span>{t('common.labels.total')}:</span>
-                  <span>{formatCurrency(total)}</span>
+                  <span>{formatCurrencyWithSymbol(total, billCurrency)}</span>
                 </div>
               </div>
 
@@ -1789,7 +1791,7 @@ const ProductGrid = ({ filteredProducts, getProductStock, getProductInventoryIte
     </div>
   );
 };
-const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inventory, products, suppliers }: any) => {
+const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrencyWithSymbol, billCurrency, inventory, products, suppliers }: any) => {
   const { t } = useI18n();
   const { getProductName } = useProductMultilingual();
   return (
@@ -1952,10 +1954,10 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrency, inven
                       tabIndex={200 + index * 4 + 4}
                       style={{ padding: '8px'}}
                       role="status"
-                        aria-label={`Total for ${productName || 'product'} is ${formatCurrency(item.lineTotal)}`}
+                        aria-label={`Total for ${productName || 'product'} is ${formatCurrencyWithSymbol(item.lineTotal, billCurrency)}`}
                     >
                       <div className="text-lg font-bold text-blue-700 text-center" aria-hidden="true" style={{ height: '26.4px' }}>
-                        {formatCurrency(item.lineTotal)}
+                        {formatCurrencyWithSymbol(item.lineTotal, billCurrency)}
                       </div>
                     </div>
                   </div>
